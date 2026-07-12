@@ -11,10 +11,14 @@ body {
 }
 #top-bar { display: flex; gap: 16px; align-items: center; padding: 4px 8px;
   background: var(--bg2); border-bottom: 1px solid var(--border); }
-#workspace { display: grid; grid-template-columns: 48px 1fr 280px; min-height: 0; }
+#workspace { display: grid; grid-template-columns: 96px 1fr 280px; min-height: 0; }
 #tool-palette { background: var(--bg2); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 2px; padding: 4px; }
+  display: flex; flex-direction: column; gap: 2px; padding: 4px; overflow-y: auto; }
 #tool-palette button { width: 38px; height: 38px; font-size: 17px; }
+.tool-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.tool-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: 11px; }
+.tool-option-row { display: flex; align-items: center; gap: 4px; }
+.tool-option-row input[type="number"] { width: 40px; }
 #canvas-host { position: relative; overflow: hidden; background: var(--bg); }
 #canvas-host canvas { position: absolute; inset: 0; }
 #side-panels { background: var(--bg2); border-left: 1px solid var(--border);
@@ -36,3 +40,22 @@ dialog { background: var(--bg2); color: var(--fg); border: 1px solid var(--borde
   border-radius: 6px; padding: 16px; }
 dialog::backdrop { background: rgba(0,0,0,.5); }
 .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+
+/* colors panel */
+.swatch-edit-row { gap: 8px; }
+.swatch { width: 32px; height: 32px; border-radius: 4px; padding: 0; flex: none; }
+.swatch-edit-row input[type="range"] { flex: 1; }
+.palette-strip { display: flex; flex-wrap: wrap; gap: 3px; margin: 6px 0; }
+.palette-swatch { width: 18px; height: 18px; padding: 0; border-radius: 2px; flex: none; }
+.sys-list { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; margin: 8px 0; }
+.sys-list .row { justify-content: space-between; }
+
+/* layers panel */
+.layer-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.layer-row { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 3px; cursor: pointer; }
+.layer-row:hover { background: var(--bg3); }
+.layer-row.active { background: var(--bg3); outline: 1px solid var(--accent); }
+.layer-row button { padding: 2px 6px; font-size: 11px; }
+.layer-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-row input[type="range"] { width: 56px; }
+.layer-rename-input { flex: 1; }

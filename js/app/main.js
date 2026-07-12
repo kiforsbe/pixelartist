@@ -2,6 +2,8 @@ import { state, on, emit, activeSheet, setProject, newDemoProject } from './stat
 import * as io from './io.js';
 import { flattenSheet } from '../core/model.js';
 import { CanvasView } from '../ui/canvasview.js';
+import { mountToolPalette, bindDrawing } from '../ui/tools.js';
+import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -120,6 +122,21 @@ function refreshCanvasView() {
 }
 on('project', () => { invalidateScratch(); refreshCanvasView(); });
 on('view', refreshCanvasView);
+// 'pixels': lightweight bitmap-changed-mid-stroke signal from tools.js/panels.js
+// (in-progress drawing preview, live opacity drag) — just re-flatten + repaint,
+// skip the heavier setContent/dirty-flag work that 'project' does.
+on('pixels', () => { invalidateScratch(); canvasView.requestRender(); });
+// undo/redo can touch pixels, layer structure, or both — repaint on every change.
+on('history', () => { invalidateScratch(); refreshCanvasView(); });
+
+// ---- drawing tools + panels ----
+mountToolPalette(document.getElementById('tool-palette'));
+bindDrawing(canvasView, () => {
+  const sheet = activeSheet();
+  return sheet ? { x: 0, y: 0, w: sheet.width, h: sheet.height } : { x: 0, y: 0, w: 0, h: 0 };
+});
+mountColorPanel(document.getElementById('panel-colors'));
+mountLayersPanel(document.getElementById('panel-layers'));
 
 // ---- file: New ----
 btnNew.addEventListener('click', () => {
