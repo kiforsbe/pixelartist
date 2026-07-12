@@ -38,6 +38,23 @@
   </aside>
 </main>
 <footer id="status-bar"><span id="status-pos"></span><span id="status-zoom"></span><span id="status-tool"></span></footer>
+<dialog id="dlg-saveas">
+  <h3>Save As</h3>
+  <div class="row">
+    <button id="saveas-packed">Packed file (.pixelproj)</button>
+    <button id="saveas-unpacked">Unpacked folder</button>
+  </div>
+  <div class="row"><button id="saveas-cancel">Cancel</button></div>
+</dialog>
+<dialog id="dlg-export">
+  <h3>Export</h3>
+  <div class="row">
+    <button id="export-png">Sheet PNG (flattened)</button>
+    <button id="export-frames" disabled title="coming in a later task">Frames JSON</button>
+    <button id="export-tiles" disabled title="coming in a later task">Tiles JSON</button>
+  </div>
+  <div class="row"><button id="export-cancel">Cancel</button></div>
+</dialog>
 <script type="module" src="js/app/main.js"></script>
 </body>
 </html>
