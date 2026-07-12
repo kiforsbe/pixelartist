@@ -143,6 +143,48 @@ export function bindDrawing(view, getTargetRect) {
 
   view.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  // A project switch (New/Open) invalidates any selection or in-progress
+  // stroke — bitmaps and layer ids from the old project are gone.
+  on('project', () => {
+    if (selection || stroke || selStroke) {
+      selection = null;
+      stroke = null;
+      selStroke = null;
+      view.requestRender();
+    }
+  });
+
+  // Clamp an image-space point into getTargetRect(); null when the target is
+  // empty (no sheet). Live drawing pre-masks coordinates with this so strokes
+  // cannot start or extend outside the editable rect.
+  function clampPoint(x, y) {
+    const t = getTargetRect();
+    if (t.w <= 0 || t.h <= 0) return null;
+    return {
+      x: Math.max(t.x, Math.min(t.x + t.w - 1, x)),
+      y: Math.max(t.y, Math.min(t.y + t.h - 1, y)),
+    };
+  }
+
+  // Restore `before` pixels outside the target rect within the given step
+  // bounds. Catches writes that coordinate clamping alone cannot prevent
+  // (brush stamps overflow up to brushSize-1 px past a clamped coordinate;
+  // select-move can drag content past the target edge).
+  function maskOutsideTarget(bitmap, before, x0, y0, x1, y1) {
+    const t = getTargetRect();
+    const bx0 = Math.max(0, x0), by0 = Math.max(0, y0);
+    const bx1 = Math.min(bitmap.width - 1, x1), by1 = Math.min(bitmap.height - 1, y1);
+    for (let y = by0; y <= by1; y++)
+      for (let x = bx0; x <= bx1; x++) {
+        if (x >= t.x && y >= t.y && x < t.x + t.w && y < t.y + t.h) continue;
+        const i = (y * bitmap.width + x) * 4;
+        bitmap.data[i] = before.data[i];
+        bitmap.data[i + 1] = before.data[i + 1];
+        bitmap.data[i + 2] = before.data[i + 2];
+        bitmap.data[i + 3] = before.data[i + 3];
+      }
+  }
+
   function currentColor(ev) {
     if (state.tool === 'eraser') return [0, 0, 0, 0];
     let c = (ev.buttons & 2) ? state.secondary : state.primary;
@@ -161,17 +203,30 @@ export function bindDrawing(view, getTargetRect) {
 
   function finalize(layer, before, dirty, label) {
     if (!dirty) return;
+    const bmp = layer.bitmap;
+    // full extent the stroke may have touched, clamped to bitmap bounds only
+    const fx0 = Math.max(dirty.minX, 0), fy0 = Math.max(dirty.minY, 0);
+    const fx1 = Math.min(dirty.maxX, bmp.width - 1), fy1 = Math.min(dirty.maxY, bmp.height - 1);
+    if (fx1 < fx0 || fy1 < fy0) return;
     const target = getTargetRect();
-    const x0 = Math.max(dirty.minX, target.x, 0);
-    const y0 = Math.max(dirty.minY, target.y, 0);
-    const x1 = Math.min(dirty.maxX, target.x + target.w - 1, layer.bitmap.width - 1);
-    const y1 = Math.min(dirty.maxY, target.y + target.h - 1, layer.bitmap.height - 1);
-    if (x1 < x0 || y1 < y0) return;
+    const x0 = Math.max(fx0, target.x);
+    const y0 = Math.max(fy0, target.y);
+    const x1 = Math.min(fx1, target.x + target.w - 1);
+    const y1 = Math.min(fy1, target.y + target.h - 1);
+    if (x1 < x0 || y1 < y0) {
+      // nothing inside the target: discard any stray live edits, no command
+      blitRegion(bmp, copyRegion(before, fx0, fy0, fx1 - fx0 + 1, fy1 - fy0 + 1), fx0, fy0);
+      emit('pixels');
+      return;
+    }
     const rect = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
     const beforeRegion = copyRegion(before, rect.x, rect.y, rect.w, rect.h);
-    const afterRegion = copyRegion(layer.bitmap, rect.x, rect.y, rect.w, rect.h);
-    blitRegion(layer.bitmap, beforeRegion, rect.x, rect.y);
-    state.commands.push(makePixelPatch(layer.bitmap, rect, beforeRegion, afterRegion, label));
+    const afterRegion = copyRegion(bmp, rect.x, rect.y, rect.w, rect.h);
+    // restore EVERYTHING the stroke touched (including any out-of-target
+    // bleed), then let the command re-apply the target-clamped patch — undo
+    // is exact and nothing outside the target can persist.
+    blitRegion(bmp, copyRegion(before, fx0, fy0, fx1 - fx0 + 1, fy1 - fy0 + 1), fx0, fy0);
+    state.commands.push(makePixelPatch(bmp, rect, beforeRegion, afterRegion, label));
     markDirty();
   }
 
@@ -185,22 +240,36 @@ export function bindDrawing(view, getTargetRect) {
     const color = currentColor(ev);
 
     if (tool === 'fill') {
-      const r = floodFill(layer.bitmap, ev.x, ev.y, color, toolOptions.contiguous);
-      const dirty = r ? extend(null, r.x, r.y, r.x + r.w - 1, r.y + r.h - 1) : null;
+      // only act when the seed is inside the target; flood a copy of the
+      // target region so the fill cannot leak outside it
+      const t = getTargetRect();
+      if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
+      const sub = copyRegion(layer.bitmap, t.x, t.y, t.w, t.h);
+      const r = floodFill(sub, ev.x - t.x, ev.y - t.y, color, toolOptions.contiguous);
+      let dirty = null;
+      if (r) {
+        blitRegion(layer.bitmap, sub, t.x, t.y);
+        dirty = extend(null, t.x + r.x, t.y + r.y, t.x + r.x + r.w - 1, t.y + r.y + r.h - 1);
+      }
       finalize(layer, before, dirty, 'fill');
       stroke = null;
       emit('pixels');
       return;
     }
     if (BRUSH_TOOLS.has(tool)) {
-      drawLine(layer.bitmap, ev.x, ev.y, ev.x, ev.y, color, state.brushSize);
-      const dirty = extend(null, ev.x, ev.y, ev.x + state.brushSize - 1, ev.y + state.brushSize - 1);
-      stroke = { tool, layer, before, color, dirty, last: { x: ev.x, y: ev.y } };
+      const p = clampPoint(ev.x, ev.y);
+      if (!p) return;
+      drawLine(layer.bitmap, p.x, p.y, p.x, p.y, color, state.brushSize);
+      maskOutsideTarget(layer.bitmap, before, p.x, p.y, p.x + state.brushSize - 1, p.y + state.brushSize - 1);
+      const dirty = extend(null, p.x, p.y, p.x + state.brushSize - 1, p.y + state.brushSize - 1);
+      stroke = { tool, layer, before, color, dirty, last: p };
       emit('pixels');
       return;
     }
     if (SHAPE_TOOLS.has(tool)) {
-      stroke = { tool, layer, before, color, dirty: null, anchor: { x: ev.x, y: ev.y } };
+      const p = clampPoint(ev.x, ev.y);
+      if (!p) return;
+      stroke = { tool, layer, before, color, dirty: null, anchor: p };
       emit('pixels');
       return;
     }
@@ -210,33 +279,36 @@ export function bindDrawing(view, getTargetRect) {
     if (!stroke) return;
     const { tool, layer, before, color } = stroke;
     if (BRUSH_TOOLS.has(tool)) {
+      const p = clampPoint(ev.x, ev.y);
+      if (!p) return;
       const last = stroke.last;
-      drawLine(layer.bitmap, last.x, last.y, ev.x, ev.y, color, state.brushSize);
-      stroke.dirty = extend(
-        stroke.dirty,
-        Math.min(last.x, ev.x), Math.min(last.y, ev.y),
-        Math.max(last.x, ev.x) + state.brushSize - 1, Math.max(last.y, ev.y) + state.brushSize - 1,
-      );
-      stroke.last = { x: ev.x, y: ev.y };
+      drawLine(layer.bitmap, last.x, last.y, p.x, p.y, color, state.brushSize);
+      const sx0 = Math.min(last.x, p.x), sy0 = Math.min(last.y, p.y);
+      const sx1 = Math.max(last.x, p.x) + state.brushSize - 1;
+      const sy1 = Math.max(last.y, p.y) + state.brushSize - 1;
+      maskOutsideTarget(layer.bitmap, before, sx0, sy0, sx1, sy1);
+      stroke.dirty = extend(stroke.dirty, sx0, sy0, sx1, sy1);
+      stroke.last = p;
       emit('pixels');
       return;
     }
     if (SHAPE_TOOLS.has(tool)) {
+      const p = clampPoint(ev.x, ev.y);
+      if (!p) return;
       blitRegion(layer.bitmap, before, 0, 0);
       const a = stroke.anchor;
       if (tool === 'line') {
-        drawLine(layer.bitmap, a.x, a.y, ev.x, ev.y, color, state.brushSize);
-        stroke.dirty = extend(
-          stroke.dirty,
-          Math.min(a.x, ev.x), Math.min(a.y, ev.y),
-          Math.max(a.x, ev.x) + state.brushSize - 1, Math.max(a.y, ev.y) + state.brushSize - 1,
-        );
+        drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, state.brushSize);
+        const sx1 = Math.max(a.x, p.x) + state.brushSize - 1;
+        const sy1 = Math.max(a.y, p.y) + state.brushSize - 1;
+        maskOutsideTarget(layer.bitmap, before, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
+        stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
       } else if (tool === 'rect') {
-        drawRect(layer.bitmap, a.x, a.y, ev.x, ev.y, color, toolOptions.filled);
-        stroke.dirty = extend(stroke.dirty, Math.min(a.x, ev.x), Math.min(a.y, ev.y), Math.max(a.x, ev.x), Math.max(a.y, ev.y));
+        drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, toolOptions.filled);
+        stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
       } else if (tool === 'ellipse') {
-        drawEllipse(layer.bitmap, a.x, a.y, ev.x, ev.y, color, toolOptions.filled);
-        stroke.dirty = extend(stroke.dirty, Math.min(a.x, ev.x), Math.min(a.y, ev.y), Math.max(a.x, ev.x), Math.max(a.y, ev.y));
+        drawEllipse(layer.bitmap, a.x, a.y, p.x, p.y, color, toolOptions.filled);
+        stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
       }
       emit('pixels');
       return;
@@ -315,6 +387,11 @@ export function bindDrawing(view, getTargetRect) {
     const nx = origin.x + offX, ny = origin.y + offY;
     fillRegion(layer.bitmap, origin.x, origin.y, clip.width, clip.height, [0, 0, 0, 0]);
     blitRegion(layer.bitmap, clip, nx, ny);
+    maskOutsideTarget(
+      layer.bitmap, before,
+      Math.min(origin.x, nx), Math.min(origin.y, ny),
+      Math.max(origin.x, nx) + clip.width - 1, Math.max(origin.y, ny) + clip.height - 1,
+    );
     selStroke.offset = { x: offX, y: offY };
     selStroke.dirty = extend(
       selStroke.dirty,

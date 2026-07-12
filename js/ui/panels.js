@@ -130,26 +130,39 @@ export function mountColorPanel(el) {
       let count = 0;
       if (sheet) for (const layer of sheet.layers) count += countColor(layer.bitmap, old);
 
+      // `old` references the original entry array; setEntry() replaces the
+      // slot with a fresh copy, so `old` stays valid for undo.
       if (count === 0) {
-        setEntry(pal, index, to);
+        state.commands.push({
+          label: 'edit palette color',
+          do() { setEntry(pal, index, to); },
+          undo() { setEntry(pal, index, old); },
+        });
         markDirty();
         refreshSwatchStrip();
         return;
       }
       if (!confirm(`Remap ${count} pixels of old color on active sheet?`)) return;
 
-      setEntry(pal, index, to);
+      // The palette-entry mutation lives INSIDE the command so undo restores
+      // both the pixels AND the palette color. commands.push() executes do(),
+      // so nothing is pre-applied here.
       const layerPatches = sheet.layers.map(layer => {
         const before = cloneBitmap(layer.bitmap);
         const after = cloneBitmap(layer.bitmap);
         remapColor(after, old, to);
         return { bitmap: layer.bitmap, before, after };
       });
-      for (const lp of layerPatches) blitRegion(lp.bitmap, lp.before, 0, 0);
       state.commands.push({
         label: 'remap palette color',
-        do() { for (const lp of layerPatches) blitRegion(lp.bitmap, lp.after, 0, 0); },
-        undo() { for (const lp of layerPatches) blitRegion(lp.bitmap, lp.before, 0, 0); },
+        do() {
+          setEntry(pal, index, to);
+          for (const lp of layerPatches) blitRegion(lp.bitmap, lp.after, 0, 0);
+        },
+        undo() {
+          setEntry(pal, index, old);
+          for (const lp of layerPatches) blitRegion(lp.bitmap, lp.before, 0, 0);
+        },
       });
       markDirty();
       refreshSwatchStrip();
@@ -403,8 +416,15 @@ export function mountLayersPanel(el) {
       if (done) return;
       done = true;
       const v = input.value.trim();
-      if (v) layer.name = v;
-      markDirty();
+      if (v && v !== layer.name) {
+        const oldName = layer.name;
+        state.commands.push({
+          label: 'rename layer',
+          do() { layer.name = v; },
+          undo() { layer.name = oldName; },
+        });
+        markDirty();
+      }
       renderList();
     }
     input.addEventListener('blur', commit);
