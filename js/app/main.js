@@ -7,6 +7,7 @@ import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
 import { registerFrameTool, bindFrameTool, mountFramesPanel } from '../ui/frames.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
+import { mountFrameEditor } from '../ui/frameeditor.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -163,6 +164,34 @@ mountColorPanel(document.getElementById('panel-colors'));
 mountLayersPanel(document.getElementById('panel-layers'));
 mountFramesPanel(document.getElementById('panel-context'));
 mountTimeline(document.getElementById('timeline-dock'));
+
+// ---- frame editor (Task 16) ----
+// A second CanvasView instance living in its own absolutely-positioned child
+// of #canvas-host (see frameeditor.js's module comment), mounted once and
+// kept for the app's lifetime — CanvasView has no teardown and installs
+// window-level key listeners, so per-show churn would leak.
+const frameEditor = mountFrameEditor(canvasHost);
+
+// ---- view switching: sheet canvas vs frame editor vs (future) tile editor.
+// Only one is visible at a time; each owns its own CanvasView. The sheet
+// view's <canvas> is hidden directly (its host, #canvas-host, is shared with
+// the frame editor's own child container) rather than tearing anything down.
+function applyView() {
+  if (state.view === 'sheet') {
+    canvasView.canvas.style.display = '';
+    frameEditor.hide();
+  } else if (state.view === 'frame') {
+    canvasView.canvas.style.display = 'none';
+    frameEditor.show();
+  } else {
+    // 'tile' — reserved for Task 18's focused tile editor. Hide both
+    // existing views for now so nothing stale is left on screen.
+    canvasView.canvas.style.display = 'none';
+    frameEditor.hide();
+  }
+}
+on('view', applyView);
+applyView();
 
 // ---- file: New ----
 btnNew.addEventListener('click', () => {

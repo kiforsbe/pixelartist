@@ -190,7 +190,16 @@ export function mountToolPalette(el) {
 
 // -------------------------------------------------------------- stroke logic
 
-export function bindDrawing(view, getTargetRect) {
+// `mapPoint` is an optional (x, y) -> {x, y} hook applied to every pointer
+// event BEFORE any tool logic runs. The sheet view passes nothing (its
+// CanvasView's content space already IS sheet-global pixel space, so no
+// translation is needed). The frame editor (Task 16) passes a hook that
+// shifts its CanvasView's frame-local content coordinates (0..f.w, 0..f.h)
+// into sheet-global bitmap coordinates (f.x..f.x+f.w, f.y..f.y+f.h) — the
+// SAME layer bitmaps are edited either way, so everything downstream
+// (clampPoint, maskOutsideTarget, finalize, flood fill, selection storage)
+// stays sheet-global and unaware of which view produced the event.
+export function bindDrawing(view, getTargetRect, mapPoint) {
   let stroke = null;   // pencil/eraser/line/rect/ellipse in-progress state
   let selStroke = null; // select tool in-progress state
 
@@ -473,6 +482,10 @@ export function bindDrawing(view, getTargetRect) {
   // ---- dispatch ----
 
   view.onPointer = (ev) => {
+    if (mapPoint) {
+      const p = mapPoint(ev.x, ev.y);
+      ev = { ...ev, x: p.x, y: p.y };
+    }
     const tool = state.tool;
     // The frame tool (registered by frames.js via registerTool()) owns pointer
     // routing on the sheet view when active — frames.js wraps view.onPointer
