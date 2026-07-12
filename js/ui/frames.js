@@ -477,7 +477,7 @@ export function mountFramesPanel(el) {
       const row = document.createElement('div');
       row.className = 'frame-row' + (f.id === state.selectedFrameId ? ' active' : '');
       row.addEventListener('click', () => {
-        if (state.selectedFrameId !== f.id) { state.selectedFrameId = f.id; emit('selection'); renderList(); }
+        if (state.selectedFrameId !== f.id) { state.selectedFrameId = f.id; emit('selection'); }
       });
 
       const nameInput = document.createElement('input');
@@ -524,9 +524,16 @@ export function mountFramesPanel(el) {
     });
   }
 
-  on('project', renderList);
-  on('history', renderList);
-  on('view', renderList);
-  on('selection', renderList);
+  let renderQueued = false;
+  function scheduleRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    queueMicrotask(() => { renderQueued = false; renderList(); });
+  }
+
+  on('project', scheduleRender);
+  on('history', scheduleRender);
+  on('view', scheduleRender);
+  on('selection', scheduleRender);
   renderList();
 }
