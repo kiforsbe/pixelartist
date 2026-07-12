@@ -20,6 +20,26 @@ const SPEEDS = [0.25, 0.5, 1, 2];
 
 // ------------------------------------------------------------- drawing helpers
 
+// Module-level scratch canvas and context, reused across all drawFit() calls
+// to avoid allocating a new canvas on every rAF tick during playback.
+let scratchCanvas = null;
+let scratchCtx = null;
+
+function getScratchCanvas(width, height) {
+  if (!scratchCanvas) {
+    scratchCanvas = document.createElement('canvas');
+    scratchCtx = scratchCanvas.getContext('2d');
+  }
+  // Only resize if dimensions differ (resize resets context state)
+  if (scratchCanvas.width !== width || scratchCanvas.height !== height) {
+    scratchCanvas.width = width;
+    scratchCanvas.height = height;
+    // Restore imageSmoothingEnabled after resize (canvas resize resets context)
+    scratchCtx.imageSmoothingEnabled = false;
+  }
+  return scratchCanvas;
+}
+
 // Draws `bmp` into `canvas` nearest-neighbor, scaled to fit (contain) and
 // centered. Used for both 64px strip thumbnails and the 96px preview.
 function drawFit(canvas, bmp) {
@@ -27,9 +47,7 @@ function drawFit(canvas, bmp) {
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!bmp || bmp.width === 0 || bmp.height === 0) return;
-  const tmp = document.createElement('canvas');
-  tmp.width = bmp.width;
-  tmp.height = bmp.height;
+  const tmp = getScratchCanvas(bmp.width, bmp.height);
   tmp.getContext('2d').putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
   const scale = Math.min(canvas.width / bmp.width, canvas.height / bmp.height);
   const dw = Math.max(1, Math.round(bmp.width * scale));
