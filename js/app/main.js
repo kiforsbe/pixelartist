@@ -6,6 +6,7 @@ import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
 import { registerFrameTool, bindFrameTool, mountFramesPanel } from '../ui/frames.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
+import { mountTimeline } from '../ui/timeline.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -161,6 +162,7 @@ bindFrameTool(canvasView);
 mountColorPanel(document.getElementById('panel-colors'));
 mountLayersPanel(document.getElementById('panel-layers'));
 mountFramesPanel(document.getElementById('panel-context'));
+mountTimeline(document.getElementById('timeline-dock'));
 
 // ---- file: New ----
 btnNew.addEventListener('click', () => {

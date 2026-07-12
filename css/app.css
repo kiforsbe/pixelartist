@@ -5,7 +5,7 @@
 }
 html, body { height: 100%; }
 body {
-  display: grid; grid-template-rows: auto 1fr auto; height: 100vh;
+  display: grid; grid-template-rows: auto 1fr auto auto; height: 100vh;
   background: var(--bg); color: var(--fg);
   font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden;
 }
@@ -71,3 +71,28 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .frame-field { display: flex; align-items: center; gap: 3px; font-size: 10px; color: #9a9ca8; }
 .frame-field input[type="number"] { width: 100%; }
 .frame-row .row { margin: 2px 0 0; }
+
+/* timeline dock */
+#timeline-dock { height: 140px; background: var(--bg2); border-top: 1px solid var(--border);
+  display: flex; flex-direction: row; overflow: hidden; }
+#timeline-dock[hidden] { display: none; }
+.timeline-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.timeline-header { display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+  border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }
+.timeline-header select { width: auto; }
+.timeline-loop { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+.timeline-preview { image-rendering: pixelated; background: var(--bg); border: 1px solid var(--border);
+  flex: none; align-self: center; margin: 0 10px; }
+.timeline-strip { flex: 1; display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto;
+  overflow-y: hidden; align-items: flex-start; min-height: 0; }
+.timeline-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 3px;
+  border: 1px solid transparent; border-radius: 3px; flex: none; width: 64px; cursor: grab; }
+.timeline-cell:hover { background: var(--bg3); }
+.timeline-cell.playhead { border-color: var(--accent); background: var(--bg3); }
+.timeline-cell.drag-before { box-shadow: inset 2px 0 0 #fff; }
+.timeline-cell.drag-after { box-shadow: inset -2px 0 0 #fff; }
+.timeline-thumb { image-rendering: pixelated; background: var(--bg); border: 1px solid var(--border);
+  width: 64px; height: 64px; }
+.timeline-cell-controls { display: flex; gap: 2px; width: 100%; }
+.timeline-cell input[type="number"] { width: 100%; font-size: 10px; padding: 1px 2px; min-width: 0; }
+.timeline-remove { font-size: 10px; padding: 1px 4px; flex: none; }
