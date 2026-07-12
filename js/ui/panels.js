@@ -1,6 +1,6 @@
 // Color/palette panel and layers panel.
 
-import { state, on, emit, activeSheet, activeLayer, markDirty } from '../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
 import { addLayer, removeLayer, moveLayer, mergeDown } from '../core/model.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
@@ -142,7 +142,7 @@ export function mountColorPanel(el) {
         refreshSwatchStrip();
         return;
       }
-      if (!confirm(`Remap ${count} pixels of old color on active sheet?`)) return;
+      if (!confirmOrAuto(`Remap ${count} pixels of old color on active sheet?`)) return;
 
       // The palette-entry mutation lives INSIDE the command so undo restores
       // both the pixels AND the palette color. commands.push() executes do(),
@@ -325,7 +325,7 @@ export function mountLayersPanel(el) {
     const layer = activeLayer();
     if (!sheet || !layer) return;
     if (sheet.layers.length <= 1) { alert('Cannot delete the last layer.'); return; }
-    if (!confirm(`Delete layer "${layer.name}"?`)) return;
+    if (!confirmOrAuto(`Delete layer "${layer.name}"?`)) return;
     const beforeLayers = sheet.layers.slice();
     const beforeActive = state.activeLayerId;
     const idx = sheet.layers.indexOf(layer);

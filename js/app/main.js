@@ -1,4 +1,4 @@
-import { state, on, emit, activeSheet, setProject, newDemoProject } from './state.js';
+import { state, on, emit, activeSheet, setProject, newDemoProject, AUTOTEST, confirmOrAuto } from './state.js';
 import * as io from './io.js';
 import { flattenSheet } from '../core/model.js';
 import { CanvasView } from '../ui/canvasview.js';
@@ -164,7 +164,7 @@ mountFramesPanel(document.getElementById('panel-context'));
 
 // ---- file: New ----
 btnNew.addEventListener('click', () => {
-  if (state.dirty && !confirm('Discard unsaved changes and start a new project?')) return;
+  if (state.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
   state.fileHandle = null; state.dirHandle = null; state.saveMode = null;
   setProject(newDemoProject());
 });
@@ -246,7 +246,7 @@ btnExportPng.addEventListener('click', async () => {
 
 // ---- beforeunload guard ----
 window.addEventListener('beforeunload', (e) => {
-  if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
+  if (state.dirty && !AUTOTEST) { e.preventDefault(); e.returnValue = ''; }
 });
 
 // ---- autosave ----
@@ -258,7 +258,7 @@ setInterval(() => {
 (async function boot() {
   let restored = null;
   try {
-    restored = await io.loadAutosave();
+    restored = AUTOTEST ? null : await io.loadAutosave();
   } catch (e) {
     restored = null;
   }
