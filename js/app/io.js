@@ -39,6 +39,7 @@ function pickFileFallback(accept) {
     const input = Object.assign(document.createElement('input'),
       { type: 'file', accept });
     input.onchange = () => input.files[0] ? resolve(input.files[0]) : reject(new Error('cancelled'));
+    input.oncancel = () => reject(new Error('cancelled'));
     input.click();
   });
 }
