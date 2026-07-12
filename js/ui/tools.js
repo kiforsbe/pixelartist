@@ -64,10 +64,6 @@ export function registerTool(def, buildOptionsRow) {
   if (paletteApi) paletteApi.addTool(entry);
 }
 
-// Current marquee selection, image-space {x,y,w,h} or null. Module state per
-// the task brief ("select: ... store selection rect in module state").
-let selection = null;
-
 function isTypingTarget(el) {
   if (!el) return false;
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
@@ -202,6 +198,13 @@ export function mountToolPalette(el) {
 export function bindDrawing(view, getTargetRect, mapPoint) {
   let stroke = null;   // pencil/eraser/line/rect/ellipse in-progress state
   let selStroke = null; // select tool in-progress state
+  // Current marquee selection, image-space {x,y,w,h} or null. Instance state
+  // (per bindDrawing() call) — bindDrawing() is invoked once per CanvasView
+  // (sheet view in main.js, frame editor in frameeditor.js), and each view
+  // must own its own selection: a marquee made on the sheet must not leak
+  // into the frame editor (or vice versa) since both operate on the same
+  // underlying layer bitmaps but represent different visible regions.
+  let selection = null;
 
   view.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 

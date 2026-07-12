@@ -159,6 +159,41 @@ export function mountFrameEditor(hostEl) {
     return flatCanvas;
   }
 
+  // ---- ghost scratch cache (onion skin) ----
+  // drawGhost() used to allocate + tint a fresh canvas on every call; with up
+  // to 16 ghosts (8 back + 8 ahead) painted continuously during pan/zoom, that
+  // was 16 canvas allocations + copyRegion + putImageData + fillRect per
+  // frame. Cache the tinted region canvas per (frameId, tint) pair, rebuilt
+  // only when the flat bitmap cache is invalidated (same 'pixels'/'project'/
+  // 'history' triggers as getFlatCanvas, via the shared flatDirty flag).
+  // Alpha (0.35/k) is NOT baked in here — it varies by ghost distance k, so it
+  // stays applied at composite time via ctx.globalAlpha in drawGhost.
+  let ghostCache = new Map(); // key `${frameId}|${tintCss}` -> canvas
+  let ghostCacheSrc = null;   // flatBitmap this cache was built against
+  function getGhostCanvas(flatBmp, gf, tintCss) {
+    if (ghostCacheSrc !== flatBmp) {
+      ghostCache.clear();
+      ghostCacheSrc = flatBmp;
+    }
+    const key = `${gf.id}|${tintCss}`;
+    let c = ghostCache.get(key);
+    if (!c) {
+      const region = copyRegion(flatBmp, gf.x, gf.y, gf.w, gf.h);
+      c = document.createElement('canvas');
+      c.width = Math.max(1, region.width);
+      c.height = Math.max(1, region.height);
+      const sctx = c.getContext('2d');
+      sctx.imageSmoothingEnabled = false;
+      sctx.putImageData(new ImageData(region.data, region.width, region.height), 0, 0);
+      sctx.globalCompositeOperation = 'source-atop';
+      sctx.fillStyle = tintCss;
+      sctx.globalAlpha = 0.6;
+      sctx.fillRect(0, 0, region.width, region.height);
+      ghostCache.set(key, c);
+    }
+    return c;
+  }
+
   // ---- onion skin ----
 
   function frameById(sheet, id) { return sheet.frames.find(fr => fr.id === id) ?? null; }
@@ -170,17 +205,7 @@ export function mountFrameEditor(hostEl) {
   // into saved pixels/export.
   function drawGhost(ctx, flatBmp, f, gf, tintCss, alpha) {
     if (!gf) return;
-    const region = copyRegion(flatBmp, gf.x, gf.y, gf.w, gf.h);
-    const scratch = document.createElement('canvas');
-    scratch.width = Math.max(1, region.width);
-    scratch.height = Math.max(1, region.height);
-    const sctx = scratch.getContext('2d');
-    sctx.imageSmoothingEnabled = false;
-    sctx.putImageData(new ImageData(region.data, region.width, region.height), 0, 0);
-    sctx.globalCompositeOperation = 'source-atop';
-    sctx.fillStyle = tintCss;
-    sctx.globalAlpha = 0.6;
-    sctx.fillRect(0, 0, region.width, region.height);
+    const scratch = getGhostCanvas(flatBmp, gf, tintCss);
 
     const dx = f.pivotX - gf.pivotX;
     const dy = f.pivotY - gf.pivotY;
@@ -343,6 +368,13 @@ export function mountFrameEditor(hostEl) {
   // ---- visibility ----
 
   let visible = false;
+  // Host CSS size last seen while visible (captured on hide()). refresh()
+  // only recenters (via loadFrame()) when the EDITED FRAME's identity or
+  // on-sheet dimensions change — reopening the same frame after the host
+  // (#canvas-host) was resized while this editor sat hidden (e.g. a window
+  // resize, or a layout panel toggling) would otherwise silently keep the
+  // stale pan/zoom from before, no longer centered in the new viewport.
+  let lastCssW = 0, lastCssH = 0;
 
   function show() {
     const wasHidden = !visible;
@@ -354,10 +386,21 @@ export function mountFrameEditor(hostEl) {
     // won't have fired yet this tick. Force a synchronous remeasure now so
     // the centerFit() inside refresh()->loadFrame() uses correct dimensions
     // instead of a leftover 0x0/1x1 size.
-    if (wasHidden) view._resize();
+    if (wasHidden) {
+      view._resize();
+      // Same frame being reopened (loadFrame() below will be skipped) but
+      // the host's css size changed while hidden: recenter explicitly so pan/
+      // zoom isn't stale relative to the new viewport. Cosmetic 'view' emits
+      // that happen while already visible still don't recenter (unchanged).
+      if (loadedFrameId != null && (view.cssWidth !== lastCssW || view.cssHeight !== lastCssH)) {
+        view.centerFit();
+      }
+    }
     refresh();
   }
   function hide() {
+    lastCssW = view.cssWidth;
+    lastCssH = view.cssHeight;
     container.style.display = 'none';
     visible = false;
   }
