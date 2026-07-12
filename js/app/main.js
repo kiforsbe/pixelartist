@@ -1,6 +1,7 @@
 import { state, on, emit, activeSheet, setProject, newDemoProject } from './state.js';
 import * as io from './io.js';
 import { flattenSheet } from '../core/model.js';
+import { CanvasView } from '../ui/canvasview.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -19,6 +20,9 @@ const btnRedo = document.getElementById('btn-redo');
 const ovlLabels = document.getElementById('ovl-labels');
 const ovlSeq = document.getElementById('ovl-seq');
 const statusTool = document.getElementById('status-tool');
+const statusPos = document.getElementById('status-pos');
+const statusZoom = document.getElementById('status-zoom');
+const canvasHost = document.getElementById('canvas-host');
 
 const dlgSaveAs = document.getElementById('dlg-saveas');
 const btnSaveAsPacked = document.getElementById('saveas-packed');
@@ -74,6 +78,48 @@ ovlSeq.addEventListener('change', () => {
 function updateStatusTool() { statusTool.textContent = `Tool: ${state.tool}`; }
 on('tool', updateStatusTool);
 updateStatusTool();
+
+// ---- canvas view ----
+const canvasView = new CanvasView(canvasHost);
+canvasView.onStatus = ({ x, y, zoom }) => {
+  statusPos.textContent = (x == null || y == null) ? '' : `${x},${y}`;
+  statusZoom.textContent = `${zoom}x`;
+};
+
+// scratch OffscreenCanvas caching the active sheet's flattened bitmap; only
+// re-flattened when the project changes, not on every paint (pan/zoom-driven).
+let scratchCanvas = null;
+let scratchDirty = true;
+function invalidateScratch() { scratchDirty = true; }
+function getScratchCanvas() {
+  const sheet = activeSheet();
+  if (!sheet) return null;
+  if (scratchDirty || !scratchCanvas || scratchCanvas.width !== sheet.width || scratchCanvas.height !== sheet.height) {
+    const bitmap = flattenSheet(sheet);
+    if (!scratchCanvas || scratchCanvas.width !== bitmap.width || scratchCanvas.height !== bitmap.height) {
+      scratchCanvas = (typeof OffscreenCanvas !== 'undefined')
+        ? new OffscreenCanvas(bitmap.width, bitmap.height)
+        : Object.assign(document.createElement('canvas'), { width: bitmap.width, height: bitmap.height });
+    }
+    const sctx = scratchCanvas.getContext('2d');
+    sctx.imageSmoothingEnabled = false;
+    sctx.putImageData(new ImageData(bitmap.data, bitmap.width, bitmap.height), 0, 0);
+    scratchDirty = false;
+  }
+  return scratchCanvas;
+}
+canvasView.onPaint = (ctx) => {
+  const canvas = getScratchCanvas();
+  if (canvas) ctx.drawImage(canvas, 0, 0);
+};
+
+function refreshCanvasView() {
+  const sheet = activeSheet();
+  if (sheet) canvasView.setContent({ width: sheet.width, height: sheet.height });
+  canvasView.requestRender();
+}
+on('project', () => { invalidateScratch(); refreshCanvasView(); });
+on('view', refreshCanvasView);
 
 // ---- file: New ----
 btnNew.addEventListener('click', () => {
