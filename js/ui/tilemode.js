@@ -47,6 +47,16 @@ function setOrDelete(obj, key, val) {
   else obj[key] = val;
 }
 
+// Deep-clone neighbors preset values, guarded for undefined
+const cloneNb = v => v === undefined ? undefined : structuredClone(v);
+
+// Check if element is a typing target (input, textarea, contenteditable, or in open dialog)
+function isTypingTarget(el) {
+  if (!el) return false;
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
+  return !!(el.closest && el.closest('dialog[open]'));
+}
+
 // Pixel-carrying swap across all layers, plus names[a]<->names[b] and
 // neighbors[a]<->neighbors[b], as one undo/redo step. Follows frames.js's
 // commitMove pattern: apply the real mutation now (patches/before values
@@ -64,11 +74,11 @@ function commitSwapTile(sheet, a, b) {
   });
 
   const namesBefore = { a: sheet.tile.names[a], b: sheet.tile.names[b] };
-  const neighborsBefore = { a: sheet.tile.neighbors[a], b: sheet.tile.neighbors[b] };
+  const neighborsBefore = { a: cloneNb(sheet.tile.neighbors[a]), b: cloneNb(sheet.tile.neighbors[b]) };
   setOrDelete(sheet.tile.names, a, namesBefore.b);
   setOrDelete(sheet.tile.names, b, namesBefore.a);
-  setOrDelete(sheet.tile.neighbors, a, neighborsBefore.b);
-  setOrDelete(sheet.tile.neighbors, b, neighborsBefore.a);
+  setOrDelete(sheet.tile.neighbors, a, cloneNb(neighborsBefore.b));
+  setOrDelete(sheet.tile.neighbors, b, cloneNb(neighborsBefore.a));
 
   const cmd = {
     label: 'swap tiles',
@@ -79,8 +89,8 @@ function commitSwapTile(sheet, a, b) {
       }
       setOrDelete(sheet.tile.names, a, namesBefore.b);
       setOrDelete(sheet.tile.names, b, namesBefore.a);
-      setOrDelete(sheet.tile.neighbors, a, neighborsBefore.b);
-      setOrDelete(sheet.tile.neighbors, b, neighborsBefore.a);
+      setOrDelete(sheet.tile.neighbors, a, cloneNb(neighborsBefore.b));
+      setOrDelete(sheet.tile.neighbors, b, cloneNb(neighborsBefore.a));
     },
     undo() {
       for (const p of patches) {
@@ -89,8 +99,8 @@ function commitSwapTile(sheet, a, b) {
       }
       setOrDelete(sheet.tile.names, a, namesBefore.a);
       setOrDelete(sheet.tile.names, b, namesBefore.b);
-      setOrDelete(sheet.tile.neighbors, a, neighborsBefore.a);
-      setOrDelete(sheet.tile.neighbors, b, neighborsBefore.b);
+      setOrDelete(sheet.tile.neighbors, a, cloneNb(neighborsBefore.a));
+      setOrDelete(sheet.tile.neighbors, b, cloneNb(neighborsBefore.b));
     },
   };
   state.commands.push(cmd);
@@ -110,10 +120,10 @@ function commitMoveTile(sheet, a, b) {
   });
 
   const namesBefore = { a: sheet.tile.names[a], b: sheet.tile.names[b] };
-  const neighborsBefore = { a: sheet.tile.neighbors[a], b: sheet.tile.neighbors[b] };
+  const neighborsBefore = { a: cloneNb(sheet.tile.neighbors[a]), b: cloneNb(sheet.tile.neighbors[b]) };
   setOrDelete(sheet.tile.names, b, namesBefore.a);
   setOrDelete(sheet.tile.names, a, undefined);
-  setOrDelete(sheet.tile.neighbors, b, neighborsBefore.a);
+  setOrDelete(sheet.tile.neighbors, b, cloneNb(neighborsBefore.a));
   setOrDelete(sheet.tile.neighbors, a, undefined);
 
   const cmd = {
@@ -125,7 +135,7 @@ function commitMoveTile(sheet, a, b) {
       }
       setOrDelete(sheet.tile.names, b, namesBefore.a);
       setOrDelete(sheet.tile.names, a, undefined);
-      setOrDelete(sheet.tile.neighbors, b, neighborsBefore.a);
+      setOrDelete(sheet.tile.neighbors, b, cloneNb(neighborsBefore.a));
       setOrDelete(sheet.tile.neighbors, a, undefined);
     },
     undo() {
@@ -135,8 +145,8 @@ function commitMoveTile(sheet, a, b) {
       }
       setOrDelete(sheet.tile.names, a, namesBefore.a);
       setOrDelete(sheet.tile.names, b, namesBefore.b);
-      setOrDelete(sheet.tile.neighbors, a, neighborsBefore.a);
-      setOrDelete(sheet.tile.neighbors, b, neighborsBefore.b);
+      setOrDelete(sheet.tile.neighbors, a, cloneNb(neighborsBefore.a));
+      setOrDelete(sheet.tile.neighbors, b, cloneNb(neighborsBefore.b));
     },
   };
   state.commands.push(cmd);
@@ -248,6 +258,7 @@ export function bindTileTool(view) {
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (document.querySelector('dialog[open]')) return;
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (state.mode === 'tiles' && state.selectedTileIndex !== null) {
       state.selectedTileIndex = null;
       drag = null;
