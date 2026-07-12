@@ -155,6 +155,16 @@ Toggleable overlays rendered on top of the sheet canvas in both modes:
   animation) and can be freely reordered on the timeline; independently,
   frames can be repositioned on the sprite map itself via the pixel-carrying
   move described above.
+- **Frame editor with onion skinning**: double-clicking a frame (on the sheet
+  or the timeline) opens a focused per-frame view — the frame at high zoom
+  with all pixel tools active, editing the underlying sheet pixels in place.
+  When the frame belongs to an animation, an **onion skin mode** ghosts the
+  previous and future frames of that animation over the canvas, aligned by
+  frame rect (pivot-aware), tinted (e.g. red = past, green = future) and faded
+  with distance. The number of frames shown back and ahead is configurable
+  (0–N each, default 1/1). Onion skins are pure overlay — never drawn into
+  the sheet. Timeline navigation (prev/next frame) works inside this view for
+  a draw-flip-draw workflow.
 
 ## Tile sheet mode
 
@@ -192,6 +202,6 @@ Toggleable overlays rendered on top of the sheet canvas in both modes:
 - True per-pixel indexed color storage (pixels stored as palette indices with
   live palette remapping); v1 approximates this with indexed-palette
   constrained drawing + explicit remap.
-- Onion skinning; tile auto-terrain rules.
+- Tile auto-terrain rules.
 - Exporters for Aseprite/Tiled formats.
 - Selection tools beyond rectangle (lasso, magic wand).
