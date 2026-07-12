@@ -106,6 +106,7 @@ async function doSave() {
       state.saveMode = 'packed';
     }
     state.dirty = false;
+    await io.clearAutosave().catch(() => {});
     emit('project');
   } catch (e) {
     if (!isCancel(e)) throw e;
@@ -124,6 +125,7 @@ btnSaveAsPacked.addEventListener('click', async () => {
     state.dirHandle = null;
     state.saveMode = 'packed';
     state.dirty = false;
+    await io.clearAutosave().catch(() => {});
     emit('project');
   } catch (e) {
     if (!isCancel(e)) throw e;
@@ -136,6 +138,7 @@ btnSaveAsUnpacked.addEventListener('click', async () => {
     state.fileHandle = null;
     state.saveMode = 'unpacked';
     state.dirty = false;
+    await io.clearAutosave().catch(() => {});
     emit('project');
   } catch (e) {
     if (!isCancel(e)) throw e;
