@@ -448,14 +448,20 @@ function buildSliceDialog() {
 }
 
 export function mountFramesPanel(el) {
-  el.innerHTML = '';
+  // #panel-context is shared with tilemode.js's tile panel (mode-exclusive
+  // visibility). Each panel gets its own wrapper appended to `el` and toggles
+  // only that wrapper — never el.hidden/el.innerHTML directly — so the two
+  // mount functions don't clobber or fight over the shared container.
+  const wrap = document.createElement('div');
+  el.appendChild(wrap);
+
   const h3 = document.createElement('h3');
   h3.textContent = 'Frames';
-  el.appendChild(h3);
+  wrap.appendChild(h3);
 
   const list = document.createElement('div');
   list.className = 'frame-list';
-  el.appendChild(list);
+  wrap.appendChild(list);
 
   const sliceDialog = buildSliceDialog();
   const btnSlice = document.createElement('button');
@@ -465,11 +471,11 @@ export function mountFramesPanel(el) {
   const btnRow = document.createElement('div');
   btnRow.className = 'row';
   btnRow.appendChild(btnSlice);
-  el.appendChild(btnRow);
+  wrap.appendChild(btnRow);
 
   function renderList() {
-    if (state.mode !== 'sprites') { el.hidden = true; return; }
-    el.hidden = false;
+    if (state.mode !== 'sprites') { wrap.hidden = true; return; }
+    wrap.hidden = false;
     list.innerHTML = '';
     const sheet = activeSheet();
     if (!sheet) return;

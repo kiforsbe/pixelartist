@@ -5,6 +5,7 @@ import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
 import { registerFrameTool, bindFrameTool, mountFramesPanel } from '../ui/frames.js';
+import { registerTileTool, bindTileTool, mountTilePanel } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
@@ -50,10 +51,11 @@ function switchMode(mode) {
   state.activeSheetId = sheet ? sheet.id : null;
   state.activeLayerId = sheet ? (sheet.layers[0]?.id ?? null) : null;
   state.view = 'sheet';
-  // frame tool is sprite-mode only (its palette button hides via isAvailable());
-  // fall back to pencil so leaving sprite mode doesn't strand pointer routing
-  // on a tool with nothing to dispatch to.
+  // frame/tile tools are mode-exclusive (their palette buttons hide via
+  // isAvailable()); fall back to pencil so leaving their mode doesn't strand
+  // pointer routing on a tool with nothing to dispatch to.
   if (mode !== 'sprites' && state.tool === 'frametool') { state.tool = 'pencil'; emit('tool'); }
+  if (mode !== 'tiles' && state.tool === 'tiletool') { state.tool = 'pencil'; emit('tool'); }
   emit('view');
 }
 tabSprites.addEventListener('click', () => switchMode('sprites'));
@@ -153,9 +155,16 @@ bindDrawing(canvasView, () => {
 // captures bindDrawing's handlers to delegate back to for every other tool.
 registerFrameTool();
 bindFrameTool(canvasView);
+// Tile tool: same shape as the frame tool above (registerTileTool() adds the
+// palette button, bindTileTool() wraps onPointer/onOverlay); runs after
+// bindFrameTool so its wrapper chains on top, though the two never both
+// intercept at once (frametool is sprite-only, tiletool is tile-only).
+registerTileTool();
+bindTileTool(canvasView);
 // Compose the sheet-view overlay chain: tools.js's marquee + frames.js's
-// create/move/resize ghost (already chained by bindFrameTool above), then
-// finally the frame/tile label overlays on top.
+// create/move/resize ghost + tilemode.js's swap/move ghost (already chained
+// by bindFrameTool/bindTileTool above), then finally the frame/tile label
+// overlays on top.
 {
   const priorOverlay = canvasView.onOverlay;
   canvasView.onOverlay = (ctx) => { priorOverlay(ctx); drawSheetOverlays(canvasView, ctx); };
@@ -163,6 +172,7 @@ bindFrameTool(canvasView);
 mountColorPanel(document.getElementById('panel-colors'));
 mountLayersPanel(document.getElementById('panel-layers'));
 mountFramesPanel(document.getElementById('panel-context'));
+mountTilePanel(document.getElementById('panel-context'));
 mountTimeline(document.getElementById('timeline-dock'));
 
 // ---- frame editor (Task 16) ----

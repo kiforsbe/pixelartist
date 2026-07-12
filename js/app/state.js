@@ -18,6 +18,7 @@ export const state = {
   brushSize: 1,
   primary: [0, 0, 0, 255], secondary: [255, 255, 255, 255],
   selectedFrameId: null, selectedAnimationId: null,
+  selectedTileIndex: null,    // tile tool selection (tile mode)
   editingFrameId: null,       // frame editor target
   editingTileIndex: null,     // tile editor target
   onion: { enabled: false, back: 1, ahead: 1 },

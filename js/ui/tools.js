@@ -490,11 +490,12 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
       ev = { ...ev, x: p.x, y: p.y };
     }
     const tool = state.tool;
-    // The frame tool (registered by frames.js via registerTool()) owns pointer
-    // routing on the sheet view when active — frames.js wraps view.onPointer
-    // around this function and delegates back for every other tool, so this
-    // dispatcher must ignore frametool events rather than fight over them.
-    if (tool === 'frametool') return;
+    // The frame tool (registered by frames.js via registerTool()) and the tile
+    // tool (registered by tilemode.js) own pointer routing on the sheet view
+    // when active — each wraps view.onPointer around this function and
+    // delegates back for every other tool, so this dispatcher must ignore
+    // their events rather than fight over them.
+    if (tool === 'frametool' || tool === 'tiletool') return;
     if (tool === 'select') {
       if (ev.type === 'down') handleSelectDown(ev);
       else if (ev.type === 'move') handleSelectMove(ev);

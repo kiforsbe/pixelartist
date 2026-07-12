@@ -79,25 +79,40 @@ function drawSpriteOverlays(view, ctx, sheet) {
 }
 
 function drawTileOverlays(view, ctx, sheet) {
-  if (!state.overlays.labels || !sheet.tile) return;
+  if (!sheet.tile) return;
   const count = tileCount(sheet);
-  if (count <= 0) return;
 
-  ctx.save();
-  ctx.strokeStyle = FRAME_STROKE;
-  ctx.lineWidth = 1;
-  for (let i = 0; i < count; i++) {
-    const r = tileRect(sheet, i);
+  if (state.overlays.labels && count > 0) {
+    ctx.save();
+    ctx.strokeStyle = FRAME_STROKE;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < count; i++) {
+      const r = tileRect(sheet, i);
+      const p0 = view.imageToScreen(r.x, r.y);
+      const p1 = view.imageToScreen(r.x + r.w, r.y + r.h);
+      ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, p1.x - p0.x - 1, p1.y - p0.y - 1);
+    }
+    ctx.restore();
+
+    for (let i = 0; i < count; i++) {
+      const r = tileRect(sheet, i);
+      const p0 = view.imageToScreen(r.x, r.y);
+      const name = sheet.tile.names[i];
+      drawChip(ctx, view, name ? `${i}:${name}` : `${i}`, p0.x, p0.y);
+    }
+  }
+
+  // Selected-tile highlight (tile tool) — independent of the labels toggle,
+  // like sprite mode's selected-frame fill/stroke.
+  const sel = state.selectedTileIndex;
+  if (sel != null && sel >= 0 && sel < count) {
+    const r = tileRect(sheet, sel);
     const p0 = view.imageToScreen(r.x, r.y);
     const p1 = view.imageToScreen(r.x + r.w, r.y + r.h);
-    ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, p1.x - p0.x - 1, p1.y - p0.y - 1);
-  }
-  ctx.restore();
-
-  for (let i = 0; i < count; i++) {
-    const r = tileRect(sheet, i);
-    const p0 = view.imageToScreen(r.x, r.y);
-    const name = sheet.tile.names[i];
-    drawChip(ctx, view, name ? `${i}:${name}` : `${i}`, p0.x, p0.y);
+    ctx.save();
+    ctx.strokeStyle = FRAME_STROKE;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p0.x + 1, p0.y + 1, p1.x - p0.x - 2, p1.y - p0.y - 2);
+    ctx.restore();
   }
 }
