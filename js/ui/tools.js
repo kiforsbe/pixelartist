@@ -38,6 +38,32 @@ const SHAPE_TOOLS = new Set(['line', 'rect', 'ellipse']);
 // edited by the tool-options row built in mountToolPalette.
 export const toolOptions = { contiguous: true, filled: false };
 
+// ---------------------------------------------------------- external tools
+//
+// Small registration hook so other UI modules (frames.js's frame tool) can
+// add a button + an options row to the palette WITHOUT tools.js knowing
+// anything about them. `mountToolPalette(el)` is called once by main.js;
+// `registerTool()` may be called any time after that (main.js calls it right
+// after mountToolPalette), so it must be able to append into an
+// already-rendered palette rather than requiring a remount (a remount would
+// re-add the window keydown listener and duplicate hotkey handling).
+//
+// def: {id, icon, key, isAvailable?: () => bool} — isAvailable gates both the
+// button's visibility and whether its hotkey fires (re-checked on every
+// 'view' event, e.g. sprite/tile mode switches).
+// buildOptionsRow?: (optionsRowEl) => rowEl — appends the tool's own option
+// controls into the shared options row and returns the element(s) whose
+// visibility should be toggled on/off with the built-in rows (shown only
+// while that tool is active). May return an array of elements.
+const extraTools = [];
+let paletteApi = null; // set once mountToolPalette has run; used for late registrations
+
+export function registerTool(def, buildOptionsRow) {
+  const entry = { ...def, buildOptionsRow };
+  extraTools.push(entry);
+  if (paletteApi) paletteApi.addTool(entry);
+}
+
 // Current marquee selection, image-space {x,y,w,h} or null. Module state per
 // the task brief ("select: ... store selection rect in module state").
 let selection = null;
@@ -62,7 +88,9 @@ export function mountToolPalette(el) {
   const btnRow = document.createElement('div');
   btnRow.className = 'tool-buttons';
   const buttons = new Map();
-  for (const t of TOOLS) {
+  const extraRows = []; // [{id, els: [el,...]}] for tools registered via registerTool()
+
+  function makeButton(t) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.dataset.tool = t.id;
@@ -71,7 +99,9 @@ export function mountToolPalette(el) {
     btn.addEventListener('click', () => selectTool(t.id));
     buttons.set(t.id, btn);
     btnRow.appendChild(btn);
+    return btn;
   }
+  for (const t of TOOLS) makeButton(t);
   el.appendChild(btnRow);
 
   const optionsRow = document.createElement('div');
@@ -114,10 +144,15 @@ export function mountToolPalette(el) {
 
   function refresh() {
     for (const [id, btn] of buttons) btn.classList.toggle('active', state.tool === id);
+    for (const extra of extraTools) {
+      const btn = buttons.get(extra.id);
+      if (btn && extra.isAvailable) btn.hidden = !extra.isAvailable();
+    }
     contiguousRow.style.display = state.tool === 'fill' ? '' : 'none';
     filledRow.style.display = (state.tool === 'rect' || state.tool === 'ellipse') ? '' : 'none';
+    for (const { id, els } of extraRows)
+      for (const rEl of els) rEl.style.display = state.tool === id ? '' : 'none';
   }
-  refresh();
 
   function selectTool(id) {
     state.tool = id;
@@ -125,11 +160,29 @@ export function mountToolPalette(el) {
     refresh();
   }
 
+  function addTool(entry) {
+    makeButton(entry);
+    if (entry.buildOptionsRow) {
+      const built = entry.buildOptionsRow(optionsRow);
+      const els = Array.isArray(built) ? built : (built ? [built] : []);
+      extraRows.push({ id: entry.id, els });
+    }
+    refresh();
+  }
+
+  // pick up any tools registered before this (re)mount
+  for (const entry of extraTools) addTool(entry);
+  paletteApi = { addTool, refresh };
+
+  refresh();
+  on('view', refresh); // re-check isAvailable() (e.g. sprite/tile mode switch)
+
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
-    const t = TOOLS.find(t => t.key === e.key.toLowerCase());
+    const t = [...TOOLS, ...extraTools].find(t => t.key === e.key.toLowerCase());
     if (!t) return;
+    if (t.isAvailable && !t.isAvailable()) return;
     e.preventDefault();
     selectTool(t.id);
   });
@@ -421,6 +474,11 @@ export function bindDrawing(view, getTargetRect) {
 
   view.onPointer = (ev) => {
     const tool = state.tool;
+    // The frame tool (registered by frames.js via registerTool()) owns pointer
+    // routing on the sheet view when active — frames.js wraps view.onPointer
+    // around this function and delegates back for every other tool, so this
+    // dispatcher must ignore frametool events rather than fight over them.
+    if (tool === 'frametool') return;
     if (tool === 'select') {
       if (ev.type === 'down') handleSelectDown(ev);
       else if (ev.type === 'move') handleSelectMove(ev);

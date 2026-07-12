@@ -59,3 +59,15 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .layer-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-row input[type="range"] { width: 56px; }
 .layer-rename-input { flex: 1; }
+
+/* frames panel */
+.frame-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.frame-row { display: flex; flex-direction: column; gap: 3px; padding: 4px; border-radius: 3px;
+  cursor: pointer; border: 1px solid transparent; }
+.frame-row:hover { background: var(--bg3); }
+.frame-row.active { background: var(--bg3); border-color: var(--accent); }
+.frame-name { font-size: 12px; }
+.frame-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 4px; }
+.frame-field { display: flex; align-items: center; gap: 3px; font-size: 10px; color: #9a9ca8; }
+.frame-field input[type="number"] { width: 100%; }
+.frame-row .row { margin: 2px 0 0; }

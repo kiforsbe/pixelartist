@@ -4,6 +4,8 @@ import { flattenSheet } from '../core/model.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
+import { registerFrameTool, bindFrameTool, mountFramesPanel } from '../ui/frames.js';
+import { drawSheetOverlays } from '../ui/overlays.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -46,6 +48,10 @@ function switchMode(mode) {
   state.activeSheetId = sheet ? sheet.id : null;
   state.activeLayerId = sheet ? (sheet.layers[0]?.id ?? null) : null;
   state.view = 'sheet';
+  // frame tool is sprite-mode only (its palette button hides via isAvailable());
+  // fall back to pencil so leaving sprite mode doesn't strand pointer routing
+  // on a tool with nothing to dispatch to.
+  if (mode !== 'sprites' && state.tool === 'frametool') { state.tool = 'pencil'; emit('tool'); }
   emit('view');
 }
 tabSprites.addEventListener('click', () => switchMode('sprites'));
@@ -128,6 +134,9 @@ on('view', refreshCanvasView);
 on('pixels', () => { invalidateScratch(); canvasView.requestRender(); });
 // undo/redo can touch pixels, layer structure, or both — repaint on every change.
 on('history', () => { invalidateScratch(); refreshCanvasView(); });
+// frame/tile selection changed (no pixel or structural change) — cheap repaint
+// so the label-overlay highlight tracks state.selectedFrameId immediately.
+on('selection', () => canvasView.requestRender());
 
 // ---- drawing tools + panels ----
 mountToolPalette(document.getElementById('tool-palette'));
@@ -135,8 +144,23 @@ bindDrawing(canvasView, () => {
   const sheet = activeSheet();
   return sheet ? { x: 0, y: 0, w: sheet.width, h: sheet.height } : { x: 0, y: 0, w: 0, h: 0 };
 });
+// Frame tool: registerFrameTool() adds the palette button + its options row
+// (must run after mountToolPalette so the button can be appended to the
+// already-rendered palette — see tools.js's registerTool() hook). bindFrameTool
+// wraps canvasView.onPointer/onOverlay and must run after bindDrawing so it
+// captures bindDrawing's handlers to delegate back to for every other tool.
+registerFrameTool();
+bindFrameTool(canvasView);
+// Compose the sheet-view overlay chain: tools.js's marquee + frames.js's
+// create/move/resize ghost (already chained by bindFrameTool above), then
+// finally the frame/tile label overlays on top.
+{
+  const priorOverlay = canvasView.onOverlay;
+  canvasView.onOverlay = (ctx) => { priorOverlay(ctx); drawSheetOverlays(canvasView, ctx); };
+}
 mountColorPanel(document.getElementById('panel-colors'));
 mountLayersPanel(document.getElementById('panel-layers'));
+mountFramesPanel(document.getElementById('panel-context'));
 
 // ---- file: New ----
 btnNew.addEventListener('click', () => {
