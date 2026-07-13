@@ -13,8 +13,9 @@
 // so it must run after bindDrawing has installed its own).
 
 import { state, on, emit, activeSheet, markDirty } from '../app/state.js';
-import { addFrame, removeFrame } from '../core/model.js';
+import { addFrame, removeFrame, addAnimation } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
+import { findFreeRect, buildStripFrames } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
 
@@ -76,6 +77,25 @@ function frameAt(sheet, x, y) {
   return null;
 }
 
+// The intact-strip animation (strip === true) containing `frameId`, else
+// null. "Intact" here just means strip === true — break-apart flips that
+// flag, after which the animation's frames behave like any other manually
+// built sequence (move individually, resizable again).
+export function stripOf(sheet, frameId) {
+  if (!sheet) return null;
+  return sheet.animations.find(a => a.strip && a.frames.some(af => af.frameId === frameId)) ?? null;
+}
+
+// Union bounding box of a list of frames (their CURRENT x/y/w/h) — used both
+// as the strip drag's ghost outline and as the clamp region for its delta.
+function boundingBoxOf(frames) {
+  const x0 = Math.min(...frames.map(f => f.x));
+  const y0 = Math.min(...frames.map(f => f.y));
+  const x1 = Math.max(...frames.map(f => f.x + f.w));
+  const y1 = Math.max(...frames.map(f => f.y + f.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 function oppositeCorner(f, handle) {
   const map = {
     nw: { x: f.x + f.w, y: f.y + f.h },
@@ -119,36 +139,44 @@ function commitCreate(sheet, rect) {
   emit('selection');
 }
 
-// Pixel-carrying move: for every layer, copy the frame's current pixels,
-// clear them, and blit them at the new position. Captures a per-layer clone
-// of the UNION of the before/after rects so undo restores pixels and undoes
-// the frame's x/y in one step.
-function commitMove(sheet, frame, nx, ny) {
-  const ox = frame.x, oy = frame.y, w = frame.w, h = frame.h;
-  const ux0 = Math.min(ox, nx), uy0 = Math.min(oy, ny);
-  const ux1 = Math.max(ox + w, nx + w), uy1 = Math.max(oy + h, ny + h);
+// Pixel-carrying move for one or more frames sharing a common delta (single
+// frame in the plain case, ALL members of an intact strip when dragged as a
+// unit). For every layer: copy ALL member regions first (their CURRENT
+// pixels), THEN clear all of them, THEN blit all of them at their new
+// positions — copying before clearing avoids corruption when member frames
+// are adjacent (clearing frame A before copying frame B's original pixels
+// would clobber B if A and B overlap/touch). Captures a per-layer clone of
+// the UNION of every member's before/after rect so undo restores all pixels
+// and all frames' x/y in one step.
+function commitMoveFrames(sheet, frames, dx, dy) {
+  const ux0 = Math.min(...frames.map(f => Math.min(f.x, f.x + dx)));
+  const uy0 = Math.min(...frames.map(f => Math.min(f.y, f.y + dy)));
+  const ux1 = Math.max(...frames.map(f => Math.max(f.x + f.w, f.x + dx + f.w)));
+  const uy1 = Math.max(...frames.map(f => Math.max(f.y + f.h, f.y + dy + f.h)));
   const ur = { x: ux0, y: uy0, w: ux1 - ux0, h: uy1 - uy0 };
+
+  const beforeCoords = frames.map(f => ({ frame: f, x: f.x, y: f.y }));
 
   const patches = sheet.layers.map((layer) => {
     const before = copyRegion(layer.bitmap, ur.x, ur.y, ur.w, ur.h);
-    const copy = copyRegion(layer.bitmap, ox, oy, w, h);
-    fillRegion(layer.bitmap, ox, oy, w, h, [0, 0, 0, 0]);
-    blitRegion(layer.bitmap, copy, nx, ny);
+    const copies = frames.map(f => copyRegion(layer.bitmap, f.x, f.y, f.w, f.h));
+    for (const f of frames) fillRegion(layer.bitmap, f.x, f.y, f.w, f.h, [0, 0, 0, 0]);
+    frames.forEach((f, i) => blitRegion(layer.bitmap, copies[i], f.x + dx, f.y + dy));
     const after = copyRegion(layer.bitmap, ur.x, ur.y, ur.w, ur.h);
     return { layer, before, after };
   });
-  frame.x = nx; frame.y = ny; // already true on the bitmaps above; keep metadata in sync now too
-  const beforeCoords = { x: ox, y: oy }, afterCoords = { x: nx, y: ny };
+  for (const f of frames) { f.x += dx; f.y += dy; } // already true on the bitmaps above; keep metadata in sync now too
+  const afterCoords = beforeCoords.map(c => ({ frame: c.frame, x: c.x + dx, y: c.y + dy }));
 
   const cmd = {
-    label: 'move frame',
+    label: frames.length > 1 ? 'move strip' : 'move frame',
     do() {
       for (const p of patches) blitRegion(p.layer.bitmap, p.after, ur.x, ur.y);
-      frame.x = afterCoords.x; frame.y = afterCoords.y;
+      for (const c of afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
     },
     undo() {
       for (const p of patches) blitRegion(p.layer.bitmap, p.before, ur.x, ur.y);
-      frame.x = beforeCoords.x; frame.y = beforeCoords.y;
+      for (const c of beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
     },
   };
   state.commands.push(cmd);
@@ -195,7 +223,10 @@ function handleDown(ev, view) {
   const sheet = activeSheet();
   if (!sheet) return;
   const selected = sheet.frames.find(f => f.id === state.selectedFrameId) || null;
-  const handle = hitHandle(view, selected, ev.sx, ev.sy);
+  // Intact-strip members have no resize handles: skip hit detection entirely
+  // rather than just refusing the resulting drag, so a pointer-down on a
+  // handle-shaped spot falls through to the move/create checks below.
+  const handle = (selected && !stripOf(sheet, selected.id)) ? hitHandle(view, selected, ev.sx, ev.sy) : null;
   if (handle) {
     drag = {
       kind: 'resize', frame: selected, handle,
@@ -209,7 +240,14 @@ function handleDown(ev, view) {
   const hit = frameAt(sheet, ev.x, ev.y);
   if (hit) {
     if (state.selectedFrameId !== hit.id) { state.selectedFrameId = hit.id; emit('selection'); }
-    drag = { kind: 'move', frame: hit, anchor: { x: ev.x, y: ev.y }, target: { x: hit.x, y: hit.y } };
+    // If `hit` belongs to an intact strip, the drag targets every member of
+    // that strip together (move-as-unit); otherwise just the single frame.
+    const strip = stripOf(sheet, hit.id);
+    const members = strip ? sheet.frames.filter(f => strip.frames.some(af => af.frameId === f.id)) : [hit];
+    drag = {
+      kind: 'move', frame: hit, members, bbox: boundingBoxOf(members),
+      anchor: { x: ev.x, y: ev.y }, delta: { dx: 0, dy: 0 },
+    };
     view.requestRender();
     return;
   }
@@ -223,7 +261,8 @@ function handleMove(ev, view) {
   if (drag.kind === 'create') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, true));
   } else if (drag.kind === 'move') {
-    drag.target = snapPoint(drag.frame.x + (ev.x - drag.anchor.x), drag.frame.y + (ev.y - drag.anchor.y));
+    const target = snapPoint(drag.frame.x + (ev.x - drag.anchor.x), drag.frame.y + (ev.y - drag.anchor.y));
+    drag.delta = { dx: target.x - drag.frame.x, dy: target.y - drag.frame.y };
   } else if (drag.kind === 'resize') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, false));
   }
@@ -245,12 +284,13 @@ function handleUp(ev, view) {
     return;
   }
   if (d.kind === 'move') {
-    if (!d.target) return;
-    // keep the moved frame fully on-sheet so no pixels are silently clipped
-    // by out-of-bounds copy/blit (pixels.js bounds-checks every write/read).
-    const nx = Math.max(0, Math.min(sheet.width - d.frame.w, d.target.x));
-    const ny = Math.max(0, Math.min(sheet.height - d.frame.h, d.target.y));
-    if (nx !== d.frame.x || ny !== d.frame.y) commitMove(sheet, d.frame, nx, ny);
+    // Clamp the common delta so the whole bounding box (single frame or
+    // every strip member) stays fully on-sheet — no pixels are silently
+    // clipped by out-of-bounds copy/blit (pixels.js bounds-checks every
+    // write/read).
+    const dx = Math.max(-d.bbox.x, Math.min(sheet.width - (d.bbox.x + d.bbox.w), d.delta.dx));
+    const dy = Math.max(-d.bbox.y, Math.min(sheet.height - (d.bbox.y + d.bbox.h), d.delta.dy));
+    if (dx !== 0 || dy !== 0) commitMoveFrames(sheet, d.members, dx, dy);
     return;
   }
   if (d.kind === 'resize') {
@@ -291,15 +331,18 @@ function drawFrameToolGhost(ctx, view) {
     ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1;
     if (drag.kind === 'create' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
-    else if (drag.kind === 'move' && drag.target)
-      strokeGhostRect(ctx, view, { x: drag.target.x, y: drag.target.y, w: drag.frame.w, h: drag.frame.h });
+    else if (drag.kind === 'move' && drag.bbox)
+      // Single frame or strip: the bbox already covers just the grabbed
+      // frame in the non-strip case, so this one branch handles both.
+      strokeGhostRect(ctx, view, { x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy, w: drag.bbox.w, h: drag.bbox.h });
     else if (drag.kind === 'resize' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
     ctx.restore();
   }
 
   if (state.tool === 'frametool') {
     const selected = sheet.frames.find(f => f.id === state.selectedFrameId);
-    if (selected) drawHandles(ctx, view, selected);
+    // No resize handles on intact-strip members.
+    if (selected && !stripOf(sheet, selected.id)) drawHandles(ctx, view, selected);
   }
 }
 
@@ -447,6 +490,87 @@ function buildSliceDialog() {
   return dlg;
 }
 
+// Creates a strip's frames + its intact (strip: true) animation as ONE
+// undoable command, mirroring buildSliceDialog's whole-array-snapshot idiom
+// above: eager-mutate now (addFrame/addAnimation both push into the sheet
+// immediately, matching the codebase's eager-mutate-then-snapshot idiom),
+// snapshot before/after of sheet.frames/sheet.animations plus the new
+// animation's own .frames array, then do()/undo() just swap whole arrays.
+function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
+  const beforeFrames = sheet.frames.slice();
+  const beforeAnimations = sheet.animations.slice();
+
+  const descriptors = buildStripFrames(name, x, y, frameW, frameH, count);
+  const frames = descriptors.map(d => addFrame(sheet, d));
+  const anim = addAnimation(sheet, name, true);
+  anim.frames = frames.map(f => ({ frameId: f.id, duration }));
+
+  const afterFrames = sheet.frames.slice();
+  const afterAnimations = sheet.animations.slice();
+  const afterAnimFrames = anim.frames.map(f => ({ ...f }));
+  const firstFrameId = frames[0].id;
+  const animId = anim.id;
+
+  const cmd = {
+    label: 'new strip',
+    do() {
+      sheet.frames = afterFrames.slice();
+      sheet.animations = afterAnimations.slice();
+      anim.frames = afterAnimFrames.map(f => ({ ...f }));
+      state.selectedFrameId = firstFrameId;
+      state.selectedAnimationId = animId;
+    },
+    undo() {
+      sheet.frames = beforeFrames.slice();
+      sheet.animations = beforeAnimations.slice();
+      if (state.selectedFrameId === firstFrameId) state.selectedFrameId = null;
+      if (state.selectedAnimationId === animId) state.selectedAnimationId = null;
+    },
+  };
+  state.commands.push(cmd);
+  markDirty();
+  emit('selection');
+}
+
+// Break apart: flips an intact strip's `strip` flag off so its frames stop
+// moving as a unit and become resizable again (membership in the animation
+// is unaffected). Exported so timeline.js's header button can push the same
+// command shape for the currently selected animation.
+export function commitBreakApartStrip(anim) {
+  state.commands.push({
+    label: 'break apart strip',
+    do() { anim.strip = false; },
+    undo() { anim.strip = true; },
+  });
+  markDirty();
+}
+
+// Wires the static #dlg-newstrip markup (index.html) the same way
+// buildSliceDialog wires its own dynamically-built dialog — one-time
+// listener setup, called once from mountFramesPanel. Returns null if the
+// dialog markup isn't present (defensive; shouldn't happen in the shipped app).
+function wireNewStripDialog() {
+  const dlg = document.getElementById('dlg-newstrip');
+  if (!dlg) return null;
+  const $ = (sel) => dlg.querySelector(sel);
+  $('#strip-cancel').addEventListener('click', () => dlg.close());
+  $('#strip-create').addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet) { dlg.close(); return; }
+    const intVal = (el, min) => Math.max(min, parseInt(el.value, 10) || min);
+    const name = $('#strip-name').value.trim() || 'strip';
+    const frameW = intVal($('#strip-frame-w'), 1);
+    const frameH = intVal($('#strip-frame-h'), 1);
+    const count = intVal($('#strip-count'), 1);
+    const duration = intVal($('#strip-duration'), 1);
+    const pos = findFreeRect(sheet, count * frameW, frameH);
+    if (!pos) { alert('No free space on the sheet for this strip.'); return; }
+    commitNewStrip(sheet, name, pos.x, pos.y, frameW, frameH, count, duration);
+    dlg.close();
+  });
+  return dlg;
+}
+
 export function mountFramesPanel(el) {
   // #panel-context is shared with tilemode.js's tile panel (mode-exclusive
   // visibility). Each panel gets its own wrapper appended to `el` and toggles
@@ -468,9 +592,39 @@ export function mountFramesPanel(el) {
   btnSlice.type = 'button';
   btnSlice.textContent = 'Slice grid…';
   btnSlice.addEventListener('click', () => sliceDialog.showModal());
+
+  const stripDialog = wireNewStripDialog();
+  const btnNewStrip = document.createElement('button');
+  btnNewStrip.type = 'button';
+  btnNewStrip.textContent = 'New strip…';
+  btnNewStrip.addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet || !stripDialog) return;
+    const settings = state.project?.settings ?? {};
+    const $ = (sel) => stripDialog.querySelector(sel);
+    $('#strip-name').value = `strip_${sheet.animations.length}`;
+    $('#strip-frame-w').value = String(settings.frameW ?? 16);
+    $('#strip-frame-h').value = String(settings.frameH ?? 16);
+    $('#strip-count').value = '4';
+    $('#strip-duration').value = String(settings.durationMs ?? 100);
+    stripDialog.showModal();
+  });
+
+  // Break apart: only visible when the selected frame is a member of an
+  // intact strip; toggled in renderList() below on every re-render.
+  const btnBreakApart = document.createElement('button');
+  btnBreakApart.type = 'button';
+  btnBreakApart.textContent = 'Break apart';
+  btnBreakApart.addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet || !state.selectedFrameId) return;
+    const strip = stripOf(sheet, state.selectedFrameId);
+    if (strip) commitBreakApartStrip(strip);
+  });
+
   const btnRow = document.createElement('div');
   btnRow.className = 'row';
-  btnRow.appendChild(btnSlice);
+  btnRow.append(btnSlice, btnNewStrip, btnBreakApart);
   wrap.appendChild(btnRow);
 
   function renderList() {
@@ -478,6 +632,7 @@ export function mountFramesPanel(el) {
     wrap.hidden = false;
     list.innerHTML = '';
     const sheet = activeSheet();
+    btnBreakApart.hidden = !(sheet && state.selectedFrameId && stripOf(sheet, state.selectedFrameId));
     if (!sheet) return;
     sheet.frames.forEach((f, index) => {
       const row = document.createElement('div');

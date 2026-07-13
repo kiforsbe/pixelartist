@@ -95,6 +95,18 @@
   </div>
   <div class="row"><button id="ns-create">Create</button><button id="ns-cancel">Cancel</button></div>
 </dialog>
+<dialog id="dlg-newstrip">
+  <h3>New Animation Strip</h3>
+  <div class="dlg-grid">
+    <span>Name</span><input id="strip-name" type="text" style="grid-column: 2 / span 3">
+    <span>Frame size</span><input id="strip-frame-w" type="number" min="1" max="1024" value="16">
+    <span>×</span><input id="strip-frame-h" type="number" min="1" max="1024" value="16">
+    <span>Count</span><input id="strip-count" type="number" min="1" value="4">
+    <span>Duration</span><input id="strip-duration" type="number" min="1" value="100">
+    <span>ms</span><span></span>
+  </div>
+  <div class="row"><button id="strip-create">Create</button><button id="strip-cancel">Cancel</button></div>
+</dialog>
 <script type="module" src="js/app/main.js"></script>
 </body>
 </html>

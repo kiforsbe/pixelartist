@@ -13,6 +13,7 @@
 import { state, on, emit, activeSheet, markDirty, confirmOrAuto } from '../app/state.js';
 import { addAnimation, flattenSheet } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
+import { commitBreakApartStrip } from './frames.js';
 
 const THUMB_SIZE = 64;
 const PREVIEW_SIZE = 96;
@@ -185,6 +186,8 @@ export function mountTimeline(el) {
   const loopLabel = document.createElement('label'); loopLabel.className = 'timeline-loop';
   loopLabel.append(loopCheckbox, document.createTextNode('Loop'));
   const btnAddFrame = document.createElement('button'); btnAddFrame.type = 'button'; btnAddFrame.textContent = 'Add selected frame';
+  // Visible only when the selected animation is an intact strip (strip === true).
+  const btnBreakApart = document.createElement('button'); btnBreakApart.type = 'button'; btnBreakApart.textContent = 'Break apart';
 
   const btnFirst = document.createElement('button'); btnFirst.type = 'button'; btnFirst.textContent = '⏮';
   const btnPlay = document.createElement('button'); btnPlay.type = 'button'; btnPlay.textContent = '▶';
@@ -198,7 +201,7 @@ export function mountTimeline(el) {
   }
 
   header.append(
-    animSelect, btnNewAnim, btnRenameAnim, btnDeleteAnim, loopLabel, btnAddFrame,
+    animSelect, btnNewAnim, btnRenameAnim, btnDeleteAnim, loopLabel, btnAddFrame, btnBreakApart,
     btnFirst, btnPlay, btnLast, speedSelect,
   );
 
@@ -372,6 +375,12 @@ export function mountTimeline(el) {
     addFrameToAnimation(anim, state.selectedFrameId);
   });
 
+  btnBreakApart.addEventListener('click', () => {
+    const anim = currentAnim();
+    if (!anim || !anim.strip) return;
+    commitBreakApartStrip(anim);
+  });
+
   // ---- strip cell ----
   function buildCell(anim, entry, index, sheet) {
     const cell = document.createElement('div');
@@ -468,6 +477,7 @@ export function mountTimeline(el) {
     btnRenameAnim.disabled = !anim;
     btnDeleteAnim.disabled = !anim;
     btnAddFrame.disabled = !anim || !state.selectedFrameId;
+    btnBreakApart.hidden = !anim?.strip;
     const hasFrames = !!anim && anim.frames.length > 0;
     btnPlay.disabled = !hasFrames;
     btnFirst.disabled = !hasFrames;
