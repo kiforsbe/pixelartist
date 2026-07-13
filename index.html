@@ -66,6 +66,22 @@
   </div>
   <div class="row"><button id="export-cancel">Cancel</button></div>
 </dialog>
+<dialog id="dlg-newproject">
+  <h3>New Project</h3>
+  <div class="dlg-grid">
+    <span>Sprite sheet</span><input id="np-sprite-w" type="number" min="1" max="4096" value="256">
+    <span>×</span><input id="np-sprite-h" type="number" min="1" max="4096" value="256">
+    <span>Tile sheet</span><input id="np-tile-sheet-w" type="number" min="1" max="4096" value="256">
+    <span>×</span><input id="np-tile-sheet-h" type="number" min="1" max="4096" value="256">
+    <span>Tile size</span><input id="np-tile-w" type="number" min="1" max="256" value="16">
+    <span>×</span><input id="np-tile-h" type="number" min="1" max="256" value="16">
+    <span>Frame size</span><input id="np-frame-w" type="number" min="1" max="1024" value="16">
+    <span>×</span><input id="np-frame-h" type="number" min="1" max="1024" value="16">
+    <span>Frame time</span><input id="np-duration" type="number" min="1" value="100">
+    <span>ms</span><span></span>
+  </div>
+  <div class="row"><button id="np-create">Create</button><button id="np-cancel">Cancel</button></div>
+</dialog>
 <script type="module" src="js/app/main.js"></script>
 </body>
 </html>

@@ -57,6 +57,19 @@ const btnExportFrames = document.getElementById('export-frames');
 const btnExportTiles = document.getElementById('export-tiles');
 const btnExportCancel = document.getElementById('export-cancel');
 
+const dlgNewProject = document.getElementById('dlg-newproject');
+const npSpriteW = document.getElementById('np-sprite-w');
+const npSpriteH = document.getElementById('np-sprite-h');
+const npTileSheetW = document.getElementById('np-tile-sheet-w');
+const npTileSheetH = document.getElementById('np-tile-sheet-h');
+const npTileW = document.getElementById('np-tile-w');
+const npTileH = document.getElementById('np-tile-h');
+const npFrameW = document.getElementById('np-frame-w');
+const npFrameH = document.getElementById('np-frame-h');
+const npDuration = document.getElementById('np-duration');
+const npCreate = document.getElementById('np-create');
+const npCancel = document.getElementById('np-cancel');
+
 // ---- mode tabs ----
 function switchMode(mode) {
   if (state.mode === mode) return;
@@ -260,8 +273,39 @@ applyView();
 // ---- file: New ----
 btnNew.addEventListener('click', () => {
   if (state.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
+  dlgNewProject.showModal();
+});
+npCancel.addEventListener('click', () => dlgNewProject.close());
+npCreate.addEventListener('click', () => {
+  // Sheet dims (sprite/tile sheet W/H) are clamped to the 1..4096 range;
+  // everything else (tile size, frame size, duration) just needs to be a
+  // positive integer. Any NaN or sub-1 value aborts with an alert rather
+  // than silently coercing, so e.g. a blank or 0 sprite width is rejected.
+  const sheetDim = (el) => {
+    const v = parseInt(el.value, 10);
+    return (Number.isNaN(v) || v < 1) ? null : Math.min(4096, v);
+  };
+  const positiveInt = (el) => {
+    const v = parseInt(el.value, 10);
+    return (Number.isNaN(v) || v < 1) ? null : v;
+  };
+  const spriteSheetW = sheetDim(npSpriteW);
+  const spriteSheetH = sheetDim(npSpriteH);
+  const tileSheetW = sheetDim(npTileSheetW);
+  const tileSheetH = sheetDim(npTileSheetH);
+  const tileW = positiveInt(npTileW);
+  const tileH = positiveInt(npTileH);
+  const frameW = positiveInt(npFrameW);
+  const frameH = positiveInt(npFrameH);
+  const durationMs = positiveInt(npDuration);
+  const settings = { spriteSheetW, spriteSheetH, tileSheetW, tileSheetH, tileW, tileH, frameW, frameH, durationMs };
+  if (Object.values(settings).some(v => v == null)) {
+    alert('Please enter valid positive numbers for all fields.');
+    return;
+  }
   state.fileHandle = null; state.dirHandle = null; state.saveMode = null;
-  setProject(newDefaultProject());
+  setProject(newDefaultProject(settings));
+  dlgNewProject.close();
 });
 
 // ---- file: Open ----
