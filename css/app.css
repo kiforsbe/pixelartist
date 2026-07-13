@@ -111,3 +111,11 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .frame-editor-legend .swatch-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 6px; }
 .frame-editor-legend .swatch-dot:first-child { margin-left: 0; }
 .frame-editor-canvas { position: relative; flex: 1; min-height: 0; }
+
+/* tile editor */
+.tile-editor { position: absolute; inset: 0; display: none; flex-direction: column; background: var(--bg); }
+.tile-editor-strip { display: flex; align-items: center; gap: 10px; padding: 4px 10px;
+  background: var(--bg2); border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; font-size: 12px; }
+.tile-editor-name { font-weight: 600; }
+.tile-editor-radius { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tile-editor-canvas { position: relative; flex: 1; min-height: 0; }
