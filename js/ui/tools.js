@@ -17,6 +17,7 @@ import {
   copyRegion, blitRegion, fillRegion, getPixel,
 } from '../core/pixels.js';
 import { makePixelPatch } from '../core/commands.js';
+import { shiftRegion } from '../core/moveregion.js';
 import { nearestColor } from '../core/palettes.js';
 import { flattenSheet } from '../core/model.js';
 
@@ -29,14 +30,15 @@ export const TOOLS = [
   { id: 'ellipse', icon: '◯', key: 'o' },
   { id: 'eyedropper', icon: '💉', key: 'i' },
   { id: 'select', icon: '⛶', key: 'm' },
+  { id: 'move', icon: '✋', key: 'v' },
 ];
 
 const BRUSH_TOOLS = new Set(['pencil', 'eraser']);
 const SHAPE_TOOLS = new Set(['line', 'rect', 'ellipse']);
 
-// Shared tool options (fill contiguity, shape fill) — read by bindDrawing,
-// edited by the tool-options row built in mountToolPalette.
-export const toolOptions = { contiguous: true, filled: false };
+// Shared tool options (fill contiguity, shape fill, move all-layers) — read by
+// bindDrawing, edited by the tool-options row built in mountToolPalette.
+export const toolOptions = { contiguous: true, filled: false, allLayers: false };
 
 // ---------------------------------------------------------- external tools
 //
@@ -142,6 +144,15 @@ export function mountToolPalette(el) {
   filledRow.append(filledInput, document.createTextNode('Filled'));
   optionsRow.appendChild(filledRow);
 
+  const allLayersRow = document.createElement('label');
+  allLayersRow.className = 'tool-option-row';
+  const allLayersInput = document.createElement('input');
+  allLayersInput.type = 'checkbox';
+  allLayersInput.checked = toolOptions.allLayers;
+  allLayersInput.addEventListener('change', () => { toolOptions.allLayers = allLayersInput.checked; });
+  allLayersRow.append(allLayersInput, document.createTextNode('All layers'));
+  optionsRow.appendChild(allLayersRow);
+
   function refresh() {
     for (const [id, btn] of buttons) btn.classList.toggle('active', state.tool === id);
     for (const extra of extraTools) {
@@ -150,6 +161,7 @@ export function mountToolPalette(el) {
     }
     contiguousRow.style.display = state.tool === 'fill' ? '' : 'none';
     filledRow.style.display = (state.tool === 'rect' || state.tool === 'ellipse') ? '' : 'none';
+    allLayersRow.style.display = state.tool === 'move' ? '' : 'none';
     for (const { id, els } of extraRows)
       for (const rEl of els) rEl.style.display = state.tool === id ? '' : 'none';
   }
@@ -202,6 +214,7 @@ export function mountToolPalette(el) {
 export function bindDrawing(view, getTargetRect, mapPoint) {
   let stroke = null;   // pencil/eraser/line/rect/ellipse in-progress state
   let selStroke = null; // select tool in-progress state
+  let moveStroke = null; // move tool in-progress state
   // Current marquee selection, image-space {x,y,w,h} or null. Instance state
   // (per bindDrawing() call) — bindDrawing() is invoked once per CanvasView
   // (sheet view in main.js, frame editor in frameeditor.js), and each view
@@ -215,10 +228,11 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
   // A project switch (New/Open) invalidates any selection or in-progress
   // stroke — bitmaps and layer ids from the old project are gone.
   on('project', () => {
-    if (selection || stroke || selStroke) {
+    if (selection || stroke || selStroke || moveStroke) {
       selection = null;
       stroke = null;
       selStroke = null;
+      moveStroke = null;
       view.requestRender();
     }
   });
@@ -486,6 +500,131 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
     selStroke = null;
   }
 
+  // ---- move ----
+  //
+  // Moves the pixels of a region (the current selection's rect, or the whole
+  // target when there is none) by the drag delta, across one or all layers.
+  // Live preview (pointermove) fully restores each layer from its captured
+  // `before` clone then re-applies shiftRegion at the current delta — same
+  // restore-then-reapply shape as the brush/select-move live-drag code above.
+  // On release, ONE command is pushed covering every affected layer's patch
+  // (mirrors frames.js's commitMoveFrames: per-layer before/after clones over
+  // a shared rect, applied/undone together) plus the selection rect's old/new
+  // position, so undo is a single step that restores pixels AND the marquee.
+
+  // Exclusive-bound (x,y,w,h) union of `region` and `region` shifted by
+  // (dx, dy) — unclamped, mirrors shiftRegion's own union-rect math.
+  function moveBounds(region, dx, dy) {
+    const x0 = Math.min(region.x, region.x + dx);
+    const y0 = Math.min(region.y, region.y + dy);
+    const x1 = Math.max(region.x + region.w, region.x + dx + region.w);
+    const y1 = Math.max(region.y + region.h, region.y + dy + region.h);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  function rectClamp(r, t) {
+    const x0 = Math.max(r.x, t.x), y0 = Math.max(r.y, t.y);
+    const x1 = Math.min(r.x + r.w, t.x + t.w), y1 = Math.min(r.y + r.h, t.y + t.h);
+    return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+  }
+
+  // Keeps a moved selection rect fully inside the target rect (same
+  // constraint already applied to marquee creation in handleSelectMove).
+  function clampRectToTarget(r, t) {
+    const maxX = Math.max(t.x, t.x + t.w - r.w);
+    const maxY = Math.max(t.y, t.y + t.h - r.h);
+    return { x: Math.max(t.x, Math.min(maxX, r.x)), y: Math.max(t.y, Math.min(maxY, r.y)), w: r.w, h: r.h };
+  }
+
+  function handleMoveDown(ev) {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    const target = getTargetRect();
+    if (target.w <= 0 || target.h <= 0) return;
+    const region = selection
+      ? { x: selection.x, y: selection.y, w: selection.w, h: selection.h }
+      : target;
+    const layers = toolOptions.allLayers ? sheet.layers.slice() : (activeLayer() ? [activeLayer()] : []);
+    if (!layers.length) return;
+    moveStroke = {
+      anchor: { x: ev.x, y: ev.y },
+      region,
+      layers,
+      before: layers.map(l => cloneBitmap(l.bitmap)),
+      delta: { dx: 0, dy: 0 },
+      hadSelection: !!selection,
+    };
+    emit('pixels');
+  }
+
+  function handleMoveMove(ev) {
+    if (!moveStroke) return;
+    const { anchor, region, layers, before } = moveStroke;
+    const dx = ev.x - anchor.x, dy = ev.y - anchor.y;
+    layers.forEach((l, i) => blitRegion(l.bitmap, before[i], 0, 0));
+    for (const l of layers) shiftRegion(l.bitmap, region, dx, dy);
+    // cosmetic: hide any live bleed past the target rect (frame/tile editors)
+    // exactly like the select-move drag does, without affecting the eventual
+    // committed patch (recomputed cleanly from `before` at pointerup).
+    const b = moveBounds(region, dx, dy);
+    layers.forEach((l, i) => maskOutsideTarget(l.bitmap, before[i], b.x, b.y, b.x + b.w - 1, b.y + b.h - 1));
+    moveStroke.delta = { dx, dy };
+    emit('pixels');
+  }
+
+  function handleMoveUp(ev) {
+    if (!moveStroke) return;
+    handleMoveMove(ev); // commit final pointer position (handles click-without-move too)
+    const { region, layers, before, delta, hadSelection } = moveStroke;
+    const { dx, dy } = delta;
+    layers.forEach((l, i) => blitRegion(l.bitmap, before[i], 0, 0)); // undo live preview
+    moveStroke = null;
+    if (dx === 0 && dy === 0) return; // zero-delta release commits nothing
+
+    const target = getTargetRect();
+    const patchRect = rectClamp(moveBounds(region, dx, dy), target);
+    if (patchRect.w <= 0 || patchRect.h <= 0) { emit('pixels'); return; }
+
+    const layerPatches = layers.map((layer, i) => {
+      shiftRegion(layer.bitmap, region, dx, dy);
+      const beforeRegion = copyRegion(before[i], patchRect.x, patchRect.y, patchRect.w, patchRect.h);
+      const afterRegion = copyRegion(layer.bitmap, patchRect.x, patchRect.y, patchRect.w, patchRect.h);
+      // restore to the pre-stroke baseline; pushing the command below (whose
+      // do() re-applies afterRegion) transitions it forward exactly once.
+      blitRegion(layer.bitmap, before[i], 0, 0);
+      return { layer, before: beforeRegion, after: afterRegion };
+    });
+
+    // `region` already IS the selection rect snapshotted at pointerdown when
+    // hadSelection is true — reuse it rather than re-reading the live
+    // `selection` var, which may have been nulled mid-drag (e.g. Escape).
+    let newSelRect = null;
+    if (hadSelection) {
+      newSelRect = clampRectToTarget({ x: region.x + dx, y: region.y + dy, w: region.w, h: region.h }, target);
+    }
+    const oldSelRect = hadSelection ? region : null;
+
+    const cmd = {
+      label: 'move',
+      do() {
+        for (const p of layerPatches) blitRegion(p.layer.bitmap, p.after, patchRect.x, patchRect.y);
+        if (newSelRect) selection = { ...newSelRect };
+      },
+      undo() {
+        for (const p of layerPatches) blitRegion(p.layer.bitmap, p.before, patchRect.x, patchRect.y);
+        if (oldSelRect) selection = { ...oldSelRect };
+      },
+    };
+    // markDirty() (via the on('project', ...) cleanup above) nulls `selection`
+    // whenever it's still truthy when 'project' fires — the SAME reason
+    // handleSelectUp calls finalize() (which markDirty()s) BEFORE reassigning
+    // `selection` to its new value. Mirror that ordering: fire markDirty()
+    // first (still referencing the OLD/soon-null selection), then push the
+    // command so its do() sets `selection` to newSelRect last.
+    markDirty();
+    state.commands.push(cmd);
+  }
+
   // ---- dispatch ----
 
   view.onPointer = (ev) => {
@@ -504,6 +643,12 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
       if (ev.type === 'down') handleSelectDown(ev);
       else if (ev.type === 'move') handleSelectMove(ev);
       else if (ev.type === 'up') handleSelectUp(ev);
+      return;
+    }
+    if (tool === 'move') {
+      if (ev.type === 'down') handleMoveDown(ev);
+      else if (ev.type === 'move') handleMoveMove(ev);
+      else if (ev.type === 'up') handleMoveUp(ev);
       return;
     }
     if (tool === 'eyedropper') { handleEyedropper(ev); return; }
