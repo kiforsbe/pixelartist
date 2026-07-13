@@ -196,6 +196,7 @@ nsCreate.addEventListener('click', () => {
       state.activeSheetId = sheet.id;
       state.activeLayerId = sheet.layers[0]?.id ?? null;
       state.view = 'sheet';
+      emit('view');
     },
     undo() {
       const i = project.sheets.indexOf(sheet);
