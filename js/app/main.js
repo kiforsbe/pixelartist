@@ -16,6 +16,14 @@ function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
 }
 
+// Same gating pattern used by tools.js/frames.js/frameeditor.js/tileeditor.js:
+// ignore shortcuts while the user is typing in a field or a dialog is open.
+function isTypingTarget(el) {
+  if (!el) return false;
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
+  return !!(el.closest && el.closest('dialog[open]'));
+}
+
 // ---- element refs ----
 const tabSprites = document.getElementById('tab-sprites');
 const tabTiles = document.getElementById('tab-tiles');
@@ -83,6 +91,33 @@ window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase();
   if (key === 'z' && !e.shiftKey) { e.preventDefault(); state.commands.undo(); }
   else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); state.commands.redo(); }
+  else if (key === 's') {
+    // Gated (unlike undo/redo above): Ctrl+S is a global browser shortcut
+    // users may also press while a text field or dialog has focus, where we
+    // want the browser/native field behavior, not a project save.
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
+    e.preventDefault();
+    doSave();
+  }
+});
+
+// ---- shortcuts: brush size [ / ], swap colors X (Ctrl/Alt-free, gated) ----
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
+  if (e.key === '[') {
+    e.preventDefault();
+    state.brushSize = Math.max(1, state.brushSize - 1);
+    emit('brushSize');
+  } else if (e.key === ']') {
+    e.preventDefault();
+    state.brushSize = Math.min(8, state.brushSize + 1);
+    emit('brushSize');
+  } else if (e.key.toLowerCase() === 'x') {
+    e.preventDefault();
+    const p = state.primary; state.primary = state.secondary; state.secondary = p;
+    emit('colors');
+  }
 });
 
 // ---- overlay toggles ----

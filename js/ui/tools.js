@@ -119,6 +119,10 @@ export function mountToolPalette(el) {
   });
   brushRow.appendChild(brushInput);
   optionsRow.appendChild(brushRow);
+  // main.js's `[`/`]` brush-size shortcut mutates state.brushSize directly and
+  // emits 'brushSize' so this input (the only other writer of that value)
+  // stays in sync without main.js needing a reference to it.
+  on('brushSize', () => { brushInput.value = String(state.brushSize); });
 
   const contiguousRow = document.createElement('label');
   contiguousRow.className = 'tool-option-row';
