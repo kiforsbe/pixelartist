@@ -146,11 +146,12 @@ canvasView.onStatus = ({ x, y, zoom }) => {
 // re-flattened when the project changes, not on every paint (pan/zoom-driven).
 let scratchCanvas = null;
 let scratchDirty = true;
+let scratchSheet = null; // sheet identity — mode switches swap sheets of equal size
 function invalidateScratch() { scratchDirty = true; }
 function getScratchCanvas() {
   const sheet = activeSheet();
   if (!sheet) return null;
-  if (scratchDirty || !scratchCanvas || scratchCanvas.width !== sheet.width || scratchCanvas.height !== sheet.height) {
+  if (scratchDirty || scratchSheet !== sheet || !scratchCanvas || scratchCanvas.width !== sheet.width || scratchCanvas.height !== sheet.height) {
     const bitmap = flattenSheet(sheet);
     if (!scratchCanvas || scratchCanvas.width !== bitmap.width || scratchCanvas.height !== bitmap.height) {
       scratchCanvas = (typeof OffscreenCanvas !== 'undefined')
@@ -161,6 +162,7 @@ function getScratchCanvas() {
     sctx.imageSmoothingEnabled = false;
     sctx.putImageData(new ImageData(bitmap.data, bitmap.width, bitmap.height), 0, 0);
     scratchDirty = false;
+    scratchSheet = sheet;
   }
   return scratchCanvas;
 }
@@ -310,7 +312,7 @@ async function doSave() {
     await io.clearAutosave().catch(() => {});
     emit('project');
   } catch (e) {
-    if (!isCancel(e)) throw e;
+    if (!isCancel(e)) alert(`Save failed: ${e.message}`);
   }
 }
 btnSave.addEventListener('click', doSave);
@@ -329,7 +331,7 @@ btnSaveAsPacked.addEventListener('click', async () => {
     await io.clearAutosave().catch(() => {});
     emit('project');
   } catch (e) {
-    if (!isCancel(e)) throw e;
+    if (!isCancel(e)) alert(`Save failed: ${e.message}`);
   }
 });
 btnSaveAsUnpacked.addEventListener('click', async () => {
@@ -342,7 +344,7 @@ btnSaveAsUnpacked.addEventListener('click', async () => {
     await io.clearAutosave().catch(() => {});
     emit('project');
   } catch (e) {
-    if (!isCancel(e)) throw e;
+    if (!isCancel(e)) alert(`Save failed: ${e.message}`);
   }
 });
 

@@ -36,8 +36,8 @@ export function emit(event, payload) {
   listeners.get(event)?.forEach(fn => fn(payload));
   if (event !== '*') listeners.get('*')?.forEach(fn => fn(payload));
 }
-// events used app-wide: 'project', 'sheet', 'selection', 'tool', 'view',
-// 'history', 'pixels', 'colors', 'brushSize'
+// events used app-wide: 'project' (data mutated OR project replaced), 'view',
+// 'tool', 'history', 'selection', 'pixels', 'colors', 'brushSize', 'playhead'
 export function activeSheet() {
   return state.project?.sheets.find(s => s.id === state.activeSheetId) ?? null;
 }

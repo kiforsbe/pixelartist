@@ -494,5 +494,8 @@ export function mountLayersPanel(el) {
 
   on('project', renderList);
   on('history', renderList);
+  // 'view' fires on mode-tab switches, which swap the active sheet — the list
+  // must show the new sheet's layers or clicks would target nonexistent ids.
+  on('view', renderList);
   renderList();
 }
