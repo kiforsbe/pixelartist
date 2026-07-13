@@ -6,6 +6,11 @@ export const PACKED_TYPE = {
   accept: { 'application/zip': ['.pixelproj'] },
 };
 
+const IMAGE_TYPE = {
+  description: 'Images',
+  accept: { 'image/png': ['.png'], 'image/*': ['.png', '.gif', '.jpg', '.jpeg', '.webp', '.bmp'] },
+};
+
 export function supportsFS() { return 'showOpenFilePicker' in window; }
 
 export async function savePacked(project, handle = null) {
@@ -32,6 +37,14 @@ export async function openPacked() {
   const file = await pickFileFallback('.pixelproj');
   const project = await unpackProject(new Uint8Array(await file.arrayBuffer()), decodePng);
   return { project, handle: null };
+}
+
+export async function pickImageFile() {
+  if (supportsFS()) {
+    const [handle] = await window.showOpenFilePicker({ types: [IMAGE_TYPE] });
+    return handle.getFile();
+  }
+  return pickFileFallback('image/*');
 }
 
 function pickFileFallback(accept) {

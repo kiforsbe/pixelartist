@@ -1,5 +1,6 @@
 import { state, on, emit, activeSheet, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
 import * as io from './io.js';
+import { decodePng } from './pngcodec.js';
 import { flattenSheet, createSheet } from '../core/model.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
@@ -59,6 +60,7 @@ const btnExportCancel = document.getElementById('export-cancel');
 
 const sheetSelect = document.getElementById('sheet-select');
 const btnNewSheet = document.getElementById('btn-new-sheet');
+const btnImportSheet = document.getElementById('btn-import-sheet');
 const dlgNewSheet = document.getElementById('dlg-newsheet');
 const nsName = document.getElementById('ns-name');
 const nsW = document.getElementById('ns-w');
@@ -146,6 +148,47 @@ sheetSelect.addEventListener('change', () => {
   emit('view');
 });
 
+// ---- add-sheet command (shared by New Sheet dialog + Import) ----
+// Eager-mutate-then-snapshot idiom (see tilemode.js commitSwapTile): the caller
+// has already created `sheet` via createSheet, which pushes it into
+// project.sheets, so capture prior selection + insertion index here, then push
+// a command whose do()/undo() replay that structural change idempotently for
+// redo/undo.
+function commitAddSheet(sheet) {
+  const project = state.project;
+  const prevActiveSheetId = state.activeSheetId;
+  const prevActiveLayerId = state.activeLayerId;
+  const insertIndex = project.sheets.indexOf(sheet);
+  const cmd = {
+    label: 'new sheet',
+    do() {
+      if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
+      state.activeSheetId = sheet.id;
+      state.activeLayerId = sheet.layers[0]?.id ?? null;
+      // See switchMode's comment above: selections are per-sheet, clear them too.
+      state.selectedFrameId = null;
+      state.selectedAnimationId = null;
+      state.selectedTileIndex = null;
+      state.view = 'sheet';
+      emit('view');
+    },
+    undo() {
+      const i = project.sheets.indexOf(sheet);
+      if (i !== -1) project.sheets.splice(i, 1);
+      state.activeSheetId = prevActiveSheetId;
+      state.activeLayerId = prevActiveLayerId;
+      state.selectedFrameId = null;
+      state.selectedAnimationId = null;
+      state.selectedTileIndex = null;
+      state.view = 'sheet';
+      emit('view');
+    },
+  };
+  state.commands.push(cmd);
+  markDirty();
+  emit('view');
+}
+
 // ---- new sheet dialog ----
 function updateNewSheetTileRow() {
   const show = state.mode === 'tiles';
@@ -192,43 +235,44 @@ nsCreate.addEventListener('click', () => {
   }
   const name = nsName.value.trim() || `sheet_${project.sheets.filter(s => s.kind === kind).length + 1}`;
 
-  // Eager-mutate-then-snapshot idiom (see tilemode.js commitSwapTile): createSheet
-  // already pushes the sheet into project.sheets, so capture prior selection +
-  // insertion index now, then push a command whose do()/undo() replay that
-  // structural change idempotently for redo/undo.
-  const prevActiveSheetId = state.activeSheetId;
-  const prevActiveLayerId = state.activeLayerId;
   const sheet = createSheet(project, { name, width, height, kind, tileW, tileH });
-  const insertIndex = project.sheets.indexOf(sheet);
-  const cmd = {
-    label: 'new sheet',
-    do() {
-      if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
-      state.activeSheetId = sheet.id;
-      state.activeLayerId = sheet.layers[0]?.id ?? null;
-      // See switchMode's comment above: selections are per-sheet, clear them too.
-      state.selectedFrameId = null;
-      state.selectedAnimationId = null;
-      state.selectedTileIndex = null;
-      state.view = 'sheet';
-      emit('view');
-    },
-    undo() {
-      const i = project.sheets.indexOf(sheet);
-      if (i !== -1) project.sheets.splice(i, 1);
-      state.activeSheetId = prevActiveSheetId;
-      state.activeLayerId = prevActiveLayerId;
-      state.selectedFrameId = null;
-      state.selectedAnimationId = null;
-      state.selectedTileIndex = null;
-      state.view = 'sheet';
-      emit('view');
-    },
-  };
-  state.commands.push(cmd);
-  markDirty();
-  emit('view');
+  commitAddSheet(sheet);
   dlgNewSheet.close();
+});
+
+// ---- import sheet from image ----
+btnImportSheet.addEventListener('click', async () => {
+  if (!state.project) return;
+  let file;
+  try {
+    file = await io.pickImageFile();
+  } catch (e) {
+    if (isCancel(e)) return;
+    alert(`Import failed: ${e.message}`);
+    return;
+  }
+  let bitmap;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    bitmap = await decodePng(bytes);
+  } catch (e) {
+    alert(`Import failed: ${e.message}`);
+    return;
+  }
+  if (bitmap.width > 4096 || bitmap.height > 4096) {
+    alert('Image is too large (max 4096×4096).');
+    return;
+  }
+  const project = state.project;
+  const settings = project.settings;
+  const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+  const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
+  const sheet = createSheet(project, {
+    name, width: bitmap.width, height: bitmap.height, kind,
+    tileW: settings.tileW, tileH: settings.tileH,
+  });
+  sheet.layers[0].bitmap = bitmap;
+  commitAddSheet(sheet);
 });
 
 // ---- undo/redo ----
