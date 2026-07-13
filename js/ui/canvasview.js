@@ -2,20 +2,11 @@
 // zoom, space/middle-drag pan, and forwards other pointer activity to `onPointer`.
 // Used by the sheet view (Task 12) and, later, the frame editor and tile editor.
 
-const ZOOM_STEPS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
-const ZOOM_MIN = 1, ZOOM_MAX = 64;
+import { stepZoom, snapFitZoom } from '../core/zoom.js';
+
 const CHECKER_SIZE = 8;
 const CHECKER_A = '#3a3a3f', CHECKER_B = '#454549';
 const FIT_MARGIN = 24;
-
-function nearestZoomStep(z) {
-  let best = ZOOM_STEPS[0], bestDist = Infinity;
-  for (const s of ZOOM_STEPS) {
-    const d = Math.abs(s - z);
-    if (d < bestDist) { bestDist = d; best = s; }
-  }
-  return best;
-}
 
 export class CanvasView {
   constructor(hostEl) {
@@ -83,11 +74,9 @@ export class CanvasView {
     const availW = Math.max(1, this.cssWidth - FIT_MARGIN * 2);
     const availH = Math.max(1, this.cssHeight - FIT_MARGIN * 2);
     const w = Math.max(1, this.width), h = Math.max(1, this.height);
-    let z = Math.floor(Math.min(availW / w, availH / h));
-    if (!Number.isFinite(z) || z < 1) z = 1;
-    this.zoom = z;
-    this.panX = (this.cssWidth - w * z) / 2;
-    this.panY = (this.cssHeight - h * z) / 2;
+    this.zoom = snapFitZoom(Math.min(availW / w, availH / h));
+    this.panX = (this.cssWidth - w * this.zoom) / 2;
+    this.panY = (this.cssHeight - h * this.zoom) / 2;
   }
 
   requestRender() {
@@ -154,12 +143,12 @@ export class CanvasView {
     ctx.beginPath();
     ctx.rect(x0, y0, x1 - x0, y1 - y0);
     ctx.clip();
-    const startCol = Math.floor(x0 / CHECKER_SIZE), endCol = Math.ceil(x1 / CHECKER_SIZE);
-    const startRow = Math.floor(y0 / CHECKER_SIZE), endRow = Math.ceil(y1 / CHECKER_SIZE);
+    const startCol = Math.floor((x0 - this.panX) / CHECKER_SIZE), endCol = Math.ceil((x1 - this.panX) / CHECKER_SIZE);
+    const startRow = Math.floor((y0 - this.panY) / CHECKER_SIZE), endRow = Math.ceil((y1 - this.panY) / CHECKER_SIZE);
     for (let row = startRow; row < endRow; row++) {
       for (let col = startCol; col < endCol; col++) {
         ctx.fillStyle = (row + col) % 2 === 0 ? CHECKER_A : CHECKER_B;
-        ctx.fillRect(col * CHECKER_SIZE, row * CHECKER_SIZE, CHECKER_SIZE, CHECKER_SIZE);
+        ctx.fillRect(this.panX + col * CHECKER_SIZE, this.panY + row * CHECKER_SIZE, CHECKER_SIZE, CHECKER_SIZE);
       }
     }
     ctx.restore();
@@ -235,9 +224,7 @@ export class CanvasView {
     const { sx, sy } = this._localPos(e);
     const imgX = (sx - this.panX) / this.zoom;
     const imgY = (sy - this.panY) / this.zoom;
-    let newZoom = this.zoom * Math.pow(2, e.deltaY > 0 ? -0.25 : 0.25);
-    newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, newZoom));
-    newZoom = nearestZoomStep(newZoom);
+    const newZoom = stepZoom(this.zoom, e.deltaY < 0 ? 1 : -1);
     this.zoom = newZoom;
     this.panX = sx - imgX * newZoom;
     this.panY = sy - imgY * newZoom;
