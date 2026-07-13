@@ -23,9 +23,11 @@ Five user-requested improvements to the shipped v1 app:
   16×16 frames, 100 ms).
 - Values persist as `project.settings = { spriteSheetW, spriteSheetH,
   tileSheetW, tileSheetH, tileW, tileH, frameW, frameH, durationMs }` in
-  `project.json`.
-- **Backward compatible**: all fields optional; `PROJECT_VERSION` stays 1;
-  loading a v1 project without `settings` falls back to built-in defaults.
+  `project.json`. The **default tile size** (`tileW`/`tileH`) is part of the
+  dialog and is applied to the initial tile sheet and to every new tile sheet.
+- **No backward compatibility required**: bump `PROJECT_VERSION` to 2;
+  `settings` is a required field and validation rejects projects without it
+  (old v1 files are rejected with the existing clear version error).
 - Dimension inputs validated against the existing 1..4096 sheet limit.
 - Creating the project produces one sprite sheet and one tile sheet at the
   chosen sizes (dirty-discard confirm unchanged).
@@ -65,8 +67,7 @@ Five user-requested improvements to the shipped v1 app:
   move individually; animation membership is unaffected.
 - Manually built animations (timeline "New" + add frames) get `strip: false`
   and behave exactly as in v1.
-- `strip` serializes with the animation; absent = false on load (backward
-  compatible).
+- `strip` serializes with the animation (absent = false on load).
 
 ## 4. View fixes
 
@@ -82,6 +83,11 @@ Five user-requested improvements to the shipped v1 app:
   locked to image (0,0) — a square corner always coincides with the sheet's
   top-left and the pattern follows content when panning. Squares stay 8
   screen pixels.
+- **Dialog centering bug**: all `<dialog>`s currently open at the window's
+  top-left because the global CSS reset (`* { margin: 0 }`) removes the UA
+  default `margin: auto` that centers dialogs. Fix: `dialog { margin: auto; }`
+  in app.css — every dialog (Save As, Export, Open, slice, slot config, and
+  the new ones) centers properly.
 
 ## 5. Layer thumbnails
 
@@ -97,12 +103,13 @@ Five user-requested improvements to the shipped v1 app:
 - New Project / New Sheet dialogs clamp dimensions to 1..4096 and refuse
   non-numeric input (reuse core validation; alert on failure).
 - Strip creation with no free space: alert, no partial state.
-- Loading old projects: missing `settings`/`strip` fields default cleanly.
+- Loading v1 projects: rejected by the version check with a clear message
+  (no migration).
 
 ## Testing
 
 - Node tests (extending the 45-test suite): settings serialization round-trip
-  (with and without settings present), strip placement scan (free-space finder
+  + v1-rejection (version 1 json fails validation), strip placement scan (free-space finder
   incl. no-space case), strip creation command shape (frames + animation +
   flag), whole-strip move geometry (pure helper), zoom table stepping helper
   (up/down from every entry, clamped ends), checkerboard phase helper if
