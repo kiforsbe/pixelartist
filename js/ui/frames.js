@@ -510,6 +510,7 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
   const afterAnimFrames = anim.frames.map(f => ({ ...f }));
   const firstFrameId = frames[0].id;
   const animId = anim.id;
+  const createdIds = new Set(frames.map(f => f.id));
 
   const cmd = {
     label: 'new strip',
@@ -523,7 +524,7 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
     undo() {
       sheet.frames = beforeFrames.slice();
       sheet.animations = beforeAnimations.slice();
-      if (state.selectedFrameId === firstFrameId) state.selectedFrameId = null;
+      if (createdIds.has(state.selectedFrameId)) state.selectedFrameId = null;
       if (state.selectedAnimationId === animId) state.selectedAnimationId = null;
     },
   };
