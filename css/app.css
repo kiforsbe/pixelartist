@@ -11,6 +11,7 @@ body {
 }
 #top-bar { display: flex; gap: 16px; align-items: center; padding: 4px 8px;
   background: var(--bg2); border-bottom: 1px solid var(--border); }
+#sheet-select { width: auto; min-width: 120px; }
 #workspace { display: grid; grid-template-columns: 96px 1fr 280px; min-height: 0; }
 #tool-palette { background: var(--bg2); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 2px; padding: 4px; overflow-y: auto; }

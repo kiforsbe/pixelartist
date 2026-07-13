@@ -1,6 +1,6 @@
-import { state, on, emit, activeSheet, setProject, newDefaultProject, AUTOTEST, confirmOrAuto } from './state.js';
+import { state, on, emit, activeSheet, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
 import * as io from './io.js';
-import { flattenSheet } from '../core/model.js';
+import { flattenSheet, createSheet } from '../core/model.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
@@ -57,6 +57,18 @@ const btnExportFrames = document.getElementById('export-frames');
 const btnExportTiles = document.getElementById('export-tiles');
 const btnExportCancel = document.getElementById('export-cancel');
 
+const sheetSelect = document.getElementById('sheet-select');
+const btnNewSheet = document.getElementById('btn-new-sheet');
+const dlgNewSheet = document.getElementById('dlg-newsheet');
+const nsName = document.getElementById('ns-name');
+const nsW = document.getElementById('ns-w');
+const nsH = document.getElementById('ns-h');
+const nsTileW = document.getElementById('ns-tile-w');
+const nsTileH = document.getElementById('ns-tile-h');
+const nsCreate = document.getElementById('ns-create');
+const nsCancel = document.getElementById('ns-cancel');
+const nsTileRowEls = document.querySelectorAll('.ns-tile-row');
+
 const dlgNewProject = document.getElementById('dlg-newproject');
 const npSpriteW = document.getElementById('np-sprite-w');
 const npSpriteH = document.getElementById('np-sprite-h');
@@ -90,6 +102,115 @@ function switchMode(mode) {
 }
 tabSprites.addEventListener('click', () => switchMode('sprites'));
 tabTiles.addEventListener('click', () => switchMode('tiles'));
+
+// ---- sheet selector ----
+function refreshSheetSelect() {
+  const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+  const sheets = state.project?.sheets.filter(s => s.kind === kind) ?? [];
+  sheetSelect.innerHTML = '';
+  for (const s of sheets) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sheetSelect.appendChild(opt);
+  }
+  sheetSelect.value = state.activeSheetId ?? '';
+}
+let sheetSelectQueued = false;
+function scheduleSheetSelectRefresh() {
+  if (sheetSelectQueued) return;
+  sheetSelectQueued = true;
+  queueMicrotask(() => { sheetSelectQueued = false; refreshSheetSelect(); });
+}
+on('project', scheduleSheetSelectRefresh);
+on('view', scheduleSheetSelectRefresh);
+refreshSheetSelect();
+
+sheetSelect.addEventListener('change', () => {
+  const sheet = state.project?.sheets.find(s => s.id === sheetSelect.value);
+  if (!sheet) return;
+  state.activeSheetId = sheet.id;
+  state.activeLayerId = sheet.layers[0]?.id ?? null;
+  state.view = 'sheet';
+  emit('view');
+});
+
+// ---- new sheet dialog ----
+function updateNewSheetTileRow() {
+  const show = state.mode === 'tiles';
+  nsTileRowEls.forEach(el => { el.style.display = show ? '' : 'none'; });
+}
+btnNewSheet.addEventListener('click', () => {
+  if (!state.project) return;
+  const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+  const settings = state.project.settings;
+  const n = state.project.sheets.filter(s => s.kind === kind).length + 1;
+  nsName.value = `sheet_${n}`;
+  if (kind === 'sprite') {
+    nsW.value = settings.spriteSheetW;
+    nsH.value = settings.spriteSheetH;
+  } else {
+    nsW.value = settings.tileSheetW;
+    nsH.value = settings.tileSheetH;
+    nsTileW.value = settings.tileW;
+    nsTileH.value = settings.tileH;
+  }
+  updateNewSheetTileRow();
+  dlgNewSheet.showModal();
+});
+nsCancel.addEventListener('click', () => dlgNewSheet.close());
+nsCreate.addEventListener('click', () => {
+  if (!state.project) return;
+  const project = state.project;
+  const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+  const sheetDim = (el) => {
+    const v = parseInt(el.value, 10);
+    return (Number.isNaN(v) || v < 1) ? null : Math.min(4096, v);
+  };
+  const positiveInt = (el) => {
+    const v = parseInt(el.value, 10);
+    return (Number.isNaN(v) || v < 1) ? null : v;
+  };
+  const width = sheetDim(nsW);
+  const height = sheetDim(nsH);
+  const tileW = kind === 'tile' ? positiveInt(nsTileW) : undefined;
+  const tileH = kind === 'tile' ? positiveInt(nsTileH) : undefined;
+  if (width == null || height == null || (kind === 'tile' && (tileW == null || tileH == null))) {
+    alert('Please enter valid positive numbers for all fields.');
+    return;
+  }
+  const name = nsName.value.trim() || `sheet_${project.sheets.filter(s => s.kind === kind).length + 1}`;
+
+  // Eager-mutate-then-snapshot idiom (see tilemode.js commitSwapTile): createSheet
+  // already pushes the sheet into project.sheets, so capture prior selection +
+  // insertion index now, then push a command whose do()/undo() replay that
+  // structural change idempotently for redo/undo.
+  const prevActiveSheetId = state.activeSheetId;
+  const prevActiveLayerId = state.activeLayerId;
+  const sheet = createSheet(project, { name, width, height, kind, tileW, tileH });
+  const insertIndex = project.sheets.indexOf(sheet);
+  const cmd = {
+    label: 'new sheet',
+    do() {
+      if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
+      state.activeSheetId = sheet.id;
+      state.activeLayerId = sheet.layers[0]?.id ?? null;
+      state.view = 'sheet';
+    },
+    undo() {
+      const i = project.sheets.indexOf(sheet);
+      if (i !== -1) project.sheets.splice(i, 1);
+      state.activeSheetId = prevActiveSheetId;
+      state.activeLayerId = prevActiveLayerId;
+      state.view = 'sheet';
+      emit('view');
+    },
+  };
+  state.commands.push(cmd);
+  markDirty();
+  emit('view');
+  dlgNewSheet.close();
+});
 
 // ---- undo/redo ----
 function updateHistoryButtons() {
