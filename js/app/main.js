@@ -1,6 +1,7 @@
 import { state, on, emit, activeSheet, setProject, newDemoProject, AUTOTEST, confirmOrAuto } from './state.js';
 import * as io from './io.js';
 import { flattenSheet } from '../core/model.js';
+import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
@@ -32,6 +33,11 @@ const statusPos = document.getElementById('status-pos');
 const statusZoom = document.getElementById('status-zoom');
 const canvasHost = document.getElementById('canvas-host');
 
+const dlgOpen = document.getElementById('dlg-open');
+const btnOpenPacked = document.getElementById('open-packed');
+const btnOpenUnpacked = document.getElementById('open-unpacked');
+const btnOpenCancel = document.getElementById('open-cancel');
+
 const dlgSaveAs = document.getElementById('dlg-saveas');
 const btnSaveAsPacked = document.getElementById('saveas-packed');
 const btnSaveAsUnpacked = document.getElementById('saveas-unpacked');
@@ -39,6 +45,8 @@ const btnSaveAsCancel = document.getElementById('saveas-cancel');
 
 const dlgExport = document.getElementById('dlg-export');
 const btnExportPng = document.getElementById('export-png');
+const btnExportFrames = document.getElementById('export-frames');
+const btnExportTiles = document.getElementById('export-tiles');
 const btnExportCancel = document.getElementById('export-cancel');
 
 // ---- mode tabs ----
@@ -220,7 +228,14 @@ btnNew.addEventListener('click', () => {
 });
 
 // ---- file: Open ----
-btnOpen.addEventListener('click', async () => {
+if (!io.supportsFS()) btnOpenUnpacked.hidden = true;
+btnOpen.addEventListener('click', () => {
+  if (state.dirty && !confirmOrAuto('Discard unsaved changes and open another project?')) return;
+  dlgOpen.showModal();
+});
+btnOpenCancel.addEventListener('click', () => dlgOpen.close());
+btnOpenPacked.addEventListener('click', async () => {
+  dlgOpen.close();
   try {
     const { project, handle } = await io.openPacked();
     state.fileHandle = handle;
@@ -228,7 +243,21 @@ btnOpen.addEventListener('click', async () => {
     state.saveMode = handle ? 'packed' : null;
     setProject(project);
   } catch (e) {
-    if (!isCancel(e)) throw e;
+    if (isCancel(e)) return;
+    alert(e.message);
+  }
+});
+btnOpenUnpacked.addEventListener('click', async () => {
+  dlgOpen.close();
+  try {
+    const { project, dirHandle } = await io.openUnpacked();
+    state.dirHandle = dirHandle;
+    state.fileHandle = null;
+    state.saveMode = 'unpacked';
+    setProject(project);
+  } catch (e) {
+    if (isCancel(e)) return;
+    alert(e.message);
   }
 });
 
@@ -283,7 +312,16 @@ btnSaveAsUnpacked.addEventListener('click', async () => {
 });
 
 // ---- export ----
-btnExport.addEventListener('click', () => dlgExport.showModal());
+function updateExportButtons() {
+  const sheet = activeSheet();
+  const isSprite = sheet?.kind === 'sprite';
+  const isTile = sheet?.kind === 'tile';
+  btnExportFrames.disabled = !isSprite;
+  btnExportFrames.title = isSprite ? '' : 'Only available for sprite sheets';
+  btnExportTiles.disabled = !isTile;
+  btnExportTiles.title = isTile ? '' : 'Only available for tile sheets';
+}
+btnExport.addEventListener('click', () => { updateExportButtons(); dlgExport.showModal(); });
 btnExportCancel.addEventListener('click', () => dlgExport.close());
 btnExportPng.addEventListener('click', async () => {
   dlgExport.close();
@@ -292,6 +330,22 @@ btnExportPng.addEventListener('click', async () => {
   const bitmap = flattenSheet(sheet);
   const blob = await io.exportPngBlob(bitmap);
   io.downloadBlob(blob, `${state.project.name}-${sheet.name}.png`);
+});
+btnExportFrames.addEventListener('click', () => {
+  dlgExport.close();
+  const sheet = activeSheet();
+  if (!sheet || sheet.kind !== 'sprite') return;
+  const json = buildFramesJson(sheet);
+  const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+  io.downloadBlob(blob, `${sheet.name}.frames.json`);
+});
+btnExportTiles.addEventListener('click', () => {
+  dlgExport.close();
+  const sheet = activeSheet();
+  if (!sheet || sheet.kind !== 'tile') return;
+  const json = buildTilesJson(sheet);
+  const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+  io.downloadBlob(blob, `${sheet.name}.tiles.json`);
 });
 
 // ---- beforeunload guard ----

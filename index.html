@@ -39,6 +39,14 @@
 </main>
 <div id="timeline-dock"></div>
 <footer id="status-bar"><span id="status-pos"></span><span id="status-zoom"></span><span id="status-tool"></span></footer>
+<dialog id="dlg-open">
+  <h3>Open</h3>
+  <div class="row">
+    <button id="open-packed">Packed file (.pixelproj)</button>
+    <button id="open-unpacked">Folder…</button>
+  </div>
+  <div class="row"><button id="open-cancel">Cancel</button></div>
+</dialog>
 <dialog id="dlg-saveas">
   <h3>Save As</h3>
   <div class="row">
@@ -51,8 +59,8 @@
   <h3>Export</h3>
   <div class="row">
     <button id="export-png">Sheet PNG (flattened)</button>
-    <button id="export-frames" disabled title="coming in a later task">Frames JSON</button>
-    <button id="export-tiles" disabled title="coming in a later task">Tiles JSON</button>
+    <button id="export-frames" disabled>Frames JSON</button>
+    <button id="export-tiles" disabled>Tiles JSON</button>
   </div>
   <div class="row"><button id="export-cancel">Cancel</button></div>
 </dialog>
