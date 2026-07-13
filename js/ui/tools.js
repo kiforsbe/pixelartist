@@ -541,9 +541,16 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
     if (!sheet) return;
     const target = getTargetRect();
     if (target.w <= 0 || target.h <= 0) return;
-    const region = selection
+    let region = selection
       ? { x: selection.x, y: selection.y, w: selection.w, h: selection.h }
       : target;
+    if (selection) {
+      const rx0 = Math.max(region.x, target.x), ry0 = Math.max(region.y, target.y);
+      const rx1 = Math.min(region.x + region.w, target.x + target.w);
+      const ry1 = Math.min(region.y + region.h, target.y + target.h);
+      if (rx1 <= rx0 || ry1 <= ry0) return; // selection entirely outside target: no-op
+      region = { x: rx0, y: ry0, w: rx1 - rx0, h: ry1 - ry0 };
+    }
     const layers = toolOptions.allLayers ? sheet.layers.slice() : (activeLayer() ? [activeLayer()] : []);
     if (!layers.length) return;
     moveStroke = {
