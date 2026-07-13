@@ -31,6 +31,49 @@ function resetBody(el, headingText) {
   return h3;
 }
 
+// ------------------------------------------------------ shared thumb drawing
+//
+// Mirrors js/ui/timeline.js's getScratchCanvas/drawFit pattern: one
+// module-level scratch canvas reused across every layer-row thumbnail draw,
+// resized only when the source bitmap's dimensions change (a canvas resize
+// resets context state, so imageSmoothingEnabled is reasserted after).
+
+const LAYER_THUMB_SIZE = 40;
+
+let scratchCanvas = null;
+let scratchCtx = null;
+
+function getScratchCanvas(width, height) {
+  if (!scratchCanvas) {
+    scratchCanvas = document.createElement('canvas');
+    scratchCtx = scratchCanvas.getContext('2d');
+  }
+  if (scratchCanvas.width !== width || scratchCanvas.height !== height) {
+    scratchCanvas.width = width;
+    scratchCanvas.height = height;
+    scratchCtx.imageSmoothingEnabled = false;
+  }
+  return scratchCanvas;
+}
+
+// Draws `bmp` into `canvas` nearest-neighbor, scaled to fit (contain) and
+// centered — same behavior as timeline.js's drawFit, applied here to
+// per-layer thumbnails.
+function drawFit(canvas, bmp) {
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!bmp || bmp.width === 0 || bmp.height === 0) return;
+  const tmp = getScratchCanvas(bmp.width, bmp.height);
+  tmp.getContext('2d').putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
+  const scale = Math.min(canvas.width / bmp.width, canvas.height / bmp.height);
+  const dw = Math.max(1, Math.round(bmp.width * scale));
+  const dh = Math.max(1, Math.round(bmp.height * scale));
+  const dx = Math.floor((canvas.width - dw) / 2);
+  const dy = Math.floor((canvas.height - dh) / 2);
+  ctx.drawImage(tmp, 0, 0, bmp.width, bmp.height, dx, dy, dw, dh);
+}
+
 // ------------------------------------------------------------- color panel
 
 export function mountColorPanel(el) {
@@ -434,8 +477,13 @@ export function mountLayersPanel(el) {
     });
   }
 
+  // layerId -> thumbnail <canvas> from the most recent renderList(), so the
+  // 'pixels' handler can redraw just the thumbnails without rebuilding rows.
+  const thumbCanvases = new Map();
+
   function renderList() {
     list.innerHTML = '';
+    thumbCanvases.clear();
     const sheet = activeSheet();
     if (!sheet) return;
     // topmost layer (last in array, composited last / on top) shown first
@@ -444,6 +492,15 @@ export function mountLayersPanel(el) {
       const row = document.createElement('div');
       row.className = 'layer-row' + (layer.id === state.activeLayerId ? ' active' : '');
       row.addEventListener('click', () => { state.activeLayerId = layer.id; renderList(); });
+
+      const thumb = document.createElement('canvas');
+      thumb.className = 'layer-thumb';
+      thumb.width = LAYER_THUMB_SIZE; thumb.height = LAYER_THUMB_SIZE;
+      // Thumbnail shows the layer's own content regardless of `visible` —
+      // it's not a viewport into the composite, so hidden layers still get
+      // a live thumb.
+      drawFit(thumb, layer.bitmap);
+      thumbCanvases.set(layer.id, thumb);
 
       const visBtn = document.createElement('button');
       visBtn.type = 'button';
@@ -483,9 +540,29 @@ export function mountLayersPanel(el) {
       downBtn.title = 'Move down'; downBtn.disabled = idx === 0;
       downBtn.addEventListener('click', (e) => { e.stopPropagation(); doMove(layer, idx - 1); });
 
-      row.append(visBtn, nameEl, opacityInput, upBtn, downBtn);
+      row.append(thumb, visBtn, nameEl, opacityInput, upBtn, downBtn);
       list.appendChild(row);
     }
+  }
+
+  // 'pixels' fires continuously during stroke preview/commit; redrawing the
+  // full row list on every tick would thrash (rebuild buttons/inputs, lose
+  // focus). Instead just repaint the cached thumbnail canvases in place,
+  // coalesced with a microtask guard so a burst of 'pixels' events during one
+  // drag only repaints once per turn of the event loop.
+  let thumbRedrawQueued = false;
+  function redrawThumbs() {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    for (const layer of sheet.layers) {
+      const canvas = thumbCanvases.get(layer.id);
+      if (canvas) drawFit(canvas, layer.bitmap);
+    }
+  }
+  function scheduleThumbRedraw() {
+    if (thumbRedrawQueued) return;
+    thumbRedrawQueued = true;
+    queueMicrotask(() => { thumbRedrawQueued = false; redrawThumbs(); });
   }
 
   btnAdd.addEventListener('click', doAddLayer);
@@ -497,5 +574,6 @@ export function mountLayersPanel(el) {
   // 'view' fires on mode-tab switches, which swap the active sheet — the list
   // must show the new sheet's layers or clicks would target nonexistent ids.
   on('view', renderList);
+  on('pixels', scheduleThumbRedraw);
   renderList();
 }

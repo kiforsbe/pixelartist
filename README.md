@@ -50,8 +50,19 @@ tool switch).
 
 | Input | Action |
 | --- | --- |
-| Mouse wheel | Zoom in/out, centered on the cursor |
-| `Space` + drag, or middle-mouse drag | Pan |
+| Mouse wheel | Zoom in/out, centered on the cursor. Stepped table (not continuous multiply): `0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64` — wheel always moves one table entry at a time, so it never sticks between two adjacent levels. |
+| `Space` + drag, or middle-mouse drag | Pan (the transparency checkerboard scrolls with the content, it isn't fixed to the viewport) |
+
+## New Project
+
+File > New opens the New Project dialog (prompts to discard unsaved
+changes first if the current project is dirty). It collects the values
+stored as the new project's `settings` (see below): sprite sheet
+width/height, tile sheet width/height, tile width/height, frame
+width/height, and default animation frame duration. These become the
+defaults offered by "New Sheet…" and "New strip…" afterward; each field
+must be a positive integer or the dialog rejects the input with an alert
+instead of silently coercing it.
 
 ## File format
 
@@ -69,7 +80,22 @@ Projects save in one of two layouts, both built from the same
 
 `project.json`'s `version` field is checked on load; a mismatched or
 corrupt file produces a clear error (e.g. `invalid project: unsupported
-version 99 (expected 1)`) shown to the user rather than failing silently.
+version 99 (expected 2)`) shown to the user rather than failing silently.
+The current format is **version 2**, which additionally requires a
+`settings` object with 9 numeric keys (validated on load — any missing
+or non-numeric key is rejected the same way a version mismatch is):
+
+- `spriteSheetW`, `spriteSheetH` — default sprite sheet dimensions
+- `tileSheetW`, `tileSheetH` — default tile sheet dimensions
+- `tileW`, `tileH` — default tile size
+- `frameW`, `frameH` — default frame size
+- `durationMs` — default animation frame duration
+
+An animation object may carry a project-internal `strip: true` flag
+marking it as an intact strip created via "New strip…" (enables the
+"Break apart" action). This flag is not part of either exported JSON
+shape below — it only affects in-app editing and is not read back on
+import; the Frames JSON `animations[]` shape is unchanged.
 
 ### Export shapes
 

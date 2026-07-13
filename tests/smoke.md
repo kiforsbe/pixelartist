@@ -201,8 +201,43 @@ is a pass condition for the whole run, not just the final step.
     (non-autotest) reload — both deliberately suppressed under
     `?autotest`.
 
+## 15. v2: New Project, sheets, strips, zoom, thumbnails
+
+56. [A] File > New: with unsaved changes, `confirmOrAuto` auto-accepts the
+    discard-changes prompt; the New Project dialog opens. Enter custom
+    sprite sheet, tile sheet, tile size, frame size, and duration values;
+    "Create" lands a project whose sheets/settings match exactly what was
+    entered (not the defaults).
+57. [A] Dialogs (New Project, New Sheet, New Strip, Open, Save As, Export)
+    render centered in the viewport via native `<dialog>`/`showModal()` —
+    no custom positioning logic to break.
+58. [A] Sheet selector dropdown lists sheets for the active tab (Sprite
+    Sheets vs Tile Sheets); "New Sheet…" dialog creates one (name/size, +
+    tile size in tile mode) and it becomes active; undo removes it and
+    restores the prior active sheet/layer.
+59. [A] Frames panel "New strip…" creates a contiguous named animation
+    strip (frame size, count, duration); the strip's cells can be
+    drag-reordered in the timeline; "Break apart" (visible only while the
+    animation is an intact strip) converts it to loose frame entries.
+    Each of create/reorder/break-apart is one undo step.
+60. [A] Mouse wheel over the canvas steps zoom through the table
+    (`0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, ...`); repeated
+    scroll-in/scroll-out reaches both 0.25x and 16x without sticking at
+    any intermediate level, and the status bar zoom readout matches.
+61. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
+    checkerboard transparency background scrolls with the content
+    (anchored to canvas content, not fixed to the viewport).
+62. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
+    layer 1 — its thumbnail updates continuously during the stroke (not
+    just on mouse-up). Add layer 2 and draw different pixels on it — the
+    two thumbnails show distinct content, both live while drawing.
+    Toggling a layer's visibility does not blank its thumbnail (the thumb
+    always shows that layer's own bitmap). Thumbnails stay correct after
+    undo/redo and after switching the active sheet via the sheet
+    selector.
+
 ## Pass criteria
 
 - All **[A]** items complete with no unexpected state and zero console
   errors/warnings across the whole run.
-- `npm test` reports 45/45 passing.
+- `npm test` reports 57/57 passing.
