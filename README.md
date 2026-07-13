@@ -93,9 +93,10 @@ or non-numeric key is rejected the same way a version mismatch is):
 
 An animation object may carry a project-internal `strip: true` flag
 marking it as an intact strip created via "New strip…" (enables the
-"Break apart" action). This flag is not part of either exported JSON
-shape below — it only affects in-app editing and is not read back on
-import; the Frames JSON `animations[]` shape is unchanged.
+"Break apart" action). This flag round-trips through the project.json
+save/load cycle (`deserializeProject` restores it via `strip: a.strip ?? false`),
+but it is not part of either exported JSON shape below — the Frames JSON
+`animations[]` shape omits it and is unchanged.
 
 ### Export shapes
 

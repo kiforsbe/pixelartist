@@ -92,6 +92,13 @@ function switchMode(mode) {
   const sheet = state.project?.sheets.find(s => s.kind === kind) ?? null;
   state.activeSheetId = sheet ? sheet.id : null;
   state.activeLayerId = sheet ? (sheet.layers[0]?.id ?? null) : null;
+  // Selections (frame/animation/tile) are per-sheet; a stale id surviving an
+  // active-sheet change lets e.g. timeline's "Add selected frame" insert one
+  // sheet's frameId into another sheet's animation (blank timeline cell,
+  // `"frame": null` on export). Clear on every path that reassigns activeSheetId.
+  state.selectedFrameId = null;
+  state.selectedAnimationId = null;
+  state.selectedTileIndex = null;
   state.view = 'sheet';
   // frame/tile tools are mode-exclusive (their palette buttons hide via
   // isAvailable()); fall back to pencil so leaving their mode doesn't strand
@@ -131,6 +138,10 @@ sheetSelect.addEventListener('change', () => {
   if (!sheet) return;
   state.activeSheetId = sheet.id;
   state.activeLayerId = sheet.layers[0]?.id ?? null;
+  // See switchMode's comment above: selections are per-sheet, clear them here too.
+  state.selectedFrameId = null;
+  state.selectedAnimationId = null;
+  state.selectedTileIndex = null;
   state.view = 'sheet';
   emit('view');
 });
@@ -195,6 +206,10 @@ nsCreate.addEventListener('click', () => {
       if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
       state.activeSheetId = sheet.id;
       state.activeLayerId = sheet.layers[0]?.id ?? null;
+      // See switchMode's comment above: selections are per-sheet, clear them too.
+      state.selectedFrameId = null;
+      state.selectedAnimationId = null;
+      state.selectedTileIndex = null;
       state.view = 'sheet';
       emit('view');
     },
@@ -203,6 +218,9 @@ nsCreate.addEventListener('click', () => {
       if (i !== -1) project.sheets.splice(i, 1);
       state.activeSheetId = prevActiveSheetId;
       state.activeLayerId = prevActiveLayerId;
+      state.selectedFrameId = null;
+      state.selectedAnimationId = null;
+      state.selectedTileIndex = null;
       state.view = 'sheet';
       emit('view');
     },
