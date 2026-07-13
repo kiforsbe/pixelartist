@@ -1,5 +1,5 @@
 import { CommandStack } from '../core/commands.js';
-import { createProject, createSheet } from '../core/model.js';
+import { createProject, createSheet, DEFAULT_SETTINGS } from '../core/model.js';
 
 // Test mode (?autotest): automated browser sessions suppress modal dialogs
 // (beforeunload guard, autosave-restore prompt, confirm() gates auto-accept).
@@ -57,9 +57,9 @@ export function setProject(project) {
   emit('project');
   emit('view');
 }
-export function newDemoProject() {
-  const project = createProject('untitled');
-  createSheet(project, { name: 'Sprites', width: 128, height: 128, kind: 'sprite' });
-  createSheet(project, { name: 'Tiles', width: 128, height: 128, kind: 'tile' });
+export function newDefaultProject(settings = DEFAULT_SETTINGS) {
+  const project = createProject('untitled', settings);
+  createSheet(project, { name: 'Sprites', width: settings.spriteSheetW, height: settings.spriteSheetH, kind: 'sprite' });
+  createSheet(project, { name: 'Tiles', width: settings.tileSheetW, height: settings.tileSheetH, kind: 'tile', tileW: settings.tileW, tileH: settings.tileH });
   return project;
 }

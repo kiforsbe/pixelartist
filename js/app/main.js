@@ -1,4 +1,4 @@
-import { state, on, emit, activeSheet, setProject, newDemoProject, AUTOTEST, confirmOrAuto } from './state.js';
+import { state, on, emit, activeSheet, setProject, newDefaultProject, AUTOTEST, confirmOrAuto } from './state.js';
 import * as io from './io.js';
 import { flattenSheet } from '../core/model.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
@@ -261,7 +261,7 @@ applyView();
 btnNew.addEventListener('click', () => {
   if (state.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
   state.fileHandle = null; state.dirHandle = null; state.saveMode = null;
-  setProject(newDemoProject());
+  setProject(newDefaultProject());
 });
 
 // ---- file: Open ----
@@ -406,7 +406,7 @@ setInterval(() => {
   if (restored && confirm('An autosaved project was found. Restore it?')) {
     setProject(restored);
   } else {
-    setProject(newDemoProject());
+    setProject(newDefaultProject());
   }
   updateHistoryButtons();
 })();

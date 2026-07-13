@@ -24,7 +24,7 @@ test('buildEntries produces project.json + one png per layer', async () => {
   assert.equal(entries.length, 2);
   assert.equal(entries[0].path, 'project.json');
   const json = JSON.parse(dec.decode(entries[0].data));
-  assert.equal(json.version, 1);
+  assert.equal(json.version, 2);
   assert.match(entries[1].path, /^images\/.+\.png$/);
 });
 

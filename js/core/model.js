@@ -1,14 +1,22 @@
 import { createBitmap, cloneBitmap, getPixel, setPixel } from './pixels.js';
 import { newId } from './palettes.js';
 
-export const PROJECT_VERSION = 1;
+export const PROJECT_VERSION = 2;
+export const DEFAULT_SETTINGS = {
+  spriteSheetW: 256, spriteSheetH: 256,
+  tileSheetW: 256, tileSheetH: 256,
+  tileW: 16, tileH: 16,
+  frameW: 16, frameH: 16,
+  durationMs: 100,
+};
 const MAX_DIM = 4096;
 
-export function createProject(name) {
-  return { version: PROJECT_VERSION, name, sheets: [], palettes: [], activePaletteId: null };
+export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
+  return { version: PROJECT_VERSION, name, settings: { ...settings },
+    sheets: [], palettes: [], activePaletteId: null };
 }
 
-export function createSheet(project, { name, width, height, kind }) {
+export function createSheet(project, { name, width, height, kind, tileW, tileH }) {
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 1 || height < 1 || width > MAX_DIM || height > MAX_DIM)
     throw new Error(`sheet size must be 1..${MAX_DIM}`);
@@ -16,7 +24,7 @@ export function createSheet(project, { name, width, height, kind }) {
     id: newId('sh'), name, width, height, kind,
     layers: [], frames: [], animations: [],
     tile: kind === 'tile'
-      ? { tileWidth: 16, tileHeight: 16, names: {}, neighbors: {} }
+      ? { tileWidth: tileW ?? 16, tileHeight: tileH ?? 16, names: {}, neighbors: {} }
       : null,
   };
   project.sheets.push(sheet);
@@ -80,8 +88,8 @@ export function removeFrame(sheet, frameId) {
     a.frames = a.frames.filter(af => af.frameId !== frameId);
 }
 
-export function addAnimation(sheet, name) {
-  const anim = { id: newId('an'), name, loop: true, frames: [] };
+export function addAnimation(sheet, name, strip = false) {
+  const anim = { id: newId('an'), name, loop: true, strip, frames: [] };
   sheet.animations.push(anim);
   return anim;
 }
@@ -105,6 +113,7 @@ export function serializeProject(project) {
   const images = [];
   const json = {
     version: PROJECT_VERSION, name: project.name,
+    settings: { ...project.settings },
     activePaletteId: project.activePaletteId,
     palettes: project.palettes.map(p => ({ ...p, colors: p.colors.map(c => [...c]) })),
     sheets: project.sheets.map(s => ({
@@ -127,12 +136,14 @@ export function deserializeProject(json, imagesByPath) {
   if (!v.ok) throw new Error(v.error);
   return {
     version: json.version, name: json.name,
+    settings: { ...json.settings },
     activePaletteId: json.activePaletteId ?? null,
     palettes: json.palettes ?? [],
     sheets: json.sheets.map(s => ({
       ...s,
       tile: s.tile ?? null,
-      frames: s.frames ?? [], animations: s.animations ?? [],
+      frames: s.frames ?? [],
+      animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false })),
       layers: s.layers.map(l => {
         const bitmap = imagesByPath.get(l.image);
         if (!bitmap) throw new Error(`missing image ${l.image}`);
@@ -142,10 +153,18 @@ export function deserializeProject(json, imagesByPath) {
   };
 }
 
+const SETTINGS_KEYS = ['spriteSheetW', 'spriteSheetH', 'tileSheetW', 'tileSheetH',
+  'tileW', 'tileH', 'frameW', 'frameH', 'durationMs'];
+
 export function validateProjectJson(json) {
   if (!json || typeof json !== 'object') return { ok: false, error: 'not an object' };
   if (json.version !== PROJECT_VERSION)
     return { ok: false, error: `unsupported version ${json.version} (expected ${PROJECT_VERSION})` };
+  if (!json.settings || typeof json.settings !== 'object')
+    return { ok: false, error: 'missing settings' };
+  for (const k of SETTINGS_KEYS)
+    if (typeof json.settings[k] !== 'number')
+      return { ok: false, error: `settings.${k} missing or not a number` };
   if (!Array.isArray(json.sheets)) return { ok: false, error: 'missing sheets' };
   for (const s of json.sheets)
     for (const l of s.layers ?? [])

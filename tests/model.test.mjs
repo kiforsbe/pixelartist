@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PROJECT_VERSION, createProject, createSheet, addLayer, removeLayer,
+  PROJECT_VERSION, DEFAULT_SETTINGS, createProject, createSheet, addLayer, removeLayer,
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet,
   serializeProject, deserializeProject, validateProjectJson, tileCount, tileRect,
 } from '../js/core/model.js';
@@ -88,4 +88,38 @@ test('validateProjectJson rejects bad input', () => {
   assert.equal(validateProjectJson(null).ok, false);
   const { p } = proj();
   assert.equal(validateProjectJson(serializeProject(p).json).ok, true);
+});
+
+test('project carries required settings; version 2', () => {
+  const p = createProject('s');
+  assert.equal(p.version, 2);
+  assert.deepEqual(p.settings, DEFAULT_SETTINGS);
+  const p2 = createProject('s2', { ...DEFAULT_SETTINGS, tileW: 8 });
+  assert.equal(p2.settings.tileW, 8);
+});
+
+test('createSheet tile kind honors tileW/tileH', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'x', width: 64, height: 64, kind: 'tile', tileW: 8, tileH: 8 });
+  assert.equal(s.tile.tileWidth, 8);
+});
+
+test('animations carry strip flag; serialize round-trips settings and strip', () => {
+  const p = createProject('a');
+  const s = createSheet(p, { name: 'sh', width: 32, height: 32, kind: 'sprite' });
+  const an = addAnimation(s, 'walk', true);
+  assert.equal(an.strip, true);
+  const { json, images } = serializeProject(p);
+  assert.equal(json.version, 2);
+  assert.deepEqual(json.settings, DEFAULT_SETTINGS);
+  const map = new Map(images.map(i => [i.path, i.bitmap]));
+  const p2 = deserializeProject(structuredClone(json), map);
+  assert.deepEqual(p2.settings, DEFAULT_SETTINGS);
+  assert.equal(p2.sheets[0].animations[0].strip, true);
+});
+
+test('validateProjectJson rejects version 1 and missing/invalid settings', () => {
+  assert.equal(validateProjectJson({ version: 1, sheets: [], settings: DEFAULT_SETTINGS }).ok, false);
+  assert.equal(validateProjectJson({ version: 2, sheets: [] }).ok, false);
+  assert.equal(validateProjectJson({ version: 2, sheets: [], settings: { tileW: 16 } }).ok, false);
 });
