@@ -275,6 +275,35 @@ btnImportSheet.addEventListener('click', async () => {
   commitAddSheet(sheet);
 });
 
+// ---- rename sheet ----
+const btnRenameSheet = document.getElementById('btn-rename-sheet');
+const dlgRenameSheet = document.getElementById('dlg-renamesheet');
+const rsName = document.getElementById('rs-name');
+const rsOk = document.getElementById('rs-ok');
+const rsCancel = document.getElementById('rs-cancel');
+btnRenameSheet.addEventListener('click', () => {
+  const sheet = activeSheet();
+  if (!sheet) return;
+  rsName.value = sheet.name;
+  dlgRenameSheet.showModal();
+});
+rsCancel.addEventListener('click', () => dlgRenameSheet.close());
+rsOk.addEventListener('click', () => {
+  const sheet = activeSheet();
+  if (!sheet) { dlgRenameSheet.close(); return; }
+  const v = rsName.value.trim();
+  if (!v) { alert('Name cannot be empty.'); return; }
+  const old = sheet.name;
+  // markDirty() in both directions: its 'project' emit refreshes the sheet
+  // selector, which undo/redo would otherwise leave showing the stale name.
+  state.commands.push({
+    label: 'rename sheet',
+    do() { sheet.name = v; markDirty(); },
+    undo() { sheet.name = old; markDirty(); },
+  });
+  dlgRenameSheet.close();
+});
+
 // ---- undo/redo ----
 function updateHistoryButtons() {
   btnUndo.disabled = !state.commands.canUndo();

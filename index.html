@@ -24,6 +24,7 @@
   <select id="sheet-select"></select>
   <button id="btn-new-sheet" title="New sheet">+</button>
   <button id="btn-import-sheet" title="Import sheet from image">Import…</button>
+  <button id="btn-rename-sheet" title="Rename sheet">✎</button>
   <div id="overlay-toggles">
     <label><input type="checkbox" id="ovl-labels" checked> Labels</label>
     <label><input type="checkbox" id="ovl-seq" checked> Sequences</label>
@@ -95,6 +96,13 @@
     <span class="ns-tile-row">×</span><input id="ns-tile-h" class="ns-tile-row" type="number" min="1" max="256" value="16">
   </div>
   <div class="row"><button id="ns-create">Create</button><button id="ns-cancel">Cancel</button></div>
+</dialog>
+<dialog id="dlg-renamesheet">
+  <h3>Rename Sheet</h3>
+  <div class="row">
+    <span>Name</span><input id="rs-name" type="text">
+  </div>
+  <div class="row"><button id="rs-ok">OK</button><button id="rs-cancel">Cancel</button></div>
 </dialog>
 <dialog id="dlg-newstrip">
   <h3>New Animation Strip</h3>

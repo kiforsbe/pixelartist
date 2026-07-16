@@ -31,6 +31,7 @@ tool switch).
 | `O` | Ellipse |
 | `I` | Eyedropper |
 | `M` | Select (marquee) |
+| `V` | Move (✋) — shifts the marquee selection if one is active, otherwise the whole active layer; check "All layers" in the tool options row to move every layer together |
 | `F` | Frame tool (sprite mode only) |
 | `T` | Tile tool (tile mode only) |
 
@@ -52,6 +53,19 @@ tool switch).
 | --- | --- |
 | Mouse wheel | Zoom in/out, centered on the cursor. Stepped table (not continuous multiply): `0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64` — wheel always moves one table entry at a time, so it never sticks between two adjacent levels. |
 | `Space` + drag, or middle-mouse drag | Pan (the transparency checkerboard scrolls with the content, it isn't fixed to the viewport) |
+
+## Sheets: Import & Rename
+
+The sheet selector row in the top bar has, besides "+" (New Sheet…):
+
+- **Import…** — creates a new sheet from a PNG image file. The sheet takes
+  the file's name (minus extension) and exact pixel dimensions (max
+  4096×4096), with the image on its only layer; it lands in the active tab
+  (sprite vs tile sheet) and becomes active. One undo step removes it.
+- **✎ (Rename sheet)** — renames the active sheet via a dialog pre-filled
+  with the current name. The name feeds the sheet selector and every
+  export filename (`<name>.png`, `<name>.frames.json`, `<name>.tiles.json`).
+  Empty names are rejected with an alert; renaming is a single undo step.
 
 ## New Project
 

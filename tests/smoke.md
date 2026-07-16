@@ -236,8 +236,40 @@ is a pass condition for the whole run, not just the final step.
     undo/redo and after switching the active sheet via the sheet
     selector.
 
+## 16. v3: Import, move tool, rename sheet
+
+63. [A] Import sheet from image: drive the fallback `<input type="file">`
+    (used when the File System Access API is unavailable; Playwright can
+    also intercept it via its file-chooser hook) with a small generated
+    PNG of known pixel values. Click "Import…", supply the file: a new
+    sheet is created and becomes active — its name is the file name minus
+    extension, its dimensions match the image, and layer 0's pixels match
+    the PNG's. Undo removes the sheet and restores the prior active
+    sheet/layer.
+64. [A] Move tool (✋, `V`) with no marquee selection: drag on the canvas —
+    the whole active layer shifts by the drag delta (pixels moved past the
+    sheet edge are cropped; the vacated area becomes transparent). One
+    undo step restores the layer.
+65. [A] Move tool with a marquee selection (draw one with `M` first, then
+    switch to `V`): dragging moves only the selected region's pixels, and
+    the marquee rect follows the drag. Undo restores both the pixels and
+    the rect position.
+66. [A] Move tool "All layers" option: with two layers holding distinct
+    pixels, check "All layers" in the tool options row and drag — both
+    layers shift together; a single undo restores both.
+67. [A] Move tool inside the frame editor: the move is confined to the
+    frame's rect — dragged pixels cannot escape the frame bounds even if
+    the drag leaves it. Undo restores.
+68. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
+    dialog opens pre-filled with the current name. OK with a new name:
+    the sheet selector label updates immediately and Export filenames
+    (e.g. the flattened PNG download) use the new name; undo restores the
+    old name in the selector. OK with an empty/whitespace name: alert
+    "Name cannot be empty." and the dialog stays open. Cancel closes
+    without changes.
+
 ## Pass criteria
 
 - All **[A]** items complete with no unexpected state and zero console
   errors/warnings across the whole run.
-- `npm test` reports 57/57 passing.
+- `npm test` reports 61/61 passing.
