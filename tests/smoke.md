@@ -45,8 +45,8 @@ is a pass condition for the whole run, not just the final step.
 10. [A] Select tool (`M`): drag a marquee; dragging from inside it moves the
     RECTANGLE only (contents stay put — verify pixels unchanged); `Escape`
     clears the marquee. Corner/edge handles (8) resize the marquee; while
-    dragging, CAD labels show origin, W×H, and Δ; idle selection shows a
-    quiet origin+size label.
+    dragging, CAD dimension lines (extension lines, arrows, value pills)
+    show origin, W×H, and Δ; idle selection shows the quiet variant.
 
 ## 3. Layers
 
@@ -80,14 +80,16 @@ is a pass condition for the whole run, not just the final step.
     visibility).
 21. [A] Drag-move a frame with the frame tool: pixels underneath move
     with it (pixel-carrying move), one undo step restores both frame
-    position and pixels. Move shows origin (+dx, +dy) labels; create/resize
-    drags show W×H with Δ.
+    position and pixels. Move shows origin (+dx, +dy); create/resize drags
+    show W×H pills with Δ on arrowed dimension lines.
 22. [A] Drag a corner handle to resize the selected frame; undo restores
     original bounds.
 23. [A] Frames panel: Slice grid… dialog creates a full grid of frames
     from cell/margin/spacing settings ("Replace existing frames" tested
     both on and off); undo removes them (and any animation entries that
-    referenced them).
+    referenced them). While the dialog is open, a live ghost grid previews
+    the cells with per-column/per-row dimension chains and overall dims;
+    the preview updates as inputs change and disappears on Cancel.
 24. [A] Select a frame, press `Delete`: frame is removed; undo restores
     it (and any animation frame-entries that referenced it).
 
@@ -223,7 +225,9 @@ is a pass condition for the whole run, not just the final step.
     strip (frame size, count, duration); the strip's cells can be
     drag-reordered in the timeline; "Break apart" (visible only while the
     animation is an intact strip) converts it to loose frame entries.
-    Each of create/reorder/break-apart is one undo step.
+    Each of create/reorder/break-apart is one undo step. An intact strip
+    selected with the frame tool shows a per-member width chain plus
+    overall width.
 60. [A] Mouse wheel over the canvas steps zoom through the table
     (`0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, ...`); repeated
     scroll-in/scroll-out reaches both 0.25x and 16x without sticking at
@@ -260,8 +264,8 @@ is a pass condition for the whole run, not just the final step.
 66. [A] Transform handles: drag a corner handle (scale, incl. pull-through
     flip), drag the rotation knob (free rotate); commit renders the
     nearest-neighbor result; each completed drag is one undo step. Scale
-    shows W×H with Δ (scaled content size, not bbox); rotate shows a live
-    angle readout near the knob.
+    shows W×H pills with Δ (scaled content size); rotate shows an angle
+    pill near the knob.
 67. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
     each layer; single-layer default otherwise. In the frame editor a
     committed float is clipped to the frame rect.

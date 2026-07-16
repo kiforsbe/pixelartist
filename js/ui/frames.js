@@ -31,6 +31,11 @@ const frameToolOptions = { snap: false, gridSize: 8 };
 // `selection`/`stroke` — there is only ever one frame-tool drag at a time.
 let drag = null;
 
+// Live Slice-grid preview: dialog's current values while it is open, else
+// null. The sheet view handle lets dialog input events trigger repaints.
+let slicePreviewOpts = null;
+let sheetViewForPreview = null;
+
 function isTypingTarget(el) {
   if (!el) return false;
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
@@ -338,10 +343,55 @@ function drawStripDims(ctx, view, members, dx, dy, opts = {}) {
   drawRectDims(ctx, view, r, { ...opts, wLevel: 1, hLevel: 0 });
 }
 
+// Ghost grid + CAD chains for the open Slice-grid dialog: cell outlines in
+// the standard dashed ghost style; level-0 chains along the TOP edge (one
+// dimension per column width) and LEFT edge (one per row height); level-1
+// overall region dimensions. Uses core sliceGrid so the preview always
+// matches exactly what Create would produce. Degenerate inputs draw nothing.
+function drawSlicePreview(ctx, view, sheet) {
+  const o = slicePreviewOpts;
+  if (o.cellW < 1 || o.cellH < 1) return;
+  let cells;
+  try {
+    cells = sliceGrid({ sheetWidth: sheet.width, sheetHeight: sheet.height, ...o });
+  } catch {
+    return;
+  }
+  if (!cells.length) return;
+  ctx.save();
+  ctx.strokeStyle = '#fff';
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1;
+  for (const c of cells) strokeGhostRect(ctx, view, c);
+  ctx.restore();
+  const firstRow = cells.filter(c => c.y === cells[0].y);
+  const firstCol = cells.filter(c => c.x === cells[0].x);
+  drawChainDims(ctx, view, {
+    axis: 'h', side: 'start', edge: cells[0].y,
+    spans: firstRow.map(c => ({ from: c.x, to: c.x + c.w, text: `${c.w}` })),
+  });
+  drawChainDims(ctx, view, {
+    axis: 'v', side: 'start', edge: cells[0].x,
+    spans: firstCol.map(c => ({ from: c.y, to: c.y + c.h, text: `${c.h}` })),
+  });
+  const lastX = Math.max(...firstRow.map(c => c.x + c.w));
+  const lastY = Math.max(...firstCol.map(c => c.y + c.h));
+  drawChainDims(ctx, view, {
+    axis: 'h', side: 'start', edge: cells[0].y, level: 1,
+    spans: [{ from: cells[0].x, to: lastX, text: `${lastX - cells[0].x}` }],
+  });
+  drawChainDims(ctx, view, {
+    axis: 'v', side: 'start', edge: cells[0].x, level: 1,
+    spans: [{ from: cells[0].y, to: lastY, text: `${lastY - cells[0].y}` }],
+  });
+}
+
 function drawFrameToolGhost(ctx, view) {
   if (state.mode !== 'sprites') return;
   const sheet = activeSheet();
   if (!sheet) return;
+
+  if (slicePreviewOpts) drawSlicePreview(ctx, view, sheet);
 
   if (drag) {
     ctx.save();
@@ -427,6 +477,7 @@ export function registerFrameTool() {
 }
 
 export function bindFrameTool(view) {
+  sheetViewForPreview = view;
   const prevPointer = view.onPointer;
   view.onPointer = (ev) => {
     if (state.mode === 'sprites' && state.tool === 'frametool') {
@@ -491,6 +542,24 @@ function buildSliceDialog() {
   `;
   document.body.appendChild(dlg);
   const $ = (sel) => dlg.querySelector(sel);
+  const readPreview = () => {
+    const intVal = (el, min) => Math.max(min, parseInt(el.value, 10) || min);
+    return {
+      cellW: intVal($('#sg-cellw'), 1), cellH: intVal($('#sg-cellh'), 1),
+      marginX: intVal($('#sg-marginx'), 0), marginY: intVal($('#sg-marginy'), 0),
+      spacingX: intVal($('#sg-spacingx'), 0), spacingY: intVal($('#sg-spacingy'), 0),
+    };
+  };
+  for (const id of ['#sg-cellw', '#sg-cellh', '#sg-marginx', '#sg-marginy', '#sg-spacingx', '#sg-spacingy'])
+    $(id).addEventListener('input', () => {
+      if (!slicePreviewOpts) return;
+      slicePreviewOpts = readPreview();
+      sheetViewForPreview?.requestRender();
+    });
+  dlg.addEventListener('close', () => {
+    slicePreviewOpts = null;
+    sheetViewForPreview?.requestRender();
+  });
   $('#sg-cancel').addEventListener('click', () => dlg.close());
   $('#sg-create').addEventListener('click', () => {
     const sheet = activeSheet();
@@ -530,7 +599,13 @@ function buildSliceDialog() {
     markDirty();
     dlg.close();
   });
-  return dlg;
+  return {
+    open() {
+      slicePreviewOpts = readPreview();
+      dlg.showModal();
+      sheetViewForPreview?.requestRender();
+    },
+  };
 }
 
 // Creates a strip's frames + its intact (strip: true) animation as ONE
@@ -635,7 +710,7 @@ export function mountFramesPanel(el) {
   const btnSlice = document.createElement('button');
   btnSlice.type = 'button';
   btnSlice.textContent = 'Slice grid…';
-  btnSlice.addEventListener('click', () => sliceDialog.showModal());
+  btnSlice.addEventListener('click', () => sliceDialog.open());
 
   const stripDialog = wireNewStripDialog();
   const btnNewStrip = document.createElement('button');
