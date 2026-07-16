@@ -21,6 +21,8 @@ import { forwardPoint, inversePoint } from '../core/floating.js';
 import { nearestColor } from '../core/palettes.js';
 import { flattenSheet } from '../core/model.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand } from './floatsession.js';
+import { resizeRect } from '../core/resizerect.js';
+import { drawRectDims } from './dimlabels.js';
 
 export const TOOLS = [
   { id: 'pencil', icon: '✏️', key: 'b' },
@@ -426,9 +428,31 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     return { x: Math.max(t.x, Math.min(maxX, r.x)), y: Math.max(t.y, Math.min(maxY, r.y)), w: r.w, h: r.h };
   }
 
+  // 8 handle anchor points on the marquee, image-space EDGE coords
+  const SEL_HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  function selHandlePoint(sel, h) {
+    const x = h.includes('w') ? sel.x : h.includes('e') ? sel.x + sel.w : sel.x + sel.w / 2;
+    const y = h.includes('n') ? sel.y : h.includes('s') ? sel.y + sel.h : sel.y + sel.h / 2;
+    return { x, y };
+  }
+  function hitSelHandle(ev) {
+    if (!selection) return null;
+    for (const h of SEL_HANDLES) {
+      const p = toScreen(selHandlePoint(selection, h));
+      if (Math.abs(ev.sx - p.x) <= HANDLE_PX + 2 && Math.abs(ev.sy - p.y) <= HANDLE_PX + 2) return h;
+    }
+    return null;
+  }
+
   function handleSelectDown(ev) {
     if (!activeLayer()) return;
     const target = getTargetRect();
+    const handle = hitSelHandle(ev);
+    if (handle) {
+      selStroke = { mode: 'resize', target, handle, orig: { ...selection } };
+      view.requestRender();
+      return;
+    }
     if (insideRect(ev.x, ev.y, selection)) {
       // drag the marquee rect itself — shape preserved, contents untouched
       selStroke = { mode: 'moverect', target, anchor: { x: ev.x, y: ev.y }, orig: { x: selection.x, y: selection.y, w: selection.w, h: selection.h } };
@@ -451,7 +475,9 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const x0 = Math.min(ax, cx), x1 = Math.max(ax, cx);
       const y0 = Math.min(ay, cy), y1 = Math.max(ay, cy);
       selection = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-    } else { // moverect
+    } else if (selStroke.mode === 'resize') {
+      selection = resizeRect(selStroke.orig, selStroke.handle, ev.x, ev.y, target);
+    } else if (selStroke.mode === 'moverect') {
       const dx = ev.x - selStroke.anchor.x, dy = ev.y - selStroke.anchor.y;
       selection = clampRectToTarget(
         { x: selStroke.orig.x + dx, y: selStroke.orig.y + dy, w: selStroke.orig.w, h: selStroke.orig.h },
@@ -611,6 +637,13 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     else if (ev.type === 'up') handleUp(ev);
   };
 
+  function drawHandleSquare(ctx, p) {
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#000';
+    ctx.fillRect(p.x - HANDLE_PX, p.y - HANDLE_PX, HANDLE_PX * 2, HANDLE_PX * 2);
+    ctx.strokeRect(p.x - HANDLE_PX + 0.5, p.y - HANDLE_PX + 0.5, HANDLE_PX * 2 - 1, HANDLE_PX * 2 - 1);
+  }
+
   view.onOverlay = (ctx) => {
     const float = state.floating;
     const sheet = activeSheet();
@@ -631,11 +664,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       }
       ctx.setLineDash([]);
       for (const a of handleAnchors(float)) {
-        const p = toScreen(forwardPoint(float, a.u, a.v));
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#000';
-        ctx.fillRect(p.x - HANDLE_PX, p.y - HANDLE_PX, HANDLE_PX * 2, HANDLE_PX * 2);
-        ctx.strokeRect(p.x - HANDLE_PX + 0.5, p.y - HANDLE_PX + 0.5, HANDLE_PX * 2 - 1, HANDLE_PX * 2 - 1);
+        drawHandleSquare(ctx, toScreen(forwardPoint(float, a.u, a.v)));
       }
       const knob = knobScreenPos(float);
       const top = toScreen(forwardPoint(float, w / 2, 0));
@@ -660,6 +689,22 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     ctx.lineDashOffset = 4;
     ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1);
     ctx.restore();
+    if (state.tool === 'select') {
+      for (const h of SEL_HANDLES) drawHandleSquare(ctx, toScreen(selHandlePoint(selection, h)));
+      if (selStroke?.mode === 'resize') {
+        drawRectDims(ctx, view, selection, {
+          dw: selection.w - selStroke.orig.w, dh: selection.h - selStroke.orig.h,
+        });
+      } else if (selStroke?.mode === 'moverect') {
+        drawRectDims(ctx, view, selection, {
+          dx: selection.x - selStroke.orig.x, dy: selection.y - selStroke.orig.y,
+        });
+      } else if (selStroke?.mode === 'new') {
+        drawRectDims(ctx, view, selection);
+      } else {
+        drawRectDims(ctx, view, selection, { quiet: true });
+      }
+    }
   };
 
   window.addEventListener('keydown', (e) => {
