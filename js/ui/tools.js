@@ -17,10 +17,10 @@ import {
   copyRegion, blitRegion, getPixel,
 } from '../core/pixels.js';
 import { makePixelPatch } from '../core/commands.js';
-import { shiftRegion } from '../core/moveregion.js';
+import { forwardPoint, inversePoint } from '../core/floating.js';
 import { nearestColor } from '../core/palettes.js';
 import { flattenSheet } from '../core/model.js';
-import { registerFloatView, isTypingTarget } from './floatsession.js';
+import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand } from './floatsession.js';
 
 export const TOOLS = [
   { id: 'pencil', icon: '✏️', key: 'b' },
@@ -37,9 +37,9 @@ export const TOOLS = [
 const BRUSH_TOOLS = new Set(['pencil', 'eraser']);
 const SHAPE_TOOLS = new Set(['line', 'rect', 'ellipse']);
 
-// Shared tool options (fill contiguity, shape fill, move all-layers) — read by
-// bindDrawing, edited by the tool-options row built in mountToolPalette.
-export const toolOptions = { contiguous: true, filled: false, allLayers: false };
+// Shared tool options (fill contiguity, shape fill) — read by bindDrawing,
+// edited by the tool-options row built in mountToolPalette.
+export const toolOptions = { contiguous: true, filled: false };
 
 // ---------------------------------------------------------- external tools
 //
@@ -139,15 +139,6 @@ export function mountToolPalette(el) {
   filledRow.append(filledInput, document.createTextNode('Filled'));
   optionsRow.appendChild(filledRow);
 
-  const allLayersRow = document.createElement('label');
-  allLayersRow.className = 'tool-option-row';
-  const allLayersInput = document.createElement('input');
-  allLayersInput.type = 'checkbox';
-  allLayersInput.checked = toolOptions.allLayers;
-  allLayersInput.addEventListener('change', () => { toolOptions.allLayers = allLayersInput.checked; });
-  allLayersRow.append(allLayersInput, document.createTextNode('All layers'));
-  optionsRow.appendChild(allLayersRow);
-
   function refresh() {
     for (const [id, btn] of buttons) btn.classList.toggle('active', state.tool === id);
     for (const extra of extraTools) {
@@ -156,7 +147,6 @@ export function mountToolPalette(el) {
     }
     contiguousRow.style.display = state.tool === 'fill' ? '' : 'none';
     filledRow.style.display = (state.tool === 'rect' || state.tool === 'ellipse') ? '' : 'none';
-    allLayersRow.style.display = state.tool === 'move' ? '' : 'none';
     for (const { id, els } of extraRows)
       for (const rEl of els) rEl.style.display = state.tool === id ? '' : 'none';
   }
@@ -429,6 +419,13 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet', u
     return !!r && px >= r.x && py >= r.y && px < r.x + r.w && py < r.y + r.h;
   }
 
+  // Keeps a moved selection rect fully inside the target rect.
+  function clampRectToTarget(r, t) {
+    const maxX = Math.max(t.x, t.x + t.w - r.w);
+    const maxY = Math.max(t.y, t.y + t.h - r.h);
+    return { x: Math.max(t.x, Math.min(maxX, r.x)), y: Math.max(t.y, Math.min(maxY, r.y)), w: r.w, h: r.h };
+  }
+
   function handleSelectDown(ev) {
     if (!activeLayer()) return;
     const target = getTargetRect();
@@ -472,130 +469,111 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet', u
     view.requestRender();
   }
 
-  // ---- move ----
+  // ---- move (floating selection) ----
   //
-  // Moves the pixels of a region (the current selection's rect, or the whole
-  // target when there is none) by the drag delta, across one or all layers.
-  // Live preview (pointermove) fully restores each layer from its captured
-  // `before` clone then re-applies shiftRegion at the current delta — same
-  // restore-then-reapply shape as the brush/select-move live-drag code above.
-  // On release, ONE command is pushed covering every affected layer's patch
-  // (mirrors frames.js's commitMoveFrames: per-layer before/after clones over
-  // a shared rect, applied/undone together) plus the selection rect's old/new
-  // position, so undo is a single step that restores pixels AND the marquee.
+  // The move tool never edits bitmaps directly: pointer-down cuts the region
+  // into state.floating (floatsession command), and every gesture only
+  // mutates float.transform live, pushing one transform command per completed
+  // drag. Enter/Escape/tool-switch commit or cancel via floatsession.
 
-  // Exclusive-bound (x,y,w,h) union of `region` and `region` shifted by
-  // (dx, dy) — unclamped, mirrors shiftRegion's own union-rect math.
-  function moveBounds(region, dx, dy) {
-    const x0 = Math.min(region.x, region.x + dx);
-    const y0 = Math.min(region.y, region.y + dy);
-    const x1 = Math.max(region.x + region.w, region.x + dx + region.w);
-    const y1 = Math.max(region.y + region.h, region.y + dy + region.h);
-    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  const HANDLE_PX = 5;    // half-size of a scale handle hit box, screen px
+  const KNOB_OFFSET = 20; // rotation knob distance beyond top-center, screen px
+  const KNOB_R = 7;
+
+  // sheet-global point -> screen px (view content space may be frame/tile-local)
+  function toScreen(p) {
+    const q = unmapPoint ? unmapPoint(p.x, p.y) : p;
+    return view.imageToScreen(q.x, q.y);
   }
 
-  function rectClamp(r, t) {
-    const x0 = Math.max(r.x, t.x), y0 = Math.max(r.y, t.y);
-    const x1 = Math.min(r.x + r.w, t.x + t.w), y1 = Math.min(r.y + r.h, t.y + t.h);
-    return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+  // 4 corners + 4 edge midpoints in buffer space
+  function handleAnchors(float) {
+    const { w, h } = float.srcRect;
+    return [
+      { u: 0, v: 0 }, { u: w, v: 0 }, { u: w, v: h }, { u: 0, v: h },
+      { u: w / 2, v: 0 }, { u: w, v: h / 2 }, { u: w / 2, v: h }, { u: 0, v: h / 2 },
+    ];
   }
 
-  // Keeps a moved selection rect fully inside the target rect (same
-  // constraint already applied to marquee creation in handleSelectMove).
-  function clampRectToTarget(r, t) {
-    const maxX = Math.max(t.x, t.x + t.w - r.w);
-    const maxY = Math.max(t.y, t.y + t.h - r.h);
-    return { x: Math.max(t.x, Math.min(maxX, r.x)), y: Math.max(t.y, Math.min(maxY, r.y)), w: r.w, h: r.h };
+  function floatCenter(float) {
+    return forwardPoint(float, float.srcRect.w / 2, float.srcRect.h / 2);
+  }
+
+  function knobScreenPos(float) {
+    const pTop = toScreen(forwardPoint(float, float.srcRect.w / 2, 0));
+    const pC = toScreen(floatCenter(float));
+    const dx = pTop.x - pC.x, dy = pTop.y - pC.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: pTop.x + (dx / len) * KNOB_OFFSET, y: pTop.y + (dy / len) * KNOB_OFFSET };
   }
 
   function handleMoveDown(ev) {
     const sheet = activeSheet();
     if (!sheet) return;
-    const target = getTargetRect();
-    if (target.w <= 0 || target.h <= 0) return;
-    let region = selection
-      ? { x: selection.x, y: selection.y, w: selection.w, h: selection.h }
-      : target;
-    if (selection) {
-      const rx0 = Math.max(region.x, target.x), ry0 = Math.max(region.y, target.y);
-      const rx1 = Math.min(region.x + region.w, target.x + target.w);
-      const ry1 = Math.min(region.y + region.h, target.y + target.h);
-      if (rx1 <= rx0 || ry1 <= ry0) return; // selection entirely outside target: no-op
-      region = { x: rx0, y: ry0, w: rx1 - rx0, h: ry1 - ry0 };
+    const float = state.floating;
+    if (float && float.sheetId === sheet.id) {
+      const knob = knobScreenPos(float);
+      if (Math.hypot(ev.sx - knob.x, ev.sy - knob.y) <= KNOB_R + 2) {
+        const c = floatCenter(float);
+        moveStroke = {
+          kind: 'rotate', t0: { ...float.transform },
+          center: c, angle0: Math.atan2(ev.y + 0.5 - c.y, ev.x + 0.5 - c.x),
+        };
+        return;
+      }
+      for (const a of handleAnchors(float)) {
+        const p = toScreen(forwardPoint(float, a.u, a.v));
+        if (Math.abs(ev.sx - p.x) <= HANDLE_PX + 2 && Math.abs(ev.sy - p.y) <= HANDLE_PX + 2) {
+          moveStroke = { kind: 'scale', t0: { ...float.transform }, anchor: a };
+          return;
+        }
+      }
+      const { u, v } = inversePoint(float, ev.x + 0.5, ev.y + 0.5);
+      if (u >= 0 && v >= 0 && u < float.srcRect.w && v < float.srcRect.h) {
+        moveStroke = { kind: 'translate', t0: { ...float.transform }, anchor: { x: ev.x, y: ev.y } };
+        return;
+      }
+      commitFloatIfAny(); // pressed outside: commit; next press starts fresh
+      return;
     }
-    const layers = toolOptions.allLayers ? sheet.layers.slice() : (activeLayer() ? [activeLayer()] : []);
-    if (!layers.length) return;
-    moveStroke = {
-      anchor: { x: ev.x, y: ev.y },
-      region,
-      layers,
-      before: layers.map(l => cloneBitmap(l.bitmap)),
-      delta: { dx: 0, dy: 0 },
-      hadSelection: !!selection,
-    };
-    emit('pixels');
+    // no float yet: cut selection (or whole target) into one, then drag it
+    if (!createFloat({ allLayers: !!ev.altKey })) return;
+    moveStroke = { kind: 'translate', t0: { ...state.floating.transform }, anchor: { x: ev.x, y: ev.y } };
   }
 
   function handleMoveMove(ev) {
-    if (!moveStroke) return;
-    const { anchor, region, layers, before } = moveStroke;
-    const dx = ev.x - anchor.x, dy = ev.y - anchor.y;
-    layers.forEach((l, i) => blitRegion(l.bitmap, before[i], 0, 0));
-    for (const l of layers) shiftRegion(l.bitmap, region, dx, dy);
-    // cosmetic: hide any live bleed past the target rect (frame/tile editors)
-    // exactly like the select-move drag does, without affecting the eventual
-    // committed patch (recomputed cleanly from `before` at pointerup).
-    const b = moveBounds(region, dx, dy);
-    layers.forEach((l, i) => maskOutsideTarget(l.bitmap, before[i], b.x, b.y, b.x + b.w - 1, b.y + b.h - 1));
-    moveStroke.delta = { dx, dy };
+    if (!moveStroke || !state.floating) return;
+    const float = state.floating;
+    const t0 = moveStroke.t0;
+    if (moveStroke.kind === 'translate') {
+      float.transform.tx = t0.tx + Math.round(ev.x - moveStroke.anchor.x);
+      float.transform.ty = t0.ty + Math.round(ev.y - moveStroke.anchor.y);
+    } else if (moveStroke.kind === 'rotate') {
+      const c = moveStroke.center;
+      float.transform.rot = t0.rot + (Math.atan2(ev.y + 0.5 - c.y, ev.x + 0.5 - c.x) - moveStroke.angle0);
+    } else { // scale, about the (fixed) float center, in the un-rotated frame
+      const { srcRect } = float;
+      const cx = srcRect.w / 2, cy = srcRect.h / 2;
+      const cSheet = { x: srcRect.x + t0.tx + cx, y: srcRect.y + t0.ty + cy };
+      const cos = Math.cos(t0.rot), sin = Math.sin(t0.rot);
+      const dx = ev.x + 0.5 - cSheet.x, dy = ev.y + 0.5 - cSheet.y;
+      const px = dx * cos + dy * sin;
+      const py = -dx * sin + dy * cos;
+      const hu = moveStroke.anchor.u - cx, hv = moveStroke.anchor.v - cy;
+      const clampS = (s) => (s < 0 ? -1 : 1) * Math.max(0.01, Math.abs(s));
+      float.transform = { ...t0 };
+      if (hu !== 0) float.transform.sx = clampS(px / hu);
+      if (hv !== 0) float.transform.sy = clampS(py / hv);
+    }
     emit('pixels');
   }
 
   function handleMoveUp(ev) {
     if (!moveStroke) return;
-    handleMoveMove(ev); // commit final pointer position (handles click-without-move too)
-    const { region, layers, before, delta, hadSelection } = moveStroke;
-    const { dx, dy } = delta;
-    layers.forEach((l, i) => blitRegion(l.bitmap, before[i], 0, 0)); // undo live preview
+    handleMoveMove(ev);
+    const t0 = moveStroke.t0;
     moveStroke = null;
-    if (dx === 0 && dy === 0) return; // zero-delta release commits nothing
-
-    const target = getTargetRect();
-    const patchRect = rectClamp(moveBounds(region, dx, dy), target);
-    if (patchRect.w <= 0 || patchRect.h <= 0) { emit('pixels'); return; }
-
-    const layerPatches = layers.map((layer, i) => {
-      shiftRegion(layer.bitmap, region, dx, dy);
-      const beforeRegion = copyRegion(before[i], patchRect.x, patchRect.y, patchRect.w, patchRect.h);
-      const afterRegion = copyRegion(layer.bitmap, patchRect.x, patchRect.y, patchRect.w, patchRect.h);
-      // restore to the pre-stroke baseline; pushing the command below (whose
-      // do() re-applies afterRegion) transitions it forward exactly once.
-      blitRegion(layer.bitmap, before[i], 0, 0);
-      return { layer, before: beforeRegion, after: afterRegion };
-    });
-
-    // `region` already IS the selection rect snapshotted at pointerdown when
-    // hadSelection is true — reuse it rather than re-reading the live
-    // `selection` var, which may have been nulled mid-drag (e.g. Escape).
-    let newSelRect = null;
-    if (hadSelection) {
-      newSelRect = clampRectToTarget({ x: region.x + dx, y: region.y + dy, w: region.w, h: region.h }, target);
-    }
-    const oldSelRect = hadSelection ? region : null;
-
-    const cmd = {
-      label: 'move',
-      do() {
-        for (const p of layerPatches) blitRegion(p.layer.bitmap, p.after, patchRect.x, patchRect.y);
-        if (newSelRect) selection = { ...newSelRect };
-      },
-      undo() {
-        for (const p of layerPatches) blitRegion(p.layer.bitmap, p.before, patchRect.x, patchRect.y);
-        if (oldSelRect) selection = { ...oldSelRect };
-      },
-    };
-    state.commands.push(cmd);
-    markDirty();
+    if (state.floating) pushTransformCommand(t0, { ...state.floating.transform });
   }
 
   // ---- dispatch ----
@@ -631,19 +609,53 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet', u
   };
 
   view.onOverlay = (ctx) => {
+    const float = state.floating;
+    const sheet = activeSheet();
+    if (float && sheet && float.sheetId === sheet.id && state.tool === 'move') {
+      const { w, h } = float.srcRect;
+      const corners = [[0, 0], [w, 0], [w, h], [0, h]]
+        .map(([u, v]) => toScreen(forwardPoint(float, u, v)));
+      ctx.save();
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      for (const [color, off] of [['#fff', 0], ['#000', 4]]) {
+        ctx.strokeStyle = color;
+        ctx.lineDashOffset = off;
+        ctx.beginPath();
+        corners.forEach((p, i) => (i ? ctx.lineTo(p.x + 0.5, p.y + 0.5) : ctx.moveTo(p.x + 0.5, p.y + 0.5)));
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      for (const a of handleAnchors(float)) {
+        const p = toScreen(forwardPoint(float, a.u, a.v));
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#000';
+        ctx.fillRect(p.x - HANDLE_PX, p.y - HANDLE_PX, HANDLE_PX * 2, HANDLE_PX * 2);
+        ctx.strokeRect(p.x - HANDLE_PX + 0.5, p.y - HANDLE_PX + 0.5, HANDLE_PX * 2 - 1, HANDLE_PX * 2 - 1);
+      }
+      const knob = knobScreenPos(float);
+      const top = toScreen(forwardPoint(float, w / 2, 0));
+      ctx.strokeStyle = '#fff';
+      ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.lineTo(knob.x, knob.y); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000';
+      ctx.beginPath(); ctx.arc(knob.x, knob.y, KNOB_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      return;
+    }
     if (!selection) return;
-    const p0 = view.imageToScreen(selection.x, selection.y);
-    const p1 = view.imageToScreen(selection.x + selection.w, selection.y + selection.h);
+    const p0 = toScreen({ x: selection.x, y: selection.y });
+    const p1 = toScreen({ x: selection.x + selection.w, y: selection.y + selection.h });
     ctx.save();
     ctx.lineWidth = 1;
-    const w = p1.x - p0.x, h = p1.y - p0.y;
+    const rw = p1.x - p0.x, rh = p1.y - p0.y;
     ctx.setLineDash([4, 4]);
     ctx.strokeStyle = '#fff';
     ctx.lineDashOffset = 0;
-    ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, w - 1, h - 1);
+    ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1);
     ctx.strokeStyle = '#000';
     ctx.lineDashOffset = 4;
-    ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, w - 1, h - 1);
+    ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1);
     ctx.restore();
   };
 
