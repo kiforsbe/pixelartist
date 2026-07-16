@@ -427,12 +427,11 @@ function drawFrameToolGhost(ctx, view) {
     const selected = sheet.frames.find(f => f.id === state.selectedFrameId);
     const strip = selected ? stripOf(sheet, selected.id) : null;
     if (selected && !drag) {
-      if (strip) {
-        const members = sheet.frames.filter(f => strip.frames.some(af => af.frameId === f.id));
-        drawStripDims(ctx, view, members, 0, 0, { quiet: true });
-      } else {
-        drawRectDims(ctx, view, selected, { quiet: true });
-      }
+      const members = strip ? sheet.frames.filter(f => strip.frames.some(af => af.frameId === f.id)) : null;
+      // A 1-member strip degenerates to the plain single-frame case (no
+      // chain, no level-1 row) — matching the drag path's members.length gate.
+      if (members && members.length > 1) drawStripDims(ctx, view, members, 0, 0, { quiet: true });
+      else drawRectDims(ctx, view, selected, { quiet: true });
     }
     // No resize handles on intact-strip members.
     if (selected && !strip) drawHandles(ctx, view, selected);
