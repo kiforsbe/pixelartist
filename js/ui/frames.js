@@ -18,6 +18,7 @@ import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
+import { drawRectDims } from './dimlabels.js';
 
 const HANDLE_SCREEN_PX = 6;
 const HANDLES = ['nw', 'ne', 'sw', 'se'];
@@ -337,10 +338,22 @@ function drawFrameToolGhost(ctx, view) {
       strokeGhostRect(ctx, view, { x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy, w: drag.bbox.w, h: drag.bbox.h });
     else if (drag.kind === 'resize' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
     ctx.restore();
+
+    if (drag.kind === 'create' && drag.rect) {
+      drawRectDims(ctx, view, drag.rect);
+    } else if (drag.kind === 'move' && drag.bbox) {
+      const r = { x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy, w: drag.bbox.w, h: drag.bbox.h };
+      drawRectDims(ctx, view, r, { dx: drag.delta.dx, dy: drag.delta.dy });
+    } else if (drag.kind === 'resize' && drag.rect) {
+      drawRectDims(ctx, view, drag.rect, {
+        dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h,
+      });
+    }
   }
 
   if (state.tool === 'frametool') {
     const selected = sheet.frames.find(f => f.id === state.selectedFrameId);
+    if (selected && !drag) drawRectDims(ctx, view, selected, { quiet: true });
     // No resize handles on intact-strip members.
     if (selected && !stripOf(sheet, selected.id)) drawHandles(ctx, view, selected);
   }
