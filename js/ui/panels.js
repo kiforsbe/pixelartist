@@ -3,6 +3,7 @@
 import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
 import { addLayer, removeLayer, moveLayer, mergeDown } from '../core/model.js';
+import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
 
@@ -499,7 +500,8 @@ export function mountLayersPanel(el) {
       // Thumbnail shows the layer's own content regardless of `visible` —
       // it's not a viewport into the composite, so hidden layers still get
       // a live thumb.
-      drawFit(thumb, layer.bitmap);
+      const fl = state.floating?.sheetId === sheet.id ? state.floating : null;
+      drawFit(thumb, (fl && compositeFloatOnLayer(layer.bitmap, fl, layer.id)) || layer.bitmap);
       thumbCanvases.set(layer.id, thumb);
 
       const visBtn = document.createElement('button');
@@ -556,7 +558,8 @@ export function mountLayersPanel(el) {
     if (!sheet) return;
     for (const layer of sheet.layers) {
       const canvas = thumbCanvases.get(layer.id);
-      if (canvas) drawFit(canvas, layer.bitmap);
+      const fl = state.floating?.sheetId === sheet.id ? state.floating : null;
+      if (canvas) drawFit(canvas, (fl && compositeFloatOnLayer(layer.bitmap, fl, layer.id)) || layer.bitmap);
     }
   }
   function scheduleThumbRedraw() {

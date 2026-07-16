@@ -415,7 +415,7 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
     if (ev.type !== 'down') return;
     const sheet = activeSheet();
     if (!sheet) return;
-    const flat = flattenSheet(sheet);
+    const flat = flattenSheet(sheet, state.floating);
     const p = getPixel(flat, ev.x, ev.y);
     if (!p) return;
     if (ev.buttons & 2) state.secondary = p; else state.primary = p;

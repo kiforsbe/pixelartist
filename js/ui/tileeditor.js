@@ -153,7 +153,7 @@ export function mountTileEditor(hostEl) {
   function invalidateFlat() { flatDirty = true; }
   function getFlatBitmap(sheet) {
     if (flatDirty || flatSheetRef !== sheet || !flatBitmap) {
-      flatBitmap = flattenSheet(sheet);
+      flatBitmap = flattenSheet(sheet, state.floating);
       flatSheetRef = sheet;
       flatDirty = false;
     }

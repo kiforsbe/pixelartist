@@ -24,6 +24,7 @@ export const state = {
   onion: { enabled: false, back: 1, ahead: 1 },
   overlays: { labels: true, sequences: true },
   commands: new CommandStack(),
+  floating: null,             // active floating selection (core/floating.js shape) or null
 };
 
 const listeners = new Map(); // event -> Set<fn>

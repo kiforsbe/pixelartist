@@ -236,7 +236,7 @@ export function mountTimeline(el) {
   let flatSheet = null;
   let flatBmp = null;
   function getFlat(sheet) {
-    if (flatSheet !== sheet || !flatBmp) { flatBmp = flattenSheet(sheet); flatSheet = sheet; }
+    if (flatSheet !== sheet || !flatBmp) { flatBmp = flattenSheet(sheet, state.floating); flatSheet = sheet; }
     return flatBmp;
   }
   function invalidateFlat() { flatSheet = null; flatBmp = null; }

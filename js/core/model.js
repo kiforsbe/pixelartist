@@ -1,5 +1,6 @@
 import { createBitmap, cloneBitmap, getPixel, setPixel } from './pixels.js';
 import { newId } from './palettes.js';
+import { compositeFloatOnLayer } from './floating.js';
 
 export const PROJECT_VERSION = 2;
 export const DEFAULT_SETTINGS = {
@@ -70,9 +71,14 @@ export function mergeDown(sheet, layerId) {
   sheet.layers.splice(i, 1);
 }
 
-export function flattenSheet(sheet) {
+export function flattenSheet(sheet, floating = null) {
   const out = createBitmap(sheet.width, sheet.height);
-  for (const l of sheet.layers) if (l.visible) compositeOver(out, l.bitmap, l.opacity);
+  const hasFloat = floating && floating.sheetId === sheet.id;
+  for (const l of sheet.layers) {
+    if (!l.visible) continue;
+    const withFloat = hasFloat ? compositeFloatOnLayer(l.bitmap, floating, l.id) : null;
+    compositeOver(out, withFloat ?? l.bitmap, l.opacity);
+  }
   return out;
 }
 

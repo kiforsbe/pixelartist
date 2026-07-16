@@ -378,7 +378,7 @@ function getScratchCanvas() {
   const sheet = activeSheet();
   if (!sheet) return null;
   if (scratchDirty || scratchSheet !== sheet || !scratchCanvas || scratchCanvas.width !== sheet.width || scratchCanvas.height !== sheet.height) {
-    const bitmap = flattenSheet(sheet);
+    const bitmap = flattenSheet(sheet, state.floating);
     if (!scratchCanvas || scratchCanvas.width !== bitmap.width || scratchCanvas.height !== bitmap.height) {
       scratchCanvas = (typeof OffscreenCanvas !== 'undefined')
         ? new OffscreenCanvas(bitmap.width, bitmap.height)
