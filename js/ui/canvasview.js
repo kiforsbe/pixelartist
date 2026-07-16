@@ -241,7 +241,7 @@ export class CanvasView {
       return;
     }
     const img = this.screenToImage(sx, sy);
-    this.onPointer({ type: 'down', x: img.x, y: img.y, sx, sy, buttons: e.buttons, shiftKey: e.shiftKey });
+    this.onPointer({ type: 'down', x: img.x, y: img.y, sx, sy, buttons: e.buttons, shiftKey: e.shiftKey, altKey: e.altKey });
   }
 
   _onPointerMove(e) {
@@ -255,7 +255,7 @@ export class CanvasView {
     }
     const img = this.screenToImage(sx, sy);
     this._reportStatus(sx, sy);
-    this.onPointer({ type: 'move', x: img.x, y: img.y, sx, sy, buttons: e.buttons, shiftKey: e.shiftKey });
+    this.onPointer({ type: 'move', x: img.x, y: img.y, sx, sy, buttons: e.buttons, shiftKey: e.shiftKey, altKey: e.altKey });
   }
 
   _onPointerUp(e) {
@@ -266,6 +266,6 @@ export class CanvasView {
       return;
     }
     const img = this.screenToImage(sx, sy);
-    this.onPointer({ type: 'up', x: img.x, y: img.y, sx, sy, buttons: e.buttons, shiftKey: e.shiftKey });
+    this.onPointer({ type: 'up', x: img.x, y: img.y, sx, sy, buttons: e.buttons, shiftKey: e.shiftKey, altKey: e.altKey });
   }
 }

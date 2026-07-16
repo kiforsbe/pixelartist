@@ -226,15 +226,18 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
   view.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // A project switch (New/Open) invalidates any selection or in-progress
-  // stroke — bitmaps and layer ids from the old project are gone.
+  // stroke — bitmaps and layer ids from the old project are gone. Guard on
+  // project IDENTITY: markDirty() also emits 'project' after every committed
+  // command, and that must NOT wipe a live selection or pending float.
+  let lastProject = state.project;
   on('project', () => {
-    if (selection || stroke || selStroke || moveStroke) {
-      selection = null;
-      stroke = null;
-      selStroke = null;
-      moveStroke = null;
-      view.requestRender();
-    }
+    if (state.project === lastProject) return;
+    lastProject = state.project;
+    selection = null;
+    stroke = null;
+    selStroke = null;
+    moveStroke = null;
+    view.requestRender();
   });
 
   // Clamp an image-space point into getTargetRect(); null when the target is
@@ -622,14 +625,8 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
         if (oldSelRect) selection = { ...oldSelRect };
       },
     };
-    // markDirty() (via the on('project', ...) cleanup above) nulls `selection`
-    // whenever it's still truthy when 'project' fires — the SAME reason
-    // handleSelectUp calls finalize() (which markDirty()s) BEFORE reassigning
-    // `selection` to its new value. Mirror that ordering: fire markDirty()
-    // first (still referencing the OLD/soon-null selection), then push the
-    // command so its do() sets `selection` to newSelRect last.
-    markDirty();
     state.commands.push(cmd);
+    markDirty();
   }
 
   // ---- dispatch ----

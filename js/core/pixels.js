@@ -112,6 +112,23 @@ export function blitRegion(dst, src, dx, dy) {
       setPixel(dst, dx + x, dy + y, getPixel(src, x, y));
 }
 
+// Source-over alpha blend of `src` onto `dst` at (dx, dy) — unlike blitRegion
+// (raw replace, transparent pixels erase), this composites: transparent source
+// pixels leave dst untouched. Out-of-bounds writes are skipped.
+export function blitOver(dst, src, dx, dy) {
+  for (let y = 0; y < src.height; y++)
+    for (let x = 0; x < src.width; x++) {
+      const p = getPixel(src, x, y);
+      if (!p || p[3] === 0) continue;
+      const q = getPixel(dst, dx + x, dy + y);
+      if (!q) continue;
+      const sa = p[3] / 255, da = q[3] / 255;
+      const oa = sa + da * (1 - sa);
+      const mix = (sc, dc) => oa === 0 ? 0 : Math.round((sc * sa + dc * da * (1 - sa)) / oa);
+      setPixel(dst, dx + x, dy + y, [mix(p[0], q[0]), mix(p[1], q[1]), mix(p[2], q[2]), Math.round(oa * 255)]);
+    }
+}
+
 export function fillRegion(bmp, x, y, w, h, rgba) {
   for (let py = y; py < y + h; py++)
     for (let px = x; px < x + w; px++) setPixel(bmp, px, py, rgba);
