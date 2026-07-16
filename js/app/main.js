@@ -12,6 +12,7 @@ import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
+import { initFloatSession, commitFloatIfAny } from '../ui/floatsession.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -441,6 +442,7 @@ bindTileTool(canvasView);
   const priorOverlay = canvasView.onOverlay;
   canvasView.onOverlay = (ctx) => { priorOverlay(ctx); drawSheetOverlays(canvasView, ctx); };
 }
+initFloatSession();
 mountColorPanel(document.getElementById('panel-colors'));
 mountLayersPanel(document.getElementById('panel-layers'));
 mountFramesPanel(document.getElementById('panel-context'));
@@ -557,6 +559,7 @@ btnOpenUnpacked.addEventListener('click', async () => {
 
 // ---- file: Save ----
 async function doSave() {
+  commitFloatIfAny();
   if (!state.saveMode) { dlgSaveAs.showModal(); return; }
   try {
     if (state.saveMode === 'unpacked') {
@@ -580,6 +583,7 @@ btnSaveAs.addEventListener('click', () => dlgSaveAs.showModal());
 btnSaveAsCancel.addEventListener('click', () => dlgSaveAs.close());
 btnSaveAsPacked.addEventListener('click', async () => {
   dlgSaveAs.close();
+  commitFloatIfAny();
   try {
     state.fileHandle = await io.savePacked(state.project, null);
     state.dirHandle = null;
@@ -593,6 +597,7 @@ btnSaveAsPacked.addEventListener('click', async () => {
 });
 btnSaveAsUnpacked.addEventListener('click', async () => {
   dlgSaveAs.close();
+  commitFloatIfAny();
   try {
     state.dirHandle = await io.saveUnpacked(state.project, null);
     state.fileHandle = null;
@@ -619,6 +624,7 @@ btnExport.addEventListener('click', () => { updateExportButtons(); dlgExport.sho
 btnExportCancel.addEventListener('click', () => dlgExport.close());
 btnExportPng.addEventListener('click', async () => {
   dlgExport.close();
+  commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
   const bitmap = flattenSheet(sheet);
@@ -627,6 +633,7 @@ btnExportPng.addEventListener('click', async () => {
 });
 btnExportFrames.addEventListener('click', () => {
   dlgExport.close();
+  commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || sheet.kind !== 'sprite') return;
   const json = buildFramesJson(sheet);
@@ -635,6 +642,7 @@ btnExportFrames.addEventListener('click', () => {
 });
 btnExportTiles.addEventListener('click', () => {
   dlgExport.close();
+  commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || sheet.kind !== 'tile') return;
   const json = buildTilesJson(sheet);
@@ -649,7 +657,7 @@ window.addEventListener('beforeunload', (e) => {
 
 // ---- autosave ----
 setInterval(() => {
-  if (state.dirty && state.project) io.autosave(state.project).catch(() => {});
+  if (state.dirty && state.project && !state.floating) io.autosave(state.project).catch(() => {});
 }, 30000);
 
 // ---- boot ----

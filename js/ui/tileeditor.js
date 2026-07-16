@@ -142,7 +142,12 @@ export function mountTileEditor(hostEl) {
     return { x: x + off.x, y: y + off.y };
   }
 
-  bindDrawing(view, getTargetRect, mapPoint);
+  function unmapPoint(x, y) {
+    const off = offset();
+    return { x: x - off.x, y: y - off.y };
+  }
+
+  bindDrawing(view, getTargetRect, mapPoint, 'tile', unmapPoint);
 
   // ---- flattened-sheet cache (scratch canvas), mirrors frameeditor.js's
   // pattern. Invalidated on 'pixels'/'project'/'history'; rebuilt lazily on

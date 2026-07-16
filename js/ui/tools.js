@@ -20,6 +20,7 @@ import { makePixelPatch } from '../core/commands.js';
 import { shiftRegion } from '../core/moveregion.js';
 import { nearestColor } from '../core/palettes.js';
 import { flattenSheet } from '../core/model.js';
+import { registerFloatView, isTypingTarget } from './floatsession.js';
 
 export const TOOLS = [
   { id: 'pencil', icon: '✏️', key: 'b' },
@@ -64,12 +65,6 @@ export function registerTool(def, buildOptionsRow) {
   const entry = { ...def, buildOptionsRow };
   extraTools.push(entry);
   if (paletteApi) paletteApi.addTool(entry);
-}
-
-function isTypingTarget(el) {
-  if (!el) return false;
-  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
-  return !!(el.closest && el.closest('dialog[open]'));
 }
 
 function activePalette() {
@@ -211,7 +206,7 @@ export function mountToolPalette(el) {
 // SAME layer bitmaps are edited either way, so everything downstream
 // (clampPoint, maskOutsideTarget, finalize, flood fill, selection storage)
 // stays sheet-global and unaware of which view produced the event.
-export function bindDrawing(view, getTargetRect, mapPoint) {
+export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet', unmapPoint = null) {
   let stroke = null;   // pencil/eraser/line/rect/ellipse in-progress state
   let selStroke = null; // select tool in-progress state
   let moveStroke = null; // move tool in-progress state
@@ -222,6 +217,12 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
   // into the frame editor (or vice versa) since both operate on the same
   // underlying layer bitmaps but represent different visible regions.
   let selection = null;
+
+  registerFloatView(viewKind, {
+    getSelection: () => (selection ? { ...selection } : null),
+    setSelection: (r) => { selection = r ? { ...r } : null; view.requestRender(); },
+    getTargetRect,
+  });
 
   view.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -648,6 +649,7 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
 
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (state.floating) return; // floatsession's capture handler owns Escape while floating
     if (document.querySelector('dialog[open]')) return;
     if (selection) { selection = null; view.requestRender(); }
   });

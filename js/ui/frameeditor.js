@@ -125,7 +125,12 @@ export function mountFrameEditor(hostEl) {
     return f ? { x: x + f.x, y: y + f.y } : { x, y };
   }
 
-  bindDrawing(view, getTargetRect, mapPoint);
+  function unmapPoint(x, y) {
+    const f = currentFrame();
+    return f ? { x: x - f.x, y: y - f.y } : { x, y };
+  }
+
+  bindDrawing(view, getTargetRect, mapPoint, 'frame', unmapPoint);
 
   // ---- flattened-sheet cache (scratch canvas), mirrors main.js's pattern.
   // Invalidated on 'pixels'/'project'/'history'; rebuilt lazily on next paint.
