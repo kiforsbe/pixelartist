@@ -33,6 +33,7 @@
 import { state, on, emit, activeSheet } from '../app/state.js';
 import { CanvasView } from './canvasview.js';
 import { bindDrawing } from './tools.js';
+import { commitFloatIfAny } from './floatsession.js';
 import { flattenSheet } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 
@@ -325,6 +326,10 @@ export function mountFrameEditor(hostEl) {
   function goTo(dir) {
     const nf = neighborFrame(dir);
     if (!nf) return;
+    // Prev/Next changes the editing frame without a 'view' emit, so the
+    // floatsession auto-commit hook can't see it — commit here or a pending
+    // float outlives its creation frame's frozen target rect.
+    commitFloatIfAny();
     state.editingFrameId = nf.id;
     loadFrame(nf);
     updateStrip();

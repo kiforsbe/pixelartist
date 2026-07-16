@@ -267,6 +267,10 @@ export function pasteClipboard() {
       emit('pixels');
     },
   });
+  // paste can be the FIRST edit of a clean project — without this, the
+  // beforeunload guard and autosave stay off until the float commits
+  // (pushTransformCommand assumes dirty is already set at float creation).
+  markDirty();
 }
 
 // ---- auto-commit hooks + keyboard ----
