@@ -14,7 +14,7 @@
 import { state, on, emit, activeSheet, activeLayer, markDirty } from '../app/state.js';
 import {
   cloneBitmap, drawLine, drawRect, drawEllipse, floodFill,
-  copyRegion, blitRegion, fillRegion, getPixel,
+  copyRegion, blitRegion, getPixel,
 } from '../core/pixels.js';
 import { makePixelPatch } from '../core/commands.js';
 import { shiftRegion } from '../core/moveregion.js';
@@ -422,33 +422,23 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
     emit('colors');
   }
 
-  // ---- select (marquee + move) ----
+  // ---- select (marquee only — the move tool is the only content mover) ----
 
   function insideRect(px, py, r) {
     return !!r && px >= r.x && py >= r.y && px < r.x + r.w && py < r.y + r.h;
   }
 
   function handleSelectDown(ev) {
-    const layer = activeLayer();
-    if (!layer) return;
+    if (!activeLayer()) return;
     const target = getTargetRect();
     if (insideRect(ev.x, ev.y, selection)) {
-      const before = cloneBitmap(layer.bitmap);
-      const clip = copyRegion(layer.bitmap, selection.x, selection.y, selection.w, selection.h);
-      fillRegion(layer.bitmap, selection.x, selection.y, selection.w, selection.h, [0, 0, 0, 0]);
-      blitRegion(layer.bitmap, clip, selection.x, selection.y);
-      selStroke = {
-        mode: 'move', layer, before, clip, target,
-        origin: { x: selection.x, y: selection.y },
-        anchor: { x: ev.x, y: ev.y },
-        offset: { x: 0, y: 0 },
-        dirty: extend(null, selection.x, selection.y, selection.x + selection.w - 1, selection.y + selection.h - 1),
-      };
+      // drag the marquee rect itself — shape preserved, contents untouched
+      selStroke = { mode: 'moverect', target, anchor: { x: ev.x, y: ev.y }, orig: { x: selection.x, y: selection.y } };
     } else {
       selection = null;
       selStroke = { mode: 'new', target, anchor: { x: ev.x, y: ev.y } };
     }
-    emit('pixels');
+    view.requestRender();
   }
 
   function handleSelectMove(ev) {
@@ -463,44 +453,22 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
       const x0 = Math.min(ax, cx), x1 = Math.max(ax, cx);
       const y0 = Math.min(ay, cy), y1 = Math.max(ay, cy);
       selection = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-      emit('pixels');
-      return;
+    } else { // moverect
+      const dx = ev.x - selStroke.anchor.x, dy = ev.y - selStroke.anchor.y;
+      selection = clampRectToTarget(
+        { x: selStroke.orig.x + dx, y: selStroke.orig.y + dy, w: selection.w, h: selection.h },
+        target,
+      );
     }
-    // move mode
-    const { layer, before, clip, anchor, origin } = selStroke;
-    blitRegion(layer.bitmap, before, 0, 0);
-    const offX = ev.x - anchor.x, offY = ev.y - anchor.y;
-    const nx = origin.x + offX, ny = origin.y + offY;
-    fillRegion(layer.bitmap, origin.x, origin.y, clip.width, clip.height, [0, 0, 0, 0]);
-    blitRegion(layer.bitmap, clip, nx, ny);
-    maskOutsideTarget(
-      layer.bitmap, before,
-      Math.min(origin.x, nx), Math.min(origin.y, ny),
-      Math.max(origin.x, nx) + clip.width - 1, Math.max(origin.y, ny) + clip.height - 1,
-    );
-    selStroke.offset = { x: offX, y: offY };
-    selStroke.dirty = extend(
-      selStroke.dirty,
-      Math.min(origin.x, nx), Math.min(origin.y, ny),
-      Math.max(origin.x + clip.width - 1, nx + clip.width - 1),
-      Math.max(origin.y + clip.height - 1, ny + clip.height - 1),
-    );
-    emit('pixels');
+    view.requestRender();
   }
 
   function handleSelectUp(ev) {
     if (!selStroke) return;
     handleSelectMove(ev);
-    if (selStroke.mode === 'new') {
-      if (!selection || selection.w <= 0 || selection.h <= 0) selection = null;
-      selStroke = null;
-      emit('pixels');
-      return;
-    }
-    const { layer, before, dirty, clip, origin, offset } = selStroke;
-    finalize(layer, before, dirty, 'move selection');
-    selection = { x: origin.x + offset.x, y: origin.y + offset.y, w: clip.width, h: clip.height };
+    if (selStroke.mode === 'new' && (!selection || selection.w <= 0 || selection.h <= 0)) selection = null;
     selStroke = null;
+    view.requestRender();
   }
 
   // ---- move ----
