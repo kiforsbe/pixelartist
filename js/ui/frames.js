@@ -18,7 +18,7 @@ import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
-import { drawRectDims } from './dimlabels.js';
+import { drawRectDims, drawChainDims } from './dimlabels.js';
 
 const HANDLE_SCREEN_PX = 6;
 const HANDLES = ['nw', 'ne', 'sw', 'se'];
@@ -321,6 +321,23 @@ function drawHandles(ctx, view, f) {
   }
 }
 
+// Strip dimensions: level-0 width chain (one dimension per member, in x
+// order) below the bbox, level-1 overall width, single level-0 height
+// (members share it), origin marker on the bbox. dx/dy shift everything to
+// the drag-ghost position; opts carries quiet/dx/dy for drawRectDims.
+function drawStripDims(ctx, view, members, dx, dy, opts = {}) {
+  const bbox = boundingBoxOf(members);
+  const r = { x: bbox.x + dx, y: bbox.y + dy, w: bbox.w, h: bbox.h };
+  const alpha = opts.quiet ? 0.7 : 1;
+  const sorted = members.slice().sort((m, n) => m.x - n.x);
+  drawChainDims(ctx, view, {
+    axis: 'h', edge: r.y + r.h,
+    spans: sorted.map(m => ({ from: m.x + dx, to: m.x + m.w + dx, text: `${m.w}` })),
+    alpha,
+  });
+  drawRectDims(ctx, view, r, { ...opts, wLevel: 1, hLevel: 0 });
+}
+
 function drawFrameToolGhost(ctx, view) {
   if (state.mode !== 'sprites') return;
   const sheet = activeSheet();
@@ -342,8 +359,13 @@ function drawFrameToolGhost(ctx, view) {
     if (drag.kind === 'create' && drag.rect) {
       drawRectDims(ctx, view, drag.rect);
     } else if (drag.kind === 'move' && drag.bbox) {
-      const r = { x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy, w: drag.bbox.w, h: drag.bbox.h };
-      drawRectDims(ctx, view, r, { dx: drag.delta.dx, dy: drag.delta.dy });
+      if (drag.members.length > 1) {
+        drawStripDims(ctx, view, drag.members, drag.delta.dx, drag.delta.dy,
+          { dx: drag.delta.dx, dy: drag.delta.dy });
+      } else {
+        const r = { x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy, w: drag.bbox.w, h: drag.bbox.h };
+        drawRectDims(ctx, view, r, { dx: drag.delta.dx, dy: drag.delta.dy });
+      }
     } else if (drag.kind === 'resize' && drag.rect) {
       drawRectDims(ctx, view, drag.rect, {
         dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h,
@@ -353,9 +375,17 @@ function drawFrameToolGhost(ctx, view) {
 
   if (state.tool === 'frametool') {
     const selected = sheet.frames.find(f => f.id === state.selectedFrameId);
-    if (selected && !drag) drawRectDims(ctx, view, selected, { quiet: true });
+    const strip = selected ? stripOf(sheet, selected.id) : null;
+    if (selected && !drag) {
+      if (strip) {
+        const members = sheet.frames.filter(f => strip.frames.some(af => af.frameId === f.id));
+        drawStripDims(ctx, view, members, 0, 0, { quiet: true });
+      } else {
+        drawRectDims(ctx, view, selected, { quiet: true });
+      }
+    }
     // No resize handles on intact-strip members.
-    if (selected && !stripOf(sheet, selected.id)) drawHandles(ctx, view, selected);
+    if (selected && !strip) drawHandles(ctx, view, selected);
   }
 }
 
