@@ -433,7 +433,7 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
     const target = getTargetRect();
     if (insideRect(ev.x, ev.y, selection)) {
       // drag the marquee rect itself — shape preserved, contents untouched
-      selStroke = { mode: 'moverect', target, anchor: { x: ev.x, y: ev.y }, orig: { x: selection.x, y: selection.y } };
+      selStroke = { mode: 'moverect', target, anchor: { x: ev.x, y: ev.y }, orig: { x: selection.x, y: selection.y, w: selection.w, h: selection.h } };
     } else {
       selection = null;
       selStroke = { mode: 'new', target, anchor: { x: ev.x, y: ev.y } };
@@ -456,7 +456,7 @@ export function bindDrawing(view, getTargetRect, mapPoint) {
     } else { // moverect
       const dx = ev.x - selStroke.anchor.x, dy = ev.y - selStroke.anchor.y;
       selection = clampRectToTarget(
-        { x: selStroke.orig.x + dx, y: selStroke.orig.y + dy, w: selection.w, h: selection.h },
+        { x: selStroke.orig.x + dx, y: selStroke.orig.y + dy, w: selStroke.orig.w, h: selStroke.orig.h },
         target,
       );
     }
