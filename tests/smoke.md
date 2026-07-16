@@ -42,8 +42,9 @@ is a pass condition for the whole run, not just the final step.
    buttons disable at the ends of the stack.
 9. [A] Eyedropper (`I`): click a drawn pixel, primary color swatch
    updates to match.
-10. [A] Select tool (`M`): drag a marquee, drag the marquee content to a
-    new position, `Escape` clears the marquee.
+10. [A] Select tool (`M`): drag a marquee; dragging from inside it moves the
+    RECTANGLE only (contents stay put — verify pixels unchanged); `Escape`
+    clears the marquee.
 
 ## 3. Layers
 
@@ -246,20 +247,19 @@ is a pass condition for the whole run, not just the final step.
     extension, its dimensions match the image, and layer 0's pixels match
     the PNG's. Undo removes the sheet and restores the prior active
     sheet/layer.
-64. [A] Move tool (✋, `V`) with no marquee selection: drag on the canvas —
-    the whole active layer shifts by the drag delta (pixels moved past the
-    sheet edge are cropped; the vacated area becomes transparent). One
-    undo step restores the layer.
-65. [A] Move tool with a marquee selection (draw one with `M` first, then
-    switch to `V`): dragging moves only the selected region's pixels, and
-    the marquee rect follows the drag. Undo restores both the pixels and
-    the rect position.
-66. [A] Move tool "All layers" option: with two layers holding distinct
-    pixels, check "All layers" in the tool options row and drag — both
-    layers shift together; a single undo restores both.
-67. [A] Move tool inside the frame editor: the move is confined to the
-    frame's rect — dragged pixels cannot escape the frame bounds even if
-    the drag leaves it. Undo restores.
+64. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
+    target region floats (source hole appears, outline + handles shown);
+    the layer bitmap is NOT modified beyond the source cut until commit.
+    `Enter` commits at the new position; stepwise undo: Ctrl+Z undoes the
+    commit, then the drag, then the float itself.
+65. [A] Move tool with a marquee: only the selected region floats; drag,
+    then `Escape` — pixels restored exactly to the original spot.
+66. [A] Transform handles: drag a corner handle (scale, incl. pull-through
+    flip), drag the rotation knob (free rotate); commit renders the
+    nearest-neighbor result; each completed drag is one undo step.
+67. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
+    each layer; single-layer default otherwise. In the frame editor a
+    committed float is clipped to the frame rect.
 68. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
     dialog opens pre-filled with the current name. OK with a new name:
     the sheet selector label updates immediately and Export filenames
@@ -267,9 +267,15 @@ is a pass condition for the whole run, not just the final step.
     old name in the selector. OK with an empty/whitespace name: alert
     "Name cannot be empty." and the dialog stays open. Cancel closes
     without changes.
+69. [A] Clipboard: `Ctrl+C` copies the marquee selection, `Ctrl+V` pastes a
+    floating copy (source intact) that commits on `Enter` or tool switch.
+    `Ctrl+X` cuts (one undo step); `Ctrl+Alt+C`/`Ctrl+Alt+X` capture all
+    layers. Paste lands at the source position when visible, else centered.
+70. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
+    first; switching sheets or opening the frame editor also commits.
 
 ## Pass criteria
 
 - All **[A]** items complete with no unexpected state and zero console
   errors/warnings across the whole run.
-- `npm test` reports 61/61 passing.
+- `npm test` reports 78/78 passing.

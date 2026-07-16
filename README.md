@@ -30,8 +30,8 @@ tool switch).
 | `U` | Rectangle |
 | `O` | Ellipse |
 | `I` | Eyedropper |
-| `M` | Select (marquee) |
-| `V` | Move (✋) — shifts the marquee selection if one is active, otherwise the whole active layer; check "All layers" in the tool options row to move every layer together |
+| `M` | Select (marquee) — selection only: dragging from inside the marquee moves the rectangle (shape preserved), never the pixels |
+| `V` | Move (✋) — cuts the selection (or whole layer if none) into a floating selection with move/scale/rotate handles; hold `Alt` at drag start to float all layers. Nothing is rendered to the image until committed |
 | `F` | Frame tool (sprite mode only) |
 | `T` | Tile tool (tile mode only) |
 
@@ -45,7 +45,9 @@ tool switch).
 | `[` / `]` | Decrease / increase brush size (pencil & eraser, clamped 1-8) |
 | `X` | Swap primary and secondary colors |
 | `Delete` | Delete the selected frame (frame tool, sprite mode) |
-| `Escape` | Clear the active marquee selection; back out of the frame editor or tile editor to the sheet view |
+| `Enter` | Commit the floating selection (render it to the layer(s)); switching tools/sheets/views also commits |
+| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy the marquee selection to the internal clipboard / paste as a new floating selection (`+Alt`: all layers) |
+| `Escape` | Clear the active marquee selection, or cancel a pending floating selection (restores the cut-out pixels); back out of the frame editor or tile editor to the sheet view |
 
 **Canvas navigation**
 
@@ -53,6 +55,17 @@ tool switch).
 | --- | --- |
 | Mouse wheel | Zoom in/out, centered on the cursor. Stepped table (not continuous multiply): `0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64` — wheel always moves one table entry at a time, so it never sticks between two adjacent levels. |
 | `Space` + drag, or middle-mouse drag | Pan (the transparency checkerboard scrolls with the content, it isn't fixed to the viewport) |
+
+## Floating selections
+
+The move tool never edits pixels directly. Dragging cuts the selection (or
+the whole layer) into a floating selection — outlined with scale handles and
+a rotation knob — that hovers over the image. Move, scale, and rotate it
+freely (always resampled nearest-neighbor from the original pixels), then
+commit with `Enter` (or by switching tool/sheet/view) or cancel with
+`Escape`. Every step (float, each transform, commit/cancel, cut, paste) is
+individually undoable. In the frame/tile editors, committed pixels are
+clipped to the frame/tile rect.
 
 ## Sheets: Import & Rename
 
