@@ -196,7 +196,7 @@ export function mountToolPalette(el) {
 // SAME layer bitmaps are edited either way, so everything downstream
 // (clampPoint, maskOutsideTarget, finalize, flood fill, selection storage)
 // stays sheet-global and unaware of which view produced the event.
-export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet', unmapPoint = null) {
+export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   let stroke = null;   // pencil/eraser/line/rect/ellipse in-progress state
   let selStroke = null; // select tool in-progress state
   let moveStroke = null; // move tool in-progress state
@@ -480,10 +480,13 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet', u
   const KNOB_OFFSET = 20; // rotation knob distance beyond top-center, screen px
   const KNOB_R = 7;
 
-  // sheet-global point -> screen px (view content space may be frame/tile-local)
+  // sheet-global point -> screen px. Every view's imageToScreen accepts
+  // sheet-global coords directly: the sheet view's content space already IS
+  // sheet-global, and the frame/tile editors OVERRIDE imageToScreen to accept
+  // sheet-global input and subtract their own offset internally (see their
+  // module comments) — so no un-mapping is needed here.
   function toScreen(p) {
-    const q = unmapPoint ? unmapPoint(p.x, p.y) : p;
-    return view.imageToScreen(q.x, q.y);
+    return view.imageToScreen(p.x, p.y);
   }
 
   // 4 corners + 4 edge midpoints in buffer space
