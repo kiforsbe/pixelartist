@@ -17,12 +17,12 @@ import {
   copyRegion, blitRegion, getPixel,
 } from '../core/pixels.js';
 import { makePixelPatch } from '../core/commands.js';
-import { forwardPoint, inversePoint } from '../core/floating.js';
+import { forwardPoint, inversePoint, floatBounds } from '../core/floating.js';
 import { nearestColor } from '../core/palettes.js';
 import { flattenSheet } from '../core/model.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand } from './floatsession.js';
 import { resizeRect } from '../core/resizerect.js';
-import { drawRectDims } from './dimlabels.js';
+import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 
 export const TOOLS = [
   { id: 'pencil', icon: '✏️', key: 'b' },
@@ -673,6 +673,24 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000';
       ctx.beginPath(); ctx.arc(knob.x, knob.y, KNOB_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.restore();
+      const t = float.transform;
+      const bounds = floatBounds(float);
+      const scaledW = Math.round(float.srcRect.w * Math.abs(t.sx));
+      const scaledH = Math.round(float.srcRect.h * Math.abs(t.sy));
+      const opts = { wOverride: scaledW, hOverride: scaledH };
+      if (moveStroke?.kind === 'translate') {
+        opts.dx = t.tx - moveStroke.t0.tx;
+        opts.dy = t.ty - moveStroke.t0.ty;
+      } else if (moveStroke?.kind === 'scale') {
+        opts.dw = scaledW - Math.round(float.srcRect.w * Math.abs(moveStroke.t0.sx));
+        opts.dh = scaledH - Math.round(float.srcRect.h * Math.abs(moveStroke.t0.sy));
+      } else if (!moveStroke) {
+        opts.quiet = true;
+      }
+      drawRectDims(ctx, view, bounds, opts);
+      if (moveStroke?.kind === 'rotate' || (!moveStroke && t.rot !== 0)) {
+        drawAngleLabel(ctx, knob.x + KNOB_R + 4, knob.y, t.rot);
+      }
       return;
     }
     if (!selection) return;

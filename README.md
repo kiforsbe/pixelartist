@@ -30,7 +30,7 @@ tool switch).
 | `U` | Rectangle |
 | `O` | Ellipse |
 | `I` | Eyedropper |
-| `M` | Select (marquee) — selection only: dragging from inside the marquee moves the rectangle (shape preserved), never the pixels |
+| `M` | Select (marquee) — selection only: drag inside moves the rectangle, drag a corner/edge handle resizes it (8 handles); CAD-style size/origin labels show W×H, origin, and Δ while dragging |
 | `V` | Move (✋) — cuts the selection (or whole layer if none) into a floating selection with move/scale/rotate handles; hold `Alt` at drag start to float all layers. Nothing is rendered to the image until committed |
 | `F` | Frame tool (sprite mode only) |
 | `T` | Tile tool (tile mode only) |
@@ -66,6 +66,10 @@ commit with `Enter` (or by switching tool/sheet/view) or cancel with
 `Escape`. Every step (float, each transform, commit/cancel, cut, paste) is
 individually undoable. In the frame/tile editors, committed pixels are
 clipped to the frame/tile rect.
+
+While a float is pending, CAD-style labels show its origin and scaled size
+(with Δ during a scale drag) and the rotation angle in degrees during a
+rotate; the same labels appear on marquee drags and frame create/resize/move.
 
 ## Sheets: Import & Rename
 
