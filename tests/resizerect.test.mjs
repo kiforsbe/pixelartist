@@ -45,3 +45,16 @@ test('min 1x1 when collapsed onto the anchor', () => {
   // 'e' dragged onto the west edge: pointer 8 → edge 9 → width 1
   assert.deepEqual(resizeRect(ORIG, 'e', 8, 8, TARGET).w, 1);
 });
+
+test('degenerate edge collision pins INSIDE the fixed edge, never past it', () => {
+  // 'w' dragged exactly onto the fixed east edge coordinate (16):
+  // the 1px rect sits at 15..16, not 16..17
+  assert.deepEqual(resizeRect(ORIG, 'w', 16, 8, TARGET), { x: 15, y: 8, w: 1, h: 8 });
+  // 'e' onto pixel 7 → edge 8 collides with the fixed west edge:
+  // pin at 8..9, inside
+  assert.deepEqual(resizeRect(ORIG, 'e', 7, 8, TARGET), { x: 8, y: 8, w: 1, h: 8 });
+  // 'n' onto the fixed south edge coordinate (16): pin at 15..16
+  assert.deepEqual(resizeRect(ORIG, 'n', 8, 16, TARGET), { x: 8, y: 15, w: 8, h: 1 });
+  // 's' onto pixel 7 → edge 8 collides with the fixed north edge: pin 8..9
+  assert.deepEqual(resizeRect(ORIG, 's', 8, 7, TARGET), { x: 8, y: 8, w: 8, h: 1 });
+});

@@ -12,7 +12,11 @@ export function resizeRect(orig, handle, px, py, target) {
   if (handle.includes('e')) x1 = px + 1;
   if (handle.includes('n')) y0 = py;
   if (handle.includes('s')) y1 = py + 1;
-  const nx0 = Math.min(x0, x1), ny0 = Math.min(y0, y1);
-  const nx1 = Math.max(x0, x1), ny1 = Math.max(y0, y1);
-  return { x: nx0, y: ny0, w: Math.max(1, nx1 - nx0), h: Math.max(1, ny1 - ny0) };
+  let nx0 = Math.min(x0, x1), ny0 = Math.min(y0, y1);
+  let nx1 = Math.max(x0, x1), ny1 = Math.max(y0, y1);
+  // Degenerate: the dragged edge landed exactly on the fixed edge — pin the
+  // 1px rect INSIDE the fixed edge rather than extending 1px past it.
+  if (nx1 === nx0) { if (handle.includes('w')) nx0 = nx1 - 1; else nx1 = nx0 + 1; }
+  if (ny1 === ny0) { if (handle.includes('n')) ny0 = ny1 - 1; else ny1 = ny0 + 1; }
+  return { x: nx0, y: ny0, w: nx1 - nx0, h: ny1 - ny0 };
 }

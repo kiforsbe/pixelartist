@@ -449,7 +449,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     const target = getTargetRect();
     const handle = hitSelHandle(ev);
     if (handle) {
-      selStroke = { mode: 'resize', target, handle, orig: { ...selection } };
+      selStroke = { mode: 'resize', target, handle, orig: { ...selection }, anchor: { x: ev.x, y: ev.y }, moved: false };
       view.requestRender();
       return;
     }
@@ -476,7 +476,12 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const y0 = Math.min(ay, cy), y1 = Math.max(ay, cy);
       selection = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
     } else if (selStroke.mode === 'resize') {
-      selection = resizeRect(selStroke.orig, selStroke.handle, ev.x, ev.y, target);
+      // A plain click on a handle must not nudge the rect: the e/s handle
+      // centers sit ON the edge coordinate, which resizeRect reads as an
+      // inclusive pixel (a no-move click would grow the rect by 1) — only
+      // recompute once the pointer has left the pointer-down pixel.
+      if (ev.x !== selStroke.anchor.x || ev.y !== selStroke.anchor.y) selStroke.moved = true;
+      if (selStroke.moved) selection = resizeRect(selStroke.orig, selStroke.handle, ev.x, ev.y, target);
     } else if (selStroke.mode === 'moverect') {
       const dx = ev.x - selStroke.anchor.x, dy = ev.y - selStroke.anchor.y;
       selection = clampRectToTarget(
