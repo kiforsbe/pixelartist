@@ -321,11 +321,83 @@ function deleteFrame(sheet, frameId) {
   emit('selection');
 }
 
+// Word-style insert-column at boundary k of a segment (0=before first,
+// n=after last): the tail shifts right one frame width (pixel-carrying), a
+// blank frame fills the gap, an animation entry lands at the matching order
+// index with its neighbor's duration.
+function commitInsertFrame(sheet, anim, run, k) {
+  const members = segmentMembers(sheet, anim, run);
+  if (!members.length) return;
+  const fw = members[0].w, fh = members[0].h;
+  const b = boundingBoxOf(members);
+  if (b.x + b.w + fw > sheet.width) return;
+  const index = run.start + k;
+  const attachLeft = k === members.length;
+
+  const beforeSheetFrames = sheet.frames.slice();
+  const beforeEntries = anim.frames.map(e => ({ ...e }));
+  const beforeBreaks = (anim.breaks ?? []).slice();
+
+  const tail = members.slice(k);
+  const mv = tail.length ? buildMovePatches(sheet, tail, fw, 0) : null;
+  const frame = addFrame(sheet, {
+    name: `${anim.name}_${anim.frames.length}`,
+    x: b.x + k * fw, y: b.y, w: fw, h: fh,
+  });
+  const duration = beforeEntries[index - 1]?.duration ?? beforeEntries[index]?.duration
+    ?? (state.project?.settings?.durationMs ?? 100);
+  const r = insertEntry(anim.frames, anim.breaks, index, { frameId: frame.id, duration }, attachLeft);
+  anim.frames = r.entries;
+  anim.breaks = r.breaks;
+
+  const afterSheetFrames = sheet.frames.slice();
+  const afterEntries = anim.frames.map(e => ({ ...e }));
+  const afterBreaks = anim.breaks.slice();
+
+  state.commands.push({
+    label: 'insert frame',
+    do() {
+      if (mv) {
+        for (const p of mv.patches) blitRegion(p.layer.bitmap, p.after, mv.ur.x, mv.ur.y);
+        for (const c of mv.afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      }
+      sheet.frames = afterSheetFrames.slice();
+      anim.frames = afterEntries.map(e => ({ ...e }));
+      anim.breaks = afterBreaks.slice();
+      state.selectedFrameId = frame.id;
+    },
+    undo() {
+      if (mv) {
+        for (const p of mv.patches) blitRegion(p.layer.bitmap, p.before, mv.ur.x, mv.ur.y);
+        for (const c of mv.beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      }
+      sheet.frames = beforeSheetFrames.slice();
+      anim.frames = beforeEntries.map(e => ({ ...e }));
+      anim.breaks = beforeBreaks.slice();
+      if (state.selectedFrameId === frame.id) state.selectedFrameId = null;
+    },
+  });
+  markDirty();
+  emit('selection');
+}
+
+function commitSplitStrip() {} // replaced in Task 6 (split call-out)
+
 // ------------------------------------------------------------- pointer
 
 function handleDown(ev, view) {
   const sheet = activeSheet();
   if (!sheet) return;
+  if (hover?.part && state.tool === 'frametool') {
+    const anim = sheet.animations.find(a => a.id === hover.animId);
+    const run = anim?.strip ? segmentsOf(anim)[hover.runIndex] : null;
+    if (anim && run) {
+      const g = chromeGeometry(view, sheet, anim, run);
+      const part = g && hitChrome(g, ev.sx, ev.sy); // re-verify at the down position
+      if (part?.type === 'insert') { commitInsertFrame(sheet, anim, run, part.k); view.requestRender(); return; }
+      if (part?.type === 'split') { commitSplitStrip(anim, run.start + part.k); view.requestRender(); return; } // Task 6
+    }
+  }
   const selected = sheet.frames.find(f => f.id === state.selectedFrameId) || null;
   // Intact-strip members have no resize handles: skip hit detection entirely
   // rather than just refusing the resulting drag, so a pointer-down on a
@@ -363,7 +435,7 @@ function handleDown(ev, view) {
 }
 
 function handleMove(ev, view) {
-  if (!drag) return;
+  if (!drag) { updateHover(ev, view); return; }
   if (drag.kind === 'create') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, true));
   } else if (drag.kind === 'move') {
@@ -489,6 +561,100 @@ function drawSlicePreview(ctx, view, sheet) {
   });
 }
 
+// ------------------------------------------------------- in-strip chrome
+// Hovering a strip segment (frame tool, idle) shows Word-style "+" insert
+// call-outs above every frame boundary, "✂" split call-outs below interior
+// boundaries (Task 6), and resize grips on the ends (Task 7). All geometry is
+// computed in screen space per render; hits are tested on pointer-down before
+// frame hit-testing.
+const CALLOUT_R = 8;
+const CALLOUT_OFF = 16;
+let hover = null; // { animId, runIndex, part } | null; part from hitChrome()
+
+function chromeGeometry(view, sheet, anim, run) {
+  const members = segmentMembers(sheet, anim, run);
+  if (!members.length) return null;
+  const b = boundingBoxOf(members);
+  const fw = members[0].w;
+  const n = members.length;
+  const canInsert = b.x + b.w + fw <= sheet.width; // any insert shifts/extends right
+  const inserts = [];
+  if (canInsert)
+    for (let k = 0; k <= n; k++) {
+      const p = view.imageToScreen(b.x + k * fw, b.y);
+      inserts.push({ k, cx: p.x, cy: p.y - CALLOUT_OFF });
+    }
+  const splits = [];
+  for (let k = 1; k < n; k++) {
+    const p = view.imageToScreen(b.x + k * fw, b.y + b.h);
+    splits.push({ k, cx: p.x, cy: p.y + CALLOUT_OFF });
+  }
+  return { members, bbox: b, fw, inserts, splits, grips: [] };
+}
+
+function hitChrome(g, sx, sy) {
+  for (const c of g.inserts)
+    if (Math.hypot(sx - c.cx, sy - c.cy) <= CALLOUT_R + 2) return { type: 'insert', k: c.k };
+  for (const c of g.splits)
+    if (Math.hypot(sx - c.cx, sy - c.cy) <= CALLOUT_R + 2) return { type: 'split', k: c.k };
+  return null;
+}
+
+function updateHover(ev, view) {
+  let next = null;
+  const sheet = activeSheet();
+  if (sheet && state.mode === 'sprites' && state.tool === 'frametool' && !drag) {
+    outer: for (const a of sheet.animations) {
+      if (!a.strip) continue;
+      for (const run of segmentsOf(a)) {
+        const g = chromeGeometry(view, sheet, a, run);
+        if (!g) continue;
+        const p0 = view.imageToScreen(g.bbox.x, g.bbox.y);
+        const p1 = view.imageToScreen(g.bbox.x + g.bbox.w, g.bbox.y + g.bbox.h);
+        const pad = CALLOUT_OFF + CALLOUT_R;
+        if (ev.sx >= p0.x - pad && ev.sx <= p1.x + pad && ev.sy >= p0.y - pad && ev.sy <= p1.y + pad) {
+          next = { animId: a.id, runIndex: run.index, part: hitChrome(g, ev.sx, ev.sy) };
+          break outer;
+        }
+      }
+    }
+  }
+  if (JSON.stringify(next) !== JSON.stringify(hover)) {
+    hover = next;
+    view.requestRender();
+  }
+}
+
+function drawCallout(ctx, c, glyph, active) {
+  ctx.beginPath();
+  ctx.arc(c.cx, c.cy, CALLOUT_R, 0, Math.PI * 2);
+  ctx.fillStyle = active ? '#4f8cff' : 'rgba(20,20,24,.85)';
+  ctx.fill();
+  ctx.strokeStyle = '#4f8cff';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = active ? '#fff' : '#a9c7ff';
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(glyph, c.cx, c.cy + 0.5);
+}
+
+function drawChrome(ctx, view, sheet) {
+  if (!hover || drag) return;
+  const anim = sheet.animations.find(a => a.id === hover.animId);
+  const run = anim?.strip ? segmentsOf(anim)[hover.runIndex] : null;
+  if (!run) { hover = null; return; }
+  const g = chromeGeometry(view, sheet, anim, run);
+  if (!g) return;
+  ctx.save();
+  for (const c of g.inserts)
+    drawCallout(ctx, c, '+', hover.part?.type === 'insert' && hover.part.k === c.k);
+  for (const c of g.splits)
+    drawCallout(ctx, c, '✂', hover.part?.type === 'split' && hover.part.k === c.k);
+  ctx.restore();
+}
+
 // A split whose halves haven't moved yet is invisible geometry — mark it.
 function drawBreakSeparators(ctx, view, sheet) {
   ctx.save();
@@ -584,6 +750,7 @@ function drawFrameToolGhost(ctx, view) {
     }
     // No resize handles on intact-strip members.
     if (selected && !strip) drawHandles(ctx, view, selected);
+    drawChrome(ctx, view, sheet);
   }
 }
 
