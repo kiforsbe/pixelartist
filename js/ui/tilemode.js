@@ -195,7 +195,7 @@ function commitCreateTile(sheet, rect) {
     label: 'add tile',
     do() {
       if (!created) {
-        created = { id: newId('ti'), x: rect.x, y: rect.y, w: rect.w, h: rect.h, name: undefined, gridId: null, gridCol: undefined, gridRow: undefined, neighbors: undefined };
+        created = { id: newId('ti'), x: rect.x, y: rect.y, w: rect.w, h: rect.h, name: undefined, gridId: null, gridCol: undefined, gridRow: undefined, neighbors: undefined, terrainSetId: undefined, blobIndex: undefined, layer: undefined, tags: undefined };
         sheet.tiles.push(created);
       } else if (!sheet.tiles.includes(created)) {
         sheet.tiles.push(created);

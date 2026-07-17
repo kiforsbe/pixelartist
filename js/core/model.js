@@ -51,6 +51,9 @@ export function createSheet(project, { name, width, height, kind }) {
     layerTree: root, frames: [], animations: [],
     tileGrids: kind === 'tile' ? [] : null,
     tiles: kind === 'tile' ? [] : null,
+    terrainSets: kind === 'tile' ? [] : null,
+    terrainLayoutPresets: kind === 'tile' ? [] : null,
+    layers: kind === 'tile' ? [] : null,
   };
   project.sheets.push(sheet);
   return sheet;
@@ -391,7 +394,18 @@ export function serializeProject(project) {
     sheets: project.sheets.map(s => ({
       id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
       tileGrids: s.tileGrids ? s.tileGrids.map(g => ({ ...g })) : null,
-      tiles: s.tiles ? s.tiles.map(t => ({ ...t, neighbors: t.neighbors ? { ...t.neighbors } : undefined })) : null,
+      tiles: s.tiles ? s.tiles.map(t => ({
+        ...t,
+        neighbors: t.neighbors ? { ...t.neighbors } : undefined,
+        tags: t.tags ? [...t.tags] : undefined,
+      })) : null,
+      terrainSets: s.terrainSets ? s.terrainSets.map(ts => ({
+        ...ts, slots: { ...ts.slots }, symmetry: { ...ts.symmetry },
+      })) : null,
+      terrainLayoutPresets: s.terrainLayoutPresets
+        ? s.terrainLayoutPresets.map(p => ({ ...p, cells: p.cells.map(c => ({ ...c })) }))
+        : null,
+      layers: s.layers ? s.layers.slice() : null,
       frames: s.frames.map(f => ({ ...f })),
       animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })), breaks: (a.breaks ?? []).slice(), layerGroupId: a.layerGroupId ?? null })),
       layerTree: serializeGroup(s.layerTree, s.id, images),
@@ -415,9 +429,13 @@ export function deserializeProject(json, imagesByPath) {
       return {
         id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
         ...(() => {
-          if (s.kind !== 'tile') return { tileGrids: null, tiles: null };
-          if (!s.tiles && s.tile) return migrateLegacyTile(s);
-          return { tileGrids: s.tileGrids ?? [], tiles: s.tiles ?? [] };
+          if (s.kind !== 'tile') return { tileGrids: null, tiles: null, terrainSets: null, terrainLayoutPresets: null, layers: null };
+          if (!s.tiles && s.tile) return { ...migrateLegacyTile(s), terrainSets: [], terrainLayoutPresets: [], layers: [] };
+          return {
+            tileGrids: s.tileGrids ?? [], tiles: s.tiles ?? [],
+            terrainSets: s.terrainSets ?? [], terrainLayoutPresets: s.terrainLayoutPresets ?? [],
+            layers: s.layers ?? [],
+          };
         })(),
         frames: s.frames ?? [],
         animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false, breaks: a.breaks ?? [], layerGroupId: a.layerGroupId ?? null })),

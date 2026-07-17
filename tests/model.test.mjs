@@ -115,6 +115,47 @@ test('createSheet sprite kind has null tileGrids/tiles', () => {
   assert.equal(s.tiles, null);
 });
 
+test('createSheet: tile-kind sheet gets empty terrainSets/terrainLayoutPresets/layers, non-tile gets null', () => {
+  const p = createProject('t');
+  const tileSheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
+  assert.deepEqual(tileSheet.terrainSets, []);
+  assert.deepEqual(tileSheet.terrainLayoutPresets, []);
+  assert.deepEqual(tileSheet.layers, []);
+  const spriteSheet = createSheet(p, { name: 'Sprites', width: 32, height: 32, kind: 'sprite' });
+  assert.equal(spriteSheet.terrainSets, null);
+  assert.equal(spriteSheet.terrainLayoutPresets, null);
+  assert.equal(spriteSheet.layers, null);
+});
+
+test('serializeProject/deserializeProject round-trips terrainSets/terrainLayoutPresets/layers and per-tile fields', () => {
+  const p = createProject('t');
+  const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
+  sheet.terrainSets.push({ id: 'ts1', name: 'Grass', tileW: 16, tileH: 16, slots: { 0: 'ti1' }, symmetry: { flip: true, rotate: false } });
+  sheet.terrainLayoutPresets.push({ id: 'tlp1', name: 'My layout', cols: 4, rows: 4, cells: [{ col: 0, row: 0, blobIndex: 0 }] });
+  sheet.layers.push('Ground', 'Props');
+  sheet.tiles.push({ id: 'ti1', x: 0, y: 0, w: 16, h: 16, name: 'grass', gridId: null, gridCol: undefined, gridRow: undefined, neighbors: undefined, terrainSetId: 'ts1', blobIndex: 0, layer: 'Ground', tags: ['nature', 'walkable'] });
+
+  const { json, images } = serializeProject(p);
+  const imagesByPath = new Map(images.map(i => [i.path, i.bitmap]));
+  const reloaded = deserializeProject(json, imagesByPath);
+  const rt = reloaded.sheets.find(s => s.name === 'Tiles');
+
+  assert.deepEqual(rt.terrainSets, [{ id: 'ts1', name: 'Grass', tileW: 16, tileH: 16, slots: { 0: 'ti1' }, symmetry: { flip: true, rotate: false } }]);
+  assert.deepEqual(rt.terrainLayoutPresets, [{ id: 'tlp1', name: 'My layout', cols: 4, rows: 4, cells: [{ col: 0, row: 0, blobIndex: 0 }] }]);
+  assert.deepEqual(rt.layers, ['Ground', 'Props']);
+  const rtTile = rt.tiles.find(t => t.id === 'ti1');
+  assert.equal(rtTile.terrainSetId, 'ts1');
+  assert.equal(rtTile.blobIndex, 0);
+  assert.equal(rtTile.layer, 'Ground');
+  assert.deepEqual(rtTile.tags, ['nature', 'walkable']);
+
+  // Mutating the reload must not alias the original sheet's nested objects.
+  rt.terrainSets[0].slots[1] = 'ti2';
+  rtTile.tags.push('extra');
+  assert.deepEqual(sheet.terrainSets[0].slots, { 0: 'ti1' });
+  assert.deepEqual(sheet.tiles[0].tags, ['nature', 'walkable']);
+});
+
 test('serialize/deserialize round-trips tileGrids and tiles', () => {
   const p = createProject('t');
   const s = createSheet(p, { name: 'Tiles', width: 32, height: 16, kind: 'tile' });
