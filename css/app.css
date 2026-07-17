@@ -68,6 +68,10 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .tree-toggle { padding: 0 3px; background: transparent; border: none; font-size: 10px; }
 .group-icon { flex: none; font-size: 12px; }
 .tree-spacer { width: 14px; flex: none; }
+.layer-row.dragging { opacity: 0.5; }
+.layer-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.layer-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.layer-row.drop-into { outline: 2px dashed var(--accent); }
 
 /* frames panel */
 .frame-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }

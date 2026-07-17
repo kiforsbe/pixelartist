@@ -4,7 +4,7 @@ import {
   PROJECT_VERSION, DEFAULT_SETTINGS, createProject, createSheet, addLayer, removeLayer,
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, tileCount, tileRect,
-  sheetLayers, findGroup, contextLayers, addGroup, flattenLayers,
+  sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
 } from '../js/core/model.js';
 import { setPixel, getPixel } from '../js/core/pixels.js';
 
@@ -37,6 +37,43 @@ test('layer ops: add, move, mergeDown composites with opacity', () => {
   assert.equal(sheetLayers(s)[0].id, l2.id);
   removeLayer(s, l2.id);
   assert.equal(sheetLayers(s).length, 1);
+});
+
+test('moveNode reorders layers and moves between groups', () => {
+  const { s } = proj();
+  const l1 = sheetLayers(s)[0];
+  const l2 = addLayer(s, 'b');
+  const g = addGroup(s, 'g');
+  const l3 = addLayer(s, 'c');
+  // root children: [l1, l2, g, l3] (created in order)
+  // move l3 into g
+  moveNode(s, l3.id, g.id, 0);
+  assert.deepEqual(g.children.map(c => c.id), [l3.id]);
+  // move l2 before l1
+  moveNode(s, l2.id, s.layerTree.id, 0);
+  assert.deepEqual(s.layerTree.children.map(c => c.id), [l2.id, l1.id, g.id]);
+  // move l1 into g after l3
+  moveNode(s, l1.id, g.id, 1);
+  assert.deepEqual(g.children.map(c => c.id), [l3.id, l1.id]);
+});
+
+test('moveNode prevents invalid moves', () => {
+  const { s } = proj();
+  const g1 = addGroup(s, 'g1');
+  const g2 = addGroup(s, 'g2');
+  addLayer(s, 'inside', g1.id);
+  // cannot move g1 into g2 because g1 contains a layer (g1 into itself/descendant would be next)
+  moveNode(s, g1.id, g1.id, 0);
+  assert.equal(findGroup(s.layerTree, g1.id).children.length, 1);
+  // cannot move g1 into its own descendant
+  moveNode(s, g1.id, g1.id, 0);
+  assert.ok(s.layerTree.children.some(c => c.id === g1.id));
+  // cannot move any node into an animation-owned group
+  const a = addAnimation(s, 'walk');
+  const ag = findGroup(s.layerTree, a.layerGroupId);
+  const freeLayer = addLayer(s, 'free');
+  moveNode(s, freeLayer.id, ag.id, 0);
+  assert.equal(ag.children.findIndex(c => c.id === freeLayer.id), -1);
 });
 
 test('frames and animations; removeFrame cleans references', () => {

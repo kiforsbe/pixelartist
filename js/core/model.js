@@ -158,15 +158,34 @@ export function moveLayer(sheet, layerId, toIndex) {
 export function moveNode(sheet, nodeId, toParentId, toIndex) {
   const srcLoc = findParent(sheet.layerTree, nodeId);
   const dstParent = findGroup(sheet.layerTree, toParentId) ?? sheet.layerTree;
-  if (!srcLoc || !dstParent || srcLoc.parent === dstParent && srcLoc.parent.children[srcLoc.index].type !== GROUP && dstParent.type === GROUP && dstParent.animationId) {
-    // Avoid moving a non-layer node into an animation-owned group? Actually
-    // only layer nodes should be movable into animation groups; groups should
-    // not be nested inside animation groups to keep scoping simple.
+  if (!srcLoc || !dstParent) return;
+  const node = srcLoc.parent.children[srcLoc.index];
+  if (!node) return;
+
+  // Prevent moving the root group.
+  if (node.type === GROUP && node === sheet.layerTree) return;
+
+  // Prevent moving a group into itself or its descendants.
+  function contains(parent, childId) {
+    if (parent.id === childId) return true;
+    if (!parent.children) return false;
+    return parent.children.some(c => c.type === GROUP && contains(c, childId));
   }
-  if (!srcLoc) return;
-  const [node] = srcLoc.parent.children.splice(srcLoc.index, 1);
-  const clamped = Math.max(0, Math.min(dstParent.children.length, toIndex));
-  dstParent.children.splice(clamped, 0, node);
+  if (node.type === GROUP && contains(node, dstParent.id)) return;
+
+  // Prevent moving any node into an animation-owned group so animation
+  // layer scopes stay isolated.
+  if (dstParent.animationId) return;
+
+  // Adjust target index when reordering within the same parent.
+  let adjustedToIndex = toIndex;
+  if (srcLoc.parent === dstParent && srcLoc.index < toIndex) {
+    adjustedToIndex = Math.max(0, toIndex - 1);
+  }
+
+  const [moved] = srcLoc.parent.children.splice(srcLoc.index, 1);
+  const clamped = Math.max(0, Math.min(dstParent.children.length, adjustedToIndex));
+  dstParent.children.splice(clamped, 0, moved);
 }
 
 function compositeOver(dst, src, opacity) {

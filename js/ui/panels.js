@@ -2,7 +2,7 @@
 
 import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
-import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, findGroup, findLayer, createLayerNode, createGroupNode } from '../core/model.js';
+import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, findGroup, findLayer, createLayerNode, createGroupNode, moveNode } from '../core/model.js';
 import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
@@ -557,6 +557,12 @@ export function mountLayersPanel(el) {
     markDirty();
   }
 
+  function animationForGroup(group) {
+    if (!group?.animationId) return null;
+    const sheet = activeSheet();
+    return sheet?.animations.find(a => a.id === group.animationId) ?? null;
+  }
+
   function startRename(node, nameEl) {
     const input = document.createElement('input');
     input.type = 'text';
@@ -572,10 +578,18 @@ export function mountLayersPanel(el) {
       const v = input.value.trim();
       if (v && v !== node.name) {
         const oldName = node.name;
+        const anim = node.type === 'group' ? animationForGroup(node) : null;
+        const oldAnimName = anim?.name;
         state.commands.push({
           label: node.type === 'group' ? 'rename group' : 'rename layer',
-          do() { node.name = v; },
-          undo() { node.name = oldName; },
+          do() {
+            node.name = v;
+            if (anim) anim.name = v;
+          },
+          undo() {
+            node.name = oldName;
+            if (anim) anim.name = oldAnimName;
+          },
         });
         markDirty();
       }
@@ -589,12 +603,146 @@ export function mountLayersPanel(el) {
   }
 
   const thumbCanvases = new Map();
+  let draggedId = null;
+
+  function isDescendant(parent, childId) {
+    if (parent.id === childId) return true;
+    if (!parent.children) return false;
+    return parent.children.some(c => c.type === 'group' && isDescendant(c, childId));
+  }
+
+  function clearDropIndicators() {
+    for (const row of list.querySelectorAll('.layer-row')) {
+      row.classList.remove('dragging', 'drop-before', 'drop-after', 'drop-into');
+    }
+  }
+
+  function getDropPosition(row, clientY) {
+    const rect = row.getBoundingClientRect();
+    const rel = clientY - rect.top;
+    const pct = rel / rect.height;
+    if (pct < 0.3) return 'before';
+    if (pct > 0.7) return 'after';
+    if (row.classList.contains('group-row')) return 'into';
+    return rel < rect.height / 2 ? 'before' : 'after';
+  }
+
+  function applyDropIndicator(row, position) {
+    clearDropIndicators();
+    if (row && row.dataset.nodeId !== draggedId) row.classList.add('drop-' + position);
+  }
+
+  function performMove(sheet, nodeId, destParentId, destIndex) {
+    const srcLoc = findParent(sheet.layerTree, nodeId);
+    const destParent = findGroup(sheet.layerTree, destParentId) ?? sheet.layerTree;
+    if (!srcLoc || !destParent) return;
+
+    const srcParent = srcLoc.parent;
+    const beforeSrc = srcParent.children.slice();
+    const beforeDest = destParent.children.slice();
+
+    moveNode(sheet, nodeId, destParentId, destIndex);
+
+    const afterSrc = srcParent.children.slice();
+    const afterDest = destParent.children.slice();
+
+    // Skip if nothing changed.
+    if (beforeSrc.length === afterSrc.length && beforeDest.length === afterDest.length &&
+        beforeSrc.every((c, i) => c === afterSrc[i]) && beforeDest.every((c, i) => c === afterDest[i])) {
+      return;
+    }
+
+    state.commands.push({
+      label: 'move layer',
+      do() {
+        srcParent.children = afterSrc.slice();
+        destParent.children = afterDest.slice();
+      },
+      undo() {
+        srcParent.children = beforeSrc.slice();
+        destParent.children = beforeDest.slice();
+      },
+    });
+    markDirty();
+  }
+
+  function onRowDragStart(e, node) {
+    draggedId = node.id;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', node.id);
+    e.currentTarget.classList.add('dragging');
+  }
+
+  function onRowDragEnd() {
+    draggedId = null;
+    clearDropIndicators();
+  }
+
+  function onListDragOver(e) {
+    e.preventDefault();
+    const row = e.target.closest('.layer-row');
+    if (!row || row.dataset.nodeId === draggedId) {
+      clearDropIndicators();
+      return;
+    }
+    const pos = getDropPosition(row, e.clientY);
+    applyDropIndicator(row, pos);
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function onListDragLeave(e) {
+    if (!list.contains(e.relatedTarget)) clearDropIndicators();
+  }
+
+  function onListDrop(e) {
+    e.preventDefault();
+    const row = e.target.closest('.layer-row');
+    const sourceId = draggedId ?? e.dataTransfer.getData('text/plain');
+    clearDropIndicators();
+    if (!row || !sourceId) return;
+
+    const targetId = row.dataset.nodeId;
+    if (targetId === sourceId) return;
+
+    const sheet = activeSheet();
+    if (!sheet) return;
+    const srcNode = findNode(sheet.layerTree, sourceId);
+    const targetNode = findNode(sheet.layerTree, targetId);
+    if (!srcNode || !targetNode) return;
+
+    const targetLoc = findParent(sheet.layerTree, targetId);
+    if (!targetLoc) return;
+
+    const pos = getDropPosition(row, e.clientY);
+    let destParent, destIndex;
+    if (pos === 'into' && targetNode.type === 'group' && !targetNode.animationId) {
+      destParent = targetNode;
+      destIndex = targetNode.children.length;
+    } else {
+      destParent = targetLoc.parent;
+      destIndex = targetLoc.index + (pos === 'after' ? 1 : 0);
+    }
+
+    // Guards against invalid drops.
+    if (destParent.animationId) return;
+    if (srcNode.type === 'group' && isDescendant(srcNode, destParent.id)) return;
+
+    performMove(sheet, sourceId, destParent.id, destIndex);
+  }
+
+  list.addEventListener('dragover', onListDragOver);
+  list.addEventListener('dragleave', onListDragLeave);
+  list.addEventListener('drop', onListDrop);
 
   function renderGroup(group, depth) {
     const sheet = activeSheet();
     const row = document.createElement('div');
     row.className = 'layer-row group-row' + (group.id === selectedNodeId ? ' active' : '');
     row.style.paddingLeft = (4 + depth * 14) + 'px';
+    row.draggable = true;
+    row.dataset.nodeId = group.id;
+    row.addEventListener('dragstart', (e) => onRowDragStart(e, group));
+    row.addEventListener('dragend', onRowDragEnd);
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
@@ -611,7 +759,13 @@ export function mountLayersPanel(el) {
     nameEl.textContent = group.name;
     nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(group, nameEl); });
 
-    row.append(toggle, icon, nameEl);
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.textContent = '✎';
+    renameBtn.title = 'Rename group';
+    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); startRename(group, nameEl); });
+
+    row.append(toggle, icon, nameEl, renameBtn);
     row.addEventListener('click', () => { selectedNodeId = group.id; state.activeLayerId = null; renderList(); });
     list.appendChild(row);
 
@@ -627,6 +781,10 @@ export function mountLayersPanel(el) {
     const row = document.createElement('div');
     row.className = 'layer-row layer-leaf' + (layer.id === state.activeLayerId ? ' active' : '');
     row.style.paddingLeft = (4 + depth * 14) + 'px';
+    row.draggable = true;
+    row.dataset.nodeId = layer.id;
+    row.addEventListener('dragstart', (e) => onRowDragStart(e, layer));
+    row.addEventListener('dragend', onRowDragEnd);
     row.addEventListener('click', () => { state.activeLayerId = layer.id; selectedNodeId = layer.id; renderList(); });
 
     const spacer = document.createElement('span');
@@ -669,19 +827,13 @@ export function mountLayersPanel(el) {
       markDirty();
     });
 
-    const loc = findParent(sheet.layerTree, layer.id);
-    const siblingCount = loc ? loc.parent.children.filter(c => c.type === 'layer').length : 1;
-    const layerIndex = loc ? loc.parent.children.filter(c => c.type === 'layer').findIndex(c => c.id === layer.id) : 0;
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.textContent = '✎';
+    renameBtn.title = 'Rename layer';
+    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); startRename(layer, nameEl); });
 
-    const upBtn = document.createElement('button'); upBtn.type = 'button'; upBtn.textContent = '↑';
-    upBtn.title = 'Move up'; upBtn.disabled = layerIndex >= siblingCount - 1;
-    upBtn.addEventListener('click', (e) => { e.stopPropagation(); doMove(layer, 1); });
-
-    const downBtn = document.createElement('button'); downBtn.type = 'button'; downBtn.textContent = '↓';
-    downBtn.title = 'Move down'; downBtn.disabled = layerIndex <= 0;
-    downBtn.addEventListener('click', (e) => { e.stopPropagation(); doMove(layer, -1); });
-
-    row.append(spacer, thumb, visBtn, nameEl, opacityInput, upBtn, downBtn);
+    row.append(spacer, thumb, visBtn, nameEl, renameBtn, opacityInput);
     list.appendChild(row);
   }
 
