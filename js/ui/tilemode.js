@@ -615,6 +615,18 @@ function commitTileLayer(tile, layer) {
   markDirty();
 }
 
+function commitSetTerrainSetLayer(terrainSet, layer) {
+  const after = layer || null;
+  if (terrainSet.layer === after) return;
+  const before = terrainSet.layer;
+  state.commands.push({
+    label: 'set terrain set layer',
+    do() { terrainSet.layer = after; },
+    undo() { terrainSet.layer = before; },
+  });
+  markDirty();
+}
+
 function commitTileTags(tile, tagsText) {
   const after = tagsText.split(',').map(s => s.trim()).filter(Boolean);
   const before = tile.tags ? [...tile.tags] : undefined;
@@ -1189,7 +1201,19 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
   rotCb.addEventListener('change', () => commitSetSymmetry(terrainSet, 'rotate', rotCb.checked));
   const flipLabel = document.createElement('label'); flipLabel.append(flipCb, document.createTextNode(' Allow flip'));
   const rotLabel = document.createElement('label'); rotLabel.append(rotCb, document.createTextNode(' Allow rotation'));
-  symRow.append(flipLabel, rotLabel);
+
+  const layerSelect = document.createElement('select');
+  const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
+  layerSelect.appendChild(noneOpt);
+  sheet.layers.forEach((name) => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    layerSelect.appendChild(opt);
+  });
+  layerSelect.value = terrainSet.layer ?? '';
+  layerSelect.addEventListener('change', () => commitSetTerrainSetLayer(terrainSet, layerSelect.value));
+
+  symRow.append(flipLabel, rotLabel, layerSelect);
   container.appendChild(symRow);
 
   const viewModeRow = document.createElement('div');
@@ -1445,13 +1469,18 @@ export function mountAutotilesPanel(el) {
   terrainSetEditor.className = 'terrain-set-editor';
   wrap.appendChild(terrainSetEditor);
 
+  const layersHeading = document.createElement('h4');
+  layersHeading.textContent = 'Tile Layers';
+  wrap.appendChild(layersHeading);
+
   const layerList = document.createElement('div');
-  layerList.className = 'layer-list';
+  layerList.className = 'tile-layer-list';
   wrap.appendChild(layerList);
 
   const btnAddLayerName = document.createElement('button');
   btnAddLayerName.type = 'button';
-  btnAddLayerName.textContent = 'Add Layer Name…';
+  btnAddLayerName.textContent = '➕';
+  btnAddLayerName.title = 'Add tile layer';
   btnAddLayerName.addEventListener('click', () => {
     const sheet = activeSheet();
     if (!sheet) return;
@@ -1502,11 +1531,11 @@ export function mountAutotilesPanel(el) {
       row.className = 'row';
       const label = document.createElement('span');
       label.textContent = name;
-      const btnUp = document.createElement('button'); btnUp.type = 'button'; btnUp.textContent = '↑';
+      const btnUp = document.createElement('button'); btnUp.type = 'button'; btnUp.textContent = '↑'; btnUp.title = 'Move up';
       btnUp.addEventListener('click', () => commitMoveLayerName(sheet, i, -1));
-      const btnDown = document.createElement('button'); btnDown.type = 'button'; btnDown.textContent = '↓';
+      const btnDown = document.createElement('button'); btnDown.type = 'button'; btnDown.textContent = '↓'; btnDown.title = 'Move down';
       btnDown.addEventListener('click', () => commitMoveLayerName(sheet, i, 1));
-      const btnDel = document.createElement('button'); btnDel.type = 'button'; btnDel.textContent = 'Delete';
+      const btnDel = document.createElement('button'); btnDel.type = 'button'; btnDel.textContent = '🗑'; btnDel.title = 'Delete';
       btnDel.addEventListener('click', () => commitRemoveLayerName(sheet, name));
       row.append(label, btnUp, btnDown, btnDel);
       layerList.appendChild(row);
