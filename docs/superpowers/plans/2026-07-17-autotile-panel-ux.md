@@ -593,18 +593,33 @@ git commit -m "feat: split tile panel into separate Tiles and Autotiles panels"
 
 ---
 
-### Task 5: View modes + 7×7 layout preset
+### Task 5: View modes + real 8×6 / 7×7 layout presets
 
 **Files:**
-- Modify: `js/ui/tilemode.js` (`BUILTIN_LAYOUT_PRESETS` array, new helpers near `blobStaircaseGroups`, `renderLayoutPresetRow`, `renderTerrainSetEditor`)
+- Modify: `js/ui/tilemode.js` (import list, `BUILTIN_LAYOUT_PRESETS` array, new helpers near `blobStaircaseGroups`, `renderLayoutPresetRow`, `renderTerrainSetEditor`)
 
 **Interfaces:**
-- Consumes: `blobIndexToMask`, `SIXTEEN_TILE_INDICES` (already imported).
+- Consumes: `blobIndexToMask`, `SIXTEEN_TILE_INDICES` (already imported), `maskToBlobIndex` (newly imported this task).
 - Produces: a module-level `terrainViewMode` variable and `slotGroupsForViewMode(mode)` helper, consumed by `renderTerrainSetEditor`'s slot-rendering loop (this task and Task 6/7/8, which all edit that same loop in later tasks).
 
-- [ ] **Step 1: Add the 7×7 built-in layout preset**
+**Correction from the committed spec:** the spec described the existing 6×8 preset as a "deterministic ascending-index ordering, not a byte-for-byte reproduction of any external tool's template" and proposed the new 7×7 preset the same way. The user has since supplied the actual reference template's raw neighbor-bitmask layout for both grid shapes (verified below against this codebase's own `maskToBlobIndex`/`NEIGHBOR_BITS` — every one of the 47 canonical blob indices appears exactly once in each template, with raw byte `255` (full 8-neighbor surround) intentionally repeated as a duplicate cell — 2 duplicates in the 8×6 template, 3 in the 7×7 — which is a known convention in real blob-47 template images, not a data error). This task therefore replaces the ascending 6×8 preset with a corrected **8×6** (cols/rows swapped) preset using the real mapping, and gives the new 7×7 preset the real (non-ascending) mapping too, instead of ascending-index placeholders. This preset data is hardcoded and never serialized to project files, so there is no migration concern — only the in-session dropdown label/shape changes.
 
-In `js/ui/tilemode.js`, change `BUILTIN_LAYOUT_PRESETS` (lines 55-64) from:
+- [ ] **Step 1: Import `maskToBlobIndex` and replace `BUILTIN_LAYOUT_PRESETS` with the real reference templates**
+
+In `js/ui/tilemode.js`, change the blob47 import (line 25) from:
+```js
+import {
+  NEIGHBOR_BITS, blobIndexToMask, SIXTEEN_TILE_INDICES, resolveTerrainSlot,
+} from '../core/blob47.js';
+```
+to:
+```js
+import {
+  NEIGHBOR_BITS, blobIndexToMask, maskToBlobIndex, SIXTEEN_TILE_INDICES, resolveTerrainSlot,
+} from '../core/blob47.js';
+```
+
+Then change `BUILTIN_LAYOUT_PRESETS` (lines 55-64) from:
 ```js
 const BUILTIN_LAYOUT_PRESETS = [
   {
@@ -619,14 +634,46 @@ const BUILTIN_LAYOUT_PRESETS = [
 ```
 to:
 ```js
+// Real blob-47 reference templates (raw neighbor bitmasks, top-left to
+// bottom-right, using this module's own NEIGHBOR_BITS weights: N=1, NE=2,
+// E=4, SE=8, S=16, SW=32, W=64, NW=128). Each raw byte is resolved through
+// maskToBlobIndex to its canonical blobIndex -- raw byte 255 (full 8-
+// neighbor surround) intentionally repeats (both templates' known
+// duplicate-cell convention); every other one of the 47 canonical indices
+// appears exactly once per template.
+const BLOB47_8X6_RAW = [
+  [0, 4, 92, 112, 28, 124, 116, 64],
+  [20, 84, 87, 221, 127, 255, 245, 80],
+  [29, 117, 85, 95, 247, 215, 209, 1],
+  [23, 213, 81, 31, 253, 125, 113, 16],
+  [21, 69, 93, 119, 223, 255, 241, 17],
+  [5, 68, 71, 193, 7, 199, 197, 65],
+];
+const BLOB47_7X7_RAW = [
+  [0, 4, 84, 92, 124, 116, 80],
+  [16, 28, 117, 95, 255, 253, 113],
+  [21, 87, 221, 127, 255, 247, 209],
+  [29, 125, 119, 199, 215, 213, 81],
+  [31, 255, 241, 20, 65, 17, 1],
+  [23, 223, 245, 85, 68, 93, 112],
+  [5, 71, 197, 69, 64, 7, 193],
+];
+function cellsFromRawGrid(rawGrid) {
+  const cells = [];
+  rawGrid.forEach((rowVals, row) => rowVals.forEach((raw, col) => {
+    cells.push({ col, row, blobIndex: maskToBlobIndex[raw] });
+  }));
+  return cells;
+}
+
 const BUILTIN_LAYOUT_PRESETS = [
   {
-    name: 'Blob-47 (6×8, ascending)', cols: 6, rows: 8,
-    cells: Array.from({ length: 47 }, (_, i) => ({ col: i % 6, row: Math.floor(i / 6), blobIndex: i })),
+    name: 'Blob-47 (8×6)', cols: 8, rows: 6,
+    cells: cellsFromRawGrid(BLOB47_8X6_RAW),
   },
   {
-    name: 'Blob-47 (7×7, ascending)', cols: 7, rows: 7,
-    cells: Array.from({ length: 47 }, (_, i) => ({ col: i % 7, row: Math.floor(i / 7), blobIndex: i })),
+    name: 'Blob-47 (7×7)', cols: 7, rows: 7,
+    cells: cellsFromRawGrid(BLOB47_7X7_RAW),
   },
   {
     name: '16-tile (4×4, ascending)', cols: 4, rows: 4,
@@ -634,6 +681,27 @@ const BUILTIN_LAYOUT_PRESETS = [
   },
 ];
 ```
+
+- [ ] **Step 1b: Verify the reference templates cover all 47 blob indices exactly once (plus the known 255 duplicate)**
+
+Run this one-off check (not a permanent test — the codebase doesn't unit-test `tilemode.js`'s private data, and this constant is verified once at authoring time):
+```bash
+node -e "
+import('./js/core/blob47.js').then(({ maskToBlobIndex }) => {
+  const grids = {
+    '8x6': [[0,4,92,112,28,124,116,64],[20,84,87,221,127,255,245,80],[29,117,85,95,247,215,209,1],[23,213,81,31,253,125,113,16],[21,69,93,119,223,255,241,17],[5,68,71,193,7,199,197,65]],
+    '7x7': [[0,4,84,92,124,116,80],[16,28,117,95,255,253,113],[21,87,221,127,255,247,209],[29,125,119,199,215,213,81],[31,255,241,20,65,17,1],[23,223,245,85,68,93,112],[5,71,197,69,64,7,193]],
+  };
+  for (const [name, grid] of Object.entries(grids)) {
+    const indices = grid.flat().map(raw => maskToBlobIndex[raw]);
+    const distinct = new Set(indices);
+    const missing = Array.from({length:47}, (_,i)=>i).filter(i => !distinct.has(i));
+    console.log(name, 'cells:', indices.length, 'distinct blobIndex:', distinct.size, 'missing:', missing);
+  }
+});
+"
+```
+Expected: both lines show `distinct blobIndex: 47` and `missing: []` (48/49 cells covering all 47 indices, with the documented 255 duplicate accounting for the extra cell(s)).
 
 - [ ] **Step 2: Add the view-mode state and slot-grouping helper**
 
@@ -738,13 +806,13 @@ Expected: `155 pass, 0 fail`.
 
 - [ ] **Step 6: Manual smoke check**
 
-At `http://localhost:8080/?autotest`, open a terrain set's editor. Confirm a "View" dropdown appears above the slot grid with 4 options; switching to "Grid 7×7" rearranges the same 47 slots into rows of 7 (last row has 5); switching to "16-tile only" shows a single row of 16 slots; switching back to "Staircase" restores the original grouping. Confirm the layout-preset dropdown (Import/Save row) now lists "Blob-47 (7×7, ascending) (7×7)" and the Import/Save buttons show `⬇`/`💾` icons with hover tooltips. Zero console errors.
+At `http://localhost:8080/?autotest`, open a terrain set's editor. Confirm a "View" dropdown appears above the slot grid with 4 options; switching to "Grid 7×7" rearranges the same 47 slots into rows of 7 (last row has 5, this is the cosmetic view mode, unrelated to the real 7×7 layout preset below); switching to "16-tile only" shows a single row of 16 slots; switching back to "Staircase" restores the original grouping. Confirm the layout-preset dropdown (Import/Save row) now lists "Blob-47 (8×6) (8×6)" (renamed/reshaped from the old "6×8, ascending") and "Blob-47 (7×7) (7×7)", and the Import/Save buttons show `⬇`/`💾` icons with hover tooltips. If a matching 8×6 or 7×7 tile grid with real tile art is available, importing either preset should place visually-continuous terrain tiles into their slots (not an arbitrary ascending jumble) — this is the concrete signal that the real reference mapping was wired correctly. Zero console errors.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add js/ui/tilemode.js
-git commit -m "feat: add terrain-set view modes and 7x7 layout preset"
+git commit -m "feat: add terrain-set view modes and real 8x6/7x7 layout presets"
 ```
 
 ---
@@ -1353,9 +1421,13 @@ After item 48 (ends `...(blue, thicker) border.`), insert:
 ```markdown
 48b. [A] Terrain-set editor's "View" dropdown (Staircase / Grid 6×8 / Grid
     7×7 / 16-tile only) rearranges the same 47 slots on screen without
-    changing any slot's assignment; the layout-preset dropdown (Import/Save
-    row) includes "Blob-47 (7×7, ascending)" alongside the 6×8 and 4×4
-    built-ins.
+    changing any slot's assignment (cosmetic only); the layout-preset
+    dropdown (Import/Save row) lists "Blob-47 (8×6)" (the corrected/renamed
+    former "6×8, ascending" built-in) and "Blob-47 (7×7)" alongside the
+    4×4 16-tile built-in — both now use the real reference template
+    mapping rather than ascending index order, so importing a matching
+    grid of real terrain art places visually-continuous tiles into their
+    slots.
 48c. [A] Toggling "Allow flip"/"Allow rotation" immediately reclassifies
     each slot as mandatory (solid border) or optional (dashed border)
     based on symmetry alone, independent of whether the slot currently has
@@ -1402,6 +1474,7 @@ git commit -m "docs: add smoke checklist items for autotile panel UX changes"
 
 ## Plan self-review notes
 
-- **Spec coverage:** every spec section maps to a task — panel split (4), view modes/7×7 (5), mandatory/optional (1+6), thumbnails/icons (7), picker dialog (8), Tile Layers disambiguation (2+9), export shape (3), testing plan (1/2/3 tests + 10 smoke items). The spec's own testing-plan line about "a case where the representative must prefer a 16-tile-subset member over a lower raw index" was checked empirically against the real 47-index table (via a throwaway Node script) — no such case exists for blob-47's actual canonical table (the 16-tile preference and plain lowest-index tie-break always agree). Task 1's tests therefore verify the real orbits/representatives directly with concrete, verified numbers instead of asserting an unreachable branch.
+- **Spec coverage:** every spec section maps to a task — panel split (4), view modes/8×6/7×7 (5), mandatory/optional (1+6), thumbnails/icons (7), picker dialog (8), Tile Layers disambiguation (2+9), export shape (3), testing plan (1/2/3 tests + 10 smoke items). The spec's own testing-plan line about "a case where the representative must prefer a 16-tile-subset member over a lower raw index" was checked empirically against the real 47-index table (via a throwaway Node script) — no such case exists for blob-47's actual canonical table (the 16-tile preference and plain lowest-index tie-break always agree). Task 1's tests therefore verify the real orbits/representatives directly with concrete, verified numbers instead of asserting an unreachable branch.
+- **Post-approval correction (Task 5):** after the spec was approved, the user supplied the actual external reference template's raw-bitmask layout for both grid shapes, superseding the spec's "ascending index, ⁠not a claimed external match" framing for the *existing* 6×8 preset as well as the new one. Verified programmatically (Task 5, Step 1b) that both supplied templates cover all 47 canonical blob indices exactly once, with the documented `255` duplicate accounting for the extra cell(s) — not a transcription error. Task 5 now corrects the existing preset (renamed/reshaped 6×8→8×6) in addition to adding the real 7×7 one; this is hardcoded, non-persisted data, so there's no save-format migration to worry about.
 - **Placeholder scan:** no TBD/TODO; every step has complete code.
 - **Type/interface consistency:** `tilePickerDialog.open`'s signature change (added `blobIndex`) is introduced and consumed within the same task (8) — no stale caller elsewhere. `classifySlots`'s return shape (`{ mandatory, orbitRepresentative }`) is used identically in Task 6 and Task 8.

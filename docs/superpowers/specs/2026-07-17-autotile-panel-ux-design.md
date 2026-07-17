@@ -96,8 +96,22 @@ only`, held in a local (non-persisted) variable. Rendering per mode:
   sorted ascending — the other 31 slots aren't rendered while this mode is
   selected (their data is untouched, just hidden from view).
 
+**Amendment (post-approval):** the paragraph above assumed no verified
+external reference existed. The user has since supplied the actual
+reference template's raw neighbor-bitmask layout for both grid shapes —
+verified programmatically to cover all 47 canonical blob indices exactly
+once (plus an intentional duplicate at raw byte 255, matching a known
+convention in real blob-47 templates). The implementation plan
+(`docs/superpowers/plans/2026-07-17-autotile-panel-ux.md`, Task 5)
+therefore replaces the ascending-index placeholder below with the real
+mapping for **both** the new 7×7 preset and the existing 6×8 preset
+(corrected/renamed to 8×6 — cols/rows were transposed). This is hardcoded,
+non-persisted data, so there is no save-format migration involved — see
+the plan for the exact raw-bitmask tables and derivation code.
+
 New built-in layout preset (for the *import* flow, independent of the
-above), added to `BUILTIN_LAYOUT_PRESETS` in `tilemode.js`:
+above), added to `BUILTIN_LAYOUT_PRESETS` in `tilemode.js` — superseded by
+the amendment above, kept here only as the originally-approved shape:
 ```js
 {
   name: 'Blob-47 (7×7, ascending)', cols: 7, rows: 7,
