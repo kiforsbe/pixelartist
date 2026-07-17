@@ -1,6 +1,7 @@
 import { createBitmap, cloneBitmap, getPixel, setPixel } from './pixels.js';
 import { newId } from './palettes.js';
 import { compositeFloatOnLayer } from './floating.js';
+import { removeEntry } from './strips.js';
 
 export const PROJECT_VERSION = 2;
 export const DEFAULT_SETTINGS = {
@@ -90,12 +91,18 @@ export function addFrame(sheet, { name, x, y, w, h, pivotX = 0, pivotY = 0 }) {
 
 export function removeFrame(sheet, frameId) {
   sheet.frames = sheet.frames.filter(f => f.id !== frameId);
-  for (const a of sheet.animations)
-    a.frames = a.frames.filter(af => af.frameId !== frameId);
+  for (const a of sheet.animations) {
+    let i;
+    while ((i = a.frames.findIndex(af => af.frameId === frameId)) !== -1) {
+      const r = removeEntry(a.frames, a.breaks, i);
+      a.frames = r.entries;
+      a.breaks = r.breaks;
+    }
+  }
 }
 
 export function addAnimation(sheet, name, strip = false) {
-  const anim = { id: newId('an'), name, loop: true, strip, frames: [] };
+  const anim = { id: newId('an'), name, loop: true, strip, breaks: [], frames: [] };
   sheet.animations.push(anim);
   return anim;
 }
@@ -126,7 +133,7 @@ export function serializeProject(project) {
       id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
       tile: s.tile ? structuredClone(s.tile) : null,
       frames: s.frames.map(f => ({ ...f })),
-      animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })) })),
+      animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })), breaks: (a.breaks ?? []).slice() })),
       layers: s.layers.map(l => {
         const path = `images/${s.id}/${l.id}.png`;
         images.push({ path, bitmap: cloneBitmap(l.bitmap) });
@@ -149,7 +156,7 @@ export function deserializeProject(json, imagesByPath) {
       ...s,
       tile: s.tile ?? null,
       frames: s.frames ?? [],
-      animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false })),
+      animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false, breaks: a.breaks ?? [] })),
       layers: s.layers.map(l => {
         const bitmap = imagesByPath.get(l.image);
         if (!bitmap) throw new Error(`missing image ${l.image}`);

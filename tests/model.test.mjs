@@ -123,3 +123,43 @@ test('validateProjectJson rejects version 1 and missing/invalid settings', () =>
   assert.equal(validateProjectJson({ version: 2, sheets: [] }).ok, false);
   assert.equal(validateProjectJson({ version: 2, sheets: [], settings: { tileW: 16 } }).ok, false);
 });
+
+test('addAnimation initializes breaks; serialize/deserialize round-trips them', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 32, height: 32, kind: 'sprite' });
+  const a = addAnimation(s, 'walk', true);
+  assert.deepEqual(a.breaks, []);
+  const f1 = addFrame(s, { name: 'f1', x: 0, y: 0, w: 8, h: 8 });
+  const f2 = addFrame(s, { name: 'f2', x: 8, y: 0, w: 8, h: 8 });
+  a.frames = [{ frameId: f1.id, duration: 100 }, { frameId: f2.id, duration: 100 }];
+  a.breaks = [1];
+  const { json, images } = serializeProject(p);
+  assert.deepEqual(json.sheets[0].animations[0].breaks, [1]);
+  const imagesByPath = new Map(images.map(i => [i.path, i.bitmap]));
+  const p2 = deserializeProject(json, imagesByPath);
+  assert.deepEqual(p2.sheets[0].animations[0].breaks, [1]);
+});
+
+test('deserializeProject defaults missing breaks to []', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 32, height: 32, kind: 'sprite' });
+  addAnimation(s, 'walk', true);
+  const { json, images } = serializeProject(p);
+  delete json.sheets[0].animations[0].breaks; // legacy file
+  const p2 = deserializeProject(json, new Map(images.map(i => [i.path, i.bitmap])));
+  assert.deepEqual(p2.sheets[0].animations[0].breaks, []);
+});
+
+test('removeFrame adjusts breaks (shift down, drop degenerate)', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 64, height: 32, kind: 'sprite' });
+  const fs = [0, 1, 2, 3].map(i => addFrame(s, { name: `f${i}`, x: i * 8, y: 0, w: 8, h: 8 }));
+  const a = addAnimation(s, 'walk', true);
+  a.frames = fs.map(f => ({ frameId: f.id, duration: 100 }));
+  a.breaks = [2];
+  removeFrame(s, fs[0].id);          // segments [0,1][2,3] → remove f0 → [1][2,3]
+  assert.deepEqual(a.breaks, [1]);
+  removeFrame(s, fs[1].id);          // [1][2,3] → remove f1 → break shifts to 0, normalize drops it
+  assert.deepEqual(a.frames.map(e => e.frameId), [fs[2].id, fs[3].id]);
+  assert.deepEqual(a.breaks, []);    // one segment [2,3]
+});

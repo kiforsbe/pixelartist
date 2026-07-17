@@ -204,7 +204,7 @@ function deleteFrame(sheet, frameId) {
   const frame = sheet.frames.find(f => f.id === frameId);
   if (!frame) return;
   const idx = sheet.frames.indexOf(frame);
-  const animSnapshots = sheet.animations.map(a => ({ anim: a, frames: a.frames.slice() }));
+  const animSnapshots = sheet.animations.map(a => ({ anim: a, frames: a.frames.slice(), breaks: (a.breaks ?? []).slice() }));
   const wasSelected = state.selectedFrameId === frameId;
   const cmd = {
     label: 'delete frame',
@@ -214,7 +214,7 @@ function deleteFrame(sheet, frameId) {
     },
     undo() {
       sheet.frames.splice(Math.min(idx, sheet.frames.length), 0, frame);
-      for (const snap of animSnapshots) snap.anim.frames = snap.frames.slice();
+      for (const snap of animSnapshots) { snap.anim.frames = snap.frames.slice(); snap.anim.breaks = snap.breaks.slice(); }
       if (wasSelected) state.selectedFrameId = frame.id;
     },
   };
@@ -575,24 +575,24 @@ function buildSliceDialog() {
     const replace = $('#sg-replace').checked;
 
     const beforeFrames = sheet.frames.slice();
-    const beforeAnimSnapshots = sheet.animations.map(a => ({ anim: a, frames: a.frames.slice() }));
+    const beforeAnimSnapshots = sheet.animations.map(a => ({ anim: a, frames: a.frames.slice(), breaks: (a.breaks ?? []).slice() }));
     if (replace) {
       sheet.frames = [];
-      for (const a of sheet.animations) a.frames = [];
+      for (const a of sheet.animations) { a.frames = []; a.breaks = []; }
     }
     for (const nf of newFrames) addFrame(sheet, nf);
     const afterFrames = sheet.frames.slice();
-    const afterAnimSnapshots = sheet.animations.map(a => ({ anim: a, frames: a.frames.slice() }));
+    const afterAnimSnapshots = sheet.animations.map(a => ({ anim: a, frames: a.frames.slice(), breaks: (a.breaks ?? []).slice() }));
 
     state.commands.push({
       label: 'slice grid',
       do() {
         sheet.frames = afterFrames.slice();
-        for (const snap of afterAnimSnapshots) snap.anim.frames = snap.frames.slice();
+        for (const snap of afterAnimSnapshots) { snap.anim.frames = snap.frames.slice(); snap.anim.breaks = snap.breaks.slice(); }
       },
       undo() {
         sheet.frames = beforeFrames.slice();
-        for (const snap of beforeAnimSnapshots) snap.anim.frames = snap.frames.slice();
+        for (const snap of beforeAnimSnapshots) { snap.anim.frames = snap.frames.slice(); snap.anim.breaks = snap.breaks.slice(); }
       },
     });
     markDirty();
@@ -655,10 +655,11 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
 // is unaffected). Exported so timeline.js's header button can push the same
 // command shape for the currently selected animation.
 export function commitBreakApartStrip(anim) {
+  const beforeBreaks = (anim.breaks ?? []).slice();
   state.commands.push({
     label: 'break apart strip',
-    do() { anim.strip = false; },
-    undo() { anim.strip = true; },
+    do() { anim.strip = false; anim.breaks = []; },
+    undo() { anim.strip = true; anim.breaks = beforeBreaks.slice(); },
   });
   markDirty();
 }
