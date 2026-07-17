@@ -73,10 +73,13 @@ function describeMask(mask) {
 // Real blob-47 reference templates (raw neighbor bitmasks, top-left to
 // bottom-right, using this module's own NEIGHBOR_BITS weights: N=1, NE=2,
 // E=4, SE=8, S=16, SW=32, W=64, NW=128). Each raw byte is resolved through
-// maskToBlobIndex to its canonical blobIndex -- raw byte 255 (full 8-
-// neighbor surround) intentionally repeats (both templates' known
-// duplicate-cell convention); every other one of the 47 canonical indices
-// appears exactly once per template.
+// maskToBlobIndex to its canonical blobIndex. Both templates have a
+// duplicated cell (known convention of the reference sheets these were
+// transcribed from): raw byte 255 (full 8-neighbor surround) repeats twice
+// in the 8x6 template; raw byte 0 (isolated) repeats three times -- at the
+// top-left, top-right, and bottom-left corners -- in the 7x7 template.
+// Every other one of the 47 canonical indices appears exactly once per
+// template.
 const BLOB47_8X6_RAW = [
   [0, 4, 92, 112, 28, 124, 116, 64],
   [20, 84, 87, 221, 127, 255, 245, 80],
@@ -86,13 +89,13 @@ const BLOB47_8X6_RAW = [
   [5, 68, 71, 193, 7, 199, 197, 65],
 ];
 const BLOB47_7X7_RAW = [
-  [0, 4, 84, 92, 124, 116, 80],
-  [16, 28, 117, 95, 255, 253, 113],
-  [21, 87, 221, 127, 255, 247, 209],
-  [29, 125, 119, 199, 215, 213, 81],
-  [31, 255, 241, 20, 65, 17, 1],
-  [23, 223, 245, 85, 68, 93, 112],
-  [5, 71, 197, 69, 64, 7, 193],
+  [0, 4, 92, 124, 116, 80, 0],
+  [16, 20, 87, 223, 241, 21, 64],
+  [29, 117, 85, 71, 221, 125, 112],
+  [31, 253, 113, 28, 127, 247, 209],
+  [23, 199, 213, 95, 255, 245, 81],
+  [5, 84, 93, 119, 215, 193, 17],
+  [0, 1, 7, 197, 69, 68, 65],
 ];
 function cellsFromRawGrid(rawGrid) {
   const cells = [];
