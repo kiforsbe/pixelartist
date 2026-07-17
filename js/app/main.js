@@ -66,11 +66,8 @@ const dlgNewSheet = document.getElementById('dlg-newsheet');
 const nsName = document.getElementById('ns-name');
 const nsW = document.getElementById('ns-w');
 const nsH = document.getElementById('ns-h');
-const nsTileW = document.getElementById('ns-tile-w');
-const nsTileH = document.getElementById('ns-tile-h');
 const nsCreate = document.getElementById('ns-create');
 const nsCancel = document.getElementById('ns-cancel');
-const nsTileRowEls = document.querySelectorAll('.ns-tile-row');
 
 const dlgNewProject = document.getElementById('dlg-newproject');
 const npSpriteW = document.getElementById('np-sprite-w');
@@ -101,7 +98,7 @@ function switchMode(mode) {
   // `"frame": null` on export). Clear on every path that reassigns activeSheetId.
   state.selectedFrameId = null;
   state.selectedAnimationId = null;
-  state.selectedTileIndex = null;
+  state.selectedTileId = null;
   state.view = 'sheet';
   // frame/tile tools are mode-exclusive (their palette buttons hide via
   // isAvailable()); fall back to pencil so leaving their mode doesn't strand
@@ -144,7 +141,7 @@ sheetSelect.addEventListener('change', () => {
   // See switchMode's comment above: selections are per-sheet, clear them here too.
   state.selectedFrameId = null;
   state.selectedAnimationId = null;
-  state.selectedTileIndex = null;
+  state.selectedTileId = null;
   state.view = 'sheet';
   emit('view');
 });
@@ -169,7 +166,7 @@ function commitAddSheet(sheet) {
       // See switchMode's comment above: selections are per-sheet, clear them too.
       state.selectedFrameId = null;
       state.selectedAnimationId = null;
-      state.selectedTileIndex = null;
+      state.selectedTileId = null;
       state.view = 'sheet';
       emit('view');
     },
@@ -180,7 +177,7 @@ function commitAddSheet(sheet) {
       state.activeLayerId = prevActiveLayerId;
       state.selectedFrameId = null;
       state.selectedAnimationId = null;
-      state.selectedTileIndex = null;
+      state.selectedTileId = null;
       state.view = 'sheet';
       emit('view');
     },
@@ -191,26 +188,14 @@ function commitAddSheet(sheet) {
 }
 
 // ---- new sheet dialog ----
-function updateNewSheetTileRow() {
-  const show = state.mode === 'tiles';
-  nsTileRowEls.forEach(el => { el.style.display = show ? '' : 'none'; });
-}
 btnNewSheet.addEventListener('click', () => {
   if (!state.project) return;
   const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
   const settings = state.project.settings;
   const n = state.project.sheets.filter(s => s.kind === kind).length + 1;
   nsName.value = `sheet_${n}`;
-  if (kind === 'sprite') {
-    nsW.value = settings.spriteSheetW;
-    nsH.value = settings.spriteSheetH;
-  } else {
-    nsW.value = settings.tileSheetW;
-    nsH.value = settings.tileSheetH;
-    nsTileW.value = settings.tileW;
-    nsTileH.value = settings.tileH;
-  }
-  updateNewSheetTileRow();
+  nsW.value = kind === 'sprite' ? settings.spriteSheetW : settings.tileSheetW;
+  nsH.value = kind === 'sprite' ? settings.spriteSheetH : settings.tileSheetH;
   dlgNewSheet.showModal();
 });
 nsCancel.addEventListener('click', () => dlgNewSheet.close());
@@ -222,21 +207,15 @@ nsCreate.addEventListener('click', () => {
     const v = parseInt(el.value, 10);
     return (Number.isNaN(v) || v < 1) ? null : Math.min(4096, v);
   };
-  const positiveInt = (el) => {
-    const v = parseInt(el.value, 10);
-    return (Number.isNaN(v) || v < 1) ? null : v;
-  };
   const width = sheetDim(nsW);
   const height = sheetDim(nsH);
-  const tileW = kind === 'tile' ? positiveInt(nsTileW) : undefined;
-  const tileH = kind === 'tile' ? positiveInt(nsTileH) : undefined;
-  if (width == null || height == null || (kind === 'tile' && (tileW == null || tileH == null))) {
+  if (width == null || height == null) {
     alert('Please enter valid positive numbers for all fields.');
     return;
   }
   const name = nsName.value.trim() || `sheet_${project.sheets.filter(s => s.kind === kind).length + 1}`;
 
-  const sheet = createSheet(project, { name, width, height, kind, tileW, tileH });
+  const sheet = createSheet(project, { name, width, height, kind });
   commitAddSheet(sheet);
   dlgNewSheet.close();
 });
@@ -265,12 +244,10 @@ btnImportSheet.addEventListener('click', async () => {
     return;
   }
   const project = state.project;
-  const settings = project.settings;
   const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
   const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
   const sheet = createSheet(project, {
     name, width: bitmap.width, height: bitmap.height, kind,
-    tileW: settings.tileW, tileH: settings.tileH,
   });
   sheetLayers(sheet)[0].bitmap = bitmap;
   commitAddSheet(sheet);
