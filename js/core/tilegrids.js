@@ -7,6 +7,7 @@
 // codebase's do()-then-snapshot command idiom — UI callers wrap these with
 // state.commands.push()).
 import { newId } from './palettes.js';
+import { scrubTileReferences } from './model.js';
 
 export function gridCellRect(grid, col, row) {
   return {
@@ -63,6 +64,7 @@ export function resizeGridCols(sheet, grid, cols) {
     const drop = new Set(ownedTiles(sheet, grid.id).filter(t => t.gridCol >= cols));
     removed.push(...drop);
     sheet.tiles = sheet.tiles.filter(t => !drop.has(t));
+    for (const t of drop) scrubTileReferences(sheet, t.id);
   }
   grid.cols = cols;
   return { added, removed };
@@ -82,6 +84,7 @@ export function resizeGridRows(sheet, grid, rows) {
     const drop = new Set(ownedTiles(sheet, grid.id).filter(t => t.gridRow >= rows));
     removed.push(...drop);
     sheet.tiles = sheet.tiles.filter(t => !drop.has(t));
+    for (const t of drop) scrubTileReferences(sheet, t.id);
   }
   grid.rows = rows;
   return { added, removed };

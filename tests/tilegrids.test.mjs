@@ -106,3 +106,14 @@ test('detachTile clears gridId/gridCol/gridRow', () => {
   assert.equal(tiles[0].gridCol, undefined);
   assert.equal(tiles[0].gridRow, undefined);
 });
+
+test('resizeGridCols shrink scrubs dropped tiles from other tiles\' neighbors and any terrain set\'s slots', () => {
+  const s = tileSheet();
+  const { grid, tiles } = createTileGrid(s, { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
+  const [left, right] = tiles;
+  left.neighbors = { e: { mode: 'tile', tileId: right.id, flipH: false, flipV: false } };
+  s.terrainSets.push({ id: 'ts1', name: 'T', tileW: 8, tileH: 8, slots: { 5: right.id }, symmetry: { flip: false, rotate: false } });
+  resizeGridCols(s, grid, 1);
+  assert.deepEqual(left.neighbors.e, { mode: 'empty', tileId: null, flipH: false, flipV: false });
+  assert.deepEqual(s.terrainSets[0].slots, {});
+});

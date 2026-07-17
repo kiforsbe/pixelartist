@@ -2,6 +2,7 @@ import { createBitmap, cloneBitmap, getPixel, setPixel } from './pixels.js';
 import { newId } from './palettes.js';
 import { compositeFloatOnLayer } from './floating.js';
 import { removeEntry } from './strips.js';
+import { NEIGHBOR_DIRS } from './neighbors.js';
 
 export const PROJECT_VERSION = 2;
 export const DEFAULT_SETTINGS = {
@@ -292,6 +293,27 @@ export function renameAnimation(sheet, animId, name) {
   return true;
 }
 
+
+// Clears any dangling reference to a just-removed tile: other tiles'
+// manual neighbor slots, and any terrain set's slot map. Called from every
+// place a tile record is actually dropped from sheet.tiles (deleteTile in
+// tilemode.js, grid-shrink in resizeGridCols/resizeGridRows).
+export function scrubTileReferences(sheet, removedTileId) {
+  for (const tile of sheet.tiles) {
+    if (!tile.neighbors) continue;
+    for (const dir of NEIGHBOR_DIRS) {
+      const slot = tile.neighbors[dir];
+      if (slot?.mode === 'tile' && slot.tileId === removedTileId) {
+        tile.neighbors[dir] = { ...slot, mode: 'empty', tileId: null };
+      }
+    }
+  }
+  for (const ts of sheet.terrainSets ?? []) {
+    for (const idx of Object.keys(ts.slots)) {
+      if (ts.slots[idx] === removedTileId) delete ts.slots[idx];
+    }
+  }
+}
 
 // ---------------------------------------------------------------- serialization
 

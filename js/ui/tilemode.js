@@ -16,6 +16,7 @@ import {
   moveGrid, removeTileGrid, createTileGrid, detachTile,
 } from '../core/tilegrids.js';
 import { newId } from '../core/palettes.js';
+import { scrubTileReferences } from '../core/model.js';
 
 // ------------------------------------------------------------- geometry
 
@@ -223,6 +224,7 @@ function deleteTile(sheet, tileId) {
     label: 'delete tile',
     do() {
       sheet.tiles = sheet.tiles.filter(t => t !== tile);
+      scrubTileReferences(sheet, tile.id);
       if (state.selectedTileId === tile.id) state.selectedTileId = null;
     },
     undo() {

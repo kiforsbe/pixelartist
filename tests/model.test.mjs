@@ -5,6 +5,7 @@ import {
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
+  scrubTileReferences,
 } from '../js/core/model.js';
 import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
 
@@ -154,6 +155,20 @@ test('serializeProject/deserializeProject round-trips terrainSets/terrainLayoutP
   rtTile.tags.push('extra');
   assert.deepEqual(sheet.terrainSets[0].slots, { 0: 'ti1' });
   assert.deepEqual(sheet.tiles[0].tags, ['nature', 'walkable']);
+});
+
+test('scrubTileReferences clears dangling neighbors slots and terrain-set slots pointing at a removed tile', () => {
+  const p = createProject('t');
+  const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
+  const a = { id: 'a', x: 0, y: 0, w: 8, h: 8, name: undefined, gridId: null, neighbors: { n: { mode: 'tile', tileId: 'b', flipH: false, flipV: false } } };
+  const b = { id: 'b', x: 8, y: 0, w: 8, h: 8, name: undefined, gridId: null, neighbors: undefined };
+  sheet.tiles.push(a, b);
+  sheet.terrainSets.push({ id: 'ts1', name: 'Grass', tileW: 8, tileH: 8, slots: { 0: 'b', 1: 'a' }, symmetry: { flip: false, rotate: false } });
+
+  scrubTileReferences(sheet, 'b');
+
+  assert.deepEqual(a.neighbors.n, { mode: 'empty', tileId: null, flipH: false, flipV: false });
+  assert.deepEqual(sheet.terrainSets[0].slots, { 1: 'a' });
 });
 
 test('serialize/deserialize round-trips tileGrids and tiles', () => {
