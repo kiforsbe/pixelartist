@@ -15,12 +15,13 @@ function tile(id, w = 16, h = 16) {
   return { id, x: 0, y: 0, w, h, name: undefined, gridId: null, neighbors: undefined, terrainSetId: undefined, blobIndex: undefined, layer: undefined, tags: undefined };
 }
 
-test('createTerrainSet pushes a set with empty slots and symmetry off', () => {
+test('createTerrainSet pushes a set with empty slots, symmetry off, and no layer', () => {
   const s = tileSheet();
   const ts = createTerrainSet(s, { name: 'Grass', tileW: 16, tileH: 16 });
   assert.equal(s.terrainSets.length, 1);
   assert.deepEqual(ts.slots, {});
   assert.deepEqual(ts.symmetry, { flip: false, rotate: false });
+  assert.equal(ts.layer, null);
 });
 
 test('assignSlot sets both directions of the reference and enforces exclusivity', () => {

@@ -5,7 +5,7 @@
 import { newId } from './palettes.js';
 
 export function createTerrainSet(sheet, { name, tileW, tileH }) {
-  const ts = { id: newId('ts'), name, tileW, tileH, slots: {}, symmetry: { flip: false, rotate: false } };
+  const ts = { id: newId('ts'), name, tileW, tileH, slots: {}, symmetry: { flip: false, rotate: false }, layer: null };
   sheet.terrainSets.push(ts);
   return ts;
 }
