@@ -395,6 +395,67 @@ function commitSplitStrip(anim, index) {
   markDirty();
 }
 
+// Resize = add/remove whole frames at the dragged end. Grow appends blank
+// frames (right: rightward; left: leftward, prepended in order). Shrink
+// removes frames + entries from that end; PIXELS STAY on the sheet by design
+// (growing back re-adopts the art). Neighbor's duration is copied.
+function commitResizeSegment(sheet, d) {
+  const { anim, run, side, fw, fh, bbox } = d;
+  const delta = d.count - d.count0;
+  const beforeSheetFrames = sheet.frames.slice();
+  const beforeEntries = anim.frames.map(e => ({ ...e }));
+  const beforeBreaks = (anim.breaks ?? []).slice();
+  const beforeSelected = state.selectedFrameId;
+  const neighbor = side === 'right' ? anim.frames[run.end - 1] : anim.frames[run.start];
+  const duration = neighbor?.duration ?? (state.project?.settings?.durationMs ?? 100);
+
+  if (delta > 0) {
+    for (let j = 0; j < delta; j++) {
+      const x = side === 'right' ? bbox.x + bbox.w + j * fw : bbox.x - (j + 1) * fw;
+      const frame = addFrame(sheet, {
+        name: `${anim.name}_${anim.frames.length}`, x, y: bbox.y, w: fw, h: fh,
+      });
+      const index = side === 'right' ? run.end + j : run.start;
+      const r = insertEntry(anim.frames, anim.breaks, index, { frameId: frame.id, duration }, side === 'right');
+      anim.frames = r.entries;
+      anim.breaks = r.breaks;
+    }
+  } else {
+    for (let j = 0; j < -delta; j++) {
+      const index = side === 'right' ? run.end - 1 - j : run.start;
+      const frameId = anim.frames[index].frameId;
+      sheet.frames = sheet.frames.filter(f => f.id !== frameId);
+      const r = removeEntry(anim.frames, anim.breaks, index);
+      anim.frames = r.entries;
+      anim.breaks = r.breaks;
+      if (state.selectedFrameId === frameId) state.selectedFrameId = null;
+    }
+  }
+
+  const afterSheetFrames = sheet.frames.slice();
+  const afterEntries = anim.frames.map(e => ({ ...e }));
+  const afterBreaks = anim.breaks.slice();
+  const afterSelected = state.selectedFrameId;
+
+  state.commands.push({
+    label: 'resize strip',
+    do() {
+      sheet.frames = afterSheetFrames.slice();
+      anim.frames = afterEntries.map(e => ({ ...e }));
+      anim.breaks = afterBreaks.slice();
+      state.selectedFrameId = afterSelected;
+    },
+    undo() {
+      sheet.frames = beforeSheetFrames.slice();
+      anim.frames = beforeEntries.map(e => ({ ...e }));
+      anim.breaks = beforeBreaks.slice();
+      state.selectedFrameId = beforeSelected;
+    },
+  });
+  markDirty();
+  emit('selection');
+}
+
 // Delete on a strip member removes the frame AND closes the gap: the rest of
 // its segment shifts left one frame width. model.removeFrame keeps every
 // animation's entries/breaks consistent; snapshots cover them all for undo.
@@ -453,6 +514,16 @@ function handleDown(ev, view) {
     if (anim && run) {
       const g = chromeGeometry(view, sheet, anim, run);
       const part = g && hitChrome(g, ev.sx, ev.sy); // re-verify at the down position
+      if (part?.type === 'grip') {
+        const members = g.members;
+        drag = {
+          kind: 'stripresize', anim, run, side: part.side,
+          fw: g.fw, fh: members[0].h, bbox: g.bbox,
+          count0: members.length, count: members.length,
+        };
+        view.requestRender();
+        return;
+      }
       if (part?.type === 'insert') { commitInsertFrame(sheet, anim, run, part.k); view.requestRender(); return; }
       if (part?.type === 'split') { commitSplitStrip(anim, run.start + part.k); view.requestRender(); return; } // Task 6
     }
@@ -504,6 +575,20 @@ function handleMove(ev, view) {
     drag.snap = (drag.anim && sheet && (drag.delta.dx !== 0 || drag.delta.dy !== 0)) ? findSnap(view, sheet, drag) : null;
   } else if (drag.kind === 'resize') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, false));
+  } else if (drag.kind === 'stripresize') {
+    const sheet = activeSheet();
+    const raw = drag.side === 'right'
+      ? ev.x - (drag.bbox.x + drag.bbox.w)
+      : drag.bbox.x - ev.x;
+    let count = drag.count0 + Math.round(raw / drag.fw);
+    count = Math.max(1, count);
+    if (sheet) {
+      const maxCount = drag.side === 'right'
+        ? Math.floor((sheet.width - drag.bbox.x) / drag.fw)
+        : Math.floor((drag.bbox.x + drag.bbox.w) / drag.fw);
+      count = Math.min(count, Math.max(1, maxCount));
+    }
+    drag.count = count;
   }
   view.requestRender();
 }
@@ -537,6 +622,11 @@ function handleUp(ev, view) {
     const r = d.rect;
     if (r && (r.x !== d.before.x || r.y !== d.before.y || r.w !== d.before.w || r.h !== d.before.h))
       commitResize(d.frame, d.before, r);
+    return;
+  }
+  if (d.kind === 'stripresize') {
+    if (d.count !== d.count0) commitResizeSegment(sheet, d);
+    return;
   }
 }
 
@@ -546,6 +636,14 @@ function strokeGhostRect(ctx, view, rect) {
   const p0 = view.imageToScreen(rect.x, rect.y);
   const p1 = view.imageToScreen(rect.x + rect.w, rect.y + rect.h);
   ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, p1.x - p0.x - 1, p1.y - p0.y - 1);
+}
+
+// Ghost rect for an in-progress edge-grip resize: grows/shrinks from the
+// dragged end while the opposite edge stays put.
+function resizeGhostRect(d) {
+  const w = d.count * d.fw;
+  const x = d.side === 'right' ? d.bbox.x : d.bbox.x + d.bbox.w - w;
+  return { x, y: d.bbox.y, w, h: d.bbox.h };
 }
 
 const FRAME_HANDLE = '#4f8cff';
@@ -648,7 +746,13 @@ function chromeGeometry(view, sheet, anim, run) {
     const p = view.imageToScreen(b.x + k * fw, b.y + b.h);
     splits.push({ k, cx: p.x, cy: p.y + CALLOUT_OFF });
   }
-  return { members, bbox: b, fw, inserts, splits, grips: [] };
+  const p0 = view.imageToScreen(b.x, b.y);
+  const p1 = view.imageToScreen(b.x + b.w, b.y + b.h);
+  const grips = [
+    { side: 'left', x: p0.x - 3, y: p0.y, w: 6, h: p1.y - p0.y },
+    { side: 'right', x: p1.x - 3, y: p0.y, w: 6, h: p1.y - p0.y },
+  ];
+  return { members, bbox: b, fw, inserts, splits, grips };
 }
 
 function hitChrome(g, sx, sy) {
@@ -656,6 +760,9 @@ function hitChrome(g, sx, sy) {
     if (Math.hypot(sx - c.cx, sy - c.cy) <= CALLOUT_R + 2) return { type: 'insert', k: c.k };
   for (const c of g.splits)
     if (Math.hypot(sx - c.cx, sy - c.cy) <= CALLOUT_R + 2) return { type: 'split', k: c.k };
+  for (const gr of g.grips)
+    if (sx >= gr.x - 2 && sx <= gr.x + gr.w + 2 && sy >= gr.y && sy <= gr.y + gr.h)
+      return { type: 'grip', side: gr.side };
   return null;
 }
 
@@ -711,6 +818,13 @@ function drawChrome(ctx, view, sheet) {
     drawCallout(ctx, c, '+', hover.part?.type === 'insert' && hover.part.k === c.k);
   for (const c of g.splits)
     drawCallout(ctx, c, '✂', hover.part?.type === 'split' && hover.part.k === c.k);
+  for (const gr of g.grips) {
+    const active = hover.part?.type === 'grip' && hover.part.side === gr.side;
+    ctx.globalAlpha = active ? 1 : 0.7;
+    ctx.fillStyle = '#4f8cff';
+    ctx.fillRect(gr.x, gr.y, gr.w, gr.h);
+    ctx.globalAlpha = 1;
+  }
   ctx.restore();
 }
 
@@ -763,6 +877,7 @@ function drawFrameToolGhost(ctx, view) {
       strokeGhostRect(ctx, view, { x: drag.bbox.x + dx, y: drag.bbox.y + dy, w: drag.bbox.w, h: drag.bbox.h });
     }
     else if (drag.kind === 'resize' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
+    else if (drag.kind === 'stripresize') strokeGhostRect(ctx, view, resizeGhostRect(drag));
     ctx.restore();
 
     if (drag.kind === 'create' && drag.rect) {
@@ -779,6 +894,18 @@ function drawFrameToolGhost(ctx, view) {
     } else if (drag.kind === 'resize' && drag.rect) {
       drawRectDims(ctx, view, drag.rect, {
         dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h,
+      });
+    } else if (drag.kind === 'stripresize') {
+      const r = resizeGhostRect(drag);
+      drawChainDims(ctx, view, {
+        axis: 'h', edge: r.y + r.h,
+        spans: Array.from({ length: drag.count }, (_, i) =>
+          ({ from: r.x + i * drag.fw, to: r.x + (i + 1) * drag.fw, text: `${drag.fw}` })),
+      });
+      const df = drag.count - drag.count0;
+      drawRectDims(ctx, view, r, {
+        wLevel: 1, hLevel: 0,
+        wOverride: `${r.w}${df ? ` (${df > 0 ? '+' : ''}${df}f)` : ''}`,
       });
     }
 
