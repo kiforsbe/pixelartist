@@ -340,9 +340,10 @@ function migrateLegacyLayers(sheetJson, sheetId, imagesByPath) {
 // Legacy sheets stored one uniform grid as sheet.tile = { tileWidth,
 // tileHeight, names, neighbors }, with every tile's identity implied by its
 // row-major array index. Synthesize the equivalent explicit grid + tiles;
-// name/neighbors carry over unchanged (js/core/neighbors.js's Phase A
-// re-key handles the neighbor shape itself; this only reproduces the old
-// per-index assignment).
+// names carry over unchanged, but neighbor slots referencing another tile
+// by that old array index must be re-keyed onto the new tile's id (see the
+// resolution pass below) since js/core/neighbors.js's Phase A shape keys
+// cross-tile references on tileId, not array position.
 function migrateLegacyTile(sheetJson) {
   const t = sheetJson.tile;
   const cols = Math.floor(sheetJson.width / t.tileWidth);
