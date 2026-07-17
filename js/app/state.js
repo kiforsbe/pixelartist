@@ -19,6 +19,7 @@ export const state = {
   primary: [0, 0, 0, 255], secondary: [255, 255, 255, 255],
   selectedFrameId: null, selectedAnimationId: null,
   selectedTileId: null,       // tile tool selection (tile mode)
+  selectedTerrainSetId: null, // which terrain set's slot editor is open in the panel
   editingFrameId: null,       // frame editor target
   editingTileId: null,        // tile editor target
   onion: { enabled: false, back: 1, ahead: 1 },

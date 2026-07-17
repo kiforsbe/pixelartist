@@ -21,8 +21,31 @@ import {
   createTerrainSet, removeTerrainSet, assignSlot, clearSlot,
   detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset,
 } from '../core/terrainsets.js';
+import {
+  NEIGHBOR_BITS, blobIndexToMask, SIXTEEN_TILE_INDICES, resolveTerrainSlot,
+} from '../core/blob47.js';
 
 // ------------------------------------------------------------- geometry
+
+// Groups the 47 canonical blob indices by how many of the 8 bits are set
+// in their representative mask (the "staircase" layout: isolated alone,
+// then single-edge variants, etc, up to the full 8-neighbor surround).
+function blobStaircaseGroups() {
+  const groups = new Map();
+  blobIndexToMask.forEach((mask, blobIndex) => {
+    let count = 0;
+    for (let b = 1; b <= 128; b <<= 1) if (mask & b) count++;
+    if (!groups.has(count)) groups.set(count, []);
+    groups.get(count).push(blobIndex);
+  });
+  return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, indices]) => indices);
+}
+
+function describeMask(mask) {
+  const names = { [NEIGHBOR_BITS.N]: 'N', [NEIGHBOR_BITS.NE]: 'NE', [NEIGHBOR_BITS.E]: 'E', [NEIGHBOR_BITS.SE]: 'SE', [NEIGHBOR_BITS.S]: 'S', [NEIGHBOR_BITS.SW]: 'SW', [NEIGHBOR_BITS.W]: 'W', [NEIGHBOR_BITS.NW]: 'NW' };
+  const parts = Object.keys(names).filter(b => mask & Number(b)).map(b => names[b]);
+  return parts.length ? parts.join(' + ') : 'isolated';
+}
 
 function tileAt(sheet, x, y) {
   for (let i = sheet.tiles.length - 1; i >= 0; i--) {
@@ -779,6 +802,129 @@ function buildAddGridDialog() {
   };
 }
 
+// ------------------------------------------------------------- terrain sets
+
+function buildAddTerrainSetDialog() {
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `
+    <h3>Add terrain set</h3>
+    <div class="row"><label>Name <input type="text" id="ats-name" value="Terrain"></label></div>
+    <div class="row"><label>Tile W <input type="number" id="ats-tilew" min="1" value="16"></label></div>
+    <div class="row"><label>Tile H <input type="number" id="ats-tileh" min="1" value="16"></label></div>
+    <div class="row"><button type="button" id="ats-create">Create</button><button type="button" id="ats-cancel">Cancel</button></div>
+  `;
+  document.body.appendChild(dlg);
+  const $ = (sel) => dlg.querySelector(sel);
+  $('#ats-cancel').addEventListener('click', () => dlg.close());
+  $('#ats-create').addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet) { dlg.close(); return; }
+    const intVal = (el) => Math.max(1, parseInt(el.value, 10) || 1);
+    commitAddTerrainSet(sheet, {
+      name: $('#ats-name').value.trim() || 'Terrain',
+      tileW: intVal($('#ats-tilew')), tileH: intVal($('#ats-tileh')),
+    });
+    dlg.close();
+  });
+  return {
+    open() {
+      const settings = state.project?.settings ?? {};
+      $('#ats-tilew').value = String(settings.tileW ?? 16);
+      $('#ats-tileh').value = String(settings.tileH ?? 16);
+      dlg.showModal();
+    },
+  };
+}
+
+function buildTilePickerDialog() {
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `
+    <h3>Assign tile</h3>
+    <div class="row"><label>Tile <select id="tp-select"></select></label></div>
+    <div class="row"><button type="button" id="tp-ok">OK</button><button type="button" id="tp-clear">Clear</button><button type="button" id="tp-cancel">Cancel</button></div>
+  `;
+  document.body.appendChild(dlg);
+  const $ = (sel) => dlg.querySelector(sel);
+  let onPick = null, onClear = null;
+  $('#tp-cancel').addEventListener('click', () => dlg.close());
+  $('#tp-ok').addEventListener('click', () => { onPick?.($('#tp-select').value); dlg.close(); });
+  $('#tp-clear').addEventListener('click', () => { onClear?.(); dlg.close(); });
+  return {
+    open(sheet, terrainSet, currentTileId, pick, clear) {
+      onPick = pick; onClear = clear;
+      const select = $('#tp-select');
+      select.innerHTML = '';
+      sheet.tiles
+        .filter(t => t.w === terrainSet.tileW && t.h === terrainSet.tileH)
+        .forEach((t, i) => {
+          const opt = document.createElement('option');
+          opt.value = t.id;
+          opt.textContent = t.name ? `${i}: ${t.name}` : `#${i}`;
+          select.appendChild(opt);
+        });
+      if (currentTileId) select.value = currentTileId;
+      dlg.showModal();
+    },
+  };
+}
+
+function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) {
+  container.innerHTML = '';
+
+  const symRow = document.createElement('div');
+  symRow.className = 'row';
+  const flipCb = document.createElement('input'); flipCb.type = 'checkbox'; flipCb.checked = terrainSet.symmetry.flip;
+  flipCb.addEventListener('change', () => commitSetSymmetry(terrainSet, 'flip', flipCb.checked));
+  const rotCb = document.createElement('input'); rotCb.type = 'checkbox'; rotCb.checked = terrainSet.symmetry.rotate;
+  rotCb.addEventListener('change', () => commitSetSymmetry(terrainSet, 'rotate', rotCb.checked));
+  const flipLabel = document.createElement('label'); flipLabel.append(flipCb, document.createTextNode(' Allow flip'));
+  const rotLabel = document.createElement('label'); rotLabel.append(rotCb, document.createTextNode(' Allow rotation'));
+  symRow.append(flipLabel, rotLabel);
+  container.appendChild(symRow);
+
+  for (const group of blobStaircaseGroups()) {
+    const groupRow = document.createElement('div');
+    groupRow.className = 'terrain-slot-group';
+    for (const blobIndex of group) {
+      const resolved = resolveTerrainSlot(terrainSet, blobIndex);
+      const isExplicit = terrainSet.slots[blobIndex] != null;
+      const cell = document.createElement('div');
+      cell.className = 'terrain-slot';
+      if (SIXTEEN_TILE_INDICES.has(blobIndex)) cell.classList.add('core');
+      if (resolved && !isExplicit) cell.classList.add('derived');
+
+      const mask = blobIndexToMask[blobIndex];
+      let title = describeMask(mask);
+      if (resolved && !isExplicit) title += ` (derived: flipH=${resolved.flipH}, rotate=${resolved.rotate})`;
+      cell.title = title;
+
+      if (resolved) {
+        const tile = sheet.tiles.find(t => t.id === resolved.tileId);
+        if (tile) {
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = (resolved.flipH || resolved.flipV) ? 'F' : (resolved.rotate ? `${resolved.rotate}°` : '');
+          cell.appendChild(badge);
+        }
+      }
+
+      cell.addEventListener('click', () => {
+        tilePickerDialog.open(sheet, terrainSet, terrainSet.slots[blobIndex] ?? null,
+          (tileId) => {
+            const tile = sheet.tiles.find(t => t.id === tileId);
+            if (tile) commitAssignSlot(sheet, terrainSet, blobIndex, tile);
+          },
+          () => {
+            const owner = sheet.tiles.find(t => t.id === terrainSet.slots[blobIndex]);
+            commitClearSlot(terrainSet, blobIndex, owner);
+          });
+      });
+      groupRow.appendChild(cell);
+    }
+    container.appendChild(groupRow);
+  }
+}
+
 // ------------------------------------------------------------- tile/grid panel
 
 function sizeField(labelText, value, onCommit) {
@@ -822,6 +968,23 @@ export function mountTilePanel(el) {
   btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
   wrap.appendChild(btnAddGrid);
 
+  const addTerrainSetDialog = buildAddTerrainSetDialog();
+  const tilePickerDialog = buildTilePickerDialog();
+
+  const terrainSetList = document.createElement('div');
+  terrainSetList.className = 'terrain-set-list';
+  wrap.appendChild(terrainSetList);
+
+  const btnAddTerrainSet = document.createElement('button');
+  btnAddTerrainSet.type = 'button';
+  btnAddTerrainSet.textContent = 'Add Terrain Set…';
+  btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
+  wrap.appendChild(btnAddTerrainSet);
+
+  const terrainSetEditor = document.createElement('div');
+  terrainSetEditor.className = 'terrain-set-editor';
+  wrap.appendChild(terrainSetEditor);
+
   const countRow = document.createElement('div');
   countRow.className = 'row';
   wrap.appendChild(countRow);
@@ -854,6 +1017,34 @@ export function mountTilePanel(el) {
       btnDel.addEventListener('click', () => commitDeleteGrid(sheet, grid));
       row.appendChild(btnDel);
       gridList.appendChild(row);
+    }
+
+    terrainSetList.innerHTML = '';
+    for (const ts of sheet.terrainSets) {
+      const row = document.createElement('div');
+      row.className = 'row terrain-set-row';
+      const nameBtn = document.createElement('button');
+      nameBtn.type = 'button';
+      nameBtn.textContent = `${ts.name} (${ts.tileW}×${ts.tileH})`;
+      nameBtn.addEventListener('click', () => {
+        state.selectedTerrainSetId = state.selectedTerrainSetId === ts.id ? null : ts.id;
+        schedule();
+      });
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.textContent = 'Delete';
+      btnDel.addEventListener('click', () => {
+        commitDeleteTerrainSet(sheet, ts.id);
+        if (state.selectedTerrainSetId === ts.id) state.selectedTerrainSetId = null;
+      });
+      row.append(nameBtn, btnDel);
+      terrainSetList.appendChild(row);
+    }
+
+    const selectedTerrainSet = sheet.terrainSets.find(ts => ts.id === state.selectedTerrainSetId);
+    terrainSetEditor.innerHTML = '';
+    if (selectedTerrainSet) {
+      renderTerrainSetEditor(terrainSetEditor, sheet, selectedTerrainSet, tilePickerDialog);
     }
 
     const count = sheet.tiles.length;
