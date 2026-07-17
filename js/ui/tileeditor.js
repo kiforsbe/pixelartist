@@ -43,6 +43,7 @@ import { CanvasView } from './canvasview.js';
 import { bindDrawing } from './tools.js';
 import { flattenSheet } from '../core/model.js';
 import { getPreset, setSlot, resolveNeighborGrid } from '../core/neighbors.js';
+import { terrainPreviewCells } from '../core/blob47.js';
 
 function isTypingTarget(el) {
   if (!el) return false;
@@ -83,6 +84,10 @@ export function mountTileEditor(hostEl) {
   const nameLabel = document.createElement('span');
   nameLabel.className = 'tile-editor-name';
 
+  const terrainLabel = document.createElement('span');
+  terrainLabel.className = 'tile-editor-terrain-label';
+  terrainLabel.hidden = true;
+
   const radiusLabel = document.createElement('label');
   radiusLabel.className = 'tile-editor-radius';
   const radiusSelect = document.createElement('select');
@@ -91,7 +96,7 @@ export function mountTileEditor(hostEl) {
   radiusSelect.append(opt3, opt5);
   radiusLabel.append(document.createTextNode('Neighbors '), radiusSelect);
 
-  strip.append(btnBack, nameLabel, radiusLabel);
+  strip.append(btnBack, nameLabel, terrainLabel, radiusLabel);
 
   // ---- canvas ----
   const canvasHostDiv = document.createElement('div');
@@ -198,8 +203,7 @@ export function mountTileEditor(hostEl) {
     if (!sheet || !t) return;
     const tw = t.w, th = t.h;
     const flat = getFlatCanvas(sheet);
-    const preset = getPreset(t);
-    const cells = resolveNeighborGrid(preset, t.id, radius);
+    const cells = t.terrainSetId != null ? terrainPreviewCells(t) : resolveNeighborGrid(getPreset(t), t.id, radius);
 
     ctx.save();
     ctx.globalAlpha = 0.85;
@@ -261,7 +265,7 @@ export function mountTileEditor(hostEl) {
   function openSlotDialog(dir) {
     const sheet = activeSheet();
     const t = currentTile();
-    if (!sheet || !t) return;
+    if (!sheet || !t || t.terrainSetId != null) return;
     dialogDir = dir;
     const slot = getPreset(t)[dir];
     teDirSpan.textContent = `${DIR_LABELS[dir]} (${dir})`;
@@ -360,6 +364,13 @@ export function mountTileEditor(hostEl) {
     const idx = sheet.tiles.indexOf(t);
     nameLabel.textContent = t.name ? `Tile ${idx} (${t.name})` : `Tile ${idx}`;
     radiusSelect.value = String(radius);
+    if (t.terrainSetId != null) {
+      const ts = sheet.terrainSets.find(x => x.id === t.terrainSetId);
+      terrainLabel.textContent = ts ? `Terrain: ${ts.name} — neighbors follow the terrain set automatically` : '';
+      terrainLabel.hidden = !ts;
+    } else {
+      terrainLabel.hidden = true;
+    }
   }
 
   radiusSelect.addEventListener('change', () => {
