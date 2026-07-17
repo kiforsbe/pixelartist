@@ -133,6 +133,9 @@ is a pass condition for the whole run, not just the final step.
 34. [A] Switch to Tile Sheets tab on a fresh tile sheet: tile panel shows
     "0 tiles", no grids listed, an "Add Grid…" button, and "No tile
     selected".
+34b. [A] The Tile Sheets tab shows two separate sidebar panels: "Tiles"
+    (grid list, Add Grid, tile detail) and "Autotiles" (terrain sets, view
+    modes, Tile Layers) — both hidden while on the Sprite Sheets tab.
 35. [A] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
     X/Y, defaulted from the project's tile size setting) with a live
     dashed-outline preview on the canvas that updates as fields change and
@@ -193,9 +196,30 @@ is a pass condition for the whole run, not just the final step.
 48. [A] Clicking a terrain set's row opens its 47-slot editor below,
     grouped in ascending neighbor-count rows; the 16 core slots show a
     distinct (blue, thicker) border.
+48b. [A] Terrain-set editor's "View" dropdown (Staircase / Grid 6×8 / Grid
+    7×7 / 16-tile only) rearranges the same 47 slots on screen without
+    changing any slot's assignment (cosmetic only); the layout-preset
+    dropdown (Import/Save row) lists "Blob-47 (8×6)" (the corrected/renamed
+    former "6×8, ascending" built-in) and "Blob-47 (7×7)" alongside the
+    4×4 16-tile built-in — both now use the real reference template
+    mapping rather than ascending index order, so importing a matching
+    grid of real terrain art places visually-continuous tiles into their
+    slots.
+48c. [A] Toggling "Allow flip"/"Allow rotation" immediately reclassifies
+    each slot as mandatory (solid border) or optional (dashed border)
+    based on symmetry alone, independent of whether the slot currently has
+    a tile assigned. A filled slot shows the actual tile's cropped pixels
+    as its background, with a small ↔/↕/↻ icon overlay only when that
+    fill came from symmetry (not an explicit assignment).
 49. [A] Clicking an empty slot opens the tile picker (filtered to tiles
     matching the terrain set's size); assigning a tile fills that slot;
     "Clear" empties it again.
+49b. [A] Opening the tile picker for an unfilled slot shows, without
+    hovering: the slot's direction description (e.g. "N + E"), a
+    Mandatory/Optional label, and a 3×3 diagram shading which neighbor
+    cells are filled. The body is a clickable grid of live tile thumbnails
+    (not a dropdown); clicking one assigns it immediately and closes the
+    dialog. A tile with fully transparent pixels still appears in the grid.
 50. [A] Toggling "Allow flip" / "Allow rotation" changes which otherwise-
     empty slots show a derived (dashed-border) state, with a badge/tooltip
     reflecting a real flip or rotation transform (not identity).
@@ -213,12 +237,21 @@ is a pass condition for the whole run, not just the final step.
     before this feature.
 55. [A] Layers list: Add/rename/reorder (↑/↓)/Delete all work; deleting a
     layer name clears it from any tile that had it selected.
+55b. [A] The Tile Layers section (in the Autotiles panel) reads "Tile
+    Layers", with an icon-only Add button and hover tooltips on its
+    add/up/down/delete controls; it is visually and structurally
+    independent from the app's real Layers panel. A terrain set's own
+    Layer dropdown (next to its symmetry checkboxes) sets that set's
+    layer without changing any member tile's own Layer selection.
 56. [A] Tile detail panel: Layer dropdown lists the Layers list plus
     "(none)"; Tags field accepts a comma-separated list and round-trips on
     reselecting the tile.
 57. [A] Tiles JSON export: a sheet with a filled terrain set and layers
     produces the new `terrainSets`/`layers` top-level keys, and a
     terrain-set tile's exported entry has no `neighbors` key.
+57b. [A] Tiles JSON export: a terrain set with a Layer selected includes a
+    `layer` key in its `terrainSets[]` entry; omitted when the set has no
+    layer selected.
 
 ## 10. Exports
 
