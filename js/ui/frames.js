@@ -15,7 +15,7 @@
 import { state, on, emit, activeSheet, markDirty } from '../app/state.js';
 import { addFrame, removeFrame, addAnimation } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
-import { findFreeRect, buildStripFrames } from '../core/strips.js';
+import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
 import { drawRectDims, drawChainDims } from './dimlabels.js';
@@ -90,6 +90,14 @@ function frameAt(sheet, x, y) {
 export function stripOf(sheet, frameId) {
   if (!sheet) return null;
   return sheet.animations.find(a => a.strip && a.frames.some(af => af.frameId === frameId)) ?? null;
+}
+
+// Frame objects of one segment run, in animation order (=== spatial order per
+// the segment invariant). Skips dangling frameIds defensively.
+function segmentMembers(sheet, anim, run) {
+  return anim.frames.slice(run.start, run.end)
+    .map(e => sheet.frames.find(f => f.id === e.frameId))
+    .filter(Boolean);
 }
 
 // Union bounding box of a list of frames (their CURRENT x/y/w/h) — used both
@@ -247,11 +255,13 @@ function handleDown(ev, view) {
   if (hit) {
     if (state.selectedFrameId !== hit.id) { state.selectedFrameId = hit.id; emit('selection'); }
     // If `hit` belongs to an intact strip, the drag targets every member of
-    // that strip together (move-as-unit); otherwise just the single frame.
+    // the grabbed SEGMENT together (move-as-unit); otherwise just the single frame.
     const strip = stripOf(sheet, hit.id);
-    const members = strip ? sheet.frames.filter(f => strip.frames.some(af => af.frameId === f.id)) : [hit];
+    const run = strip ? segmentOfFrame(strip, hit.id) : null;
+    const members = run ? segmentMembers(sheet, strip, run) : [hit];
     drag = {
-      kind: 'move', frame: hit, members, bbox: boundingBoxOf(members),
+      kind: 'move', frame: hit, anim: strip, run, members, snap: null,
+      bbox: boundingBoxOf(members),
       anchor: { x: ev.x, y: ev.y }, delta: { dx: 0, dy: 0 },
     };
     view.requestRender();
@@ -386,12 +396,39 @@ function drawSlicePreview(ctx, view, sheet) {
   });
 }
 
+// A split whose halves haven't moved yet is invisible geometry — mark it.
+function drawBreakSeparators(ctx, view, sheet) {
+  ctx.save();
+  ctx.strokeStyle = '#ffb454';
+  ctx.setLineDash([3, 3]);
+  ctx.lineWidth = 1;
+  for (const a of sheet.animations) {
+    if (!a.strip) continue;
+    const runs = segmentsOf(a);
+    for (let i = 1; i < runs.length; i++) {
+      const prev = segmentMembers(sheet, a, runs[i - 1]);
+      const next = segmentMembers(sheet, a, runs[i]);
+      if (!prev.length || !next.length) continue;
+      const pl = prev[prev.length - 1], nf = next[0];
+      if (nf.x !== pl.x + pl.w || nf.y !== pl.y) continue;
+      const p0 = view.imageToScreen(nf.x, nf.y);
+      const p1 = view.imageToScreen(nf.x, nf.y + nf.h);
+      ctx.beginPath();
+      ctx.moveTo(p0.x + 0.5, p0.y);
+      ctx.lineTo(p1.x + 0.5, p1.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 function drawFrameToolGhost(ctx, view) {
   if (state.mode !== 'sprites') return;
   const sheet = activeSheet();
   if (!sheet) return;
 
   if (slicePreviewOpts) drawSlicePreview(ctx, view, sheet);
+  if (state.tool === 'frametool') drawBreakSeparators(ctx, view, sheet);
 
   if (drag) {
     ctx.save();
@@ -427,7 +464,8 @@ function drawFrameToolGhost(ctx, view) {
     const selected = sheet.frames.find(f => f.id === state.selectedFrameId);
     const strip = selected ? stripOf(sheet, selected.id) : null;
     if (selected && !drag) {
-      const members = strip ? sheet.frames.filter(f => strip.frames.some(af => af.frameId === f.id)) : null;
+      const run = strip ? segmentOfFrame(strip, selected.id) : null;
+      const members = run ? segmentMembers(sheet, strip, run) : null;
       // A 1-member strip degenerates to the plain single-frame case (no
       // chain, no level-1 row) — matching the drag path's members.length gate.
       if (members && members.length > 1) drawStripDims(ctx, view, members, 0, 0, { quiet: true });
