@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createProject, createSheet, addFrame, addAnimation } from '../js/core/model.js';
 import { createTileGrid } from '../js/core/tilegrids.js';
 import { setSlot } from '../js/core/neighbors.js';
+import { createTerrainSet, assignSlot } from '../js/core/terrainsets.js';
 import { buildFramesJson, buildTilesJson } from '../js/app/exports.js';
 
 test('buildFramesJson: shape, indices, and animation frames-by-name', () => {
@@ -75,4 +76,41 @@ test('buildTilesJson: unnamed, unset tiles are excluded entirely', () => {
   const json = buildTilesJson(sheet);
   assert.equal(json.count, 2);
   assert.deepEqual(json.tiles, []);
+});
+
+test('buildTilesJson: terrainSets export resolved {tileIndex,flipH,flipV,rotate} slots, omitted entirely when empty', () => {
+  const p = createProject('t');
+  const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
+  sheet.tiles.push({ id: 't0', x: 0, y: 0, w: 16, h: 16, name: undefined, gridId: null, neighbors: undefined, terrainSetId: undefined, blobIndex: undefined, layer: undefined, tags: undefined });
+  let json = buildTilesJson(sheet);
+  assert.equal(json.terrainSets, undefined);
+  assert.equal(json.layers, undefined);
+
+  const ts = createTerrainSet(sheet, { name: 'Grass', tileW: 16, tileH: 16 });
+  assignSlot(sheet, ts, 0, sheet.tiles[0]); // blobIndex 0 = isolated/no-neighbors
+  json = buildTilesJson(sheet);
+  assert.equal(json.terrainSets.length, 1);
+  assert.equal(json.terrainSets[0].name, 'Grass');
+  assert.deepEqual(json.terrainSets[0].slots['0'], { tileIndex: 0, flipH: false, flipV: false, rotate: 0 });
+});
+
+test('buildTilesJson: layers export as an ordered array, per-tile layer/tags included, omitted when unset', () => {
+  const p = createProject('t');
+  const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
+  sheet.layers.push('Ground', 'Props');
+  sheet.tiles.push({ id: 't0', x: 0, y: 0, w: 16, h: 16, name: 'grass', gridId: null, neighbors: undefined, terrainSetId: undefined, blobIndex: undefined, layer: 'Ground', tags: ['nature'] });
+  const json = buildTilesJson(sheet);
+  assert.deepEqual(json.layers, ['Ground', 'Props']);
+  assert.equal(json.tiles[0].layer, 'Ground');
+  assert.deepEqual(json.tiles[0].tags, ['nature']);
+});
+
+test('buildTilesJson: a terrain-set tile omits the manual neighbors block', () => {
+  const p = createProject('t');
+  const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
+  sheet.tiles.push({ id: 't0', x: 0, y: 0, w: 16, h: 16, name: 'grass', gridId: null, neighbors: { n: { mode: 'same', tileId: null, flipH: false, flipV: false } }, terrainSetId: undefined, blobIndex: undefined, layer: undefined, tags: undefined });
+  const ts = createTerrainSet(sheet, { name: 'Grass', tileW: 16, tileH: 16 });
+  assignSlot(sheet, ts, 0, sheet.tiles[0]);
+  const json = buildTilesJson(sheet);
+  assert.equal(json.tiles[0].neighbors, undefined);
 });
