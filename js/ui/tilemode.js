@@ -1109,42 +1109,10 @@ export function mountTilePanel(el) {
   const addGridDialog = buildAddGridDialog();
   const btnAddGrid = document.createElement('button');
   btnAddGrid.type = 'button';
-  btnAddGrid.textContent = 'Add Grid…';
+  btnAddGrid.textContent = '➕';
+  btnAddGrid.title = 'Add grid';
   btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
   wrap.appendChild(btnAddGrid);
-
-  const addTerrainSetDialog = buildAddTerrainSetDialog();
-  const tilePickerDialog = buildTilePickerDialog();
-
-  const terrainSetList = document.createElement('div');
-  terrainSetList.className = 'terrain-set-list';
-  wrap.appendChild(terrainSetList);
-
-  const btnAddTerrainSet = document.createElement('button');
-  btnAddTerrainSet.type = 'button';
-  btnAddTerrainSet.textContent = 'Add Terrain Set…';
-  btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
-  wrap.appendChild(btnAddTerrainSet);
-
-  const terrainSetEditor = document.createElement('div');
-  terrainSetEditor.className = 'terrain-set-editor';
-  wrap.appendChild(terrainSetEditor);
-
-  const layerList = document.createElement('div');
-  layerList.className = 'layer-list';
-  wrap.appendChild(layerList);
-
-  const btnAddLayerName = document.createElement('button');
-  btnAddLayerName.type = 'button';
-  btnAddLayerName.textContent = 'Add Layer Name…';
-  btnAddLayerName.addEventListener('click', () => {
-    const sheet = activeSheet();
-    if (!sheet) return;
-    const name = prompt('Layer name?');
-    if (!name) return;
-    commitAddLayerName(sheet, name);
-  });
-  wrap.appendChild(btnAddLayerName);
 
   const countRow = document.createElement('div');
   countRow.className = 'row';
@@ -1179,50 +1147,6 @@ export function mountTilePanel(el) {
       row.appendChild(btnDel);
       gridList.appendChild(row);
     }
-
-    terrainSetList.innerHTML = '';
-    for (const ts of sheet.terrainSets) {
-      const row = document.createElement('div');
-      row.className = 'row terrain-set-row';
-      const nameBtn = document.createElement('button');
-      nameBtn.type = 'button';
-      nameBtn.textContent = `${ts.name} (${ts.tileW}×${ts.tileH})`;
-      nameBtn.addEventListener('click', () => {
-        state.selectedTerrainSetId = state.selectedTerrainSetId === ts.id ? null : ts.id;
-        schedule();
-      });
-      const btnDel = document.createElement('button');
-      btnDel.type = 'button';
-      btnDel.textContent = 'Delete';
-      btnDel.addEventListener('click', () => {
-        commitDeleteTerrainSet(sheet, ts.id);
-        if (state.selectedTerrainSetId === ts.id) state.selectedTerrainSetId = null;
-      });
-      row.append(nameBtn, btnDel);
-      terrainSetList.appendChild(row);
-    }
-
-    const selectedTerrainSet = sheet.terrainSets.find(ts => ts.id === state.selectedTerrainSetId);
-    terrainSetEditor.innerHTML = '';
-    if (selectedTerrainSet) {
-      renderTerrainSetEditor(terrainSetEditor, sheet, selectedTerrainSet, tilePickerDialog);
-    }
-
-    layerList.innerHTML = '';
-    sheet.layers.forEach((name, i) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      const label = document.createElement('span');
-      label.textContent = name;
-      const btnUp = document.createElement('button'); btnUp.type = 'button'; btnUp.textContent = '↑';
-      btnUp.addEventListener('click', () => commitMoveLayerName(sheet, i, -1));
-      const btnDown = document.createElement('button'); btnDown.type = 'button'; btnDown.textContent = '↓';
-      btnDown.addEventListener('click', () => commitMoveLayerName(sheet, i, 1));
-      const btnDel = document.createElement('button'); btnDel.type = 'button'; btnDel.textContent = 'Delete';
-      btnDel.addEventListener('click', () => commitRemoveLayerName(sheet, name));
-      row.append(label, btnUp, btnDown, btnDel);
-      layerList.appendChild(row);
-    });
 
     const count = sheet.tiles.length;
     countRow.textContent = `${count} tile${count === 1 ? '' : 's'}`;
@@ -1277,6 +1201,119 @@ export function mountTilePanel(el) {
     tagsInput.addEventListener('change', () => commitTileTags(tile, tagsInput.value));
 
     selRow.append(layerSelect, tagsInput);
+  }
+
+  let queued = false;
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => { queued = false; render(); });
+  }
+  on('project', schedule);
+  on('history', schedule);
+  on('view', schedule);
+  on('selection', schedule);
+  render();
+}
+
+// Shares no DOM with mountTilePanel — mounts into its own #panel-autotiles
+// sibling. Owns terrain sets, the terrain-set slot editor, and the Tile
+// Layers manager (props/terrain/walls categorization) -- kept separate from
+// mountTilePanel because it's the more complex consumer of sheet.layers,
+// even though mountTilePanel's own tile-detail layer <select> reads the
+// same array.
+export function mountAutotilesPanel(el) {
+  const wrap = document.createElement('div');
+  el.appendChild(wrap);
+
+  const h3 = document.createElement('h3');
+  h3.textContent = 'Autotiles';
+  wrap.appendChild(h3);
+
+  const addTerrainSetDialog = buildAddTerrainSetDialog();
+  const tilePickerDialog = buildTilePickerDialog();
+
+  const terrainSetList = document.createElement('div');
+  terrainSetList.className = 'terrain-set-list';
+  wrap.appendChild(terrainSetList);
+
+  const btnAddTerrainSet = document.createElement('button');
+  btnAddTerrainSet.type = 'button';
+  btnAddTerrainSet.textContent = '➕';
+  btnAddTerrainSet.title = 'Add terrain set';
+  btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
+  wrap.appendChild(btnAddTerrainSet);
+
+  const terrainSetEditor = document.createElement('div');
+  terrainSetEditor.className = 'terrain-set-editor';
+  wrap.appendChild(terrainSetEditor);
+
+  const layerList = document.createElement('div');
+  layerList.className = 'layer-list';
+  wrap.appendChild(layerList);
+
+  const btnAddLayerName = document.createElement('button');
+  btnAddLayerName.type = 'button';
+  btnAddLayerName.textContent = 'Add Layer Name…';
+  btnAddLayerName.addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    const name = prompt('Layer name?');
+    if (!name) return;
+    commitAddLayerName(sheet, name);
+  });
+  wrap.appendChild(btnAddLayerName);
+
+  function render() {
+    if (state.mode !== 'tiles') { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    const sheet = activeSheet();
+    terrainSetList.innerHTML = '';
+    terrainSetEditor.innerHTML = '';
+    layerList.innerHTML = '';
+    if (!sheet) return;
+
+    for (const ts of sheet.terrainSets) {
+      const row = document.createElement('div');
+      row.className = 'row terrain-set-row';
+      const nameBtn = document.createElement('button');
+      nameBtn.type = 'button';
+      nameBtn.textContent = `${ts.name} (${ts.tileW}×${ts.tileH})`;
+      nameBtn.addEventListener('click', () => {
+        state.selectedTerrainSetId = state.selectedTerrainSetId === ts.id ? null : ts.id;
+        schedule();
+      });
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.textContent = '🗑';
+      btnDel.title = 'Delete terrain set';
+      btnDel.addEventListener('click', () => {
+        commitDeleteTerrainSet(sheet, ts.id);
+        if (state.selectedTerrainSetId === ts.id) state.selectedTerrainSetId = null;
+      });
+      row.append(nameBtn, btnDel);
+      terrainSetList.appendChild(row);
+    }
+
+    const selectedTerrainSet = sheet.terrainSets.find(ts => ts.id === state.selectedTerrainSetId);
+    if (selectedTerrainSet) {
+      renderTerrainSetEditor(terrainSetEditor, sheet, selectedTerrainSet, tilePickerDialog);
+    }
+
+    sheet.layers.forEach((name, i) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const label = document.createElement('span');
+      label.textContent = name;
+      const btnUp = document.createElement('button'); btnUp.type = 'button'; btnUp.textContent = '↑';
+      btnUp.addEventListener('click', () => commitMoveLayerName(sheet, i, -1));
+      const btnDown = document.createElement('button'); btnDown.type = 'button'; btnDown.textContent = '↓';
+      btnDown.addEventListener('click', () => commitMoveLayerName(sheet, i, 1));
+      const btnDel = document.createElement('button'); btnDel.type = 'button'; btnDel.textContent = 'Delete';
+      btnDel.addEventListener('click', () => commitRemoveLayerName(sheet, name));
+      row.append(label, btnUp, btnDown, btnDel);
+      layerList.appendChild(row);
+    });
   }
 
   let queued = false;
