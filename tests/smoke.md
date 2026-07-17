@@ -133,7 +133,7 @@ is a pass condition for the whole run, not just the final step.
 34. [A] Switch to Tile Sheets tab on a fresh tile sheet: tile panel shows
     "0 tiles", no grids listed, an "Add Grid…" button, and "No tile
     selected".
-35. [M] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
+35. [A] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
     X/Y, defaulted from the project's tile size setting) with a live
     dashed-outline preview on the canvas that updates as fields change and
     disappears on Cancel. Create adds a grid; the panel now lists it with
@@ -177,9 +177,10 @@ is a pass condition for the whole run, not just the final step.
     escape the center tile even if the drag leaves it).
 45. [A] Click a neighbor slot (outside the center tile, no drag) to open
     the slot config dialog; the "Other tile" field is now a dropdown
-    listing every tile on the sheet (by name, or `#index` if unnamed) —
-    try each mode (`same tile` / `other tile` + selection / `empty`), and
-    Flip H/V; OK commits, undo restores the prior preset for that slot.
+    listing every tile on the sheet (`"{index}: {name}"`, or `#index` if
+    unnamed) — try each mode (`same tile` / `other tile` + selection /
+    `empty`), and Flip H/V; OK commits, undo restores the prior preset for
+    that slot.
 46. [A] Switch the neighbor radius to 5×5 and back to 3×3; grid resizes
     and recenters, sized from the edited tile's own W/H (not a sheet-wide
     size).
