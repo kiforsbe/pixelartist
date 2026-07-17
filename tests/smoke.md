@@ -77,9 +77,13 @@ is a pass condition for the whole run, not just the final step.
 ## 5. Frames
 
 20. [A] Switch to frame tool (`F`, sprite mode only). Drag to create a
-    frame; it appears in the Frames panel and as an overlay on the
-    canvas (labels/sequence overlay toggles in the top bar affect
-    visibility).
+    frame; it appears as an overlay on the canvas (labels/sequence overlay
+    toggles in the top bar affect visibility). The Frames panel shows a
+    detail block for the SELECTED frame only (hint text when nothing is
+    selected); selecting a strip member shows one strip-wide block instead
+    — name renames the animation and every member, X/Y move the whole
+    strip rigidly, W/H set the shared frame size (W re-lays each sub-strip
+    contiguously), pivots apply to all members; one undo step each.
 21. [A] Drag-move a frame with the frame tool: metadata-only — the frame
     rect moves, pixels stay put (like dragging a marquee); one undo step
     restores the position. Move shows origin (+dx, +dy); create/resize
