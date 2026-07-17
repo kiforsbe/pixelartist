@@ -110,6 +110,42 @@ function boundingBoxOf(frames) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+const SNAP_SCREEN_PX = 10;
+
+// While dragging a segment, find the best end-to-end join: dragged RIGHT edge
+// to a target's LEFT edge (side 'before' — dragged frames come first) or
+// dragged LEFT edge to a target's RIGHT edge (side 'after'). Same frame w/h
+// required; snapped position must stay on-sheet.
+function findSnap(view, sheet, drag) {
+  const d = drag.bbox;
+  const fw = drag.members[0].w, fh = drag.members[0].h;
+  const tol = SNAP_SCREEN_PX / view.zoom;
+  const gx = d.x + drag.delta.dx, gy = d.y + drag.delta.dy;
+  let best = null;
+  for (const a of sheet.animations) {
+    if (!a.strip) continue;
+    for (const run of segmentsOf(a)) {
+      if (a === drag.anim && run.index === drag.run.index) continue;
+      const members = segmentMembers(sheet, a, run);
+      if (!members.length || members[0].w !== fw || members[0].h !== fh) continue;
+      const t = boundingBoxOf(members);
+      const cands = [
+        { side: 'before', dx: t.x - d.w - d.x, dy: t.y - d.y,
+          err: Math.hypot(gx + d.w - t.x, gy - t.y) },
+        { side: 'after', dx: t.x + t.w - d.x, dy: t.y - d.y,
+          err: Math.hypot(gx - (t.x + t.w), gy - t.y) },
+      ];
+      for (const c of cands) {
+        if (c.err > tol) continue;
+        if (d.x + c.dx < 0 || d.x + c.dx + d.w > sheet.width) continue;
+        if (d.y + c.dy < 0 || d.y + c.dy + d.h > sheet.height) continue;
+        if (!best || c.err < best.err) best = { anim: a, run, side: c.side, dx: c.dx, dy: c.dy, err: c.err };
+      }
+    }
+  }
+  return best;
+}
+
 function oppositeCorner(f, handle) {
   const map = {
     nw: { x: f.x + f.w, y: f.y + f.h },
@@ -162,7 +198,7 @@ function commitCreate(sheet, rect) {
 // would clobber B if A and B overlap/touch). Captures a per-layer clone of
 // the UNION of every member's before/after rect so undo restores all pixels
 // and all frames' x/y in one step.
-function commitMoveFrames(sheet, frames, dx, dy) {
+function buildMovePatches(sheet, frames, dx, dy) {
   const ux0 = Math.min(...frames.map(f => Math.min(f.x, f.x + dx)));
   const uy0 = Math.min(...frames.map(f => Math.min(f.y, f.y + dy)));
   const ux1 = Math.max(...frames.map(f => Math.max(f.x + f.w, f.x + dx + f.w)));
@@ -170,7 +206,6 @@ function commitMoveFrames(sheet, frames, dx, dy) {
   const ur = { x: ux0, y: uy0, w: ux1 - ux0, h: uy1 - uy0 };
 
   const beforeCoords = frames.map(f => ({ frame: f, x: f.x, y: f.y }));
-
   const patches = sheet.layers.map((layer) => {
     const before = copyRegion(layer.bitmap, ur.x, ur.y, ur.w, ur.h);
     const copies = frames.map(f => copyRegion(layer.bitmap, f.x, f.y, f.w, f.h));
@@ -179,22 +214,77 @@ function commitMoveFrames(sheet, frames, dx, dy) {
     const after = copyRegion(layer.bitmap, ur.x, ur.y, ur.w, ur.h);
     return { layer, before, after };
   });
-  for (const f of frames) { f.x += dx; f.y += dy; } // already true on the bitmaps above; keep metadata in sync now too
+  for (const f of frames) { f.x += dx; f.y += dy; }
   const afterCoords = beforeCoords.map(c => ({ frame: c.frame, x: c.x + dx, y: c.y + dy }));
+  return { patches, ur, beforeCoords, afterCoords };
+}
 
+function commitMoveFrames(sheet, frames, dx, dy) {
+  const mv = buildMovePatches(sheet, frames, dx, dy);
   const cmd = {
     label: frames.length > 1 ? 'move strip' : 'move frame',
     do() {
-      for (const p of patches) blitRegion(p.layer.bitmap, p.after, ur.x, ur.y);
-      for (const c of afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.after, mv.ur.x, mv.ur.y);
+      for (const c of mv.afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
     },
     undo() {
-      for (const p of patches) blitRegion(p.layer.bitmap, p.before, ur.x, ur.y);
-      for (const c of beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.before, mv.ur.x, mv.ur.y);
+      for (const c of mv.beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
     },
   };
   state.commands.push(cmd);
   markDirty();
+}
+
+// Snap-merge: one undoable command = pixel move of the dragged members +
+// order/breaks rewrite (+ possible source-animation deletion). Whole-array
+// snapshots keep do()/undo() idempotent per the codebase idiom.
+function commitMergeSegments(sheet, d, snap) {
+  const srcAnim = d.anim, dstAnim = snap.anim;
+  const sameAnim = srcAnim === dstAnim;
+  const before = {
+    srcFrames: srcAnim.frames.map(e => ({ ...e })), srcBreaks: (srcAnim.breaks ?? []).slice(),
+    dstFrames: dstAnim.frames.map(e => ({ ...e })), dstBreaks: (dstAnim.breaks ?? []).slice(),
+    animations: sheet.animations.slice(),
+    selectedAnimationId: state.selectedAnimationId,
+  };
+  const mv = buildMovePatches(sheet, d.members, snap.dx, snap.dy);
+  if (sameAnim) {
+    const r = mergeSegments(srcAnim, d.run.index, snap.run.index, snap.side);
+    srcAnim.frames = r.frames; srcAnim.breaks = r.breaks;
+  } else {
+    const r = transferSegment(srcAnim, dstAnim, d.run.index, snap.run.index, snap.side);
+    srcAnim.frames = r.src.frames; srcAnim.breaks = r.src.breaks;
+    dstAnim.frames = r.dst.frames; dstAnim.breaks = r.dst.breaks;
+    if (srcAnim.frames.length === 0)
+      sheet.animations = sheet.animations.filter(a => a !== srcAnim);
+  }
+  const after = {
+    srcFrames: srcAnim.frames.map(e => ({ ...e })), srcBreaks: srcAnim.breaks.slice(),
+    dstFrames: dstAnim.frames.map(e => ({ ...e })), dstBreaks: dstAnim.breaks.slice(),
+    animations: sheet.animations.slice(),
+  };
+  state.commands.push({
+    label: 'merge strips',
+    do() {
+      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.after, mv.ur.x, mv.ur.y);
+      for (const c of mv.afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      srcAnim.frames = after.srcFrames.map(e => ({ ...e })); srcAnim.breaks = after.srcBreaks.slice();
+      dstAnim.frames = after.dstFrames.map(e => ({ ...e })); dstAnim.breaks = after.dstBreaks.slice();
+      sheet.animations = after.animations.slice();
+      state.selectedAnimationId = dstAnim.id;
+    },
+    undo() {
+      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.before, mv.ur.x, mv.ur.y);
+      for (const c of mv.beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      srcAnim.frames = before.srcFrames.map(e => ({ ...e })); srcAnim.breaks = before.srcBreaks.slice();
+      dstAnim.frames = before.dstFrames.map(e => ({ ...e })); dstAnim.breaks = before.dstBreaks.slice();
+      sheet.animations = before.animations.slice();
+      state.selectedAnimationId = before.selectedAnimationId;
+    },
+  });
+  markDirty();
+  emit('selection');
 }
 
 function commitResize(frame, before, after) {
@@ -279,6 +369,8 @@ function handleMove(ev, view) {
   } else if (drag.kind === 'move') {
     const target = snapPoint(drag.frame.x + (ev.x - drag.anchor.x), drag.frame.y + (ev.y - drag.anchor.y));
     drag.delta = { dx: target.x - drag.frame.x, dy: target.y - drag.frame.y };
+    const sheet = activeSheet();
+    drag.snap = (drag.anim && sheet) ? findSnap(view, sheet, drag) : null;
   } else if (drag.kind === 'resize') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, false));
   }
@@ -300,6 +392,7 @@ function handleUp(ev, view) {
     return;
   }
   if (d.kind === 'move') {
+    if (d.snap) { commitMergeSegments(sheet, d, d.snap); return; }
     // Clamp the common delta so the whole bounding box (single frame or
     // every strip member) stays fully on-sheet — no pixels are silently
     // clipped by out-of-bounds copy/blit (pixels.js bounds-checks every
@@ -436,27 +529,45 @@ function drawFrameToolGhost(ctx, view) {
     ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1;
     if (drag.kind === 'create' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
-    else if (drag.kind === 'move' && drag.bbox)
+    else if (drag.kind === 'move' && drag.bbox) {
+      const dx = drag.snap ? drag.snap.dx : drag.delta.dx;
+      const dy = drag.snap ? drag.snap.dy : drag.delta.dy;
+      if (drag.snap) ctx.strokeStyle = '#6adf7a';
       // Single frame or strip: the bbox already covers just the grabbed
       // frame in the non-strip case, so this one branch handles both.
-      strokeGhostRect(ctx, view, { x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy, w: drag.bbox.w, h: drag.bbox.h });
+      strokeGhostRect(ctx, view, { x: drag.bbox.x + dx, y: drag.bbox.y + dy, w: drag.bbox.w, h: drag.bbox.h });
+    }
     else if (drag.kind === 'resize' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
     ctx.restore();
 
     if (drag.kind === 'create' && drag.rect) {
       drawRectDims(ctx, view, drag.rect);
     } else if (drag.kind === 'move' && drag.bbox) {
+      const dx = drag.snap ? drag.snap.dx : drag.delta.dx;
+      const dy = drag.snap ? drag.snap.dy : drag.delta.dy;
       if (drag.members.length > 1) {
-        drawStripDims(ctx, view, drag.members, drag.delta.dx, drag.delta.dy,
-          { dx: drag.delta.dx, dy: drag.delta.dy });
+        drawStripDims(ctx, view, drag.members, dx, dy, { dx, dy });
       } else {
-        const r = { x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy, w: drag.bbox.w, h: drag.bbox.h };
-        drawRectDims(ctx, view, r, { dx: drag.delta.dx, dy: drag.delta.dy });
+        const r = { x: drag.bbox.x + dx, y: drag.bbox.y + dy, w: drag.bbox.w, h: drag.bbox.h };
+        drawRectDims(ctx, view, r, { dx, dy });
       }
     } else if (drag.kind === 'resize' && drag.rect) {
       drawRectDims(ctx, view, drag.rect, {
         dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h,
       });
+    }
+
+    if (drag.kind === 'move' && drag.snap) {
+      const jx = drag.snap.side === 'before'
+        ? drag.bbox.x + drag.snap.dx + drag.bbox.w   // dragged right edge
+        : drag.bbox.x + drag.snap.dx;                 // dragged left edge
+      const jy = drag.bbox.y + drag.snap.dy;
+      const p0 = view.imageToScreen(jx, jy);
+      const p1 = view.imageToScreen(jx, jy + drag.bbox.h);
+      ctx.save();
+      ctx.strokeStyle = '#6adf7a'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+      ctx.restore();
     }
   }
 
