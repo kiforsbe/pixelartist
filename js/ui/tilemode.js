@@ -250,6 +250,114 @@ function openTileEditor(tileId) {
   emit('view');
 }
 
+function commitAddGrid(sheet, opts) {
+  const beforeGrids = sheet.tileGrids.slice();
+  const beforeTiles = sheet.tiles.slice();
+  createTileGrid(sheet, opts);
+  const afterGrids = sheet.tileGrids.slice();
+  const afterTiles = sheet.tiles.slice();
+  state.commands.push({
+    label: 'add grid',
+    do() { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); },
+    undo() { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); },
+  });
+  markDirty();
+}
+
+function commitDeleteGrid(sheet, grid) {
+  const beforeGrids = sheet.tileGrids.slice();
+  const beforeTiles = sheet.tiles.slice();
+  removeTileGrid(sheet, grid.id);
+  const afterGrids = sheet.tileGrids.slice();
+  const afterTiles = sheet.tiles.slice();
+  state.commands.push({
+    label: 'delete grid',
+    do() { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); },
+    undo() { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); },
+  });
+  markDirty();
+}
+
+function commitResizeGridCols(sheet, grid, cols) {
+  if (cols === grid.cols) return;
+  const beforeTiles = sheet.tiles.slice();
+  const beforeCols = grid.cols;
+  resizeGridCols(sheet, grid, cols);
+  const afterTiles = sheet.tiles.slice();
+  const afterCols = grid.cols;
+  state.commands.push({
+    label: 'resize grid cols',
+    do() { grid.cols = afterCols; sheet.tiles = afterTiles.slice(); },
+    undo() { grid.cols = beforeCols; sheet.tiles = beforeTiles.slice(); },
+  });
+  markDirty();
+}
+
+function commitResizeGridRows(sheet, grid, rows) {
+  if (rows === grid.rows) return;
+  const beforeTiles = sheet.tiles.slice();
+  const beforeRows = grid.rows;
+  resizeGridRows(sheet, grid, rows);
+  const afterTiles = sheet.tiles.slice();
+  const afterRows = grid.rows;
+  state.commands.push({
+    label: 'resize grid rows',
+    do() { grid.rows = afterRows; sheet.tiles = afterTiles.slice(); },
+    undo() { grid.rows = beforeRows; sheet.tiles = beforeTiles.slice(); },
+  });
+  markDirty();
+}
+
+// Cell size/spacing edits re-layout every owned tile in place; only their
+// geometry needs snapshotting (name/neighbors/gridCol/gridRow are untouched).
+function commitGridCellField(sheet, grid, key, value) {
+  if (grid[key] === value) return;
+  const before = grid[key];
+  const beforeRects = ownedTiles(sheet, grid.id).map(t => ({ t, x: t.x, y: t.y, w: t.w, h: t.h }));
+  state.commands.push({
+    label: `edit grid ${key}`,
+    do() { grid[key] = value; relayoutGrid(sheet, grid); },
+    undo() {
+      grid[key] = before;
+      for (const r of beforeRects) { r.t.x = r.x; r.t.y = r.y; r.t.w = r.w; r.t.h = r.h; }
+    },
+  });
+  markDirty();
+}
+
+function commitDetachTile(tile) {
+  const before = { gridId: tile.gridId, gridCol: tile.gridCol, gridRow: tile.gridRow };
+  state.commands.push({
+    label: 'detach tile from grid',
+    do() { detachTile(tile); },
+    undo() { tile.gridId = before.gridId; tile.gridCol = before.gridCol; tile.gridRow = before.gridRow; },
+  });
+  markDirty();
+}
+
+function commitTileName(tile, name) {
+  const before = tile.name;
+  const after = name || undefined;
+  if (before === after) return;
+  state.commands.push({
+    label: 'rename tile',
+    do() { tile.name = after; },
+    undo() { tile.name = before; },
+  });
+  markDirty();
+}
+
+function commitTileSize(tile, key, value) {
+  if (tile[key] === value) return;
+  const before = tile[key];
+  state.commands.push({
+    label: `edit tile ${key}`,
+    do() { tile[key] = value; },
+    undo() { tile[key] = before; },
+  });
+  markDirty();
+}
+
 // ------------------------------------------------------------- pointer
 
 const DBLCLICK_MS = 400;
@@ -465,30 +573,78 @@ export function bindTileTool(view) {
   on('tool', () => { if (state.tool !== 'tiletool' && drag) { drag = null; view.requestRender(); } });
 }
 
-// ------------------------------------------------------------- tile panel
+// ------------------------------------------------------------- add-grid dialog
 
-function commitTileSize(sheet, key, value) {
-  const before = sheet.tile[key];
-  if (before === value) return;
-  state.commands.push({
-    label: `edit tile ${key}`,
-    do() { sheet.tile[key] = value; },
-    undo() { sheet.tile[key] = before; },
-  });
-  markDirty();
+let addGridPreviewOpts = null; // dialog's current field values while open, else null
+
+function drawAddGridPreview(ctx, view) {
+  const { cellW, cellH, cols, rows, spacingX, spacingY } = addGridPreviewOpts;
+  if (cellW < 1 || cellH < 1 || cols < 1 || rows < 1) return;
+  ctx.save();
+  ctx.strokeStyle = '#fff';
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = 1;
+  const previewGrid = { x: 0, y: 0, cellW, cellH, spacingX, spacingY };
+  for (let row = 0; row < rows; row++)
+    for (let col = 0; col < cols; col++) {
+      const r = gridCellRect(previewGrid, col, row);
+      strokeGhostRect(ctx, view, r);
+    }
+  ctx.restore();
 }
 
-function commitTileName(sheet, index, name) {
-  const before = sheet.tile.names[index];
-  const after = name || undefined;
-  if (before === after) return;
-  state.commands.push({
-    label: 'rename tile',
-    do() { setOrDelete(sheet.tile.names, index, after); },
-    undo() { setOrDelete(sheet.tile.names, index, before); },
+function buildAddGridDialog() {
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `
+    <h3>Add grid</h3>
+    <div class="row"><label>Cell W <input type="number" id="ag-cellw" min="1" value="16"></label></div>
+    <div class="row"><label>Cell H <input type="number" id="ag-cellh" min="1" value="16"></label></div>
+    <div class="row"><label>Cols <input type="number" id="ag-cols" min="1" value="4"></label></div>
+    <div class="row"><label>Rows <input type="number" id="ag-rows" min="1" value="4"></label></div>
+    <div class="row"><label>Spacing X <input type="number" id="ag-spacingx" min="0" value="0"></label></div>
+    <div class="row"><label>Spacing Y <input type="number" id="ag-spacingy" min="0" value="0"></label></div>
+    <div class="row"><button type="button" id="ag-create">Create</button><button type="button" id="ag-cancel">Cancel</button></div>
+  `;
+  document.body.appendChild(dlg);
+  const $ = (sel) => dlg.querySelector(sel);
+  const readPreview = () => {
+    const intVal = (el, min) => Math.max(min, parseInt(el.value, 10) || min);
+    return {
+      cellW: intVal($('#ag-cellw'), 1), cellH: intVal($('#ag-cellh'), 1),
+      cols: intVal($('#ag-cols'), 1), rows: intVal($('#ag-rows'), 1),
+      spacingX: intVal($('#ag-spacingx'), 0), spacingY: intVal($('#ag-spacingy'), 0),
+    };
+  };
+  for (const id of ['#ag-cellw', '#ag-cellh', '#ag-cols', '#ag-rows', '#ag-spacingx', '#ag-spacingy'])
+    $(id).addEventListener('input', () => {
+      if (!addGridPreviewOpts) return;
+      addGridPreviewOpts = readPreview();
+      tileToolView?.requestRender();
+    });
+  dlg.addEventListener('close', () => {
+    addGridPreviewOpts = null;
+    tileToolView?.requestRender();
   });
-  markDirty();
+  $('#ag-cancel').addEventListener('click', () => dlg.close());
+  $('#ag-create').addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet) { dlg.close(); return; }
+    commitAddGrid(sheet, { x: 0, y: 0, ...readPreview() });
+    dlg.close();
+  });
+  return {
+    open() {
+      const settings = state.project?.settings ?? {};
+      $('#ag-cellw').value = String(settings.tileW ?? 16);
+      $('#ag-cellh').value = String(settings.tileH ?? 16);
+      addGridPreviewOpts = readPreview();
+      dlg.showModal();
+      tileToolView?.requestRender();
+    },
+  };
 }
+
+// ------------------------------------------------------------- tile/grid panel
 
 function sizeField(labelText, value, onCommit) {
   const label = document.createElement('label');
@@ -520,9 +676,16 @@ export function mountTilePanel(el) {
   h3.textContent = 'Tiles';
   wrap.appendChild(h3);
 
-  const sizeRow = document.createElement('div');
-  sizeRow.className = 'row';
-  wrap.appendChild(sizeRow);
+  const gridList = document.createElement('div');
+  gridList.className = 'tile-grid-list';
+  wrap.appendChild(gridList);
+
+  const addGridDialog = buildAddGridDialog();
+  const btnAddGrid = document.createElement('button');
+  btnAddGrid.type = 'button';
+  btnAddGrid.textContent = 'Add Grid…';
+  btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
+  wrap.appendChild(btnAddGrid);
 
   const countRow = document.createElement('div');
   countRow.className = 'row';
@@ -536,40 +699,62 @@ export function mountTilePanel(el) {
     if (state.mode !== 'tiles') { wrap.hidden = true; return; }
     wrap.hidden = false;
     const sheet = activeSheet();
-    sizeRow.innerHTML = '';
+    gridList.innerHTML = '';
     countRow.innerHTML = '';
     selRow.innerHTML = '';
-    if (!sheet || !sheet.tile) return;
+    if (!sheet) return;
 
-    sizeRow.append(
-      sizeField('W', sheet.tile.tileWidth, (v) => commitTileSize(sheet, 'tileWidth', v)),
-      sizeField('H', sheet.tile.tileHeight, (v) => commitTileSize(sheet, 'tileHeight', v)),
-    );
+    for (const grid of sheet.tileGrids) {
+      const row = document.createElement('div');
+      row.className = 'row tile-grid-row';
+      row.append(
+        sizeField('Cols', grid.cols, (v) => commitResizeGridCols(sheet, grid, v)),
+        sizeField('Rows', grid.rows, (v) => commitResizeGridRows(sheet, grid, v)),
+        sizeField('W', grid.cellW, (v) => commitGridCellField(sheet, grid, 'cellW', v)),
+        sizeField('H', grid.cellH, (v) => commitGridCellField(sheet, grid, 'cellH', v)),
+      );
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.textContent = 'Delete grid';
+      btnDel.addEventListener('click', () => commitDeleteGrid(sheet, grid));
+      row.appendChild(btnDel);
+      gridList.appendChild(row);
+    }
 
-    const count = tileCount(sheet);
+    const count = sheet.tiles.length;
     countRow.textContent = `${count} tile${count === 1 ? '' : 's'}`;
 
-    const idx = state.selectedTileIndex;
-    if (idx == null || idx < 0 || idx >= count) {
+    const tile = sheet.tiles.find(t => t.id === state.selectedTileId);
+    if (!tile) {
       const hint = document.createElement('span');
       hint.textContent = 'No tile selected';
       selRow.appendChild(hint);
       return;
     }
 
-    const idxLabel = document.createElement('span');
-    idxLabel.textContent = `#${idx}`;
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
-    nameInput.value = sheet.tile.names[idx] || '';
+    nameInput.value = tile.name || '';
     nameInput.placeholder = 'name';
-    nameInput.addEventListener('change', () => commitTileName(sheet, idx, nameInput.value.trim()));
+    nameInput.addEventListener('change', () => commitTileName(tile, nameInput.value.trim()));
     const btnEdit = document.createElement('button');
     btnEdit.type = 'button';
     btnEdit.textContent = 'Edit tile';
-    btnEdit.addEventListener('click', () => openTileEditor(idx));
+    btnEdit.addEventListener('click', () => openTileEditor(tile.id));
+    selRow.append(nameInput, btnEdit);
 
-    selRow.append(idxLabel, nameInput, btnEdit);
+    if (tile.gridId != null) {
+      const btnDetach = document.createElement('button');
+      btnDetach.type = 'button';
+      btnDetach.textContent = 'Detach from grid';
+      btnDetach.addEventListener('click', () => commitDetachTile(tile));
+      selRow.appendChild(btnDetach);
+    } else {
+      selRow.append(
+        sizeField('W', tile.w, (v) => commitTileSize(tile, 'w', v)),
+        sizeField('H', tile.h, (v) => commitTileSize(tile, 'h', v)),
+      );
+    }
   }
 
   let queued = false;
