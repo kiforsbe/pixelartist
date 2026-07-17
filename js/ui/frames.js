@@ -513,25 +513,24 @@ function commitRemoveMember(sheet, anim, frameId) {
 function handleDown(ev, view) {
   const sheet = activeSheet();
   if (!sheet) return;
-  if (hover?.part && state.tool === 'frametool') {
-    const anim = sheet.animations.find(a => a.id === hover.animId);
-    const run = anim?.strip ? segmentsOf(anim)[hover.runIndex] : null;
-    if (anim && run) {
-      const g = chromeGeometry(view, sheet, anim, run);
-      const part = g && hitChrome(g, ev.sx, ev.sy); // re-verify at the down position
-      if (part?.type === 'grip') {
-        const members = g.members;
-        drag = {
-          kind: 'stripresize', anim, run, side: part.side,
-          fw: g.fw, fh: members[0].h, bbox: g.bbox,
-          count0: members.length, count: members.length,
-        };
-        view.requestRender();
-        return;
-      }
-      if (part?.type === 'insert') { commitInsertFrame(sheet, anim, run, part.k); view.requestRender(); return; }
-      if (part?.type === 'split') { commitSplitStrip(anim, run.start + part.k); view.requestRender(); return; } // Task 6
+  if (state.tool === 'frametool') {
+    // Chrome is always visible for the selected segment, so hit-test it
+    // directly at the down position — no dependence on hover state.
+    const sel = selectedSegment(sheet);
+    const g = sel && chromeGeometry(view, sheet, sel.anim, sel.run);
+    const part = g && hitChrome(g, ev.sx, ev.sy);
+    if (part?.type === 'grip') {
+      const members = g.members;
+      drag = {
+        kind: 'stripresize', anim: sel.anim, run: sel.run, side: part.side,
+        fw: g.fw, fh: members[0].h, bbox: g.bbox,
+        count0: members.length, count: members.length,
+      };
+      view.requestRender();
+      return;
     }
+    if (part?.type === 'insert') { commitInsertFrame(sheet, sel.anim, sel.run, part.k); view.requestRender(); return; }
+    if (part?.type === 'split') { commitSplitStrip(sel.anim, sel.run.start + part.k); view.requestRender(); return; }
   }
   // Double-click (two downs on the same frame within 350ms) opens the frame
   // editor and points the timeline at the frame's animation.
@@ -747,7 +746,7 @@ function drawSlicePreview(ctx, view, sheet) {
 // frame hit-testing.
 const CALLOUT_R = 8;
 const CALLOUT_OFF = 16;
-let hover = null; // { animId, runIndex, part } | null; part from hitChrome()
+let hover = null; // hovered chrome part from hitChrome() ({type,k|side}) | null
 
 function chromeGeometry(view, sheet, anim, run) {
   const members = segmentMembers(sheet, anim, run);
@@ -790,26 +789,23 @@ function hitChrome(g, sx, sy) {
 // Chrome only ever targets the segment containing the currently SELECTED
 // frame — never whatever the pointer happens to be over — so a non-selected
 // strip's call-outs/grips can't sit in front of and block the selected
-// strip's commands when strips are close together or overlap. Hovering any
-// other strip shows no chrome; clicking a member of it (selecting it) is what
-// makes its chrome available.
+// strip's commands when strips are close together or overlap. A sub-strip
+// wins over its parent strip by construction: the selected frame's run IS
+// the sub-strip. Chrome is VISIBLE whenever such a segment is selected;
+// hovering only highlights the part under the pointer.
+function selectedSegment(sheet) {
+  const anim = stripOf(sheet, state.selectedFrameId);
+  const run = anim ? segmentOfFrame(anim, state.selectedFrameId) : null;
+  return run ? { anim, run } : null;
+}
+
 function updateHover(ev, view) {
   let next = null;
   const sheet = activeSheet();
   if (sheet && state.mode === 'sprites' && state.tool === 'frametool' && !drag) {
-    const anim = stripOf(sheet, state.selectedFrameId);
-    const run = anim ? segmentOfFrame(anim, state.selectedFrameId) : null;
-    if (anim && run) {
-      const g = chromeGeometry(view, sheet, anim, run);
-      if (g) {
-        const p0 = view.imageToScreen(g.bbox.x, g.bbox.y);
-        const p1 = view.imageToScreen(g.bbox.x + g.bbox.w, g.bbox.y + g.bbox.h);
-        const pad = CALLOUT_OFF + CALLOUT_R;
-        if (ev.sx >= p0.x - pad && ev.sx <= p1.x + pad && ev.sy >= p0.y - pad && ev.sy <= p1.y + pad) {
-          next = { animId: anim.id, runIndex: run.index, part: hitChrome(g, ev.sx, ev.sy) };
-        }
-      }
-    }
+    const sel = selectedSegment(sheet);
+    const g = sel && chromeGeometry(view, sheet, sel.anim, sel.run);
+    if (g) next = hitChrome(g, ev.sx, ev.sy);
   }
   if (JSON.stringify(next) !== JSON.stringify(hover)) {
     hover = next;
@@ -833,19 +829,18 @@ function drawCallout(ctx, c, glyph, active) {
 }
 
 function drawChrome(ctx, view, sheet) {
-  if (!hover || drag) return;
-  const anim = sheet.animations.find(a => a.id === hover.animId);
-  const run = anim?.strip ? segmentsOf(anim)[hover.runIndex] : null;
-  if (!run) { hover = null; return; }
-  const g = chromeGeometry(view, sheet, anim, run);
+  if (drag) return;
+  const sel = selectedSegment(sheet);
+  if (!sel) return;
+  const g = chromeGeometry(view, sheet, sel.anim, sel.run);
   if (!g) return;
   ctx.save();
   for (const c of g.inserts)
-    drawCallout(ctx, c, '+', hover.part?.type === 'insert' && hover.part.k === c.k);
+    drawCallout(ctx, c, '+', hover?.type === 'insert' && hover.k === c.k);
   for (const c of g.splits)
-    drawCallout(ctx, c, '✂', hover.part?.type === 'split' && hover.part.k === c.k);
+    drawCallout(ctx, c, '✂', hover?.type === 'split' && hover.k === c.k);
   for (const gr of g.grips) {
-    const active = hover.part?.type === 'grip' && hover.part.side === gr.side;
+    const active = hover?.type === 'grip' && hover.side === gr.side;
     ctx.globalAlpha = active ? 1 : 0.7;
     ctx.fillStyle = '#4f8cff';
     ctx.fillRect(gr.x, gr.y, gr.w, gr.h);

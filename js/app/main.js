@@ -6,7 +6,7 @@ import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
-import { registerFrameTool, bindFrameTool, mountFramesPanel } from '../ui/frames.js';
+import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } from '../ui/frames.js';
 import { registerTileTool, bindTileTool, mountTilePanel } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
