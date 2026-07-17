@@ -16,7 +16,7 @@ import {
   moveGrid, removeTileGrid, createTileGrid, detachTile,
 } from '../core/tilegrids.js';
 import { newId } from '../core/palettes.js';
-import { scrubTileReferences } from '../core/model.js';
+import { scrubTileReferences, flattenSheet } from '../core/model.js';
 import {
   createTerrainSet, removeTerrainSet, assignSlot, clearSlot,
   detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset,
@@ -1008,6 +1008,72 @@ function buildTilePickerDialog() {
   };
 }
 
+// ---------------------------------------------------------------- thumbnails
+
+// Flattened-sheet scratch-canvas cache, mirroring tileeditor.js's
+// getFlatCanvas (this codebase duplicates the pattern per-module rather
+// than sharing it -- see tileeditor.js:166's comment). Invalidated
+// explicitly by mountAutotilesPanel on 'pixels'/'project'/'history'.
+let flatSheetRef = null;
+let flatBitmap = null;
+let flatDirty = true;
+function invalidateFlat() { flatDirty = true; }
+function getFlatBitmap(sheet) {
+  if (flatDirty || flatSheetRef !== sheet || !flatBitmap) {
+    flatBitmap = flattenSheet(sheet, state.floating);
+    flatSheetRef = sheet;
+    flatDirty = false;
+  }
+  return flatBitmap;
+}
+let flatCanvas = null;
+let flatCanvasSrc = null;
+function getFlatCanvas(sheet) {
+  const bmp = getFlatBitmap(sheet);
+  if (flatCanvasSrc !== bmp) {
+    if (!flatCanvas || flatCanvas.width !== bmp.width || flatCanvas.height !== bmp.height) {
+      flatCanvas = document.createElement('canvas');
+      flatCanvas.width = bmp.width;
+      flatCanvas.height = bmp.height;
+    }
+    const c = flatCanvas.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
+    flatCanvasSrc = bmp;
+  }
+  return flatCanvas;
+}
+
+// Crops tile.w x tile.h from the flattened sheet, applies flipH/flipV/rotate,
+// and returns a data URL. Cached by tile id + transform key so redraws
+// within the same paint cycle don't re-crop identical thumbnails.
+const thumbnailCache = new Map();
+function tileThumbnailURL(sheet, tile, { flipH = false, flipV = false, rotate = 0 } = {}) {
+  const flat = getFlatCanvas(sheet);
+  const key = `${tile.id}|${flipH}|${flipV}|${rotate}`;
+  const cached = thumbnailCache.get(key);
+  if (cached && cached.src === flat) return cached.url;
+
+  const scratch = document.createElement('canvas');
+  scratch.width = tile.w;
+  scratch.height = tile.h;
+  const ctx = scratch.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.save();
+  ctx.translate(flipH ? tile.w : 0, flipV ? tile.h : 0);
+  ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+  if (rotate) {
+    ctx.translate(tile.w / 2, tile.h / 2);
+    ctx.rotate((rotate * Math.PI) / 180);
+    ctx.translate(-tile.w / 2, -tile.h / 2);
+  }
+  ctx.drawImage(flat, tile.x, tile.y, tile.w, tile.h, 0, 0, tile.w, tile.h);
+  ctx.restore();
+  const url = scratch.toDataURL();
+  thumbnailCache.set(key, { url, src: flat });
+  return url;
+}
+
 function renderLayoutPresetRow(container, sheet, terrainSet) {
   const row = document.createElement('div');
   row.className = 'row';
@@ -1126,10 +1192,17 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
       if (resolved) {
         const tile = sheet.tiles.find(t => t.id === resolved.tileId);
         if (tile) {
-          const badge = document.createElement('span');
-          badge.className = 'badge';
-          badge.textContent = (resolved.flipH || resolved.flipV) ? 'F' : (resolved.rotate ? `${resolved.rotate}°` : '');
-          cell.appendChild(badge);
+          cell.style.backgroundImage = `url(${tileThumbnailURL(sheet, tile, { flipH: resolved.flipH, flipV: resolved.flipV, rotate: resolved.rotate })})`;
+          if (!isExplicit) {
+            const icons = [];
+            if (resolved.flipH) icons.push('↔');
+            if (resolved.flipV) icons.push('↕');
+            if (resolved.rotate) icons.push('↻');
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = icons.join(' ');
+            cell.appendChild(badge);
+          }
         }
       }
 
@@ -1402,8 +1475,9 @@ export function mountAutotilesPanel(el) {
     queued = true;
     queueMicrotask(() => { queued = false; render(); });
   }
-  on('project', schedule);
-  on('history', schedule);
+  on('project', () => { invalidateFlat(); schedule(); });
+  on('history', () => { invalidateFlat(); schedule(); });
+  on('pixels', () => { invalidateFlat(); schedule(); });
   on('view', schedule);
   on('selection', schedule);
   render();
