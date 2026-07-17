@@ -47,6 +47,22 @@ function describeMask(mask) {
   return parts.length ? parts.join(' + ') : 'isolated';
 }
 
+// Built-in layout presets: pixelartist's own deterministic ascending-index
+// ordering at two common grid shapes (NOT a byte-for-byte reproduction of
+// any specific external tool's template image -- see the design spec for
+// why that couldn't be reliably verified). "Save current as preset" is the
+// supported path for matching a layout the user already has.
+const BUILTIN_LAYOUT_PRESETS = [
+  {
+    name: 'Blob-47 (6×8, ascending)', cols: 6, rows: 8,
+    cells: Array.from({ length: 47 }, (_, i) => ({ col: i % 6, row: Math.floor(i / 6), blobIndex: i })),
+  },
+  {
+    name: '16-tile (4×4, ascending)', cols: 4, rows: 4,
+    cells: Array.from({ length: 16 }, (_, i) => ({ col: i % 4, row: Math.floor(i / 4), blobIndex: [...SIXTEEN_TILE_INDICES][i] })),
+  },
+];
+
 function tileAt(sheet, x, y) {
   for (let i = sheet.tiles.length - 1; i >= 0; i--) {
     const t = sheet.tiles[i];
@@ -486,6 +502,77 @@ function commitSaveLayoutPreset(sheet, name, cols, rows, cells) {
   emit('project');
 }
 
+function commitAddLayerName(sheet, name) {
+  const before = sheet.layers.slice();
+  sheet.layers.push(name);
+  const after = sheet.layers.slice();
+  state.commands.push({
+    label: 'add layer name',
+    do() { sheet.layers = after.slice(); },
+    undo() { sheet.layers = before.slice(); },
+  });
+  markDirty();
+}
+
+function commitRemoveLayerName(sheet, name) {
+  const before = sheet.layers.slice();
+  const beforeTileLayers = sheet.tiles.map(t => ({ t, layer: t.layer }));
+  sheet.layers = sheet.layers.filter(l => l !== name);
+  for (const t of sheet.tiles) if (t.layer === name) t.layer = undefined;
+  const after = sheet.layers.slice();
+  state.commands.push({
+    label: 'remove layer name',
+    do() {
+      sheet.layers = after.slice();
+      for (const t of sheet.tiles) if (t.layer === name) t.layer = undefined;
+    },
+    undo() {
+      sheet.layers = before.slice();
+      for (const b of beforeTileLayers) b.t.layer = b.layer;
+    },
+  });
+  markDirty();
+}
+
+function commitMoveLayerName(sheet, index, delta) {
+  const to = index + delta;
+  if (to < 0 || to >= sheet.layers.length) return;
+  const before = sheet.layers.slice();
+  const arr = sheet.layers.slice();
+  [arr[index], arr[to]] = [arr[to], arr[index]];
+  const after = arr;
+  state.commands.push({
+    label: 'reorder layer names',
+    do() { sheet.layers = after.slice(); },
+    undo() { sheet.layers = before.slice(); },
+  });
+  markDirty();
+}
+
+function commitTileLayer(tile, layer) {
+  const after = layer || undefined;
+  if (tile.layer === after) return;
+  const before = tile.layer;
+  state.commands.push({
+    label: 'set tile layer',
+    do() { tile.layer = after; },
+    undo() { tile.layer = before; },
+  });
+  markDirty();
+}
+
+function commitTileTags(tile, tagsText) {
+  const after = tagsText.split(',').map(s => s.trim()).filter(Boolean);
+  const before = tile.tags ? [...tile.tags] : undefined;
+  const afterVal = after.length ? after : undefined;
+  state.commands.push({
+    label: 'set tile tags',
+    do() { tile.tags = afterVal ? [...afterVal] : undefined; },
+    undo() { tile.tags = before ? [...before] : undefined; },
+  });
+  markDirty();
+}
+
 function commitTileName(tile, name) {
   const before = tile.name;
   const after = name || undefined;
@@ -868,8 +955,66 @@ function buildTilePickerDialog() {
   };
 }
 
+function renderLayoutPresetRow(container, sheet, terrainSet) {
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const presetSelect = document.createElement('select');
+  const allPresets = [...BUILTIN_LAYOUT_PRESETS, ...sheet.terrainLayoutPresets];
+  allPresets.forEach((p, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = `${p.name} (${p.cols}×${p.rows})`;
+    presetSelect.appendChild(opt);
+  });
+
+  const gridSelect = document.createElement('select');
+  sheet.tileGrids.forEach((g) => {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = `Grid ${g.cols}×${g.rows} @ (${g.x},${g.y})`;
+    gridSelect.appendChild(opt);
+  });
+
+  const btnImport = document.createElement('button');
+  btnImport.type = 'button';
+  btnImport.textContent = 'Import from layout…';
+  btnImport.addEventListener('click', () => {
+    const preset = allPresets[Number(presetSelect.value)];
+    const grid = sheet.tileGrids.find(g => g.id === gridSelect.value);
+    if (!preset || !grid || grid.cols !== preset.cols || grid.rows !== preset.rows) {
+      alert(`Selected grid must be exactly ${preset?.cols ?? '?'}×${preset?.rows ?? '?'} to use this layout.`);
+      return;
+    }
+    const sourceTiles = ownedTiles(sheet, grid.id).sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
+    commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, grid.cols);
+  });
+
+  const btnSave = document.createElement('button');
+  btnSave.type = 'button';
+  btnSave.textContent = 'Save current as preset…';
+  btnSave.addEventListener('click', () => {
+    const grid = sheet.tileGrids.find(g => g.id === gridSelect.value);
+    if (!grid) { alert('Select a grid to save its current slot layout as a preset.'); return; }
+    const name = prompt('Preset name?');
+    if (!name) return;
+    const sourceTiles = ownedTiles(sheet, grid.id).sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
+    const cells = [];
+    sourceTiles.forEach((t, i) => {
+      if (t.terrainSetId === terrainSet.id && t.blobIndex != null) {
+        cells.push({ col: i % grid.cols, row: Math.floor(i / grid.cols), blobIndex: t.blobIndex });
+      }
+    });
+    commitSaveLayoutPreset(sheet, name, grid.cols, grid.rows, cells);
+  });
+
+  row.append(presetSelect, gridSelect, btnImport, btnSave);
+  container.appendChild(row);
+}
+
 function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) {
   container.innerHTML = '';
+  renderLayoutPresetRow(container, sheet, terrainSet);
 
   const symRow = document.createElement('div');
   symRow.className = 'row';
@@ -985,6 +1130,22 @@ export function mountTilePanel(el) {
   terrainSetEditor.className = 'terrain-set-editor';
   wrap.appendChild(terrainSetEditor);
 
+  const layerList = document.createElement('div');
+  layerList.className = 'layer-list';
+  wrap.appendChild(layerList);
+
+  const btnAddLayerName = document.createElement('button');
+  btnAddLayerName.type = 'button';
+  btnAddLayerName.textContent = 'Add Layer Name…';
+  btnAddLayerName.addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    const name = prompt('Layer name?');
+    if (!name) return;
+    commitAddLayerName(sheet, name);
+  });
+  wrap.appendChild(btnAddLayerName);
+
   const countRow = document.createElement('div');
   countRow.className = 'row';
   wrap.appendChild(countRow);
@@ -1047,6 +1208,22 @@ export function mountTilePanel(el) {
       renderTerrainSetEditor(terrainSetEditor, sheet, selectedTerrainSet, tilePickerDialog);
     }
 
+    layerList.innerHTML = '';
+    sheet.layers.forEach((name, i) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const label = document.createElement('span');
+      label.textContent = name;
+      const btnUp = document.createElement('button'); btnUp.type = 'button'; btnUp.textContent = '↑';
+      btnUp.addEventListener('click', () => commitMoveLayerName(sheet, i, -1));
+      const btnDown = document.createElement('button'); btnDown.type = 'button'; btnDown.textContent = '↓';
+      btnDown.addEventListener('click', () => commitMoveLayerName(sheet, i, 1));
+      const btnDel = document.createElement('button'); btnDel.type = 'button'; btnDel.textContent = 'Delete';
+      btnDel.addEventListener('click', () => commitRemoveLayerName(sheet, name));
+      row.append(label, btnUp, btnDown, btnDel);
+      layerList.appendChild(row);
+    });
+
     const count = sheet.tiles.length;
     countRow.textContent = `${count} tile${count === 1 ? '' : 's'}`;
 
@@ -1081,6 +1258,25 @@ export function mountTilePanel(el) {
         sizeField('H', tile.h, (v) => commitTileSize(sheet, tile, 'h', v)),
       );
     }
+
+    const layerSelect = document.createElement('select');
+    const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
+    layerSelect.appendChild(noneOpt);
+    sheet.layers.forEach((name) => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      layerSelect.appendChild(opt);
+    });
+    layerSelect.value = tile.layer ?? '';
+    layerSelect.addEventListener('change', () => commitTileLayer(tile, layerSelect.value));
+
+    const tagsInput = document.createElement('input');
+    tagsInput.type = 'text';
+    tagsInput.placeholder = 'tags, comma, separated';
+    tagsInput.value = (tile.tags ?? []).join(', ');
+    tagsInput.addEventListener('change', () => commitTileTags(tile, tagsInput.value));
+
+    selRow.append(layerSelect, tagsInput);
   }
 
   let queued = false;
