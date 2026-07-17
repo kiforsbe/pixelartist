@@ -1058,6 +1058,91 @@ function commitFrameField(frame, key, value) {
   markDirty();
 }
 
+// ---- strip-wide edits (the frames panel's strip detail) ----
+// The panel shows ONE detail block: the selected loose frame, or — when the
+// selection is a strip member — the whole STRIP, where every edit applies to
+// all member frames at once.
+
+// All members of a strip animation, in animation order.
+function stripMembers(sheet, anim) {
+  return anim.frames.map(e => sheet.frames.find(f => f.id === e.frameId)).filter(Boolean);
+}
+
+// One undoable command over every member's geometry/pivot fields: eager-
+// mutate via `mutate()`, snapshot absolutes before/after, do()/undo() swap.
+function commitStripEdit(label, members, mutate) {
+  const snap = () => members.map(f => [f.x, f.y, f.w, f.h, f.pivotX, f.pivotY]);
+  const apply = (vals) => members.forEach((f, i) => {
+    [f.x, f.y, f.w, f.h, f.pivotX, f.pivotY] = vals[i];
+  });
+  const before = snap();
+  mutate();
+  const after = snap();
+  state.commands.push({
+    label,
+    do() { apply(after); },
+    undo() { apply(before); },
+  });
+  markDirty();
+}
+
+// Renames the animation AND its member frames (`name_0`, `name_1`, …).
+function commitRenameStrip(anim, members, newName) {
+  const beforeAnim = anim.name;
+  const beforeNames = members.map(f => f.name);
+  state.commands.push({
+    label: 'rename strip',
+    do() { anim.name = newName; members.forEach((f, i) => { f.name = `${newName}_${i}`; }); },
+    undo() { anim.name = beforeAnim; members.forEach((f, i) => { f.name = beforeNames[i]; }); },
+  });
+  markDirty();
+}
+
+// Rigid move of the whole strip (every segment keeps its relative offset) so
+// its bounding box lands at (nx, ny), clamped on-sheet. Metadata-only.
+function moveStripTo(sheet, members, nx, ny) {
+  const b = boundingBoxOf(members);
+  const dx = Math.max(-b.x, Math.min(sheet.width - b.x - b.w, Math.round(nx) - b.x));
+  const dy = Math.max(-b.y, Math.min(sheet.height - b.y - b.h, Math.round(ny) - b.y));
+  if (dx === 0 && dy === 0) return;
+  commitStripEdit('move strip', members, () => {
+    for (const f of members) { f.x += dx; f.y += dy; }
+  });
+}
+
+// Shared frame size for ALL members. Width re-lays each segment out
+// contiguously from its origin; height applies in place. Clamped so every
+// segment stays on-sheet.
+function setStripFrameSize(sheet, anim, members, key, value) {
+  let v = Math.max(1, Math.round(value));
+  if (key === 'w') {
+    for (const run of segmentsOf(anim)) {
+      const ms = segmentMembers(sheet, anim, run);
+      if (ms.length) v = Math.min(v, Math.floor((sheet.width - ms[0].x) / ms.length));
+    }
+  } else {
+    for (const f of members) v = Math.min(v, sheet.height - f.y);
+  }
+  v = Math.max(1, v);
+  if (members.every(f => f[key] === v)) return;
+  commitStripEdit(`strip frame ${key}`, members, () => {
+    if (key === 'w') {
+      for (const run of segmentsOf(anim)) {
+        const ms = segmentMembers(sheet, anim, run);
+        let x = ms[0]?.x ?? 0;
+        for (const f of ms) { f.x = x; f.w = v; x += v; }
+      }
+    } else {
+      for (const f of members) f.h = v;
+    }
+  });
+}
+
+function setStripPivot(members, key, value) {
+  if (members.every(f => f[key] === value)) return;
+  commitStripEdit('strip pivot', members, () => { for (const f of members) f[key] = value; });
+}
+
 function buildSliceDialog() {
   const dlg = document.createElement('dialog');
   dlg.innerHTML = `
@@ -1279,62 +1364,117 @@ export function mountFramesPanel(el) {
   btnRow.append(btnSlice, btnNewStrip, btnBreakApart);
   wrap.appendChild(btnRow);
 
+  // Edit + Delete for the SELECTED frame (strip mode deletes just that
+  // member, closing the gap — same as the Delete key).
+  function actionsRow(sheet, f, inStrip) {
+    const actions = document.createElement('div');
+    actions.className = 'row';
+    const btnEdit = document.createElement('button');
+    btnEdit.type = 'button'; btnEdit.textContent = 'Edit';
+    btnEdit.addEventListener('click', () => {
+      state.editingFrameId = f.id;
+      state.view = 'frame';
+      emit('view');
+    });
+    const btnDelete = document.createElement('button');
+    btnDelete.type = 'button';
+    btnDelete.textContent = inStrip ? 'Delete frame' : 'Delete';
+    btnDelete.addEventListener('click', () => {
+      const strip = stripOf(sheet, f.id);
+      if (strip) commitRemoveMember(sheet, strip, f.id);
+      else deleteFrame(sheet, f.id);
+    });
+    actions.append(btnEdit, btnDelete);
+    return actions;
+  }
+
+  function renderFrameDetail(sheet, f) {
+    const row = document.createElement('div');
+    row.className = 'frame-row active';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'frame-name';
+    nameInput.value = f.name;
+    nameInput.addEventListener('change', () => {
+      const v = nameInput.value.trim();
+      if (v) commitFrameField(f, 'name', v);
+      else nameInput.value = f.name;
+    });
+
+    const fields = document.createElement('div');
+    fields.className = 'frame-fields';
+    fields.append(
+      fieldRow('X', f.x, { onCommit: (v) => commitFrameField(f, 'x', Math.round(v)) }),
+      fieldRow('Y', f.y, { onCommit: (v) => commitFrameField(f, 'y', Math.round(v)) }),
+      fieldRow('W', f.w, { onCommit: (v) => commitFrameField(f, 'w', Math.max(1, Math.round(v))) }),
+      fieldRow('H', f.h, { onCommit: (v) => commitFrameField(f, 'h', Math.max(1, Math.round(v))) }),
+      fieldRow('PivotX', f.pivotX, { step: 0.5, onCommit: (v) => commitFrameField(f, 'pivotX', v) }),
+      fieldRow('PivotY', f.pivotY, { step: 0.5, onCommit: (v) => commitFrameField(f, 'pivotY', v) }),
+    );
+
+    row.append(nameInput, fields, actionsRow(sheet, f, false));
+    list.appendChild(row);
+  }
+
+  // Strip detail: one block for the whole strip; every field writes to ALL
+  // member frames (X/Y move the strip rigidly, W/H set the shared frame
+  // size, pivots apply to each member). Name renames animation + members.
+  function renderStripDetail(sheet, anim, selected) {
+    const members = stripMembers(sheet, anim);
+    if (!members.length) return;
+    const b = boundingBoxOf(members);
+    const segs = segmentsOf(anim).length;
+    const row = document.createElement('div');
+    row.className = 'frame-row active';
+
+    const title = document.createElement('div');
+    title.className = 'frame-field';
+    title.textContent = `Strip · ${members.length} frames${segs > 1 ? ` · ${segs} sub-strips` : ''}`;
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'frame-name';
+    nameInput.value = anim.name;
+    nameInput.addEventListener('change', () => {
+      const v = nameInput.value.trim();
+      if (v && v !== anim.name) commitRenameStrip(anim, members, v);
+      else nameInput.value = anim.name;
+    });
+
+    const fields = document.createElement('div');
+    fields.className = 'frame-fields';
+    fields.append(
+      fieldRow('X', b.x, { onCommit: (v) => moveStripTo(sheet, members, v, b.y) }),
+      fieldRow('Y', b.y, { onCommit: (v) => moveStripTo(sheet, members, b.x, v) }),
+      fieldRow('W', members[0].w, { onCommit: (v) => setStripFrameSize(sheet, anim, members, 'w', v) }),
+      fieldRow('H', members[0].h, { onCommit: (v) => setStripFrameSize(sheet, anim, members, 'h', v) }),
+      fieldRow('PivotX', members[0].pivotX, { step: 0.5, onCommit: (v) => setStripPivot(members, 'pivotX', v) }),
+      fieldRow('PivotY', members[0].pivotY, { step: 0.5, onCommit: (v) => setStripPivot(members, 'pivotY', v) }),
+    );
+
+    row.append(title, nameInput, fields, actionsRow(sheet, selected, true));
+    list.appendChild(row);
+  }
+
   function renderList() {
     if (state.mode !== 'sprites') { wrap.hidden = true; return; }
     wrap.hidden = false;
     list.innerHTML = '';
     const sheet = activeSheet();
-    btnBreakApart.hidden = !(sheet && state.selectedFrameId && stripOf(sheet, state.selectedFrameId));
+    const frame = sheet?.frames.find(f => f.id === state.selectedFrameId) ?? null;
+    const strip = frame ? stripOf(sheet, frame.id) : null;
+    btnBreakApart.hidden = !strip;
     if (!sheet) return;
-    sheet.frames.forEach((f, index) => {
-      const row = document.createElement('div');
-      row.className = 'frame-row' + (f.id === state.selectedFrameId ? ' active' : '');
-      row.addEventListener('click', () => {
-        if (state.selectedFrameId !== f.id) { state.selectedFrameId = f.id; emit('selection'); }
-      });
-
-      const nameInput = document.createElement('input');
-      nameInput.type = 'text';
-      nameInput.className = 'frame-name';
-      nameInput.value = f.name;
-      nameInput.addEventListener('click', (e) => e.stopPropagation());
-      nameInput.addEventListener('change', () => {
-        const v = nameInput.value.trim();
-        if (v) commitFrameField(f, 'name', v);
-        else nameInput.value = f.name;
-      });
-
-      const fields = document.createElement('div');
-      fields.className = 'frame-fields';
-      fields.append(
-        fieldRow('X', f.x, { onCommit: (v) => commitFrameField(f, 'x', Math.round(v)) }),
-        fieldRow('Y', f.y, { onCommit: (v) => commitFrameField(f, 'y', Math.round(v)) }),
-        fieldRow('W', f.w, { onCommit: (v) => commitFrameField(f, 'w', Math.max(1, Math.round(v))) }),
-        fieldRow('H', f.h, { onCommit: (v) => commitFrameField(f, 'h', Math.max(1, Math.round(v))) }),
-        fieldRow('PivotX', f.pivotX, { step: 0.5, onCommit: (v) => commitFrameField(f, 'pivotX', v) }),
-        fieldRow('PivotY', f.pivotY, { step: 0.5, onCommit: (v) => commitFrameField(f, 'pivotY', v) }),
-      );
-
-      const actions = document.createElement('div');
-      actions.className = 'row';
-      const btnEdit = document.createElement('button');
-      btnEdit.type = 'button'; btnEdit.textContent = 'Edit';
-      btnEdit.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Frame editor lands in Task 16; for now this just points state at
-        // the frame and switches the view mode — no view yet consumes it.
-        state.editingFrameId = f.id;
-        state.view = 'frame';
-        emit('view');
-      });
-      const btnDelete = document.createElement('button');
-      btnDelete.type = 'button'; btnDelete.textContent = 'Delete';
-      btnDelete.addEventListener('click', (e) => { e.stopPropagation(); deleteFrame(sheet, f.id); });
-      actions.append(btnEdit, btnDelete);
-
-      row.append(nameInput, fields, actions);
-      list.appendChild(row);
-    });
+    if (!frame) {
+      const hint = document.createElement('div');
+      hint.className = 'frame-field';
+      hint.textContent = 'No frame selected — click one with the frame tool.';
+      list.appendChild(hint);
+      return;
+    }
+    if (strip) renderStripDetail(sheet, strip, frame);
+    else renderFrameDetail(sheet, frame);
   }
 
   let renderQueued = false;
