@@ -114,3 +114,18 @@ test('buildTilesJson: a terrain-set tile omits the manual neighbors block', () =
   const json = buildTilesJson(sheet);
   assert.equal(json.tiles[0].neighbors, undefined);
 });
+
+test('buildTilesJson: terrain set layer is included when set, omitted when null', () => {
+  const p = createProject('t');
+  const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
+  sheet.tiles.push({ id: 't0', x: 0, y: 0, w: 16, h: 16, name: undefined, gridId: null, neighbors: undefined, terrainSetId: undefined, blobIndex: undefined, layer: undefined, tags: undefined });
+  const ts = createTerrainSet(sheet, { name: 'Grass', tileW: 16, tileH: 16 });
+  assignSlot(sheet, ts, 0, sheet.tiles[0]);
+
+  let json = buildTilesJson(sheet);
+  assert.equal(json.terrainSets[0].layer, undefined);
+
+  ts.layer = 'Ground';
+  json = buildTilesJson(sheet);
+  assert.equal(json.terrainSets[0].layer, 'Ground');
+});

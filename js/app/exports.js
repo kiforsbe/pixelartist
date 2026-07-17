@@ -57,7 +57,8 @@ export function buildTilesJson(sheet) {
         if (tileIndex == null) continue;
         slots[blobIndex] = { tileIndex, flipH: resolved.flipH, flipV: resolved.flipV, rotate: resolved.rotate };
       }
-      return { name: ts.name, tileW: ts.tileW, tileH: ts.tileH, slots };
+      return { name: ts.name, tileW: ts.tileW, tileH: ts.tileH, slots,
+        ...(ts.layer != null ? { layer: ts.layer } : {}) };
     });
   }
 
