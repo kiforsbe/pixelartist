@@ -79,8 +79,9 @@ function activePalette() {
 // ---------------------------------------------------------------- palette UI
 
 export function mountToolPalette(el) {
-  el.innerHTML = '';
+  el.innerHTML = '<h3>Tools</h3>';
 
+  const buttonsHost = el;
   const btnRow = document.createElement('div');
   btnRow.className = 'tool-buttons';
   const buttons = new Map();
@@ -98,14 +99,26 @@ export function mountToolPalette(el) {
     return btn;
   }
   for (const t of TOOLS) makeButton(t);
-  el.appendChild(btnRow);
+  buttonsHost.appendChild(btnRow);
+
+  // ---- separate tool options panel ----
+  const optionsPanel = document.createElement('div');
+  optionsPanel.className = 'tool-options-panel';
+  buttonsHost.appendChild(optionsPanel);
+
+  const toolNameEl = document.createElement('h3');
+  toolNameEl.className = 'tool-options-title';
+  optionsPanel.appendChild(toolNameEl);
 
   const optionsRow = document.createElement('div');
   optionsRow.className = 'tool-options';
-  el.appendChild(optionsRow);
+  optionsPanel.appendChild(optionsRow);
 
+  // Common options are always rendered in the same layout so their position
+  // does not jump when switching between tools that share them.
   const brushRow = document.createElement('label');
   brushRow.className = 'tool-option-row';
+  brushRow.dataset.commonOption = 'size';
   brushRow.appendChild(document.createTextNode('Size'));
   const brushInput = document.createElement('input');
   brushInput.type = 'number'; brushInput.min = '1'; brushInput.max = '8';
@@ -124,6 +137,10 @@ export function mountToolPalette(el) {
   // stays in sync without main.js needing a reference to it.
   on('brushSize', () => { brushInput.value = String(state.brushSize); });
 
+  const optionChecks = document.createElement('div');
+  optionChecks.className = 'tool-option-checks';
+  optionChecks.dataset.commonOption = 'checks';
+
   const contiguousRow = document.createElement('label');
   contiguousRow.className = 'tool-option-row';
   const contiguousInput = document.createElement('input');
@@ -131,7 +148,7 @@ export function mountToolPalette(el) {
   contiguousInput.checked = toolOptions.contiguous;
   contiguousInput.addEventListener('change', () => { toolOptions.contiguous = contiguousInput.checked; });
   contiguousRow.append(contiguousInput, document.createTextNode('Contiguous'));
-  optionsRow.appendChild(contiguousRow);
+  optionChecks.appendChild(contiguousRow);
 
   const filledRow = document.createElement('label');
   filledRow.className = 'tool-option-row';
@@ -140,7 +157,28 @@ export function mountToolPalette(el) {
   filledInput.checked = toolOptions.filled;
   filledInput.addEventListener('change', () => { toolOptions.filled = filledInput.checked; });
   filledRow.append(filledInput, document.createTextNode('Filled'));
-  optionsRow.appendChild(filledRow);
+  optionChecks.appendChild(filledRow);
+
+  optionsRow.appendChild(optionChecks);
+
+  function toolLabel(id) {
+    const t = TOOLS.find(x => x.id === id) ?? extraTools.find(x => x.id === id);
+    return t ? `${t.icon} ${t.id}` : id;
+  }
+
+  function toolTitle(id) {
+    const t = TOOLS.find(x => x.id === id) ?? extraTools.find(x => x.id === id);
+    if (!t) return id;
+    return t.id.charAt(0).toUpperCase() + t.id.slice(1);
+  }
+
+  function optionVisibleFor(id) {
+    return {
+      size: BRUSH_TOOLS.has(id),
+      contiguous: id === 'fill',
+      filled: id === 'rect' || id === 'ellipse',
+    };
+  }
 
   function refresh() {
     for (const [id, btn] of buttons) btn.classList.toggle('active', state.tool === id);
@@ -148,8 +186,12 @@ export function mountToolPalette(el) {
       const btn = buttons.get(extra.id);
       if (btn && extra.isAvailable) btn.hidden = !extra.isAvailable();
     }
-    contiguousRow.style.display = state.tool === 'fill' ? '' : 'none';
-    filledRow.style.display = (state.tool === 'rect' || state.tool === 'ellipse') ? '' : 'none';
+    toolNameEl.textContent = toolTitle(state.tool);
+    const vis = optionVisibleFor(state.tool);
+    brushRow.style.display = vis.size ? '' : 'none';
+    contiguousRow.style.display = vis.contiguous ? '' : 'none';
+    filledRow.style.display = vis.filled ? '' : 'none';
+    optionChecks.style.display = (vis.contiguous || vis.filled) ? '' : 'none';
     for (const { id, els } of extraRows)
       for (const rEl of els) rEl.style.display = state.tool === id ? '' : 'none';
   }

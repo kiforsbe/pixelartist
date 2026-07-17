@@ -416,7 +416,7 @@ on('history', () => { invalidateScratch(); refreshCanvasView(); });
 on('selection', () => canvasView.requestRender());
 
 // ---- drawing tools + panels ----
-mountToolPalette(document.getElementById('tool-palette'));
+mountToolPalette(document.getElementById('tool-panel'));
 bindDrawing(canvasView, () => {
   const sheet = activeSheet();
   return sheet ? { x: 0, y: 0, w: sheet.width, h: sheet.height } : { x: 0, y: 0, w: 0, h: 0 };

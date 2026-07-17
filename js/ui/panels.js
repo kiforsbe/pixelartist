@@ -85,14 +85,17 @@ export function mountColorPanel(el) {
     row.className = 'row swatch-edit-row';
     const swatch = document.createElement('button');
     swatch.type = 'button';
-    swatch.className = 'swatch';
+    swatch.className = 'swatch checkerboard';
+    const swatchColor = document.createElement('span');
+    swatchColor.className = 'swatch-color';
+    swatch.appendChild(swatchColor);
     const colorInput = hiddenColorInput();
     const alpha = document.createElement('input');
     alpha.type = 'range'; alpha.min = '0'; alpha.max = '255';
 
     function getColor() { return slot === 'primary' ? state.primary : state.secondary; }
     function setColor(c) { if (slot === 'primary') state.primary = c; else state.secondary = c; }
-    function sync() { const c = getColor(); swatch.style.background = cssColor(c); alpha.value = String(c[3]); }
+    function sync() { const c = getColor(); swatchColor.style.background = cssColor(c); alpha.value = String(c[3]); }
 
     swatch.addEventListener('click', () => { colorInput.value = rgbaToHex(getColor()); colorInput.click(); });
     colorInput.addEventListener('input', () => {
@@ -115,28 +118,46 @@ export function mountColorPanel(el) {
   const secondaryEditor = buildSwatchEditor('secondary');
   el.append(primaryEditor.row, secondaryEditor.row);
 
-  // palette selector + new/system dialogs
-  const paletteRow = document.createElement('div');
-  paletteRow.className = 'row';
+  // ---- Palette panel (separate section) ----
+  const palettePanel = document.createElement('div');
+  palettePanel.className = 'palette-section';
+  el.appendChild(palettePanel);
+
+  const paletteHeader = document.createElement('h3');
+  paletteHeader.textContent = 'Palette';
+  palettePanel.appendChild(paletteHeader);
+
+  const paletteActions = document.createElement('div');
+  paletteActions.className = 'row palette-actions';
+
   const paletteSelect = document.createElement('select');
-  const btnNewPalette = document.createElement('button'); btnNewPalette.textContent = 'New palette…';
-  const btnSystemPalette = document.createElement('button'); btnSystemPalette.textContent = 'System…';
-  paletteRow.append(paletteSelect, btnNewPalette, btnSystemPalette);
-  el.appendChild(paletteRow);
+  const btnNewPalette = document.createElement('button');
+  btnNewPalette.type = 'button';
+  btnNewPalette.textContent = '+';
+  btnNewPalette.title = 'New palette';
+  const btnSystemPalette = document.createElement('button');
+  btnSystemPalette.type = 'button';
+  btnSystemPalette.textContent = '⚙';
+  btnSystemPalette.title = 'System palettes';
+  const btnAddSwatch = document.createElement('button');
+  btnAddSwatch.textContent = '+';
+  btnAddSwatch.title = 'Add current color';
+  paletteActions.append(btnNewPalette, btnSystemPalette, btnAddSwatch);
+  palettePanel.appendChild(paletteActions);
 
   const swatchStrip = document.createElement('div');
   swatchStrip.className = 'palette-strip';
-  el.appendChild(swatchStrip);
-
-  const addRow = document.createElement('div'); addRow.className = 'row';
-  const btnAddSwatch = document.createElement('button'); btnAddSwatch.textContent = '+ Add current color';
-  addRow.appendChild(btnAddSwatch);
-  el.appendChild(addRow);
+  palettePanel.appendChild(swatchStrip);
 
   function currentPalette() {
     const proj = state.project;
     return proj?.palettes.find(p => p.id === proj.activePaletteId) ?? null;
   }
+
+  const selectRow = document.createElement('div');
+  selectRow.className = 'row palette-select-row';
+  selectRow.appendChild(paletteSelect);
+  palettePanel.insertBefore(selectRow, swatchStrip);
 
   function refreshPaletteSelect() {
     paletteSelect.innerHTML = '';
