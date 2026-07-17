@@ -14,10 +14,11 @@
 //     tile (the one actually being edited) occupies editor-local
 //     [radius*tw, radius*tw+tw) x [radius*th, radius*th+th).
 //   - mapPoint(x, y) shifts editor-local pointer coords into sheet-global
-//     layer-bitmap coords: sheetX = x + r.x - radius*tw (r = tileRect of the
-//     center tile). getTargetRect() returns r itself, so tools.js's target
-//     clipping (Task 13) guarantees strokes can only ever affect the center
-//     tile's pixels no matter how far a drag strays into neighbor cells.
+//     layer-bitmap coords: sheetX = x + r.x - radius*tw (r = centerRect(),
+//     the center tile's own rect). getTargetRect() returns r itself, so
+//     tools.js's target clipping (Task 13) guarantees strokes can only ever
+//     affect the center tile's pixels no matter how far a drag strays into
+//     neighbor cells.
 //   - view.imageToScreen is overridden the same way frameeditor.js does it:
 //     tools.js's marquee selection is stored in sheet-global coords (because
 //     of mapPoint), so overlays need to map sheet-global -> screen by

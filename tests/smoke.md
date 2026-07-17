@@ -187,12 +187,12 @@ is a pass condition for the whole run, not just the final step.
 
 ## 10. Exports
 
-42. [A] Export dialog: "Sheet PNG (flattened)" downloads a PNG (verify a
+47. [A] Export dialog: "Sheet PNG (flattened)" downloads a PNG (verify a
     download/blob was produced — no console error).
-43. [A] "Frames JSON" (enabled only for sprite sheets) downloads
+48. [A] "Frames JSON" (enabled only for sprite sheets) downloads
     `<sheet>.frames.json`; shape matches README's Export shapes section
     (`sheet`, `width`, `height`, `frames[]`, `animations[]`).
-44. [A] "Tiles JSON" (enabled only for tile sheets) downloads
+49. [A] "Tiles JSON" (enabled only for tile sheets) downloads
     `<sheet>.tiles.json`; shape is `{ sheet, count, tiles[] }` — `tiles[]`
     includes only named/preset tiles, each with `index, name, x, y, w, h`
     and the full 8-direction `neighbors` (each slot's `tileIndex` resolved
@@ -200,32 +200,32 @@ is a pass condition for the whole run, not just the final step.
 
 ## 11. Shortcuts (Task 20)
 
-45. [A] Each tool hotkey (`B E G L U O I M`, plus `F`/`T` in their
+50. [A] Each tool hotkey (`B E G L U O I M`, plus `F`/`T` in their
     respective modes) selects the matching tool; hotkeys are ignored
     while a text input/checkbox/select has focus or a dialog is open.
-46. [A] `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` undo/redo (already covered
+51. [A] `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` undo/redo (already covered
     in section 2).
-47. [A] `Ctrl+S` on a project with no save target yet opens the Save As
+52. [A] `Ctrl+S` on a project with no save target yet opens the Save As
     dialog (same as clicking the Save button); close it via Cancel. (A
     project that already has a save target — packed or unpacked — would
     instead call the native save path directly; that path is [M], see
     section 13.)
-48. [A] `[` / `]` decrement/increment `state.brushSize`, clamped to
+53. [A] `[` / `]` decrement/increment `state.brushSize`, clamped to
     1..8, and the Size number input in the tool options row reflects the
     new value.
-49. [A] `X` swaps `state.primary` and `state.secondary`; both color
+54. [A] `X` swaps `state.primary` and `state.secondary`; both color
     swatches in the Colors panel visibly swap.
-50. [A] `Escape` clears an active marquee selection, or backs out of the
+55. [A] `Escape` clears an active marquee selection, or backs out of the
     frame/tile editor to the sheet view (already covered in sections 2,
     7, 9).
-51. [A] `Delete` removes the selected frame while the frame tool is
+56. [A] `Delete` removes the selected frame while the frame tool is
     active (already covered in section 5, item 24).
-52. [A] Mouse wheel zooms the canvas centered on the cursor; `Space`+drag
+57. [A] Mouse wheel zooms the canvas centered on the cursor; `Space`+drag
     (or middle-mouse drag) pans.
 
 ## 12. Packed save/open round trip [M]
 
-53. [M] Save As → "Packed file (.pixelproj)": pick a location via the
+58. [M] Save As → "Packed file (.pixelproj)": pick a location via the
     native save picker (or, on browsers without File System Access API,
     via the download fallback). Reload the app, Open → "Packed file
     (.pixelproj)", pick the saved file: project round-trips (sheets,
@@ -235,14 +235,14 @@ is a pass condition for the whole run, not just the final step.
 
 ## 13. Unpacked folder round trip [M]
 
-54. [M] Save As → "Unpacked folder": pick a folder via the native
+59. [M] Save As → "Unpacked folder": pick a folder via the native
     directory picker. Reload, Open → "Folder…", pick the same folder:
     project round-trips, and `images/<sheetId>/<layerId>.png` files
     exist on disk. Same exemption as above (native picker).
 
 ## 14. Autosave restore [M]
 
-55. [M] Without `?autotest`, make an edit (so `state.dirty` is true),
+60. [M] Without `?autotest`, make an edit (so `state.dirty` is true),
     wait ~30s (or trigger `io.autosave()` manually) for the autosave
     interval, then reload the tab (not the `?autotest` URL — that flag
     skips the restore prompt by design). A "restore autosaved project?"
@@ -253,33 +253,33 @@ is a pass condition for the whole run, not just the final step.
 
 ## 15. v2: New Project, sheets, strips, zoom, thumbnails
 
-56. [A] File > New: with unsaved changes, `confirmOrAuto` auto-accepts the
+61. [A] File > New: with unsaved changes, `confirmOrAuto` auto-accepts the
     discard-changes prompt; the New Project dialog opens. Enter custom
     sprite sheet, tile sheet, tile size, frame size, and duration values;
     "Create" lands a project whose sheets/settings match exactly what was
     entered (not the defaults).
-57. [A] Dialogs (New Project, New Sheet, New Strip, Open, Save As, Export)
+62. [A] Dialogs (New Project, New Sheet, New Strip, Open, Save As, Export)
     render centered in the viewport via native `<dialog>`/`showModal()` —
     no custom positioning logic to break.
-58. [A] Sheet selector dropdown lists sheets for the active tab (Sprite
+63. [A] Sheet selector dropdown lists sheets for the active tab (Sprite
     Sheets vs Tile Sheets); "New Sheet…" dialog creates one (name/size, +
     tile size in tile mode) and it becomes active; undo removes it and
     restores the prior active sheet/layer.
-59. [A] Frames panel "New strip…" creates a contiguous named animation
+64. [A] Frames panel "New strip…" creates a contiguous named animation
     strip (frame size, count, duration); the strip's cells can be
     drag-reordered in the timeline; "Break apart" (visible only while the
     animation is an intact strip) converts it to loose frame entries.
     Each of create/reorder/break-apart is one undo step. An intact strip
     selected with the frame tool shows a per-member width chain plus
     overall width.
-60. [A] Mouse wheel over the canvas steps zoom through the table
+65. [A] Mouse wheel over the canvas steps zoom through the table
     (`0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, ...`); repeated
     scroll-in/scroll-out reaches both 0.25x and 16x without sticking at
     any intermediate level, and the status bar zoom readout matches.
-61. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
+66. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
     checkerboard transparency background scrolls with the content
     (anchored to canvas content, not fixed to the viewport).
-62. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
+67. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
     layer 1 — its thumbnail updates continuously during the stroke (not
     just on mouse-up). Add layer 2 and draw different pixels on it — the
     two thumbnails show distinct content, both live while drawing.
@@ -290,7 +290,7 @@ is a pass condition for the whole run, not just the final step.
 
 ## 16. v3: Import, move tool, rename sheet
 
-63. [A] Import sheet from image: drive the fallback `<input type="file">`
+68. [A] Import sheet from image: drive the fallback `<input type="file">`
     (used when the File System Access API is unavailable; Playwright can
     also intercept it via its file-chooser hook) with a small generated
     PNG of known pixel values. Click "Import…", supply the file: a new
@@ -298,75 +298,75 @@ is a pass condition for the whole run, not just the final step.
     extension, its dimensions match the image, and layer 0's pixels match
     the PNG's. Undo removes the sheet and restores the prior active
     sheet/layer.
-64. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
+69. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
     target region floats (source hole appears, outline + handles shown);
     the layer bitmap is NOT modified beyond the source cut until commit.
     `Enter` commits at the new position; stepwise undo: Ctrl+Z undoes the
     commit, then the drag, then the float itself.
-65. [A] Move tool with a marquee: only the selected region floats; drag,
+70. [A] Move tool with a marquee: only the selected region floats; drag,
     then `Escape` — pixels restored exactly to the original spot.
-66. [A] Transform handles: drag a corner handle (scale, incl. pull-through
+71. [A] Transform handles: drag a corner handle (scale, incl. pull-through
     flip), drag the rotation knob (free rotate); commit renders the
     nearest-neighbor result; each completed drag is one undo step. Scale
     shows W×H pills with Δ (scaled content size); rotate shows an angle
     pill near the knob.
-67. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
+72. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
     each layer; single-layer default otherwise. In the frame editor a
     committed float is clipped to the frame rect.
-68. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
+73. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
     dialog opens pre-filled with the current name. OK with a new name:
     the sheet selector label updates immediately and Export filenames
     (e.g. the flattened PNG download) use the new name; undo restores the
     old name in the selector. OK with an empty/whitespace name: alert
     "Name cannot be empty." and the dialog stays open. Cancel closes
     without changes.
-69. [A] Clipboard: `Ctrl+C` copies the marquee selection, `Ctrl+V` pastes a
+74. [A] Clipboard: `Ctrl+C` copies the marquee selection, `Ctrl+V` pastes a
     floating copy (source intact) that commits on `Enter` or tool switch.
     `Ctrl+X` cuts (one undo step); `Ctrl+Alt+C`/`Ctrl+Alt+X` capture all
     layers. Paste lands at the source position when visible, else centered.
-70. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
+75. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
     first; switching sheets or opening the frame editor also commits.
 
 ## 17. v4: Strip segments
 
-71. [A] With the frame tool, an intact strip's SELECTED segment always
+76. [A] With the frame tool, an intact strip's SELECTED segment always
     shows its chrome (topmost, above label overlays): "+" insert call-outs
     above each frame boundary and "✂" split call-outs below each interior
     boundary; hovering a part highlights it; clicking "+" inserts a blank
     frame there (pixel-carrying tail shift), one undo step. Chrome only
     ever appears for the segment containing `state.selectedFrameId` —
     a non-selected strip shows no chrome until a member of it is clicked.
-72. [A] Clicking "✂" between two frames of a segment adds a break (a
+77. [A] Clicking "✂" between two frames of a segment adds a break (a
     dashed separator appears once the two halves are no longer touching);
     one undo step.
-73. [M] Dragging a whole segment with the frame tool (grab any member, not
+78. [M] Dragging a whole segment with the frame tool (grab any member, not
     a grip) moves every member's rect together, metadata-only — pixels stay
     put; undo restores all member positions in one step. Moving the segment
     WITH its pixels is the move tool's frame-float (item 21b).
-74. [M] Dragging a segment's end near another segment of the SAME
+79. [M] Dragging a segment's end near another segment of the SAME
     animation with matching frame size snaps (green outline) and merges
     the two into one ordered run; undo restores the prior two-segment
     layout.
-75. [M] Dragging a segment's end near a segment of a DIFFERENT animation
+80. [M] Dragging a segment's end near a segment of a DIFFERENT animation
     snaps and transfers it into that animation (including deleting the
     source animation entirely when it becomes empty); undo restores the
     original animation, its frames, and the deleted animation.
-76. [M] Dragging an end-of-segment grip grows (adds blank frames) or
+81. [M] Dragging an end-of-segment grip grows (adds blank frames) or
     shrinks (removes frames; pixels remain on the sheet) that end;
     verify both the left and right ends independently; undo restores the
     prior frame count and any removed frames/pixels.
-77. [A] Selecting a member frame of a segment and pressing `Delete` removes
+82. [A] Selecting a member frame of a segment and pressing `Delete` removes
     it AND closes the gap (rest of the segment shifts to stay contiguous);
     undo restores the frame, its position, and its pixels.
-78. [A] Double-clicking a member frame of a strip (frame tool, two quick
+83. [A] Double-clicking a member frame of a strip (frame tool, two quick
     downs on the same frame) opens the frame editor on that frame; "← Back
     to sheet" returns to the sheet view with the timeline's animation
     picker showing that frame's animation selected.
-79. [A] With a strip animation (`strip: true`) selected in the timeline,
+84. [A] With a strip animation (`strip: true`) selected in the timeline,
     cells have no ✕ remove button and are not draggable (`cell.draggable`
     is `false`); "Add selected frame" is disabled. Editing a cell's
     duration still works and is still one undo step.
-80. [M] Save (packed or unpacked), reload, and open the file: segment
+85. [M] Save (packed or unpacked), reload, and open the file: segment
     breaks (dashed separators / detached halves) and frame order survive
     the round trip exactly. Same native-picker exemption as sections 12-13.
 

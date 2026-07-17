@@ -176,9 +176,13 @@ one per sheet:
 **Tiles JSON** (tile sheets only) — `<sheetname>.tiles.json`:
 
 ```js
-{ "sheet": "<name>.png", "tileWidth": tw, "tileHeight": th, "columns": c, "count": n,
-  "tiles": [{ "index", "name": "<or null>", "neighbors": { "n": {"mode","tileIndex","flipH","flipV"}, ... } }] }
-// only tiles with a name or stored neighbor preset are listed
+{ "sheet": "<name>.png", "count": n,
+  "tiles": [{ "index", "name": "<or null>", "x", "y", "w", "h",
+    "neighbors": { "n": {"mode","tileIndex","flipH","flipV"}, ... } }] }
+// only tiles with a name or stored neighbor preset are listed; tiles can
+// have per-tile size (grids + standalone frames coexist on one sheet), so
+// there's no sheet-wide tileWidth/tileHeight/columns. A neighbor slot's
+// tileIndex is that referenced tile's position in the tiles array.
 ```
 
 ## Test
