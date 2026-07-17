@@ -31,7 +31,7 @@ tool switch).
 | `O` | Ellipse |
 | `I` | Eyedropper |
 | `M` | Select (marquee) — selection only: drag inside moves the rectangle, drag a corner/edge handle resizes it (8 handles); CAD-style dimension lines (arrowed, with value pills) show W×H, origin, and Δ while dragging |
-| `V` | Move (✋) — cuts the selection (or whole layer if none) into a floating selection with move/scale/rotate handles; hold `Alt` at drag start to float all layers. Nothing is rendered to the image until committed |
+| `V` | Move (✋) — cuts the selection (or whole layer if none) into a floating selection with move/scale/rotate handles; hold `Alt` at drag start to float all layers. On the sheet with no marquee, grabbing a frame or strip segment starts a translate-only frame-float instead (frame chrome, no handles/rotation; all layers): committing moves the frame rects together with the pixels. Nothing is rendered to the image until committed |
 | `F` | Frame tool (sprite mode only) |
 | `T` | Tile tool (tile mode only) |
 
@@ -138,18 +138,23 @@ segmentation, so `breaks` has no effect on exported JSON or on how the
 animation plays. Like `strip`, it round-trips through project.json but is
 absent from both exported JSON shapes.
 
-With the frame tool, hovering the segment that contains the currently
-selected frame shows its editing chrome directly on the canvas: "+"
-call-outs to insert a blank frame at any boundary, "✂" call-outs to split
-the segment into two (adding a `breaks` entry) at any interior boundary,
-and grips on both ends to grow/shrink the segment by whole frames. Only one
-segment's chrome is shown at a time — the one containing the selection —
-so overlapping or closely-spaced strips never have their chrome fight for
-the same screen space; click a different strip's member first to bring up
-its chrome instead. Dragging a segment moves every member together
-(pixel-carrying); dragging it end-to-end against another matching-size
-segment snaps and merges the two (across animations if needed, deleting the
-source animation if it becomes empty). Double-clicking any frame (strip
+With the frame tool, the segment that contains the currently selected frame
+shows its editing chrome directly on the canvas whenever it is selected:
+"+" call-outs to insert a blank frame at any boundary, "✂" call-outs to
+split the segment into two (adding a `breaks` entry) at any interior
+boundary, and grips on both ends to grow/shrink the segment by whole
+frames. Only one segment's chrome is shown at a time — the one containing
+the selection — so overlapping or closely-spaced strips never have their
+chrome fight for the same screen space; click a different strip's member
+first to bring up its chrome instead. Dragging a segment moves every member
+together, metadata-only: like dragging a selection marquee, it never moves
+or clears pixels — frames are viewports onto the sheet. To move a frame or
+strip WITH its content, use the move tool (`V`): grabbing it starts a
+translate-only frame-float (live preview, frame-style chrome, no
+scale/rotation) and committing lands pixels and frame rects together.
+Dragging a segment end-to-end against another matching-size segment
+snaps and merges the two (across animations if needed, deleting the source
+animation if it becomes empty). Double-clicking any frame (strip
 member or not) opens the frame editor on it and selects its animation in
 the timeline. Once a strip is intact, its timeline cells can't be
 individually removed, reordered, or padded out with an arbitrary frame

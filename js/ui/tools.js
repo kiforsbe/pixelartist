@@ -20,7 +20,8 @@ import { makePixelPatch } from '../core/commands.js';
 import { forwardPoint, inversePoint, floatBounds } from '../core/floating.js';
 import { nearestColor } from '../core/palettes.js';
 import { flattenSheet } from '../core/model.js';
-import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand } from './floatsession.js';
+import { segmentAt } from '../core/strips.js';
+import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat } from './floatsession.js';
 import { resizeRect } from '../core/resizerect.js';
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 
@@ -546,8 +547,9 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (!sheet) return;
     const float = state.floating;
     if (float && float.sheetId === sheet.id) {
-      const knob = knobScreenPos(float);
-      if (Math.hypot(ev.sx - knob.x, ev.sy - knob.y) <= KNOB_R + 2) {
+      // Frame-floats are translate-only: no rotation knob, no scale handles.
+      const knob = !float.frameIds && knobScreenPos(float);
+      if (knob && Math.hypot(ev.sx - knob.x, ev.sy - knob.y) <= KNOB_R + 2) {
         const c = floatCenter(float);
         moveStroke = {
           kind: 'rotate', t0: { ...float.transform },
@@ -555,7 +557,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         };
         return;
       }
-      for (const a of handleAnchors(float)) {
+      if (!float.frameIds) for (const a of handleAnchors(float)) {
         const p = toScreen(forwardPoint(float, a.u, a.v));
         if (Math.abs(ev.sx - p.x) <= HANDLE_PX + 2 && Math.abs(ev.sy - p.y) <= HANDLE_PX + 2) {
           moveStroke = { kind: 'scale', t0: { ...float.transform }, anchor: a };
@@ -570,7 +572,20 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       commitFloatIfAny(); // pressed outside: commit; next press starts fresh
       return;
     }
-    // no float yet: cut selection (or whole target) into one, then drag it
+    // No float yet. On the sheet view with no marquee, a down on a frame or
+    // strip segment starts a FRAME-FLOAT: the region's pixels (all layers)
+    // float exactly like a selection — live preview, commit on Enter/outside
+    // click — but translate-only, and on commit the frame rects move with
+    // the pixels. Everything else keeps the classic behavior: cut the
+    // selection (or whole target) and drag it.
+    if (state.view === 'sheet' && !selection) {
+      const seg = segmentAt(sheet, ev.x, ev.y);
+      if (seg) {
+        if (!createFloat({ allLayers: true, region: seg.rect, frameIds: seg.frameIds })) return;
+        moveStroke = { kind: 'translate', t0: { ...state.floating.transform }, anchor: { x: ev.x, y: ev.y } };
+        return;
+      }
+    }
     if (!createFloat({ allLayers: !!ev.altKey })) return;
     moveStroke = { kind: 'translate', t0: { ...state.floating.transform }, anchor: { x: ev.x, y: ev.y } };
   }
@@ -582,6 +597,18 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (moveStroke.kind === 'translate') {
       float.transform.tx = t0.tx + Math.round(ev.x - moveStroke.anchor.x);
       float.transform.ty = t0.ty + Math.round(ev.y - moveStroke.anchor.y);
+      if (float.frameIds) {
+        // Frame rects must stay on-sheet, so the frame-float clamps where a
+        // plain float may overhang (commit crops overhang pixels anyway).
+        const sheet = activeSheet();
+        if (sheet) {
+          float.transform.tx = Math.max(-float.srcRect.x,
+            Math.min(sheet.width - float.srcRect.x - float.srcRect.w, float.transform.tx));
+          float.transform.ty = Math.max(-float.srcRect.y,
+            Math.min(sheet.height - float.srcRect.y - float.srcRect.h, float.transform.ty));
+        }
+        syncFrameFloat(); // rects follow live — the frame itself is moving
+      }
     } else if (moveStroke.kind === 'rotate') {
       const c = moveStroke.center;
       float.transform.rot = t0.rot + (Math.atan2(ev.y + 0.5 - c.y, ev.x + 0.5 - c.x) - moveStroke.angle0);
@@ -659,7 +686,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       ctx.save();
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
-      for (const [color, off] of [['#fff', 0], ['#000', 4]]) {
+      // Frame-floats use the frame tool's ghost style (plain white dashes),
+      // not the selection's white/black marching ants.
+      const dashes = float.frameIds ? [['#fff', 0]] : [['#fff', 0], ['#000', 4]];
+      for (const [color, off] of dashes) {
         ctx.strokeStyle = color;
         ctx.lineDashOffset = off;
         ctx.beginPath();
@@ -668,15 +698,20 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         ctx.stroke();
       }
       ctx.setLineDash([]);
-      for (const a of handleAnchors(float)) {
-        drawHandleSquare(ctx, toScreen(forwardPoint(float, a.u, a.v)));
+      // Frame-floats read as a moving frame, not a transformable selection:
+      // outline + dimension chrome only — no scale handles, no rotation knob.
+      let knob = null;
+      if (!float.frameIds) {
+        for (const a of handleAnchors(float)) {
+          drawHandleSquare(ctx, toScreen(forwardPoint(float, a.u, a.v)));
+        }
+        knob = knobScreenPos(float);
+        const top = toScreen(forwardPoint(float, w / 2, 0));
+        ctx.strokeStyle = '#fff';
+        ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.lineTo(knob.x, knob.y); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000';
+        ctx.beginPath(); ctx.arc(knob.x, knob.y, KNOB_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       }
-      const knob = knobScreenPos(float);
-      const top = toScreen(forwardPoint(float, w / 2, 0));
-      ctx.strokeStyle = '#fff';
-      ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.lineTo(knob.x, knob.y); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000';
-      ctx.beginPath(); ctx.arc(knob.x, knob.y, KNOB_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.restore();
       const t = float.transform;
       const bounds = floatBounds(float);
@@ -693,7 +728,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         opts.quiet = true;
       }
       drawRectDims(ctx, view, bounds, opts);
-      if (moveStroke?.kind === 'rotate' || (!moveStroke && t.rot !== 0)) {
+      if (knob && (moveStroke?.kind === 'rotate' || (!moveStroke && t.rot !== 0))) {
         drawAngleLabel(ctx, knob.x + KNOB_R + 4, knob.y, t.rot);
       }
       return;

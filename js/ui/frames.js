@@ -194,15 +194,17 @@ function commitCreate(sheet, rect) {
   emit('selection');
 }
 
-// Pixel-carrying move for one or more frames sharing a common delta (single
-// frame in the plain case, ALL members of an intact strip when dragged as a
-// unit). For every layer: copy ALL member regions first (their CURRENT
-// pixels), THEN clear all of them, THEN blit all of them at their new
-// positions — copying before clearing avoids corruption when member frames
-// are adjacent (clearing frame A before copying frame B's original pixels
-// would clobber B if A and B overlap/touch). Captures a per-layer clone of
-// the UNION of every member's before/after rect so undo restores all pixels
-// and all frames' x/y in one step.
+// Pixel-carrying shift for one or more frames sharing a common delta — used
+// by CONTENT operations only (insert-column's tail shift, remove-column's
+// gap close). Plain frame/strip moves are metadata-only (commitMoveFrames);
+// moving pixel content is the move tool's job, same as for a selection.
+// For every layer: copy ALL member regions first (their CURRENT pixels),
+// THEN clear all of them, THEN blit all of them at their new positions —
+// copying before clearing avoids corruption when member frames are adjacent
+// (clearing frame A before copying frame B's original pixels would clobber B
+// if A and B overlap/touch). Captures a per-layer clone of the UNION of
+// every member's before/after rect so undo restores all pixels and all
+// frames' x/y in one step.
 function buildMovePatches(sheet, frames, dx, dy) {
   const ux0 = Math.min(...frames.map(f => Math.min(f.x, f.x + dx)));
   const uy0 = Math.min(...frames.map(f => Math.min(f.y, f.y + dy)));
@@ -224,26 +226,24 @@ function buildMovePatches(sheet, frames, dx, dy) {
   return { patches, ur, beforeCoords, afterCoords };
 }
 
+// Metadata-only move: frames are viewports onto the sheet, so dragging them
+// with the frame tool never moves or clears pixels — exactly like dragging a
+// selection marquee. Use the move tool to move the underlying content.
 function commitMoveFrames(sheet, frames, dx, dy) {
-  const mv = buildMovePatches(sheet, frames, dx, dy);
+  const coords = frames.map(f => ({ frame: f, x: f.x, y: f.y }));
   const cmd = {
     label: frames.length > 1 ? 'move strip' : 'move frame',
-    do() {
-      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.after, mv.ur.x, mv.ur.y);
-      for (const c of mv.afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
-    },
-    undo() {
-      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.before, mv.ur.x, mv.ur.y);
-      for (const c of mv.beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
-    },
+    do() { for (const c of coords) { c.frame.x = c.x + dx; c.frame.y = c.y + dy; } },
+    undo() { for (const c of coords) { c.frame.x = c.x; c.frame.y = c.y; } },
   };
   state.commands.push(cmd);
   markDirty();
 }
 
-// Snap-merge: one undoable command = pixel move of the dragged members +
-// order/breaks rewrite (+ possible source-animation deletion). Whole-array
-// snapshots keep do()/undo() idempotent per the codebase idiom.
+// Snap-merge: one undoable command = metadata reposition of the dragged
+// members (no pixels move — the frame tool is metadata-only) + order/breaks
+// rewrite (+ possible source-animation deletion). Whole-array snapshots keep
+// do()/undo() idempotent per the codebase idiom.
 function commitMergeSegments(sheet, d, snap) {
   const srcAnim = d.anim, dstAnim = snap.anim;
   const sameAnim = srcAnim === dstAnim;
@@ -253,7 +253,8 @@ function commitMergeSegments(sheet, d, snap) {
     animations: sheet.animations.slice(),
     selectedAnimationId: state.selectedAnimationId,
   };
-  const mv = buildMovePatches(sheet, d.members, snap.dx, snap.dy);
+  const coords = d.members.map(f => ({ frame: f, x: f.x, y: f.y }));
+  for (const f of d.members) { f.x += snap.dx; f.y += snap.dy; }
   if (sameAnim) {
     const r = mergeSegments(srcAnim, d.run.index, snap.run.index, snap.side);
     srcAnim.frames = r.frames; srcAnim.breaks = r.breaks;
@@ -272,16 +273,14 @@ function commitMergeSegments(sheet, d, snap) {
   state.commands.push({
     label: 'merge strips',
     do() {
-      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.after, mv.ur.x, mv.ur.y);
-      for (const c of mv.afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      for (const c of coords) { c.frame.x = c.x + snap.dx; c.frame.y = c.y + snap.dy; }
       srcAnim.frames = after.srcFrames.map(e => ({ ...e })); srcAnim.breaks = after.srcBreaks.slice();
       dstAnim.frames = after.dstFrames.map(e => ({ ...e })); dstAnim.breaks = after.dstBreaks.slice();
       sheet.animations = after.animations.slice();
       state.selectedAnimationId = dstAnim.id;
     },
     undo() {
-      for (const p of mv.patches) blitRegion(p.layer.bitmap, p.before, mv.ur.x, mv.ur.y);
-      for (const c of mv.beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      for (const c of coords) { c.frame.x = c.x; c.frame.y = c.y; }
       srcAnim.frames = before.srcFrames.map(e => ({ ...e })); srcAnim.breaks = before.srcBreaks.slice();
       dstAnim.frames = before.dstFrames.map(e => ({ ...e })); dstAnim.breaks = before.dstBreaks.slice();
       sheet.animations = before.animations.slice();

@@ -80,10 +80,15 @@ is a pass condition for the whole run, not just the final step.
     frame; it appears in the Frames panel and as an overlay on the
     canvas (labels/sequence overlay toggles in the top bar affect
     visibility).
-21. [A] Drag-move a frame with the frame tool: pixels underneath move
-    with it (pixel-carrying move), one undo step restores both frame
-    position and pixels. Move shows origin (+dx, +dy); create/resize drags
-    show W×H pills with Δ on arrowed dimension lines.
+21. [A] Drag-move a frame with the frame tool: metadata-only — the frame
+    rect moves, pixels stay put (like dragging a marquee); one undo step
+    restores the position. Move shows origin (+dx, +dy); create/resize
+    drags show W×H pills with Δ on arrowed dimension lines.
+21b. [M] Move tool (`V`) on a frame/strip segment (no marquee active):
+    starts a translate-only frame-float — frame-style chrome, no scale
+    handles or rotation knob — live-previewing the pixels; committing
+    (Enter/click outside) moves frame rects and pixels together; Escape
+    cancels both. Undo of the commit restores rects and pixels.
 22. [A] Drag a corner handle to resize the selected frame; undo restores
     original bounds.
 23. [A] Frames panel: Slice grid… dialog creates a full grid of frames
@@ -287,19 +292,20 @@ is a pass condition for the whole run, not just the final step.
 
 ## 17. v4: Strip segments
 
-71. [A] Frame tool hover over an intact strip's SELECTED segment shows "+"
-    insert call-outs above each frame boundary and "✂" split call-outs
-    below each interior boundary; clicking "+" inserts a blank frame there
-    (pixel-carrying tail shift), one undo step. Chrome only ever appears
-    for the segment containing `state.selectedFrameId` — hovering a
-    different (non-selected) strip shows no chrome until a member of it is
-    clicked first.
+71. [A] With the frame tool, an intact strip's SELECTED segment always
+    shows its chrome (topmost, above label overlays): "+" insert call-outs
+    above each frame boundary and "✂" split call-outs below each interior
+    boundary; hovering a part highlights it; clicking "+" inserts a blank
+    frame there (pixel-carrying tail shift), one undo step. Chrome only
+    ever appears for the segment containing `state.selectedFrameId` —
+    a non-selected strip shows no chrome until a member of it is clicked.
 72. [A] Clicking "✂" between two frames of a segment adds a break (a
     dashed separator appears once the two halves are no longer touching);
     one undo step.
-73. [M] Dragging a whole segment (grab any member, not a resize handle)
-    moves every member of that segment together as a pixel-carrying unit;
-    undo restores all member positions and pixels in one step.
+73. [M] Dragging a whole segment with the frame tool (grab any member, not
+    a grip) moves every member's rect together, metadata-only — pixels stay
+    put; undo restores all member positions in one step. Moving the segment
+    WITH its pixels is the move tool's frame-float (item 21b).
 74. [M] Dragging a segment's end near another segment of the SAME
     animation with matching frame size snaps (green outline) and merges
     the two into one ordered run; undo restores the prior two-segment

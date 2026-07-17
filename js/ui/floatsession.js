@@ -49,19 +49,36 @@ function captureLayers(sheet, region, allLayers) {
   }));
 }
 
-export function createFloat({ allLayers = false } = {}) {
+// region/frameIds: the move tool passes these when the drag starts on a frame
+// or strip segment (frame-float): the float cuts exactly that rect, and on
+// commit the named frames' rects move with the pixels. Only honored when no
+// marquee selection exists — an explicit selection always wins.
+export function createFloat({ allLayers = false, region = null, frameIds = null } = {}) {
   commitFloatIfAny();
   const viewApi = activeView();
   const sheet = activeSheet();
   if (!viewApi || !sheet) return false;
   const rr = resolveRegion(viewApi);
   if (!rr) return false;
-  const { region, target } = rr;
-  const captured = captureLayers(sheet, region, allLayers);
+  let { region: reg, target } = rr;
+  const frameFloat = !!(region && frameIds && !viewApi.getSelection());
+  if (frameFloat) {
+    const clamped = rectIntersect(region, target);
+    if (!clamped) return false;
+    reg = clamped;
+  }
+  const captured = captureLayers(sheet, reg, allLayers);
   if (!captured.length) return false;
   const float = {
-    sheetId: sheet.id, srcRect: { ...region }, cut: true,
+    sheetId: sheet.id, srcRect: { ...reg }, cut: true,
     layers: captured, transform: makeTransform(),
+    frameIds: frameFloat ? frameIds.slice() : null,
+    // Original rect origins of the floated frames: the live-sync target
+    // (rects follow the translation during the drag) and the undo baseline.
+    frameOrig: frameFloat
+      ? frameIds.map(id => sheet.frames.find(f => f.id === id))
+          .filter(Boolean).map(f => ({ id: f.id, x: f.x, y: f.y }))
+      : null,
   };
   const ctx = { viewKind: state.view, targetRect: { ...target } };
   const prevSelection = viewApi.getSelection();
@@ -70,7 +87,7 @@ export function createFloat({ allLayers = false } = {}) {
     do() {
       for (const { layerId } of captured) {
         const l = layerIn(sheet, layerId);
-        if (l) fillRegion(l.bitmap, region.x, region.y, region.w, region.h, [0, 0, 0, 0]);
+        if (l) fillRegion(l.bitmap, reg.x, reg.y, reg.w, reg.h, [0, 0, 0, 0]);
       }
       state.floating = float;
       floatCtx = ctx;
@@ -80,7 +97,7 @@ export function createFloat({ allLayers = false } = {}) {
     undo() {
       for (const { layerId, buffer } of captured) {
         const l = layerIn(sheet, layerId);
-        if (l) blitRegion(l.bitmap, buffer, region.x, region.y);
+        if (l) blitRegion(l.bitmap, buffer, reg.x, reg.y);
       }
       state.floating = null;
       floatCtx = null;
@@ -114,11 +131,25 @@ export function commitFloatIfAny() {
       patches.push({ layer, before, after });
     }
   }
-  const sel = rect ? { ...rect } : null;
+  // Frame-float: the frames whose region was cut land with the pixels —
+  // rects were live-synced during the drag, so the undo baseline is the
+  // ORIGINAL origins captured at float creation, never the current rects.
+  // (Frame-floats are translate-only — no scale handles, no rotation knob —
+  // so the guard only skips degenerate states.)
+  const t = float.transform;
+  const dx = Math.round(t.tx), dy = Math.round(t.ty);
+  const frameCoords = (float.frameOrig && t.sx === 1 && t.sy === 1 && t.rot === 0)
+    ? float.frameOrig.map(o => {
+        const f = sheet.frames.find(fr => fr.id === o.id);
+        return f ? { frame: f, x: o.x, y: o.y } : null;
+      }).filter(Boolean)
+    : [];
+  const sel = rect && !float.frameIds ? { ...rect } : null;
   state.commands.push({
     label: 'commit float',
     do() {
       for (const p of patches) blitRegion(p.layer.bitmap, p.after, rect.x, rect.y);
+      for (const c of frameCoords) { c.frame.x = c.x + dx; c.frame.y = c.y + dy; }
       state.floating = null;
       floatCtx = null;
       views.get(ctx.viewKind)?.setSelection(sel ? { ...sel } : null);
@@ -126,6 +157,7 @@ export function commitFloatIfAny() {
     },
     undo() {
       for (const p of patches) blitRegion(p.layer.bitmap, p.before, rect.x, rect.y);
+      for (const c of frameCoords) { c.frame.x = c.x; c.frame.y = c.y; }
       state.floating = float;
       floatCtx = ctx;
       views.get(ctx.viewKind)?.setSelection(null);
@@ -141,6 +173,13 @@ export function cancelFloatIfAny() {
   const ctx = floatCtx;
   const sheet = sheetById(float.sheetId);
   if (!sheet || !ctx) { state.floating = null; floatCtx = null; return; }
+  // Live-synced frame-float rects snap back to their original origins on
+  // cancel (and back to the cancelled translation on redo... i.e. undo).
+  const cdx = Math.round(float.transform.tx), cdy = Math.round(float.transform.ty);
+  const frameCoords = (float.frameOrig ?? []).map(o => {
+    const f = sheet.frames.find(fr => fr.id === o.id);
+    return f ? { frame: f, x: o.x, y: o.y } : null;
+  }).filter(Boolean);
   state.commands.push({
     label: 'cancel float',
     do() {
@@ -148,9 +187,11 @@ export function cancelFloatIfAny() {
         const l = layerIn(sheet, layerId);
         if (l) blitRegion(l.bitmap, buffer, float.srcRect.x, float.srcRect.y);
       }
+      for (const c of frameCoords) { c.frame.x = c.x; c.frame.y = c.y; }
       state.floating = null;
       floatCtx = null;
-      views.get(ctx.viewKind)?.setSelection(float.cut ? { ...float.srcRect } : null);
+      // Frame-floats never leave a marquee behind — the frames ARE the shape.
+      views.get(ctx.viewKind)?.setSelection(float.cut && !float.frameIds ? { ...float.srcRect } : null);
       emit('pixels');
     },
     undo() {
@@ -158,6 +199,7 @@ export function cancelFloatIfAny() {
         const l = layerIn(sheet, layerId);
         if (l) fillRegion(l.bitmap, float.srcRect.x, float.srcRect.y, float.srcRect.w, float.srcRect.h, [0, 0, 0, 0]);
       }
+      for (const c of frameCoords) { c.frame.x = c.x + cdx; c.frame.y = c.y + cdy; }
       state.floating = float;
       floatCtx = ctx;
       views.get(ctx.viewKind)?.setSelection(null);
@@ -167,6 +209,21 @@ export function cancelFloatIfAny() {
   markDirty();
 }
 
+// Frame-float rects track the float's integer translation live, so the frame
+// reads as moving (labels/overlays/panel follow) instead of a detached
+// selection. No-op for plain floats.
+export function syncFrameFloat() {
+  const float = state.floating;
+  if (!float?.frameOrig) return;
+  const sheet = sheetById(float.sheetId);
+  if (!sheet) return;
+  const dx = Math.round(float.transform.tx), dy = Math.round(float.transform.ty);
+  for (const o of float.frameOrig) {
+    const f = sheet.frames.find(fr => fr.id === o.id);
+    if (f) { f.x = o.x + dx; f.y = o.y + dy; }
+  }
+}
+
 export function pushTransformCommand(before, after) {
   const float = state.floating;
   if (!float) return;
@@ -174,8 +231,8 @@ export function pushTransformCommand(before, after) {
     && before.sy === after.sy && before.rot === after.rot) return;
   state.commands.push({
     label: 'transform float',
-    do() { float.transform = { ...after }; emit('pixels'); },
-    undo() { float.transform = { ...before }; emit('pixels'); },
+    do() { float.transform = { ...after }; syncFrameFloat(); emit('pixels'); },
+    undo() { float.transform = { ...before }; syncFrameFloat(); emit('pixels'); },
   });
   // no markDirty: bitmaps unchanged; state.dirty is already true from creation
 }
