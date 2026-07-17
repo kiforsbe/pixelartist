@@ -113,8 +113,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .terrain-set-list .row { justify-content: space-between; }
 .terrain-slot-group { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
 .terrain-slot { width: 28px; height: 28px; border: 1px solid #444; cursor: pointer; position: relative; background-size: cover; }
-.terrain-slot.core { border-color: #4f8cff; border-width: 2px; }
-.terrain-slot.derived { border-style: dashed; }
+.terrain-slot.mandatory { border-color: #4f8cff; border-width: 2px; }
+.terrain-slot.optional { border-style: dashed; }
 .terrain-slot .badge { position: absolute; bottom: 0; right: 0; font-size: 8px; background: #000a; color: #fff; padding: 0 2px; }
 
 /* timeline dock */

@@ -22,7 +22,7 @@ import {
   detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset,
 } from '../core/terrainsets.js';
 import {
-  NEIGHBOR_BITS, blobIndexToMask, maskToBlobIndex, SIXTEEN_TILE_INDICES, resolveTerrainSlot,
+  NEIGHBOR_BITS, blobIndexToMask, maskToBlobIndex, SIXTEEN_TILE_INDICES, resolveTerrainSlot, classifySlots,
 } from '../core/blob47.js';
 
 // ------------------------------------------------------------- geometry
@@ -1106,19 +1106,20 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
   viewModeRow.appendChild(viewModeLabel);
   container.appendChild(viewModeRow);
 
+  const classification = classifySlots(terrainSet.symmetry);
   for (const group of slotGroupsForViewMode(terrainViewMode)) {
     const groupRow = document.createElement('div');
     groupRow.className = 'terrain-slot-group';
     for (const blobIndex of group) {
       const resolved = resolveTerrainSlot(terrainSet, blobIndex);
       const isExplicit = terrainSet.slots[blobIndex] != null;
+      const classInfo = classification.get(blobIndex);
       const cell = document.createElement('div');
       cell.className = 'terrain-slot';
-      if (SIXTEEN_TILE_INDICES.has(blobIndex)) cell.classList.add('core');
-      if (resolved && !isExplicit) cell.classList.add('derived');
+      cell.classList.add(classInfo.mandatory ? 'mandatory' : 'optional');
 
       const mask = blobIndexToMask[blobIndex];
-      let title = describeMask(mask);
+      let title = `${describeMask(mask)} — ${classInfo.mandatory ? 'mandatory' : 'optional'}`;
       if (resolved && !isExplicit) title += ` (derived: flipH=${resolved.flipH}, rotate=${resolved.rotate})`;
       cell.title = title;
 
