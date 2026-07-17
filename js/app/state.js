@@ -1,5 +1,5 @@
 import { CommandStack } from '../core/commands.js';
-import { createProject, createSheet, DEFAULT_SETTINGS } from '../core/model.js';
+import { createProject, createSheet, DEFAULT_SETTINGS, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers } from '../core/model.js';
 
 // Test mode (?autotest): automated browser sessions suppress modal dialogs
 // (beforeunload guard, autosave-restore prompt, confirm() gates auto-accept).
@@ -44,7 +44,15 @@ export function activeSheet() {
 }
 export function activeLayer() {
   const sheet = activeSheet();
-  return sheet?.layers.find(l => l.id === state.activeLayerId) ?? null;
+  return sheet ? findLayer(sheet.layerTree, state.activeLayerId) : null;
+}
+// Layers visible/editable in the current context. When an animation is
+// selected, operations that would otherwise affect "all layers" are scoped to
+// the layers inside that animation's group.
+export function currentContextLayers() {
+  const sheet = activeSheet();
+  if (!sheet) return [];
+  return modelContextLayers(sheet, state.selectedAnimationId);
 }
 export function markDirty() { state.dirty = true; emit('project'); }
 export function setProject(project) {
@@ -52,7 +60,7 @@ export function setProject(project) {
   const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
   const sheet = project.sheets.find(s => s.kind === kind) ?? null;
   state.activeSheetId = sheet ? sheet.id : null;
-  state.activeLayerId = sheet ? (sheet.layers[0]?.id ?? null) : null;
+  state.activeLayerId = sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null;
   state.commands.clear();
   state.dirty = false;
   emit('project');

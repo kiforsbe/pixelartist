@@ -8,7 +8,7 @@
 // element frames.js's mountFramesPanel does — see mountFramesPanel's wrap-div
 // comment for how the two coexist without clobbering each other.
 
-import { state, on, emit, activeSheet, markDirty } from '../app/state.js';
+import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
 import { tileCount, tileRect } from '../core/model.js';
 import { copyRegion, blitRegion, fillRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
@@ -65,7 +65,7 @@ function isTypingTarget(el) {
 // regardless of how many times it's called.
 function commitSwapTile(sheet, a, b) {
   const ra = tileRect(sheet, a), rb = tileRect(sheet, b);
-  const patches = sheet.layers.map((layer) => {
+  const patches = currentContextLayers().map((layer) => {
     const beforeA = copyRegion(layer.bitmap, ra.x, ra.y, ra.w, ra.h);
     const beforeB = copyRegion(layer.bitmap, rb.x, rb.y, rb.w, rb.h);
     blitRegion(layer.bitmap, beforeB, ra.x, ra.y);
@@ -111,7 +111,7 @@ function commitSwapTile(sheet, a, b) {
 // A's name/neighbors move to B; B's originals are dropped. One command.
 function commitMoveTile(sheet, a, b) {
   const ra = tileRect(sheet, a), rb = tileRect(sheet, b);
-  const patches = sheet.layers.map((layer) => {
+  const patches = currentContextLayers().map((layer) => {
     const beforeA = copyRegion(layer.bitmap, ra.x, ra.y, ra.w, ra.h);
     const beforeB = copyRegion(layer.bitmap, rb.x, rb.y, rb.w, rb.h);
     blitRegion(layer.bitmap, beforeA, rb.x, rb.y);

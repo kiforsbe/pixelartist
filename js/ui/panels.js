@@ -2,7 +2,7 @@
 
 import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
-import { addLayer, removeLayer, moveLayer, mergeDown } from '../core/model.js';
+import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, findGroup, findLayer, createLayerNode, createGroupNode } from '../core/model.js';
 import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
@@ -159,6 +159,11 @@ export function mountColorPanel(el) {
     return n;
   }
 
+  function allSheetLayers() {
+    const sheet = activeSheet();
+    return sheet ? sheetLayers(sheet) : [];
+  }
+
   function editIndexedEntry(pal, index) {
     const old = pal.colors[index];
     const input = hiddenColorInput();
@@ -172,7 +177,7 @@ export function mountColorPanel(el) {
 
       const sheet = activeSheet();
       let count = 0;
-      if (sheet) for (const layer of sheet.layers) count += countColor(layer.bitmap, old);
+      if (sheet) for (const layer of sheetLayers(sheet)) count += countColor(layer.bitmap, old);
 
       // `old` references the original entry array; setEntry() replaces the
       // slot with a fresh copy, so `old` stays valid for undo.
@@ -191,7 +196,7 @@ export function mountColorPanel(el) {
       // The palette-entry mutation lives INSIDE the command so undo restores
       // both the pixels AND the palette color. commands.push() executes do(),
       // so nothing is pre-applied here.
-      const layerPatches = sheet.layers.map(layer => {
+      const layerPatches = sheetLayers(sheet).map(layer => {
         const before = cloneBitmap(layer.bitmap);
         const after = cloneBitmap(layer.bitmap);
         remapColor(after, old, to);
@@ -332,31 +337,85 @@ export function mountLayersPanel(el) {
   resetBody(el, 'Layers');
 
   const list = document.createElement('div');
-  list.className = 'layer-list';
+  list.className = 'layer-list layer-tree';
   el.appendChild(list);
 
   const btnRow = document.createElement('div'); btnRow.className = 'row';
-  const btnAdd = document.createElement('button'); btnAdd.textContent = 'Add';
+  const btnAddLayer = document.createElement('button'); btnAddLayer.textContent = '+ Layer';
+  const btnAddGroup = document.createElement('button'); btnAddGroup.textContent = '+ Group';
   const btnDelete = document.createElement('button'); btnDelete.textContent = 'Delete';
   const btnMerge = document.createElement('button'); btnMerge.textContent = 'Merge Down';
-  btnRow.append(btnAdd, btnDelete, btnMerge);
+  btnRow.append(btnAddLayer, btnAddGroup, btnDelete, btnMerge);
   el.appendChild(btnRow);
+
+  // Selected node can be a layer or a group. Active layer id is authoritative
+  // for drawing; selected node id is authoritative for panel operations.
+  let selectedNodeId = state.activeLayerId;
+
+  function targetGroupForInsert() {
+    const sheet = activeSheet();
+    if (!sheet) return null;
+    if (!selectedNodeId) return sheet.layerTree;
+    const node = findNode(sheet.layerTree, selectedNodeId);
+    if (!node) return sheet.layerTree;
+    if (node.type === 'group') return node;
+    const loc = findParent(sheet.layerTree, selectedNodeId);
+    return loc ? loc.parent : sheet.layerTree;
+  }
+
+  function countNodes(sheet, type) {
+    let n = 0;
+    function walk(node) {
+      if (node.type === type) n++;
+      if (node.children) for (const c of node.children) walk(c);
+    }
+    walk(sheet.layerTree);
+    return n;
+  }
 
   function doAddLayer() {
     const sheet = activeSheet();
-    if (!sheet) return;
-    const beforeLayers = sheet.layers.slice();
+    const group = targetGroupForInsert();
+    if (!sheet || !group) return;
+    const beforeChildren = group.children.slice();
     const beforeActive = state.activeLayerId;
     let newLayer = null;
     const cmd = {
       label: 'add layer',
       do() {
-        if (!newLayer) newLayer = addLayer(sheet, `Layer ${sheet.layers.length + 1}`);
-        else if (!sheet.layers.includes(newLayer)) sheet.layers.push(newLayer);
+        if (!newLayer) newLayer = createLayerNode(`Layer ${countNodes(sheet, 'layer') + 1}`, sheet.width, sheet.height);
+        if (!group.children.includes(newLayer)) group.children.push(newLayer);
         state.activeLayerId = newLayer.id;
+        selectedNodeId = newLayer.id;
       },
       undo() {
-        sheet.layers = beforeLayers.slice();
+        group.children = beforeChildren.slice();
+        state.activeLayerId = beforeActive;
+        selectedNodeId = beforeActive;
+      },
+    };
+    state.commands.push(cmd);
+    markDirty();
+  }
+
+  function doAddGroup() {
+    const sheet = activeSheet();
+    const group = targetGroupForInsert();
+    if (!sheet || !group) return;
+    const beforeChildren = group.children.slice();
+    const beforeActive = state.activeLayerId;
+    let newGroup = null;
+    const cmd = {
+      label: 'add group',
+      do() {
+        if (!newGroup) newGroup = createGroupNode(`Group ${countNodes(sheet, 'group') + 1}`);
+        if (!group.children.includes(newGroup)) group.children.push(newGroup);
+        selectedNodeId = newGroup.id;
+        state.activeLayerId = null;
+      },
+      undo() {
+        group.children = beforeChildren.slice();
+        selectedNodeId = beforeChildren[beforeChildren.length - 1]?.id ?? null;
         state.activeLayerId = beforeActive;
       },
     };
@@ -364,73 +423,124 @@ export function mountLayersPanel(el) {
     markDirty();
   }
 
-  function doDeleteLayer() {
+  function doDelete() {
     const sheet = activeSheet();
+    if (!sheet) return;
     const layer = activeLayer();
-    if (!sheet || !layer) return;
-    if (sheet.layers.length <= 1) { alert('Cannot delete the last layer.'); return; }
-    if (!confirmOrAuto(`Delete layer "${layer.name}"?`)) return;
-    const beforeLayers = sheet.layers.slice();
-    const beforeActive = state.activeLayerId;
-    const idx = sheet.layers.indexOf(layer);
-    const cmd = {
-      label: 'delete layer',
-      do() {
-        removeLayer(sheet, layer.id);
-        const fallback = sheet.layers[Math.min(idx, sheet.layers.length - 1)];
-        state.activeLayerId = fallback ? fallback.id : null;
-      },
-      undo() {
-        sheet.layers = beforeLayers.slice();
-        state.activeLayerId = beforeActive;
-      },
-    };
-    state.commands.push(cmd);
-    markDirty();
+    if (layer) {
+      if (sheetLayers(sheet).length <= 1) { alert('Cannot delete the last layer.'); return; }
+      if (!confirmOrAuto(`Delete layer "${layer.name}"?`)) return;
+      const loc = findParent(sheet.layerTree, layer.id);
+      if (!loc) return;
+      const parent = loc.parent;
+      const beforeChildren = parent.children.slice();
+      const beforeActive = state.activeLayerId;
+      const idx = loc.index;
+      const cmd = {
+        label: 'delete layer',
+        do() {
+          parent.children = parent.children.filter(c => c.id !== layer.id);
+          const all = sheetLayers(sheet);
+          const fallback = all[Math.min(idx, all.length - 1)];
+          state.activeLayerId = fallback ? fallback.id : null;
+          selectedNodeId = state.activeLayerId;
+        },
+        undo() {
+          parent.children = beforeChildren.slice();
+          state.activeLayerId = beforeActive;
+          selectedNodeId = beforeActive;
+        },
+      };
+      state.commands.push(cmd);
+      markDirty();
+      return;
+    }
+    if (selectedNodeId) {
+      const g = findGroup(sheet.layerTree, selectedNodeId);
+      if (g) {
+        if (g.animationId && !confirmOrAuto(`Delete group "${g.name}"? Its animation will keep its frames but lose its layer group.`)) return;
+        else if (!g.animationId && !confirmOrAuto(`Delete group "${g.name}" and its contents?`)) return;
+        const loc = findParent(sheet.layerTree, g.id);
+        if (!loc) return;
+        const parent = loc.parent;
+        const beforeChildren = parent.children.slice();
+        const beforeActive = state.activeLayerId;
+        const cmd = {
+          label: 'delete group',
+          do() {
+            parent.children = parent.children.filter(c => c.id !== g.id);
+            if (g.animationId) {
+              const anim = sheet.animations.find(a => a.id === g.animationId);
+              if (anim) anim.layerGroupId = null;
+            }
+            selectedNodeId = state.activeLayerId;
+          },
+          undo() {
+            parent.children = beforeChildren.slice();
+            if (g.animationId) {
+              const anim = sheet.animations.find(a => a.id === g.animationId);
+              if (anim) anim.layerGroupId = g.id;
+            }
+            selectedNodeId = g.id;
+            state.activeLayerId = beforeActive;
+          },
+        };
+        state.commands.push(cmd);
+        markDirty();
+      }
+    }
   }
 
   function doMergeDown() {
     const sheet = activeSheet();
     const layer = activeLayer();
     if (!sheet || !layer) return;
-    const idx = sheet.layers.indexOf(layer);
-    if (idx <= 0) { alert('Cannot merge the bottom layer down.'); return; }
-    const dest = sheet.layers[idx - 1];
-    const beforeLayers = sheet.layers.slice();
+    const loc = findParent(sheet.layerTree, layer.id);
+    if (!loc || loc.index <= 0) { alert('Cannot merge the bottom layer down.'); return; }
+    const dest = loc.parent.children[loc.index - 1];
+    if (dest.type !== 'layer') { alert('Cannot merge into a group.'); return; }
+    const parent = loc.parent;
+    const beforeChildren = parent.children.slice();
     const beforeActive = state.activeLayerId;
     const destBefore = cloneBitmap(dest.bitmap);
     mergeDown(sheet, layer.id);
     const destAfter = cloneBitmap(dest.bitmap);
-    const afterLayers = sheet.layers.slice();
+    const afterChildren = parent.children.slice();
     state.activeLayerId = dest.id;
     const afterActive = dest.id;
     const cmd = {
       label: 'merge down',
       do() {
         blitRegion(dest.bitmap, destAfter, 0, 0);
-        sheet.layers = afterLayers.slice();
+        parent.children = afterChildren.slice();
         state.activeLayerId = afterActive;
+        selectedNodeId = afterActive;
       },
       undo() {
-        sheet.layers = beforeLayers.slice();
+        parent.children = beforeChildren.slice();
         blitRegion(dest.bitmap, destBefore, 0, 0);
         state.activeLayerId = beforeActive;
+        selectedNodeId = beforeActive;
       },
     };
     state.commands.push(cmd);
     markDirty();
   }
 
-  function doMove(layer, toIndex) {
+  function doMove(layer, delta) {
     const sheet = activeSheet();
     if (!sheet) return;
-    const beforeLayers = sheet.layers.slice();
-    moveLayer(sheet, layer.id, toIndex);
-    const afterLayers = sheet.layers.slice();
+    const loc = findParent(sheet.layerTree, layer.id);
+    if (!loc) return;
+    const parent = loc.parent;
+    const beforeChildren = parent.children.slice();
+    const newIndex = Math.max(0, Math.min(parent.children.length - 1, loc.index + delta));
+    moveLayer(sheet, layer.id, newIndex);
+    const afterChildren = parent.children.slice();
     const cmd = {
       label: 'reorder layers',
-      do() { sheet.layers = afterLayers.slice(); },
-      undo() { sheet.layers = beforeLayers.slice(); },
+      do() { parent.children = afterChildren.slice(); },
+      undo() { parent.children = beforeChildren.slice(); },
     };
     state.commands.push(cmd);
     markDirty();
@@ -447,10 +557,10 @@ export function mountLayersPanel(el) {
     markDirty();
   }
 
-  function startRename(layer, nameEl) {
+  function startRename(node, nameEl) {
     const input = document.createElement('input');
     input.type = 'text';
-    input.value = layer.name;
+    input.value = node.name;
     input.className = 'layer-rename-input';
     nameEl.replaceWith(input);
     input.focus();
@@ -460,12 +570,12 @@ export function mountLayersPanel(el) {
       if (done) return;
       done = true;
       const v = input.value.trim();
-      if (v && v !== layer.name) {
-        const oldName = layer.name;
+      if (v && v !== node.name) {
+        const oldName = node.name;
         state.commands.push({
-          label: 'rename layer',
-          do() { layer.name = v; },
-          undo() { layer.name = oldName; },
+          label: node.type === 'group' ? 'rename group' : 'rename layer',
+          do() { node.name = v; },
+          undo() { node.name = oldName; },
         });
         markDirty();
       }
@@ -478,85 +588,127 @@ export function mountLayersPanel(el) {
     });
   }
 
-  // layerId -> thumbnail <canvas> from the most recent renderList(), so the
-  // 'pixels' handler can redraw just the thumbnails without rebuilding rows.
   const thumbCanvases = new Map();
+
+  function renderGroup(group, depth) {
+    const sheet = activeSheet();
+    const row = document.createElement('div');
+    row.className = 'layer-row group-row' + (group.id === selectedNodeId ? ' active' : '');
+    row.style.paddingLeft = (4 + depth * 14) + 'px';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'tree-toggle';
+    toggle.textContent = group.open !== false ? '▼' : '▶';
+    toggle.addEventListener('click', (e) => { e.stopPropagation(); group.open = !group.open; renderList(); });
+
+    const icon = document.createElement('span');
+    icon.className = 'group-icon';
+    icon.textContent = group.animationId ? '🎞' : '📁';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'layer-name';
+    nameEl.textContent = group.name;
+    nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(group, nameEl); });
+
+    row.append(toggle, icon, nameEl);
+    row.addEventListener('click', () => { selectedNodeId = group.id; state.activeLayerId = null; renderList(); });
+    list.appendChild(row);
+
+    if (group.open !== false) {
+      for (let i = group.children.length - 1; i >= 0; i--) {
+        renderNode(group.children[i], depth + 1);
+      }
+    }
+  }
+
+  function renderLayer(layer, depth) {
+    const sheet = activeSheet();
+    const row = document.createElement('div');
+    row.className = 'layer-row layer-leaf' + (layer.id === state.activeLayerId ? ' active' : '');
+    row.style.paddingLeft = (4 + depth * 14) + 'px';
+    row.addEventListener('click', () => { state.activeLayerId = layer.id; selectedNodeId = layer.id; renderList(); });
+
+    const spacer = document.createElement('span');
+    spacer.className = 'tree-spacer';
+
+    const thumb = document.createElement('canvas');
+    thumb.className = 'layer-thumb';
+    thumb.width = LAYER_THUMB_SIZE; thumb.height = LAYER_THUMB_SIZE;
+    const fl = state.floating?.sheetId === sheet.id ? state.floating : null;
+    drawFit(thumb, (fl && compositeFloatOnLayer(layer.bitmap, fl, layer.id)) || layer.bitmap);
+    thumbCanvases.set(layer.id, thumb);
+
+    const visBtn = document.createElement('button');
+    visBtn.type = 'button';
+    visBtn.textContent = layer.visible ? '👁' : '🚫';
+    visBtn.title = 'Toggle visibility';
+    visBtn.addEventListener('click', (e) => { e.stopPropagation(); doToggleVisible(layer); });
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'layer-name';
+    nameEl.textContent = layer.name;
+    nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(layer, nameEl); });
+
+    const opacityInput = document.createElement('input');
+    opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100';
+    opacityInput.value = String(Math.round(layer.opacity * 100));
+    opacityInput.addEventListener('click', (e) => e.stopPropagation());
+    let opacityBefore = null;
+    opacityInput.addEventListener('pointerdown', () => { opacityBefore = layer.opacity; });
+    opacityInput.addEventListener('input', () => {
+      layer.opacity = Number(opacityInput.value) / 100;
+      emit('pixels');
+    });
+    opacityInput.addEventListener('change', () => {
+      if (opacityBefore == null) return;
+      const before = opacityBefore, after = layer.opacity;
+      opacityBefore = null;
+      if (before === after) return;
+      state.commands.push({ label: 'layer opacity', do() { layer.opacity = after; }, undo() { layer.opacity = before; } });
+      markDirty();
+    });
+
+    const loc = findParent(sheet.layerTree, layer.id);
+    const siblingCount = loc ? loc.parent.children.filter(c => c.type === 'layer').length : 1;
+    const layerIndex = loc ? loc.parent.children.filter(c => c.type === 'layer').findIndex(c => c.id === layer.id) : 0;
+
+    const upBtn = document.createElement('button'); upBtn.type = 'button'; upBtn.textContent = '↑';
+    upBtn.title = 'Move up'; upBtn.disabled = layerIndex >= siblingCount - 1;
+    upBtn.addEventListener('click', (e) => { e.stopPropagation(); doMove(layer, 1); });
+
+    const downBtn = document.createElement('button'); downBtn.type = 'button'; downBtn.textContent = '↓';
+    downBtn.title = 'Move down'; downBtn.disabled = layerIndex <= 0;
+    downBtn.addEventListener('click', (e) => { e.stopPropagation(); doMove(layer, -1); });
+
+    row.append(spacer, thumb, visBtn, nameEl, opacityInput, upBtn, downBtn);
+    list.appendChild(row);
+  }
+
+  function renderNode(node, depth) {
+    if (node.type === 'group') renderGroup(node, depth);
+    else renderLayer(node, depth);
+  }
 
   function renderList() {
     list.innerHTML = '';
     thumbCanvases.clear();
     const sheet = activeSheet();
     if (!sheet) return;
-    // topmost layer (last in array, composited last / on top) shown first
-    for (let idx = sheet.layers.length - 1; idx >= 0; idx--) {
-      const layer = sheet.layers[idx];
-      const row = document.createElement('div');
-      row.className = 'layer-row' + (layer.id === state.activeLayerId ? ' active' : '');
-      row.addEventListener('click', () => { state.activeLayerId = layer.id; renderList(); });
-
-      const thumb = document.createElement('canvas');
-      thumb.className = 'layer-thumb';
-      thumb.width = LAYER_THUMB_SIZE; thumb.height = LAYER_THUMB_SIZE;
-      // Thumbnail shows the layer's own content regardless of `visible` —
-      // it's not a viewport into the composite, so hidden layers still get
-      // a live thumb.
-      const fl = state.floating?.sheetId === sheet.id ? state.floating : null;
-      drawFit(thumb, (fl && compositeFloatOnLayer(layer.bitmap, fl, layer.id)) || layer.bitmap);
-      thumbCanvases.set(layer.id, thumb);
-
-      const visBtn = document.createElement('button');
-      visBtn.type = 'button';
-      visBtn.textContent = layer.visible ? '👁' : '🚫';
-      visBtn.title = 'Toggle visibility';
-      visBtn.addEventListener('click', (e) => { e.stopPropagation(); doToggleVisible(layer); });
-
-      const nameEl = document.createElement('span');
-      nameEl.className = 'layer-name';
-      nameEl.textContent = layer.name;
-      nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(layer, nameEl); });
-
-      const opacityInput = document.createElement('input');
-      opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100';
-      opacityInput.value = String(Math.round(layer.opacity * 100));
-      opacityInput.addEventListener('click', (e) => e.stopPropagation());
-      let opacityBefore = null;
-      opacityInput.addEventListener('pointerdown', () => { opacityBefore = layer.opacity; });
-      opacityInput.addEventListener('input', () => {
-        layer.opacity = Number(opacityInput.value) / 100;
-        emit('pixels'); // live preview only, no undo step / panel rebuild yet
-      });
-      opacityInput.addEventListener('change', () => {
-        if (opacityBefore == null) return;
-        const before = opacityBefore, after = layer.opacity;
-        opacityBefore = null;
-        if (before === after) return;
-        state.commands.push({ label: 'layer opacity', do() { layer.opacity = after; }, undo() { layer.opacity = before; } });
-        markDirty();
-      });
-
-      const upBtn = document.createElement('button'); upBtn.type = 'button'; upBtn.textContent = '↑';
-      upBtn.title = 'Move up'; upBtn.disabled = idx === sheet.layers.length - 1;
-      upBtn.addEventListener('click', (e) => { e.stopPropagation(); doMove(layer, idx + 1); });
-
-      const downBtn = document.createElement('button'); downBtn.type = 'button'; downBtn.textContent = '↓';
-      downBtn.title = 'Move down'; downBtn.disabled = idx === 0;
-      downBtn.addEventListener('click', (e) => { e.stopPropagation(); doMove(layer, idx - 1); });
-
-      row.append(thumb, visBtn, nameEl, opacityInput, upBtn, downBtn);
-      list.appendChild(row);
+    if (selectedNodeId && !findNode(sheet.layerTree, selectedNodeId)) {
+      selectedNodeId = state.activeLayerId;
+    }
+    // Don't render the root group itself; show its children as the top level.
+    for (let i = sheet.layerTree.children.length - 1; i >= 0; i--) {
+      renderNode(sheet.layerTree.children[i], 0);
     }
   }
 
-  // 'pixels' fires continuously during stroke preview/commit; redrawing the
-  // full row list on every tick would thrash (rebuild buttons/inputs, lose
-  // focus). Instead just repaint the cached thumbnail canvases in place,
-  // coalesced with a microtask guard so a burst of 'pixels' events during one
-  // drag only repaints once per turn of the event loop.
   let thumbRedrawQueued = false;
   function redrawThumbs() {
     const sheet = activeSheet();
     if (!sheet) return;
-    for (const layer of sheet.layers) {
+    for (const layer of sheetLayers(sheet)) {
       const canvas = thumbCanvases.get(layer.id);
       const fl = state.floating?.sheetId === sheet.id ? state.floating : null;
       if (canvas) drawFit(canvas, (fl && compositeFloatOnLayer(layer.bitmap, fl, layer.id)) || layer.bitmap);
@@ -568,14 +720,13 @@ export function mountLayersPanel(el) {
     queueMicrotask(() => { thumbRedrawQueued = false; redrawThumbs(); });
   }
 
-  btnAdd.addEventListener('click', doAddLayer);
-  btnDelete.addEventListener('click', doDeleteLayer);
+  btnAddLayer.addEventListener('click', doAddLayer);
+  btnAddGroup.addEventListener('click', doAddGroup);
+  btnDelete.addEventListener('click', doDelete);
   btnMerge.addEventListener('click', doMergeDown);
 
   on('project', renderList);
   on('history', renderList);
-  // 'view' fires on mode-tab switches, which swap the active sheet — the list
-  // must show the new sheet's layers or clicks would target nonexistent ids.
   on('view', renderList);
   on('pixels', scheduleThumbRedraw);
   renderList();

@@ -30,11 +30,11 @@
 // flattened-sheet drawImage call, then restores back to frame-local space to
 // draw onion ghosts (which are pivot-aligned in that same frame-local frame).
 
-import { state, on, emit, activeSheet } from '../app/state.js';
+import { state, on, emit, activeSheet, currentContextLayers } from '../app/state.js';
 import { CanvasView } from './canvasview.js';
 import { bindDrawing } from './tools.js';
 import { commitFloatIfAny } from './floatsession.js';
-import { flattenSheet } from '../core/model.js';
+import { flattenSheetLayers } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 
 function isTypingTarget(el) {
@@ -136,7 +136,7 @@ export function mountFrameEditor(hostEl) {
   function invalidateFlat() { flatDirty = true; }
   function getFlatBitmap(sheet) {
     if (flatDirty || flatSheetRef !== sheet || !flatBitmap) {
-      flatBitmap = flattenSheet(sheet, state.floating);
+      flatBitmap = flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id);
       flatSheetRef = sheet;
       flatDirty = false;
     }

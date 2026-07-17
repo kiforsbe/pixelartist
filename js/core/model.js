@@ -13,6 +13,28 @@ export const DEFAULT_SETTINGS = {
 };
 const MAX_DIM = 4096;
 
+export const LAYER = 'layer';
+export const GROUP = 'group';
+
+// ---------------------------------------------------------------- tree model
+// A sheet now stores its layers inside a hierarchical `layerTree` instead of
+// a flat `layers[]` array. The tree is made of group nodes (folders) and leaf
+// layer nodes. Groups can own an animation (`animationId`), meaning the group
+// holds the animation's private sub-layers. Every operation that used to read
+// `sheet.layers` now goes through `sheetLayers(sheet)` or `contextLayers(sheet,
+// animId)`.
+
+export function createLayerNode(name, width, height) {
+  return {
+    id: newId('ly'), type: LAYER, name, visible: true, opacity: 1,
+    bitmap: createBitmap(width, height),
+  };
+}
+
+export function createGroupNode(name, { animationId = null, open = true } = {}) {
+  return { id: newId('gp'), type: GROUP, name, animationId, open, children: [] };
+}
+
 export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
   return { version: PROJECT_VERSION, name, settings: { ...settings },
     sheets: [], palettes: [], activePaletteId: null };
@@ -22,33 +44,129 @@ export function createSheet(project, { name, width, height, kind, tileW, tileH }
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 1 || height < 1 || width > MAX_DIM || height > MAX_DIM)
     throw new Error(`sheet size must be 1..${MAX_DIM}`);
+  const root = createGroupNode(name);
+  root.children.push(createLayerNode('Layer 1', width, height));
   const sheet = {
     id: newId('sh'), name, width, height, kind,
-    layers: [], frames: [], animations: [],
+    layerTree: root, frames: [], animations: [],
     tile: kind === 'tile'
       ? { tileWidth: tileW ?? 16, tileHeight: tileH ?? 16, names: {}, neighbors: {} }
       : null,
   };
   project.sheets.push(sheet);
-  addLayer(sheet, 'Layer 1');
   return sheet;
 }
 
-export function addLayer(sheet, name) {
-  const layer = { id: newId('ly'), name, visible: true, opacity: 1,
-    bitmap: createBitmap(sheet.width, sheet.height) };
-  sheet.layers.push(layer);
+// ---------------------------------------------------------------- tree traversal
+
+export function flattenLayers(root) {
+  const out = [];
+  function walk(node) {
+    if (node.type === LAYER) out.push(node);
+    else if (node.children) for (const c of node.children) walk(c);
+  }
+  walk(root);
+  return out;
+}
+
+export function sheetLayers(sheet) { return flattenLayers(sheet.layerTree); }
+
+export function findNode(root, id) {
+  if (root.id === id) return root;
+  if (nodeChildren(root)) for (const c of nodeChildren(root)) {
+    const found = findNode(c, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function findLayer(root, id) {
+  const n = findNode(root, id);
+  return n?.type === LAYER ? n : null;
+}
+
+export function findGroup(root, id) {
+  const n = findNode(root, id);
+  return n?.type === GROUP ? n : null;
+}
+
+function nodeChildren(node) { return node.children ?? null; }
+
+export function findParent(root, id) {
+  const children = nodeChildren(root);
+  if (!children) return null;
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].id === id) return { parent: root, index: i };
+    const found = findParent(children[i], id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findGroupParent(root, groupId) {
+  const children = nodeChildren(root);
+  if (!children) return null;
+  for (let i = 0; i < children.length; i++) {
+    const c = children[i];
+    if (c.type === GROUP && c.id === groupId) return { parent: root, index: i };
+    if (c.type === GROUP) {
+      const found = findGroupParent(c, groupId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- layer ops
+
+export function addLayer(sheet, name, groupId = sheet.layerTree.id) {
+  const group = findGroup(sheet.layerTree, groupId) ?? sheet.layerTree;
+  const layer = createLayerNode(name, sheet.width, sheet.height);
+  group.children.push(layer);
   return layer;
 }
 
+export function addGroup(sheet, name, parentId = sheet.layerTree.id) {
+  const parent = findGroup(sheet.layerTree, parentId) ?? sheet.layerTree;
+  const group = createGroupNode(name);
+  parent.children.push(group);
+  return group;
+}
+
 export function removeLayer(sheet, layerId) {
-  sheet.layers = sheet.layers.filter(l => l.id !== layerId);
+  const loc = findParent(sheet.layerTree, layerId);
+  if (!loc) return;
+  const node = loc.parent.children[loc.index];
+  if (node.type !== LAYER) return;
+  loc.parent.children.splice(loc.index, 1);
+}
+
+export function removeGroup(sheet, groupId) {
+  const loc = findGroupParent(sheet.layerTree, groupId);
+  if (!loc) return;
+  loc.parent.children.splice(loc.index, 1);
 }
 
 export function moveLayer(sheet, layerId, toIndex) {
-  const i = sheet.layers.findIndex(l => l.id === layerId);
-  const [l] = sheet.layers.splice(i, 1);
-  sheet.layers.splice(toIndex, 0, l);
+  const loc = findParent(sheet.layerTree, layerId);
+  if (!loc) return;
+  const [node] = loc.parent.children.splice(loc.index, 1);
+  const clamped = Math.max(0, Math.min(loc.parent.children.length, toIndex));
+  loc.parent.children.splice(clamped, 0, node);
+}
+
+export function moveNode(sheet, nodeId, toParentId, toIndex) {
+  const srcLoc = findParent(sheet.layerTree, nodeId);
+  const dstParent = findGroup(sheet.layerTree, toParentId) ?? sheet.layerTree;
+  if (!srcLoc || !dstParent || srcLoc.parent === dstParent && srcLoc.parent.children[srcLoc.index].type !== GROUP && dstParent.type === GROUP && dstParent.animationId) {
+    // Avoid moving a non-layer node into an animation-owned group? Actually
+    // only layer nodes should be movable into animation groups; groups should
+    // not be nested inside animation groups to keep scoping simple.
+  }
+  if (!srcLoc) return;
+  const [node] = srcLoc.parent.children.splice(srcLoc.index, 1);
+  const clamped = Math.max(0, Math.min(dstParent.children.length, toIndex));
+  dstParent.children.splice(clamped, 0, node);
 }
 
 function compositeOver(dst, src, opacity) {
@@ -66,22 +184,45 @@ function compositeOver(dst, src, opacity) {
 }
 
 export function mergeDown(sheet, layerId) {
-  const i = sheet.layers.findIndex(l => l.id === layerId);
-  if (i <= 0) throw new Error('cannot merge bottom layer');
-  compositeOver(sheet.layers[i - 1].bitmap, sheet.layers[i].bitmap, sheet.layers[i].opacity);
-  sheet.layers.splice(i, 1);
+  const loc = findParent(sheet.layerTree, layerId);
+  if (!loc || loc.index <= 0) throw new Error('cannot merge bottom layer');
+  const dest = loc.parent.children[loc.index - 1];
+  if (dest.type !== LAYER) throw new Error('cannot merge into a group');
+  const src = loc.parent.children[loc.index];
+  compositeOver(dest.bitmap, src.bitmap, src.opacity);
+  loc.parent.children.splice(loc.index, 1);
 }
 
-export function flattenSheet(sheet, floating = null) {
-  const out = createBitmap(sheet.width, sheet.height);
-  const hasFloat = floating && floating.sheetId === sheet.id;
-  for (const l of sheet.layers) {
+export function flattenSheetLayers(layers, width, height, floating = null, sheetId = null) {
+  const out = createBitmap(width, height);
+  const hasFloat = floating && floating.sheetId && (sheetId == null || floating.sheetId === sheetId);
+  for (const l of layers) {
     if (!l.visible) continue;
     const withFloat = hasFloat ? compositeFloatOnLayer(l.bitmap, floating, l.id) : null;
     compositeOver(out, withFloat ?? l.bitmap, l.opacity);
   }
   return out;
 }
+
+export function flattenSheet(sheet, floating = null) {
+  return flattenSheetLayers(sheetLayers(sheet), sheet.width, sheet.height, floating, sheet.id);
+}
+
+// ---------------------------------------------------------------- animation layer groups
+
+export function animationGroup(sheet, animId) {
+  const anim = sheet.animations.find(a => a.id === animId);
+  if (!anim?.layerGroupId) return null;
+  return findGroup(sheet.layerTree, anim.layerGroupId) ?? null;
+}
+
+export function contextLayers(sheet, animId = null) {
+  if (!animId) return sheetLayers(sheet);
+  const group = animationGroup(sheet, animId);
+  return group ? flattenLayers(group) : sheetLayers(sheet);
+}
+
+// ---------------------------------------------------------------- frames / animations
 
 export function addFrame(sheet, { name, x, y, w, h, pivotX = 0, pivotY = 0 }) {
   const frame = { id: newId('fr'), name, x, y, w, h, pivotX, pivotY };
@@ -102,9 +243,32 @@ export function removeFrame(sheet, frameId) {
 }
 
 export function addAnimation(sheet, name, strip = false) {
-  const anim = { id: newId('an'), name, loop: true, strip, breaks: [], frames: [] };
+  // Each animation owns a dedicated group under the root. The group is
+  // initialized with a copy of the current sheet-wide layers so the
+  // animation starts from the existing art.
+  const group = createGroupNode(name);
+  for (const src of sheetLayers(sheet)) {
+    const copy = createLayerNode(src.name, sheet.width, sheet.height);
+    copy.bitmap = cloneBitmap(src.bitmap);
+    copy.visible = src.visible;
+    copy.opacity = src.opacity;
+    group.children.push(copy);
+  }
+  sheet.layerTree.children.push(group);
+
+  const anim = { id: newId('an'), name, loop: true, strip, breaks: [], frames: [], layerGroupId: group.id };
+  group.animationId = anim.id;
   sheet.animations.push(anim);
   return anim;
+}
+
+export function renameAnimation(sheet, animId, name) {
+  const anim = sheet.animations.find(a => a.id === animId);
+  if (!anim) return false;
+  anim.name = name;
+  const group = animationGroup(sheet, animId);
+  if (group) group.name = name;
+  return true;
 }
 
 export function tileCount(sheet) {
@@ -122,6 +286,53 @@ export function tileRect(sheet, index) {
   };
 }
 
+// ---------------------------------------------------------------- serialization
+
+function serializeGroup(group, sheetId, images) {
+  return {
+    id: group.id, type: group.type, name: group.name,
+    animationId: group.animationId ?? null, open: group.open ?? true,
+    children: group.children.map(c => {
+      if (c.type === LAYER) {
+        const path = `images/${sheetId}/${c.id}.png`;
+        images.push({ path, bitmap: cloneBitmap(c.bitmap) });
+        return { id: c.id, type: LAYER, name: c.name, visible: c.visible, opacity: c.opacity, image: path };
+      }
+      return serializeGroup(c, sheetId, images);
+    }),
+  };
+}
+
+function deserializeGroup(json, sheetId, imagesByPath) {
+  const group = {
+    id: json.id, type: GROUP, name: json.name,
+    animationId: json.animationId ?? null, open: json.open ?? true,
+    children: [],
+  };
+  for (const c of json.children ?? []) {
+    if (c.type === LAYER) {
+      const bitmap = imagesByPath.get(c.image);
+      if (!bitmap) throw new Error(`missing image ${c.image}`);
+      group.children.push({ id: c.id, type: LAYER, name: c.name, visible: c.visible, opacity: c.opacity, bitmap });
+    } else {
+      group.children.push(deserializeGroup(c, sheetId, imagesByPath));
+    }
+  }
+  return group;
+}
+
+// Backward-compat helper: turn a legacy flat `layers[]` into a root group.
+function migrateLegacyLayers(sheetJson, sheetId, imagesByPath) {
+  return {
+    id: newId('gp'), type: GROUP, name: sheetJson.name ?? 'root', animationId: null, open: true,
+    children: (sheetJson.layers ?? []).map(l => {
+      const bitmap = imagesByPath.get(l.image);
+      if (!bitmap) throw new Error(`missing image ${l.image}`);
+      return { id: l.id, type: LAYER, name: l.name, visible: l.visible, opacity: l.opacity, bitmap };
+    }),
+  };
+}
+
 export function serializeProject(project) {
   const images = [];
   const json = {
@@ -133,12 +344,8 @@ export function serializeProject(project) {
       id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
       tile: s.tile ? structuredClone(s.tile) : null,
       frames: s.frames.map(f => ({ ...f })),
-      animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })), breaks: (a.breaks ?? []).slice() })),
-      layers: s.layers.map(l => {
-        const path = `images/${s.id}/${l.id}.png`;
-        images.push({ path, bitmap: cloneBitmap(l.bitmap) });
-        return { id: l.id, name: l.name, visible: l.visible, opacity: l.opacity, image: path };
-      }),
+      animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })), breaks: (a.breaks ?? []).slice(), layerGroupId: a.layerGroupId ?? null })),
+      layerTree: serializeGroup(s.layerTree, s.id, images),
     })),
   };
   return { json, images };
@@ -152,17 +359,18 @@ export function deserializeProject(json, imagesByPath) {
     settings: { ...json.settings },
     activePaletteId: json.activePaletteId ?? null,
     palettes: json.palettes ?? [],
-    sheets: json.sheets.map(s => ({
-      ...s,
-      tile: s.tile ?? null,
-      frames: s.frames ?? [],
-      animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false, breaks: a.breaks ?? [] })),
-      layers: s.layers.map(l => {
-        const bitmap = imagesByPath.get(l.image);
-        if (!bitmap) throw new Error(`missing image ${l.image}`);
-        return { id: l.id, name: l.name, visible: l.visible, opacity: l.opacity, bitmap };
-      }),
-    })),
+    sheets: json.sheets.map(s => {
+      const layerTree = s.layerTree
+        ? deserializeGroup(s.layerTree, s.id, imagesByPath)
+        : migrateLegacyLayers(s, s.id, imagesByPath);
+      return {
+        id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
+        tile: s.tile ?? null,
+        frames: s.frames ?? [],
+        animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false, breaks: a.breaks ?? [], layerGroupId: a.layerGroupId ?? null })),
+        layerTree,
+      };
+    }),
   };
 }
 
@@ -179,8 +387,13 @@ export function validateProjectJson(json) {
     if (typeof json.settings[k] !== 'number')
       return { ok: false, error: `settings.${k} missing or not a number` };
   if (!Array.isArray(json.sheets)) return { ok: false, error: 'missing sheets' };
-  for (const s of json.sheets)
-    for (const l of s.layers ?? [])
+  for (const s of json.sheets) {
+    const hasTree = s.layerTree && typeof s.layerTree === 'object' && s.layerTree.type === GROUP;
+    const hasLayers = Array.isArray(s.layers);
+    if (!hasTree && !hasLayers) return { ok: false, error: `sheet ${s.id} missing layerTree` };
+    const layers = hasTree ? flattenLayers(s.layerTree) : (s.layers ?? []);
+    for (const l of layers)
       if (typeof l.image !== 'string') return { ok: false, error: `layer ${l.id} missing image path` };
+  }
   return { ok: true, error: null };
 }

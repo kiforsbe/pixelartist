@@ -4,8 +4,9 @@
 // Pointer GESTURES (drag/scale/rotate) live in tools.js's move tool; every
 // state change funnels through here so stepwise undo and auto-commit stay
 // consistent. This module must never import tools.js (tools.js imports us).
-import { state, on, emit, activeSheet, activeLayer, markDirty } from '../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, markDirty, currentContextLayers } from '../app/state.js';
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../core/pixels.js';
+import { findLayer } from '../core/model.js';
 import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../core/floating.js';
 
 const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, setSelection, getTargetRect}
@@ -15,7 +16,7 @@ let clipboard = null;    // { srcRect, layers: [{layerId, buffer}] }
 export function registerFloatView(viewKind, api) { views.set(viewKind, api); }
 function activeView() { return views.get(state.view) ?? null; }
 function sheetById(id) { return state.project?.sheets.find(s => s.id === id) ?? null; }
-function layerIn(sheet, layerId) { return sheet.layers.find(l => l.id === layerId) ?? null; }
+function layerIn(sheet, layerId) { return findLayer(sheet.layerTree, layerId); }
 
 export function isTypingTarget(el) {
   if (!el) return false;
@@ -42,7 +43,7 @@ function resolveRegion(viewApi, requireSelection = false) {
 }
 
 function captureLayers(sheet, region, allLayers) {
-  const layers = allLayers ? sheet.layers.slice() : (activeLayer() ? [activeLayer()] : []);
+  const layers = allLayers ? currentContextLayers() : (activeLayer() ? [activeLayer()] : []);
   return layers.map(l => ({
     layerId: l.id,
     buffer: copyRegion(l.bitmap, region.x, region.y, region.w, region.h),

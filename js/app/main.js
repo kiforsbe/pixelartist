@@ -1,7 +1,7 @@
 import { state, on, emit, activeSheet, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
-import { flattenSheet, createSheet } from '../core/model.js';
+import { flattenSheet, createSheet, sheetLayers } from '../core/model.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
@@ -94,7 +94,7 @@ function switchMode(mode) {
   const kind = mode === 'sprites' ? 'sprite' : 'tile';
   const sheet = state.project?.sheets.find(s => s.kind === kind) ?? null;
   state.activeSheetId = sheet ? sheet.id : null;
-  state.activeLayerId = sheet ? (sheet.layers[0]?.id ?? null) : null;
+  state.activeLayerId = sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null;
   // Selections (frame/animation/tile) are per-sheet; a stale id surviving an
   // active-sheet change lets e.g. timeline's "Add selected frame" insert one
   // sheet's frameId into another sheet's animation (blank timeline cell,
@@ -140,7 +140,7 @@ sheetSelect.addEventListener('change', () => {
   const sheet = state.project?.sheets.find(s => s.id === sheetSelect.value);
   if (!sheet) return;
   state.activeSheetId = sheet.id;
-  state.activeLayerId = sheet.layers[0]?.id ?? null;
+  state.activeLayerId = sheetLayers(sheet)[0]?.id ?? null;
   // See switchMode's comment above: selections are per-sheet, clear them here too.
   state.selectedFrameId = null;
   state.selectedAnimationId = null;
@@ -165,7 +165,7 @@ function commitAddSheet(sheet) {
     do() {
       if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
       state.activeSheetId = sheet.id;
-      state.activeLayerId = sheet.layers[0]?.id ?? null;
+      state.activeLayerId = sheetLayers(sheet)[0]?.id ?? null;
       // See switchMode's comment above: selections are per-sheet, clear them too.
       state.selectedFrameId = null;
       state.selectedAnimationId = null;
@@ -272,7 +272,7 @@ btnImportSheet.addEventListener('click', async () => {
     name, width: bitmap.width, height: bitmap.height, kind,
     tileW: settings.tileW, tileH: settings.tileH,
   });
-  sheet.layers[0].bitmap = bitmap;
+  sheetLayers(sheet)[0].bitmap = bitmap;
   commitAddSheet(sheet);
 });
 

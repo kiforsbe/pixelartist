@@ -10,8 +10,8 @@
 // undoable, following the before/after-array-snapshot pattern frames.js uses
 // for its own animation-affecting edits (slice grid / delete frame).
 
-import { state, on, emit, activeSheet, markDirty, confirmOrAuto } from '../app/state.js';
-import { addAnimation, flattenSheet } from '../core/model.js';
+import { state, on, emit, activeSheet, markDirty, confirmOrAuto, currentContextLayers } from '../app/state.js';
+import { addAnimation, flattenSheetLayers, findParent, renameAnimation } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 import { commitBreakApartStrip } from './frames.js';
 
@@ -132,14 +132,22 @@ function commitDeleteAnimation(sheet, animId) {
   if (!anim) return;
   const idx = sheet.animations.indexOf(anim);
   const wasSelected = state.selectedAnimationId === animId;
+  const groupLoc = anim.layerGroupId ? findParent(sheet.layerTree, anim.layerGroupId) : null;
+  const group = groupLoc ? groupLoc.parent.children[groupLoc.index] : null;
+  const groupParent = groupLoc ? groupLoc.parent : null;
+  const groupIdx = groupLoc ? groupLoc.index : -1;
   const cmd = {
     label: 'delete animation',
     do() {
       sheet.animations = sheet.animations.filter(a => a.id !== animId);
+      if (groupParent) groupParent.children = groupParent.children.filter(c => c.id !== anim.layerGroupId);
+      anim.layerGroupId = null;
       if (state.selectedAnimationId === animId) state.selectedAnimationId = null;
     },
     undo() {
       sheet.animations.splice(Math.min(idx, sheet.animations.length), 0, anim);
+      if (groupParent) groupParent.children.splice(Math.min(groupIdx, groupParent.children.length), 0, group);
+      anim.layerGroupId = group.id;
       if (wasSelected) state.selectedAnimationId = animId;
     },
   };
@@ -147,13 +155,13 @@ function commitDeleteAnimation(sheet, animId) {
   markDirty();
 }
 
-function commitRenameAnimation(anim, name) {
+function commitRenameAnimation(sheet, anim, name) {
   const before = anim.name;
   if (before === name) return;
   state.commands.push({
     label: 'rename animation',
-    do() { anim.name = name; },
-    undo() { anim.name = before; },
+    do() { renameAnimation(sheet, anim.id, name); },
+    undo() { renameAnimation(sheet, anim.id, before); },
   });
   markDirty();
 }
@@ -236,7 +244,7 @@ export function mountTimeline(el) {
   let flatSheet = null;
   let flatBmp = null;
   function getFlat(sheet) {
-    if (flatSheet !== sheet || !flatBmp) { flatBmp = flattenSheet(sheet, state.floating); flatSheet = sheet; }
+    if (flatSheet !== sheet || !flatBmp) { flatBmp = flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id); flatSheet = sheet; }
     return flatBmp;
   }
   function invalidateFlat() { flatSheet = null; flatBmp = null; }
@@ -346,12 +354,13 @@ export function mountTimeline(el) {
   });
 
   btnRenameAnim.addEventListener('click', () => {
+    const sheet = activeSheet();
     const anim = currentAnim();
-    if (!anim) return;
+    if (!sheet || !anim) return;
     const name = prompt('Animation name', anim.name);
     if (name == null) return;
     const v = name.trim();
-    if (v) commitRenameAnimation(anim, v);
+    if (v) commitRenameAnimation(sheet, anim, v);
   });
 
   btnDeleteAnim.addEventListener('click', () => {

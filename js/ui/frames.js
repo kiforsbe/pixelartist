@@ -12,8 +12,8 @@
 // bindDrawing() (bindFrameTool wraps the view's existing onPointer/onOverlay,
 // so it must run after bindDrawing has installed its own).
 
-import { state, on, emit, activeSheet, markDirty } from '../app/state.js';
-import { addFrame, removeFrame, addAnimation } from '../core/model.js';
+import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
+import { addFrame, removeFrame, addAnimation, renameAnimation } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
@@ -213,7 +213,7 @@ function buildMovePatches(sheet, frames, dx, dy) {
   const ur = { x: ux0, y: uy0, w: ux1 - ux0, h: uy1 - uy0 };
 
   const beforeCoords = frames.map(f => ({ frame: f, x: f.x, y: f.y }));
-  const patches = sheet.layers.map((layer) => {
+  const patches = currentContextLayers().map((layer) => {
     const before = copyRegion(layer.bitmap, ur.x, ur.y, ur.w, ur.h);
     const copies = frames.map(f => copyRegion(layer.bitmap, f.x, f.y, f.w, f.h));
     for (const f of frames) fillRegion(layer.bitmap, f.x, f.y, f.w, f.h, [0, 0, 0, 0]);
@@ -1086,14 +1086,14 @@ function commitStripEdit(label, members, mutate) {
   markDirty();
 }
 
-// Renames the animation AND its member frames (`name_0`, `name_1`, …).
-function commitRenameStrip(anim, members, newName) {
+// Renames the animation, its layer group, AND its member frames (`name_0`, `name_1`, …).
+function commitRenameStrip(sheet, anim, members, newName) {
   const beforeAnim = anim.name;
   const beforeNames = members.map(f => f.name);
   state.commands.push({
     label: 'rename strip',
-    do() { anim.name = newName; members.forEach((f, i) => { f.name = `${newName}_${i}`; }); },
-    undo() { anim.name = beforeAnim; members.forEach((f, i) => { f.name = beforeNames[i]; }); },
+    do() { renameAnimation(sheet, anim.id, newName); members.forEach((f, i) => { f.name = `${newName}_${i}`; }); },
+    undo() { renameAnimation(sheet, anim.id, beforeAnim); members.forEach((f, i) => { f.name = beforeNames[i]; }); },
   });
   markDirty();
 }
@@ -1438,7 +1438,7 @@ export function mountFramesPanel(el) {
     nameInput.value = anim.name;
     nameInput.addEventListener('change', () => {
       const v = nameInput.value.trim();
-      if (v && v !== anim.name) commitRenameStrip(anim, members, v);
+      if (v && v !== anim.name) commitRenameStrip(sheet, anim, members, v);
       else nameInput.value = anim.name;
     });
 

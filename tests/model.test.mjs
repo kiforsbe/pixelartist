@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PROJECT_VERSION, DEFAULT_SETTINGS, createProject, createSheet, addLayer, removeLayer,
-  moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet,
+  moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, tileCount, tileRect,
+  sheetLayers, findGroup, contextLayers, addGroup, flattenLayers,
 } from '../js/core/model.js';
 import { setPixel, getPixel } from '../js/core/pixels.js';
 
@@ -15,8 +16,8 @@ function proj() {
 
 test('createSheet defaults: one layer, bounds enforced', () => {
   const { p, s } = proj();
-  assert.equal(s.layers.length, 1);
-  assert.equal(s.layers[0].bitmap.width, 32);
+  assert.equal(sheetLayers(s).length, 1);
+  assert.equal(sheetLayers(s)[0].bitmap.width, 32);
   assert.throws(() => createSheet(p, { name: 'x', width: 0, height: 5, kind: 'sprite' }));
   assert.throws(() => createSheet(p, { name: 'x', width: 5000, height: 5, kind: 'sprite' }));
 });
@@ -25,17 +26,17 @@ test('layer ops: add, move, mergeDown composites with opacity', () => {
   const { s } = proj();
   const top = addLayer(s, 'top');
   top.opacity = 0.5;
-  setPixel(s.layers[0].bitmap, 0, 0, [0, 0, 0, 255]);
+  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [0, 0, 0, 255]);
   setPixel(top.bitmap, 0, 0, [255, 255, 255, 255]);
   mergeDown(s, top.id);
-  assert.equal(s.layers.length, 1);
-  const px = getPixel(s.layers[0].bitmap, 0, 0);
+  assert.equal(sheetLayers(s).length, 1);
+  const px = getPixel(sheetLayers(s)[0].bitmap, 0, 0);
   assert.ok(px[0] > 100 && px[0] < 155, `blended, got ${px}`);
-  assert.throws(() => mergeDown(s, s.layers[0].id)); // bottom layer
+  assert.throws(() => mergeDown(s, sheetLayers(s)[0].id)); // bottom layer
   const l2 = addLayer(s, 'b'); moveLayer(s, l2.id, 0);
-  assert.equal(s.layers[0].id, l2.id);
+  assert.equal(sheetLayers(s)[0].id, l2.id);
   removeLayer(s, l2.id);
-  assert.equal(s.layers.length, 1);
+  assert.equal(sheetLayers(s).length, 1);
 });
 
 test('frames and animations; removeFrame cleans references', () => {
@@ -52,7 +53,7 @@ test('frames and animations; removeFrame cleans references', () => {
 test('flattenSheet composites visible layers only', () => {
   const { s } = proj();
   const top = addLayer(s, 'top');
-  setPixel(s.layers[0].bitmap, 1, 1, [255, 0, 0, 255]);
+  setPixel(sheetLayers(s)[0].bitmap, 1, 1, [255, 0, 0, 255]);
   setPixel(top.bitmap, 1, 1, [0, 255, 0, 255]);
   top.visible = false;
   assert.deepEqual(getPixel(flattenSheet(s), 1, 1), [255, 0, 0, 255]);
@@ -70,16 +71,16 @@ test('tile helpers', () => {
 
 test('serialize/deserialize round-trip preserves pixels and structure', () => {
   const { p, s } = proj();
-  setPixel(s.layers[0].bitmap, 3, 2, [1, 2, 3, 255]);
+  setPixel(sheetLayers(s)[0].bitmap, 3, 2, [1, 2, 3, 255]);
   addFrame(s, { name: 'f', x: 0, y: 0, w: 8, h: 8 });
   const { json, images } = serializeProject(p);
   assert.equal(json.version, PROJECT_VERSION);
   assert.equal(images.length, 1);
   assert.match(images[0].path, /^images\/.+\/.+\.png$/);
-  assert.equal(json.sheets[0].layers[0].image, images[0].path);
+  assert.equal(json.sheets[0].layerTree.children[0].image, images[0].path);
   const map = new Map(images.map(i => [i.path, i.bitmap]));
   const p2 = deserializeProject(structuredClone(json), map);
-  assert.deepEqual(getPixel(p2.sheets[0].layers[0].bitmap, 3, 2), [1, 2, 3, 255]);
+  assert.deepEqual(getPixel(sheetLayers(p2.sheets[0])[0].bitmap, 3, 2), [1, 2, 3, 255]);
   assert.equal(p2.sheets[0].frames.length, 1);
 });
 
@@ -162,4 +163,47 @@ test('removeFrame adjusts breaks (shift down, drop degenerate)', () => {
   removeFrame(s, fs[1].id);          // [1][2,3] → remove f1 → break shifts to 0, normalize drops it
   assert.deepEqual(a.frames.map(e => e.frameId), [fs[2].id, fs[3].id]);
   assert.deepEqual(a.breaks, []);    // one segment [2,3]
+});
+
+test('addAnimation creates a group with a copy of current layers', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [1, 2, 3, 255]);
+  const a = addAnimation(s, 'walk');
+  assert.ok(a.layerGroupId, 'animation has layerGroupId');
+  const g = findGroup(s.layerTree, a.layerGroupId);
+  assert.ok(g, 'group exists');
+  assert.equal(g.animationId, a.id);
+  assert.equal(flattenLayers(g).length, 1);
+  assert.deepEqual(getPixel(flattenLayers(g)[0].bitmap, 0, 0), [1, 2, 3, 255]);
+  // mutation on animation layer does not bleed back to sheet layer
+  setPixel(flattenLayers(g)[0].bitmap, 0, 0, [9, 9, 9, 255]);
+  assert.deepEqual(getPixel(sheetLayers(s)[0].bitmap, 0, 0), [1, 2, 3, 255]);
+});
+
+test('contextLayers scopes to animation group or returns all layers', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  addLayer(s, 'global');
+  const beforeAnim = sheetLayers(s).map(l => l.id);
+  const a = addAnimation(s, 'walk');
+  // all sheet layers include both root layers plus the two copied into the anim group
+  assert.equal(contextLayers(s).length, 4);
+  // scoped to the animation, only its private layers are returned
+  assert.equal(contextLayers(s, a.id).length, 2);
+  const animLayerIds = new Set(contextLayers(s, a.id).map(l => l.id));
+  // animation layers are independent copies with new ids, not the originals
+  for (const id of animLayerIds) assert.ok(!beforeAnim.includes(id));
+});
+
+test('flattenSheetLayers respects context and visibility', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  addLayer(s, 'global');
+  const a = addAnimation(s, 'walk');
+  const animLayers = contextLayers(s, a.id);
+  animLayers[0].visible = false;
+  setPixel(animLayers[1].bitmap, 1, 1, [255, 0, 0, 255]);
+  const flat = flattenSheetLayers(animLayers, s.width, s.height);
+  assert.deepEqual(getPixel(flat, 1, 1), [255, 0, 0, 255]);
 });

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEntries, loadEntries, packProject, unpackProject } from '../js/core/bundle.js';
-import { createProject, createSheet } from '../js/core/model.js';
+import { createProject, createSheet, sheetLayers } from '../js/core/model.js';
 import { setPixel, getPixel } from '../js/core/pixels.js';
 
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -15,7 +15,7 @@ const fakeDecode = async bytes => {
 function demoProject() {
   const p = createProject('demo');
   const s = createSheet(p, { name: 's', width: 8, height: 8, kind: 'sprite' });
-  setPixel(s.layers[0].bitmap, 1, 1, [7, 8, 9, 255]);
+  setPixel(sheetLayers(s)[0].bitmap, 1, 1, [7, 8, 9, 255]);
   return p;
 }
 
@@ -31,14 +31,14 @@ test('buildEntries produces project.json + one png per layer', async () => {
 test('entries round-trip preserves pixels', async () => {
   const entries = await buildEntries(demoProject(), fakeEncode);
   const p2 = await loadEntries(entries, fakeDecode);
-  assert.deepEqual(getPixel(p2.sheets[0].layers[0].bitmap, 1, 1), [7, 8, 9, 255]);
+  assert.deepEqual(getPixel(sheetLayers(p2.sheets[0])[0].bitmap, 1, 1), [7, 8, 9, 255]);
 });
 
 test('packed round-trip via zip', async () => {
   const bytes = await packProject(demoProject(), fakeEncode);
   const p2 = await unpackProject(bytes, fakeDecode);
   assert.equal(p2.name, 'demo');
-  assert.deepEqual(getPixel(p2.sheets[0].layers[0].bitmap, 1, 1), [7, 8, 9, 255]);
+  assert.deepEqual(getPixel(sheetLayers(p2.sheets[0])[0].bitmap, 1, 1), [7, 8, 9, 255]);
 });
 
 test('loadEntries rejects bad version with clear error', async () => {
