@@ -381,7 +381,66 @@ function commitInsertFrame(sheet, anim, run, k) {
   emit('selection');
 }
 
-function commitSplitStrip() {} // replaced in Task 6 (split call-out)
+// Split = add a break. Nothing moves; the dashed separator (Task 3) marks the
+// cut until one side is dragged away.
+function commitSplitStrip(anim, index) {
+  const before = (anim.breaks ?? []).slice();
+  const after = normalizeBreaks([...before, index], anim.frames.length);
+  if (after.length === before.length) return;
+  state.commands.push({
+    label: 'split strip',
+    do() { anim.breaks = after.slice(); },
+    undo() { anim.breaks = before.slice(); },
+  });
+  markDirty();
+}
+
+// Delete on a strip member removes the frame AND closes the gap: the rest of
+// its segment shifts left one frame width. model.removeFrame keeps every
+// animation's entries/breaks consistent; snapshots cover them all for undo.
+function commitRemoveMember(sheet, anim, frameId) {
+  const run = segmentOfFrame(anim, frameId);
+  if (!run) return;
+  const members = segmentMembers(sheet, anim, run);
+  const index = anim.frames.findIndex(e => e.frameId === frameId);
+  const k = index - run.start;
+  const fw = members[0].w;
+
+  const beforeSheetFrames = sheet.frames.slice();
+  const beforeAnims = sheet.animations.map(a => ({ anim: a, frames: a.frames.map(e => ({ ...e })), breaks: (a.breaks ?? []).slice() }));
+  const wasSelected = state.selectedFrameId === frameId;
+
+  const tail = members.slice(k + 1);
+  const mv = tail.length ? buildMovePatches(sheet, tail, -fw, 0) : null;
+  removeFrame(sheet, frameId);
+
+  const afterSheetFrames = sheet.frames.slice();
+  const afterAnims = sheet.animations.map(a => ({ anim: a, frames: a.frames.map(e => ({ ...e })), breaks: (a.breaks ?? []).slice() }));
+
+  state.commands.push({
+    label: 'remove strip frame',
+    do() {
+      if (mv) {
+        for (const p of mv.patches) blitRegion(p.layer.bitmap, p.after, mv.ur.x, mv.ur.y);
+        for (const c of mv.afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      }
+      sheet.frames = afterSheetFrames.slice();
+      for (const s of afterAnims) { s.anim.frames = s.frames.map(e => ({ ...e })); s.anim.breaks = s.breaks.slice(); }
+      if (state.selectedFrameId === frameId) state.selectedFrameId = null;
+    },
+    undo() {
+      if (mv) {
+        for (const p of mv.patches) blitRegion(p.layer.bitmap, p.before, mv.ur.x, mv.ur.y);
+        for (const c of mv.beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      }
+      sheet.frames = beforeSheetFrames.slice();
+      for (const s of beforeAnims) { s.anim.frames = s.frames.map(e => ({ ...e })); s.anim.breaks = s.breaks.slice(); }
+      if (wasSelected) state.selectedFrameId = frameId;
+    },
+  });
+  markDirty();
+  emit('selection');
+}
 
 // ------------------------------------------------------------- pointer
 
@@ -787,7 +846,9 @@ export function registerFrameTool() {
     if (state.tool !== 'frametool' || state.mode !== 'sprites') return;
     const sheet = activeSheet();
     if (!sheet || !state.selectedFrameId) return;
-    deleteFrame(sheet, state.selectedFrameId);
+    const strip = stripOf(sheet, state.selectedFrameId);
+    if (strip) commitRemoveMember(sheet, strip, state.selectedFrameId);
+    else deleteFrame(sheet, state.selectedFrameId);
   });
 }
 
