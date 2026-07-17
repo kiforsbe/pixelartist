@@ -22,7 +22,7 @@ import {
   detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset,
 } from '../core/terrainsets.js';
 import {
-  NEIGHBOR_BITS, blobIndexToMask, SIXTEEN_TILE_INDICES, resolveTerrainSlot,
+  NEIGHBOR_BITS, blobIndexToMask, maskToBlobIndex, SIXTEEN_TILE_INDICES, resolveTerrainSlot,
 } from '../core/blob47.js';
 
 // ------------------------------------------------------------- geometry
@@ -41,21 +41,74 @@ function blobStaircaseGroups() {
   return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, indices]) => indices);
 }
 
+// Cosmetic-only arrangement of the same 47 slots in the terrain-set editor
+// -- never touches terrainSet.slots or any saved/imported layout preset.
+// 'staircase' | 'grid6x8' | 'grid7x7' | 'sixteen'.
+let terrainViewMode = 'staircase';
+
+function ascendingIndices() {
+  return Array.from({ length: blobIndexToMask.length }, (_, i) => i);
+}
+
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function slotGroupsForViewMode(mode) {
+  if (mode === 'grid6x8') return chunk(ascendingIndices(), 6);
+  if (mode === 'grid7x7') return chunk(ascendingIndices(), 7);
+  if (mode === 'sixteen') return [[...SIXTEEN_TILE_INDICES].sort((a, b) => a - b)];
+  return blobStaircaseGroups();
+}
+
 function describeMask(mask) {
   const names = { [NEIGHBOR_BITS.N]: 'N', [NEIGHBOR_BITS.NE]: 'NE', [NEIGHBOR_BITS.E]: 'E', [NEIGHBOR_BITS.SE]: 'SE', [NEIGHBOR_BITS.S]: 'S', [NEIGHBOR_BITS.SW]: 'SW', [NEIGHBOR_BITS.W]: 'W', [NEIGHBOR_BITS.NW]: 'NW' };
   const parts = Object.keys(names).filter(b => mask & Number(b)).map(b => names[b]);
   return parts.length ? parts.join(' + ') : 'isolated';
 }
 
-// Built-in layout presets: pixelartist's own deterministic ascending-index
-// ordering at two common grid shapes (NOT a byte-for-byte reproduction of
-// any specific external tool's template image -- see the design spec for
-// why that couldn't be reliably verified). "Save current as preset" is the
-// supported path for matching a layout the user already has.
+// Real blob-47 reference templates (raw neighbor bitmasks, top-left to
+// bottom-right, using this module's own NEIGHBOR_BITS weights: N=1, NE=2,
+// E=4, SE=8, S=16, SW=32, W=64, NW=128). Each raw byte is resolved through
+// maskToBlobIndex to its canonical blobIndex -- raw byte 255 (full 8-
+// neighbor surround) intentionally repeats (both templates' known
+// duplicate-cell convention); every other one of the 47 canonical indices
+// appears exactly once per template.
+const BLOB47_8X6_RAW = [
+  [0, 4, 92, 112, 28, 124, 116, 64],
+  [20, 84, 87, 221, 127, 255, 245, 80],
+  [29, 117, 85, 95, 247, 215, 209, 1],
+  [23, 213, 81, 31, 253, 125, 113, 16],
+  [21, 69, 93, 119, 223, 255, 241, 17],
+  [5, 68, 71, 193, 7, 199, 197, 65],
+];
+const BLOB47_7X7_RAW = [
+  [0, 4, 84, 92, 124, 116, 80],
+  [16, 28, 117, 95, 255, 253, 113],
+  [21, 87, 221, 127, 255, 247, 209],
+  [29, 125, 119, 199, 215, 213, 81],
+  [31, 255, 241, 20, 65, 17, 1],
+  [23, 223, 245, 85, 68, 93, 112],
+  [5, 71, 197, 69, 64, 7, 193],
+];
+function cellsFromRawGrid(rawGrid) {
+  const cells = [];
+  rawGrid.forEach((rowVals, row) => rowVals.forEach((raw, col) => {
+    cells.push({ col, row, blobIndex: maskToBlobIndex[raw] });
+  }));
+  return cells;
+}
+
 const BUILTIN_LAYOUT_PRESETS = [
   {
-    name: 'Blob-47 (6×8, ascending)', cols: 6, rows: 8,
-    cells: Array.from({ length: 47 }, (_, i) => ({ col: i % 6, row: Math.floor(i / 6), blobIndex: i })),
+    name: 'Blob-47 (8×6)', cols: 8, rows: 6,
+    cells: cellsFromRawGrid(BLOB47_8X6_RAW),
+  },
+  {
+    name: 'Blob-47 (7×7)', cols: 7, rows: 7,
+    cells: cellsFromRawGrid(BLOB47_7X7_RAW),
   },
   {
     name: '16-tile (4×4, ascending)', cols: 4, rows: 4,
@@ -978,7 +1031,8 @@ function renderLayoutPresetRow(container, sheet, terrainSet) {
 
   const btnImport = document.createElement('button');
   btnImport.type = 'button';
-  btnImport.textContent = 'Import from layout…';
+  btnImport.textContent = '⬇';
+  btnImport.title = 'Import from layout';
   btnImport.addEventListener('click', () => {
     const preset = allPresets[Number(presetSelect.value)];
     const grid = sheet.tileGrids.find(g => g.id === gridSelect.value);
@@ -992,7 +1046,8 @@ function renderLayoutPresetRow(container, sheet, terrainSet) {
 
   const btnSave = document.createElement('button');
   btnSave.type = 'button';
-  btnSave.textContent = 'Save current as preset…';
+  btnSave.textContent = '💾';
+  btnSave.title = 'Save current as preset';
   btnSave.addEventListener('click', () => {
     const grid = sheet.tileGrids.find(g => g.id === gridSelect.value);
     if (!grid) { alert('Select a grid to save its current slot layout as a preset.'); return; }
@@ -1027,7 +1082,31 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
   symRow.append(flipLabel, rotLabel);
   container.appendChild(symRow);
 
-  for (const group of blobStaircaseGroups()) {
+  const viewModeRow = document.createElement('div');
+  viewModeRow.className = 'row';
+  const viewModeLabel = document.createElement('label');
+  viewModeLabel.appendChild(document.createTextNode('View '));
+  const viewModeSelect = document.createElement('select');
+  [
+    ['staircase', 'Staircase'],
+    ['grid6x8', 'Grid 6×8'],
+    ['grid7x7', 'Grid 7×7'],
+    ['sixteen', '16-tile only'],
+  ].forEach(([value, label]) => {
+    const opt = document.createElement('option');
+    opt.value = value; opt.textContent = label;
+    viewModeSelect.appendChild(opt);
+  });
+  viewModeSelect.value = terrainViewMode;
+  viewModeSelect.addEventListener('change', () => {
+    terrainViewMode = viewModeSelect.value;
+    renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog);
+  });
+  viewModeLabel.appendChild(viewModeSelect);
+  viewModeRow.appendChild(viewModeLabel);
+  container.appendChild(viewModeRow);
+
+  for (const group of slotGroupsForViewMode(terrainViewMode)) {
     const groupRow = document.createElement('div');
     groupRow.className = 'terrain-slot-group';
     for (const blobIndex of group) {
