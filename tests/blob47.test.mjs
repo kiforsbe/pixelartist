@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   maskToBlobIndex, blobIndexToMask, terrainPreviewCells,
-  SIXTEEN_TILE_INDICES, sixteenTileBlobIndex, resolveTerrainSlot,
+  SIXTEEN_TILE_INDICES, sixteenTileBlobIndex, resolveTerrainSlot, classifySlots,
 } from '../js/core/blob47.js';
 
 test('maskToBlobIndex reduces 256 raw masks to exactly 47 canonical buckets', () => {
@@ -100,4 +100,45 @@ test('resolveTerrainSlot: both symmetry + 16-tile fallback compose', () => {
   const eIndex = maskToBlobIndex[4];
   const result = resolveTerrainSlot(ts, eIndex);
   assert.ok(result && result.tileId === 'tileN');
+});
+
+test('classifySlots: symmetry off -> every index is its own singleton orbit, all mandatory', () => {
+  const classification = classifySlots({ flip: false, rotate: false });
+  assert.equal(classification.size, 47);
+  for (let i = 0; i < 47; i++) {
+    const c = classification.get(i);
+    assert.equal(c.mandatory, true);
+    assert.equal(c.orbitRepresentative, i);
+  }
+});
+
+test('classifySlots: flip-only pairs mirror-symmetric indices, one mandatory per pair', () => {
+  const classification = classifySlots({ flip: true, rotate: false });
+  assert.equal([...classification.values()].filter(c => c.mandatory).length, 20);
+  // real orbit: blob indices 1 and 5 are E<->W-style mirror images of each other.
+  const c1 = classification.get(1);
+  const c5 = classification.get(5);
+  assert.equal(c1.orbitRepresentative, 1);
+  assert.equal(c5.orbitRepresentative, 1);
+  assert.equal(c1.mandatory, true);
+  assert.equal(c5.mandatory, false);
+});
+
+test('classifySlots: rotate-only groups the 4-way rotational orbit of index 1, one mandatory per orbit', () => {
+  const classification = classifySlots({ flip: false, rotate: true });
+  assert.equal([...classification.values()].filter(c => c.mandatory).length, 15);
+  // real orbit: blob indices 1, 2, 5, 13 are 90-degree rotations of each other.
+  for (const idx of [1, 2, 5, 13]) assert.equal(classification.get(idx).orbitRepresentative, 1);
+  assert.equal(classification.get(1).mandatory, true);
+  for (const idx of [2, 5, 13]) assert.equal(classification.get(idx).mandatory, false);
+});
+
+test('classifySlots: both flip+rotate enabled composes into larger orbits, one mandatory per orbit', () => {
+  const classification = classifySlots({ flip: true, rotate: true });
+  assert.equal([...classification.values()].filter(c => c.mandatory).length, 14);
+  // real 8-element orbit under the full dihedral group.
+  const orbit = [9, 11, 17, 23, 27, 28, 35, 37];
+  for (const idx of orbit) assert.equal(classification.get(idx).orbitRepresentative, 9);
+  assert.equal(classification.get(9).mandatory, true);
+  for (const idx of orbit.filter(i => i !== 9)) assert.equal(classification.get(idx).mandatory, false);
 });

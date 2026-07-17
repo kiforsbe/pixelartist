@@ -123,7 +123,7 @@ function flipHBits(mask) {
 // group (4 rotations x flip-or-not) -- a separate flipV is never needed
 // internally: e.g. { rotate: 180, flipH: true } already nets out to a pure
 // top-bottom mirror.
-function applyDescriptor(mask, { rotate, flipH }) {
+export function applyDescriptor(mask, { rotate, flipH }) {
   let m = rotateMaskBy(mask, rotate);
   if (flipH) m = flipHBits(m);
   return m;
@@ -138,7 +138,7 @@ function inverseOf(t) {
   return t;
 }
 
-function enabledGroup(symmetry) {
+export function enabledGroup(symmetry) {
   const rotate = symmetry?.rotate;
   const flip = symmetry?.flip;
   const rotates = rotate ? [0, 90, 180, 270] : (flip ? [0, 180] : [0]);
@@ -146,6 +146,32 @@ function enabledGroup(symmetry) {
   const group = [];
   for (const r of rotates) for (const fh of flips) group.push({ rotate: r, flipH: fh });
   return group;
+}
+
+// For each of the 47 blob indices, compute its orbit under the terrain
+// set's ENABLED symmetry transforms (flip/rotate) and pick one
+// representative per orbit -- preferring a 16-tile-subset member when the
+// orbit contains one, else the lowest blobIndex. The representative is
+// "mandatory" (draw a real tile for it); every other orbit member is
+// "optional" (comes free via resolveTerrainSlot's symmetry fallback once
+// the representative is assigned). With symmetry fully off, every orbit is
+// a singleton, so all 47 are mandatory.
+export function classifySlots(symmetry) {
+  const group = enabledGroup(symmetry);
+  const classification = new Map();
+  const visited = new Set();
+  for (let blobIndex = 0; blobIndex < blobIndexToMask.length; blobIndex++) {
+    if (visited.has(blobIndex)) continue;
+    const mask = blobIndexToMask[blobIndex];
+    const orbit = new Set(group.map(t => maskToBlobIndex[applyDescriptor(mask, t)]));
+    const sorted = [...orbit].sort((a, b) => a - b);
+    const representative = sorted.find(i => SIXTEEN_TILE_INDICES.has(i)) ?? sorted[0];
+    for (const idx of orbit) {
+      visited.add(idx);
+      classification.set(idx, { mandatory: idx === representative, orbitRepresentative: representative });
+    }
+  }
+  return classification;
 }
 
 // ---------------------------------------------------------------- resolution
