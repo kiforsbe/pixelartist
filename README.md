@@ -129,6 +129,32 @@ save/load cycle (`deserializeProject` restores it via `strip: a.strip ?? false`)
 but it is not part of either exported JSON shape below — the Frames JSON
 `animations[]` shape omits it and is unchanged.
 
+An intact strip may also carry a project-internal, optional `breaks` array —
+sorted indices into the animation's `frames` marking where a spatial
+SEGMENT boundary falls. Segments are purely a canvas/editing concept (each
+one can be moved, resized, or merged with another segment independently of
+the others); playback always uses the full `frames` order regardless of
+segmentation, so `breaks` has no effect on exported JSON or on how the
+animation plays. Like `strip`, it round-trips through project.json but is
+absent from both exported JSON shapes.
+
+With the frame tool, hovering the segment that contains the currently
+selected frame shows its editing chrome directly on the canvas: "+"
+call-outs to insert a blank frame at any boundary, "✂" call-outs to split
+the segment into two (adding a `breaks` entry) at any interior boundary,
+and grips on both ends to grow/shrink the segment by whole frames. Only one
+segment's chrome is shown at a time — the one containing the selection —
+so overlapping or closely-spaced strips never have their chrome fight for
+the same screen space; click a different strip's member first to bring up
+its chrome instead. Dragging a segment moves every member together
+(pixel-carrying); dragging it end-to-end against another matching-size
+segment snaps and merges the two (across animations if needed, deleting the
+source animation if it becomes empty). Double-clicking any frame (strip
+member or not) opens the frame editor on it and selects its animation in
+the timeline. Once a strip is intact, its timeline cells can't be
+individually removed, reordered, or padded out with an arbitrary frame
+(that's what "Break apart" is for) — but durations remain editable per cell.
+
 ### Export shapes
 
 The Export dialog also produces two engine-consumable JSON formats,

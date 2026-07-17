@@ -385,7 +385,7 @@ export function mountTimeline(el) {
   function buildCell(anim, entry, index, sheet) {
     const cell = document.createElement('div');
     cell.className = 'timeline-cell';
-    cell.draggable = true;
+    cell.draggable = !anim.strip;
 
     const thumbCanvas = document.createElement('canvas');
     thumbCanvas.width = THUMB_SIZE; thumbCanvas.height = THUMB_SIZE;
@@ -410,7 +410,8 @@ export function mountTimeline(el) {
 
     const controls = document.createElement('div');
     controls.className = 'timeline-cell-controls';
-    controls.append(durationInput, btnRemove);
+    controls.append(durationInput);
+    if (!anim.strip) controls.append(btnRemove);
 
     cell.append(thumbCanvas, controls);
 
@@ -427,6 +428,7 @@ export function mountTimeline(el) {
       e.dataTransfer.effectAllowed = 'move';
     });
     cell.addEventListener('dragover', (e) => {
+      if (anim.strip) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       const rect = cell.getBoundingClientRect();
@@ -436,6 +438,7 @@ export function mountTimeline(el) {
     });
     cell.addEventListener('dragleave', () => cell.classList.remove('drag-before', 'drag-after'));
     cell.addEventListener('drop', (e) => {
+      if (anim.strip) return;
       e.preventDefault();
       const before = cell.classList.contains('drag-before');
       cell.classList.remove('drag-before', 'drag-after');
@@ -476,7 +479,7 @@ export function mountTimeline(el) {
     loopCheckbox.disabled = !anim;
     btnRenameAnim.disabled = !anim;
     btnDeleteAnim.disabled = !anim;
-    btnAddFrame.disabled = !anim || !state.selectedFrameId;
+    btnAddFrame.disabled = !anim || !state.selectedFrameId || !!anim.strip;
     btnBreakApart.hidden = !anim?.strip;
     const hasFrames = !!anim && anim.frames.length > 0;
     btnPlay.disabled = !hasFrames;

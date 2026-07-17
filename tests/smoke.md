@@ -10,8 +10,10 @@ don't block on native dialogs.
 Each item is marked:
 - **[A]** automatable via Playwright MCP (dispatch clicks/keys, read
   `state`/DOM/console — no native OS picker involved)
-- **[M]** manual only (native file/folder pickers, or requires leaving the
-  tab/restoring a real browser session)
+- **[M]** manual only (native file/folder pickers, requires leaving the
+  tab/restoring a real browser session, or involves a pointer drag/resize/
+  snap gesture — agents are policy-restricted from simulating drags in this
+  repo, so the owner verifies these directly)
 
 Run the **[A]** items in one pass after any change that touches drawing,
 layers, palettes, frames, animation, the frame/tile editors, tile mode, or
@@ -283,8 +285,51 @@ is a pass condition for the whole run, not just the final step.
 70. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
     first; switching sheets or opening the frame editor also commits.
 
+## 17. v4: Strip segments
+
+71. [A] Frame tool hover over an intact strip's SELECTED segment shows "+"
+    insert call-outs above each frame boundary and "✂" split call-outs
+    below each interior boundary; clicking "+" inserts a blank frame there
+    (pixel-carrying tail shift), one undo step. Chrome only ever appears
+    for the segment containing `state.selectedFrameId` — hovering a
+    different (non-selected) strip shows no chrome until a member of it is
+    clicked first.
+72. [A] Clicking "✂" between two frames of a segment adds a break (a
+    dashed separator appears once the two halves are no longer touching);
+    one undo step.
+73. [M] Dragging a whole segment (grab any member, not a resize handle)
+    moves every member of that segment together as a pixel-carrying unit;
+    undo restores all member positions and pixels in one step.
+74. [M] Dragging a segment's end near another segment of the SAME
+    animation with matching frame size snaps (green outline) and merges
+    the two into one ordered run; undo restores the prior two-segment
+    layout.
+75. [M] Dragging a segment's end near a segment of a DIFFERENT animation
+    snaps and transfers it into that animation (including deleting the
+    source animation entirely when it becomes empty); undo restores the
+    original animation, its frames, and the deleted animation.
+76. [M] Dragging an end-of-segment grip grows (adds blank frames) or
+    shrinks (removes frames; pixels remain on the sheet) that end;
+    verify both the left and right ends independently; undo restores the
+    prior frame count and any removed frames/pixels.
+77. [A] Selecting a member frame of a segment and pressing `Delete` removes
+    it AND closes the gap (rest of the segment shifts to stay contiguous);
+    undo restores the frame, its position, and its pixels.
+78. [A] Double-clicking a member frame of a strip (frame tool, two quick
+    downs on the same frame) opens the frame editor on that frame; "← Back
+    to sheet" returns to the sheet view with the timeline's animation
+    picker showing that frame's animation selected.
+79. [A] With a strip animation (`strip: true`) selected in the timeline,
+    cells have no ✕ remove button and are not draggable (`cell.draggable`
+    is `false`); "Add selected frame" is disabled. Editing a cell's
+    duration still works and is still one undo step.
+80. [M] Save (packed or unpacked), reload, and open the file: segment
+    breaks (dashed separators / detached halves) and frame order survive
+    the round trip exactly. Same native-picker exemption as sections 12-13.
+
 ## Pass criteria
 
 - All **[A]** items complete with no unexpected state and zero console
   errors/warnings across the whole run.
-- `npm test` reports 78/78 passing.
+- `npm test` reports all green (see the suite's own summary line for the
+  current total).

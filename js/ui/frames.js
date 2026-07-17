@@ -31,6 +31,11 @@ const frameToolOptions = { snap: false, gridSize: 8 };
 // `selection`/`stroke` — there is only ever one frame-tool drag at a time.
 let drag = null;
 
+// Last pointerdown's { frameId, t } for double-click detection in handleDown,
+// module-scoped alongside `drag` for the same reason (one frame-tool pointer
+// stream at a time).
+let lastClick = null;
+
 // Live Slice-grid preview: dialog's current values while it is open, else
 // null. The sheet view handle lets dialog input events trigger repaints.
 let slicePreviewOpts = null;
@@ -528,6 +533,22 @@ function handleDown(ev, view) {
       if (part?.type === 'split') { commitSplitStrip(anim, run.start + part.k); view.requestRender(); return; } // Task 6
     }
   }
+  // Double-click (two downs on the same frame within 350ms) opens the frame
+  // editor and points the timeline at the frame's animation.
+  const clickHit = frameAt(sheet, ev.x, ev.y);
+  const now = performance.now();
+  if (clickHit && lastClick && lastClick.frameId === clickHit.id && now - lastClick.t < 350) {
+    lastClick = null;
+    drag = null;
+    state.editingFrameId = clickHit.id;
+    const owner = sheet.animations.find(a => a.frames.some(af => af.frameId === clickHit.id));
+    if (owner) state.selectedAnimationId = owner.id;
+    state.view = 'frame';
+    emit('view');
+    emit('selection');
+    return;
+  }
+  lastClick = clickHit ? { frameId: clickHit.id, t: now } : null;
   const selected = sheet.frames.find(f => f.id === state.selectedFrameId) || null;
   // Intact-strip members have no resize handles: skip hit detection entirely
   // rather than just refusing the resulting drag, so a pointer-down on a
@@ -766,21 +787,26 @@ function hitChrome(g, sx, sy) {
   return null;
 }
 
+// Chrome only ever targets the segment containing the currently SELECTED
+// frame — never whatever the pointer happens to be over — so a non-selected
+// strip's call-outs/grips can't sit in front of and block the selected
+// strip's commands when strips are close together or overlap. Hovering any
+// other strip shows no chrome; clicking a member of it (selecting it) is what
+// makes its chrome available.
 function updateHover(ev, view) {
   let next = null;
   const sheet = activeSheet();
   if (sheet && state.mode === 'sprites' && state.tool === 'frametool' && !drag) {
-    outer: for (const a of sheet.animations) {
-      if (!a.strip) continue;
-      for (const run of segmentsOf(a)) {
-        const g = chromeGeometry(view, sheet, a, run);
-        if (!g) continue;
+    const anim = stripOf(sheet, state.selectedFrameId);
+    const run = anim ? segmentOfFrame(anim, state.selectedFrameId) : null;
+    if (anim && run) {
+      const g = chromeGeometry(view, sheet, anim, run);
+      if (g) {
         const p0 = view.imageToScreen(g.bbox.x, g.bbox.y);
         const p1 = view.imageToScreen(g.bbox.x + g.bbox.w, g.bbox.y + g.bbox.h);
         const pad = CALLOUT_OFF + CALLOUT_R;
         if (ev.sx >= p0.x - pad && ev.sx <= p1.x + pad && ev.sy >= p0.y - pad && ev.sy <= p1.y + pad) {
-          next = { animId: a.id, runIndex: run.index, part: hitChrome(g, ev.sx, ev.sy) };
-          break outer;
+          next = { animId: anim.id, runIndex: run.index, part: hitChrome(g, ev.sx, ev.sy) };
         }
       }
     }
