@@ -6,7 +6,7 @@ const DIR_BY_DELTA = {
   '-1,1': 'sw', '0,1': 's', '1,1': 'se',
 };
 
-function emptySlot() { return { mode: 'same', tileIndex: null, flipH: false, flipV: false }; }
+function emptySlot() { return { mode: 'same', tileId: null, flipH: false, flipV: false }; }
 
 export function defaultPreset() {
   const p = {};
@@ -14,31 +14,29 @@ export function defaultPreset() {
   return p;
 }
 
-export function getPreset(sheet, tileIndex) {
-  const stored = sheet.tile.neighbors[tileIndex];
+export function getPreset(tile) {
   const p = defaultPreset();
-  if (stored) for (const d of NEIGHBOR_DIRS) if (stored[d]) p[d] = { ...stored[d] };
+  if (tile.neighbors) for (const d of NEIGHBOR_DIRS) if (tile.neighbors[d]) p[d] = { ...tile.neighbors[d] };
   return p;
 }
 
-export function setSlot(sheet, tileIndex, dir, slot) {
-  if (!sheet.tile.neighbors[tileIndex])
-    sheet.tile.neighbors[tileIndex] = defaultPreset();
-  sheet.tile.neighbors[tileIndex][dir] = { ...slot };
+export function setSlot(tile, dir, slot) {
+  if (!tile.neighbors) tile.neighbors = defaultPreset();
+  tile.neighbors[dir] = { ...slot };
 }
 
-export function resolveNeighborGrid(preset, centerIndex, radius = 1) {
+export function resolveNeighborGrid(preset, centerTileId, radius = 1) {
   const cells = [];
   for (let dy = -radius; dy <= radius; dy++)
     for (let dx = -radius; dx <= radius; dx++) {
       if (dx === 0 && dy === 0) continue;
       const dir = DIR_BY_DELTA[`${Math.sign(dx)},${Math.sign(dy)}`];
       const slot = preset[dir];
-      let tileIndex;
-      if (slot.mode === 'empty') tileIndex = null;
-      else if (slot.mode === 'tile') tileIndex = slot.tileIndex;
-      else tileIndex = centerIndex;
-      cells.push({ dx, dy, tileIndex, flipH: slot.flipH, flipV: slot.flipV });
+      let tileId;
+      if (slot.mode === 'empty') tileId = null;
+      else if (slot.mode === 'tile') tileId = slot.tileId;
+      else tileId = centerTileId;
+      cells.push({ dx, dy, tileId, flipH: slot.flipH, flipV: slot.flipV });
     }
   return cells;
 }
