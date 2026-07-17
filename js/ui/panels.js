@@ -361,11 +361,11 @@ export function mountLayersPanel(el) {
   list.className = 'layer-list layer-tree';
   el.appendChild(list);
 
-  const btnRow = document.createElement('div'); btnRow.className = 'row';
-  const btnAddLayer = document.createElement('button'); btnAddLayer.textContent = '+ Layer';
-  const btnAddGroup = document.createElement('button'); btnAddGroup.textContent = '+ Group';
-  const btnDelete = document.createElement('button'); btnDelete.textContent = 'Delete';
-  const btnMerge = document.createElement('button'); btnMerge.textContent = 'Merge Down';
+  const btnRow = document.createElement('div'); btnRow.className = 'row layer-actions';
+  const btnAddLayer = document.createElement('button'); btnAddLayer.textContent = '➕'; btnAddLayer.title = 'Add layer';
+  const btnAddGroup = document.createElement('button'); btnAddGroup.textContent = '📁'; btnAddGroup.title = 'Add group';
+  const btnDelete = document.createElement('button'); btnDelete.textContent = '🗑'; btnDelete.title = 'Delete';
+  const btnMerge = document.createElement('button'); btnMerge.textContent = '⬇'; btnMerge.title = 'Merge down';
   btnRow.append(btnAddLayer, btnAddGroup, btnDelete, btnMerge);
   el.appendChild(btnRow);
 
