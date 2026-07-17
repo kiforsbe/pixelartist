@@ -176,7 +176,7 @@ export function drawRectDims(ctx, view, rect, opts = {}) {
   drawDimension(ctx, view, { x: p1.x, y: p0.y }, { x: p1.x, y: p1.y }, {
     axis: 'v', level: opts.hLevel ?? opts.level ?? 0, text: `${h}${delta(opts.dh)}`, alpha,
   });
-  const originText = `(${rect.x}, ${rect.y})`
+  const originText = `${rect.x}, ${rect.y}`
     + ((opts.dx || opts.dy) ? ` (${signed(opts.dx || 0)}, ${signed(opts.dy || 0)})` : '');
   drawOriginMarker(ctx, p0, originText, alpha);
 }

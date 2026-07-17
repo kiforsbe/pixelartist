@@ -442,6 +442,12 @@ bindTileTool(canvasView);
   const priorOverlay = canvasView.onOverlay;
   canvasView.onOverlay = (ctx) => { priorOverlay(ctx); drawSheetOverlays(canvasView, ctx); };
 }
+// Strip chrome (+/✂ call-outs, grips) chains last of all so it stays
+// clickable-looking above the label overlays it is hit-tested above.
+{
+  const priorOverlay = canvasView.onOverlay;
+  canvasView.onOverlay = (ctx) => { priorOverlay(ctx); drawStripChrome(ctx, canvasView); };
+}
 initFloatSession();
 mountColorPanel(document.getElementById('panel-colors'));
 mountLayersPanel(document.getElementById('panel-layers'));

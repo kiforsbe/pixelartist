@@ -949,21 +949,30 @@ function drawFrameToolGhost(ctx, view) {
     }
   }
 
-  if (state.tool === 'frametool') {
-    const selected = sheet.frames.find(f => f.id === state.selectedFrameId);
-    const strip = selected ? stripOf(sheet, selected.id) : null;
-    if (selected && !drag) {
-      const run = strip ? segmentOfFrame(strip, selected.id) : null;
-      const members = run ? segmentMembers(sheet, strip, run) : null;
-      // A 1-member strip degenerates to the plain single-frame case (no
-      // chain, no level-1 row) — matching the drag path's members.length gate.
-      if (members && members.length > 1) drawStripDims(ctx, view, members, 0, 0, { quiet: true });
-      else drawRectDims(ctx, view, selected, { quiet: true });
-    }
-    // No resize handles on intact-strip members.
-    if (selected && !strip) drawHandles(ctx, view, selected);
-    drawChrome(ctx, view, sheet);
+}
+
+// Selection chrome — the idle dims, resize handles, and the strip call-outs/
+// grips — must render above EVERYTHING on the sheet overlay (including the
+// frame/tile label overlays main.js chains after bindFrameTool), so it is not
+// drawn inside drawFrameToolGhost — main.js chains this as the final overlay
+// layer instead.
+export function drawStripChrome(ctx, view) {
+  if (state.mode !== 'sprites' || state.tool !== 'frametool') return;
+  const sheet = activeSheet();
+  if (!sheet) return;
+  const selected = sheet.frames.find(f => f.id === state.selectedFrameId);
+  const strip = selected ? stripOf(sheet, selected.id) : null;
+  if (selected && !drag) {
+    const run = strip ? segmentOfFrame(strip, selected.id) : null;
+    const members = run ? segmentMembers(sheet, strip, run) : null;
+    // A 1-member strip degenerates to the plain single-frame case (no
+    // chain, no level-1 row) — matching the drag path's members.length gate.
+    if (members && members.length > 1) drawStripDims(ctx, view, members, 0, 0, { quiet: true });
+    else drawRectDims(ctx, view, selected, { quiet: true });
   }
+  // No resize handles on intact-strip members.
+  if (selected && !strip) drawHandles(ctx, view, selected);
+  drawChrome(ctx, view, sheet);
 }
 
 // ------------------------------------------------------------- tool options row
