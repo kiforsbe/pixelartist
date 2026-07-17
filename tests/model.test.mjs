@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {
   PROJECT_VERSION, DEFAULT_SETTINGS, createProject, createSheet, addLayer, removeLayer,
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet, flattenSheetLayers,
-  serializeProject, deserializeProject, validateProjectJson, tileCount, tileRect,
+  serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
 } from '../js/core/model.js';
-import { setPixel, getPixel } from '../js/core/pixels.js';
+import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
 
 function proj() {
   const p = createProject('demo');
@@ -102,12 +102,63 @@ test('flattenSheet composites visible layers only', () => {
   assert.deepEqual(getPixel(flattenSheet(s), 1, 1), [0, 255, 0, 255]);
 });
 
-test('tile helpers', () => {
+test('createSheet tile kind starts with empty grids/tiles', () => {
   const p = createProject('t');
-  const s = createSheet(p, { name: 'tiles', width: 64, height: 32, kind: 'tile' });
-  s.tile.tileWidth = 16; s.tile.tileHeight = 16;
-  assert.equal(tileCount(s), 8);
-  assert.deepEqual(tileRect(s, 5), { x: 16, y: 16, w: 16, h: 16 });
+  const s = createSheet(p, { name: 'x', width: 64, height: 64, kind: 'tile' });
+  assert.deepEqual(s.tileGrids, []);
+  assert.deepEqual(s.tiles, []);
+});
+
+test('createSheet sprite kind has null tileGrids/tiles', () => {
+  const { s } = proj();
+  assert.equal(s.tileGrids, null);
+  assert.equal(s.tiles, null);
+});
+
+test('serialize/deserialize round-trips tileGrids and tiles', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'Tiles', width: 32, height: 16, kind: 'tile' });
+  s.tileGrids.push({ id: 'tg1', x: 0, y: 0, cellW: 16, cellH: 16, cols: 2, rows: 1, spacingX: 0, spacingY: 0 });
+  s.tiles.push({ id: 'ti1', x: 0, y: 0, w: 16, h: 16, name: 'grass', gridId: 'tg1', gridCol: 0, gridRow: 0, neighbors: undefined });
+  s.tiles.push({ id: 'ti2', x: 16, y: 0, w: 16, h: 16, name: undefined, gridId: 'tg1', gridCol: 1, gridRow: 0, neighbors: { n: { mode: 'empty', tileId: null, flipH: false, flipV: false } } });
+  const { json, images } = serializeProject(p);
+  const p2 = deserializeProject(json, new Map(images.map(i => [i.path, i.bitmap])));
+  const s2 = p2.sheets[0];
+  assert.deepEqual(s2.tileGrids, s.tileGrids);
+  assert.equal(s2.tiles.length, 2);
+  assert.equal(s2.tiles[0].name, 'grass');
+  assert.deepEqual(s2.tiles[1].neighbors, { n: { mode: 'empty', tileId: null, flipH: false, flipV: false } });
+});
+
+test('deserializeProject migrates legacy sheet.tile shape into one grid + tiles', () => {
+  const legacy = {
+    version: 2, name: 't',
+    settings: DEFAULT_SETTINGS,
+    activePaletteId: null, palettes: [],
+    sheets: [{
+      id: 's1', name: 'Ground', width: 32, height: 16, kind: 'tile',
+      tile: {
+        tileWidth: 16, tileHeight: 16,
+        names: { 1: 'grass' },
+        neighbors: { 1: { e: { mode: 'tile', tileIndex: 0, flipH: true, flipV: false } } },
+      },
+      frames: [], animations: [],
+      layerTree: { id: 'root', type: GROUP, name: 'root', animationId: null, open: true, children: [
+        { id: 'ly1', type: LAYER, name: 'Layer 1', visible: true, opacity: 1, image: 'images/s1/ly1.png' },
+      ] },
+    }],
+  };
+  const bitmap = createBitmap(32, 16);
+  const p2 = deserializeProject(legacy, new Map([['images/s1/ly1.png', bitmap]]));
+  const s2 = p2.sheets[0];
+  assert.equal(s2.tileGrids.length, 1);
+  assert.deepEqual(s2.tileGrids[0], { id: s2.tileGrids[0].id, x: 0, y: 0, cellW: 16, cellH: 16, cols: 2, rows: 1, spacingX: 0, spacingY: 0 });
+  assert.equal(s2.tiles.length, 2);
+  const t0 = s2.tiles.find(t => t.gridCol === 0 && t.gridRow === 0);
+  const t1 = s2.tiles.find(t => t.gridCol === 1 && t.gridRow === 0);
+  assert.equal(t0.name, undefined);
+  assert.equal(t1.name, 'grass');
+  assert.deepEqual(t1.neighbors.e, { mode: 'tile', tileIndex: 0, flipH: true, flipV: false });
 });
 
 test('serialize/deserialize round-trip preserves pixels and structure', () => {
@@ -140,11 +191,6 @@ test('project carries required settings; version 2', () => {
   assert.equal(p2.settings.tileW, 8);
 });
 
-test('createSheet tile kind honors tileW/tileH', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'x', width: 64, height: 64, kind: 'tile', tileW: 8, tileH: 8 });
-  assert.equal(s.tile.tileWidth, 8);
-});
 
 test('animations carry strip flag; serialize round-trips settings and strip', () => {
   const p = createProject('a');

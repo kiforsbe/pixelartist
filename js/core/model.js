@@ -40,7 +40,7 @@ export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
     sheets: [], palettes: [], activePaletteId: null };
 }
 
-export function createSheet(project, { name, width, height, kind, tileW, tileH }) {
+export function createSheet(project, { name, width, height, kind }) {
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 1 || height < 1 || width > MAX_DIM || height > MAX_DIM)
     throw new Error(`sheet size must be 1..${MAX_DIM}`);
@@ -49,9 +49,8 @@ export function createSheet(project, { name, width, height, kind, tileW, tileH }
   const sheet = {
     id: newId('sh'), name, width, height, kind,
     layerTree: root, frames: [], animations: [],
-    tile: kind === 'tile'
-      ? { tileWidth: tileW ?? 16, tileHeight: tileH ?? 16, names: {}, neighbors: {} }
-      : null,
+    tileGrids: kind === 'tile' ? [] : null,
+    tiles: kind === 'tile' ? [] : null,
   };
   project.sheets.push(sheet);
   return sheet;
@@ -290,20 +289,6 @@ export function renameAnimation(sheet, animId, name) {
   return true;
 }
 
-export function tileCount(sheet) {
-  const cols = Math.floor(sheet.width / sheet.tile.tileWidth);
-  const rows = Math.floor(sheet.height / sheet.tile.tileHeight);
-  return cols * rows;
-}
-
-export function tileRect(sheet, index) {
-  const cols = Math.floor(sheet.width / sheet.tile.tileWidth);
-  return {
-    x: (index % cols) * sheet.tile.tileWidth,
-    y: Math.floor(index / cols) * sheet.tile.tileHeight,
-    w: sheet.tile.tileWidth, h: sheet.tile.tileHeight,
-  };
-}
 
 // ---------------------------------------------------------------- serialization
 
@@ -352,6 +337,31 @@ function migrateLegacyLayers(sheetJson, sheetId, imagesByPath) {
   };
 }
 
+// Legacy sheets stored one uniform grid as sheet.tile = { tileWidth,
+// tileHeight, names, neighbors }, with every tile's identity implied by its
+// row-major array index. Synthesize the equivalent explicit grid + tiles;
+// name/neighbors carry over unchanged (js/core/neighbors.js's Phase A
+// re-key handles the neighbor shape itself; this only reproduces the old
+// per-index assignment).
+function migrateLegacyTile(sheetJson) {
+  const t = sheetJson.tile;
+  const cols = Math.floor(sheetJson.width / t.tileWidth);
+  const rows = Math.floor(sheetJson.height / t.tileHeight);
+  const grid = { id: newId('tg'), x: 0, y: 0, cellW: t.tileWidth, cellH: t.tileHeight, cols, rows, spacingX: 0, spacingY: 0 };
+  const tiles = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const index = row * cols + col;
+      tiles.push({
+        id: newId('ti'), x: col * t.tileWidth, y: row * t.tileHeight, w: t.tileWidth, h: t.tileHeight,
+        name: t.names?.[index], gridId: grid.id, gridCol: col, gridRow: row,
+        neighbors: t.neighbors?.[index] ? { ...t.neighbors[index] } : undefined,
+      });
+    }
+  }
+  return { tileGrids: [grid], tiles };
+}
+
 export function serializeProject(project) {
   const images = [];
   const json = {
@@ -361,7 +371,8 @@ export function serializeProject(project) {
     palettes: project.palettes.map(p => ({ ...p, colors: p.colors.map(c => [...c]) })),
     sheets: project.sheets.map(s => ({
       id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
-      tile: s.tile ? structuredClone(s.tile) : null,
+      tileGrids: s.tileGrids ? s.tileGrids.map(g => ({ ...g })) : null,
+      tiles: s.tiles ? s.tiles.map(t => ({ ...t, neighbors: t.neighbors ? { ...t.neighbors } : undefined })) : null,
       frames: s.frames.map(f => ({ ...f })),
       animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })), breaks: (a.breaks ?? []).slice(), layerGroupId: a.layerGroupId ?? null })),
       layerTree: serializeGroup(s.layerTree, s.id, images),
@@ -384,7 +395,11 @@ export function deserializeProject(json, imagesByPath) {
         : migrateLegacyLayers(s, s.id, imagesByPath);
       return {
         id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
-        tile: s.tile ?? null,
+        ...(() => {
+          if (s.kind !== 'tile') return { tileGrids: null, tiles: null };
+          if (!s.tiles && s.tile) return migrateLegacyTile(s);
+          return { tileGrids: s.tileGrids ?? [], tiles: s.tiles ?? [] };
+        })(),
         frames: s.frames ?? [],
         animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false, breaks: a.breaks ?? [], layerGroupId: a.layerGroupId ?? null })),
         layerTree,
