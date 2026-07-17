@@ -158,7 +158,11 @@ test('deserializeProject migrates legacy sheet.tile shape into one grid + tiles'
   const t1 = s2.tiles.find(t => t.gridCol === 1 && t.gridRow === 0);
   assert.equal(t0.name, undefined);
   assert.equal(t1.name, 'grass');
-  assert.deepEqual(t1.neighbors.e, { mode: 'tile', tileIndex: 0, flipH: true, flipV: false });
+  // Legacy neighbor slot referenced tileIndex: 0 (old row-major array
+  // index) — migration must resolve that to t0's new id, not carry the
+  // stale index over, since Task 3 re-keys neighbor cross-references onto
+  // tileId everywhere else in the app.
+  assert.deepEqual(t1.neighbors.e, { mode: 'tile', tileId: t0.id, flipH: true, flipV: false });
 });
 
 test('serialize/deserialize round-trip preserves pixels and structure', () => {

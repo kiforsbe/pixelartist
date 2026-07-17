@@ -355,9 +355,27 @@ function migrateLegacyTile(sheetJson) {
       tiles.push({
         id: newId('ti'), x: col * t.tileWidth, y: row * t.tileHeight, w: t.tileWidth, h: t.tileHeight,
         name: t.names?.[index], gridId: grid.id, gridCol: col, gridRow: row,
-        neighbors: t.neighbors?.[index] ? { ...t.neighbors[index] } : undefined,
+        neighbors: undefined, // resolved below, once every tile in this grid has an id
       });
     }
+  }
+  // Legacy neighbor slots reference the OTHER tile by its old row-major
+  // array index (tileIndex) — js/core/neighbors.js's Phase A shape keys
+  // that reference on tileId instead (Task 3), so resolve old-index ->
+  // new-tile-id here rather than carrying the stale index over verbatim.
+  for (let i = 0; i < tiles.length; i++) {
+    const legacy = t.neighbors?.[i];
+    if (!legacy) continue;
+    const neighbors = {};
+    for (const dir of Object.keys(legacy)) {
+      const slot = legacy[dir];
+      neighbors[dir] = {
+        mode: slot.mode,
+        tileId: (slot.mode === 'tile' && slot.tileIndex != null) ? (tiles[slot.tileIndex]?.id ?? null) : null,
+        flipH: slot.flipH, flipV: slot.flipV,
+      };
+    }
+    tiles[i].neighbors = neighbors;
   }
   return { tileGrids: [grid], tiles };
 }
