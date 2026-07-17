@@ -23,6 +23,7 @@ import {
 } from '../core/terrainsets.js';
 import {
   NEIGHBOR_BITS, blobIndexToMask, maskToBlobIndex, SIXTEEN_TILE_INDICES, resolveTerrainSlot, classifySlots,
+  DIRECTION_OFFSETS,
 } from '../core/blob47.js';
 
 // ------------------------------------------------------------- geometry
@@ -978,31 +979,74 @@ function buildAddTerrainSetDialog() {
 
 function buildTilePickerDialog() {
   const dlg = document.createElement('dialog');
+  dlg.className = 'tile-picker-dialog';
   dlg.innerHTML = `
     <h3>Assign tile</h3>
-    <div class="row"><label>Tile <select id="tp-select"></select></label></div>
-    <div class="row"><button type="button" id="tp-ok">OK</button><button type="button" id="tp-clear">Clear</button><button type="button" id="tp-cancel">Cancel</button></div>
+    <div class="tile-picker-header">
+      <div class="tile-picker-mask-grid" id="tp-mask"></div>
+      <div>
+        <div id="tp-desc"></div>
+        <div id="tp-badge" class="badge"></div>
+      </div>
+    </div>
+    <div class="tile-picker-grid" id="tp-grid"></div>
+    <div class="row"><button type="button" id="tp-clear">Clear</button><button type="button" id="tp-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const $ = (sel) => dlg.querySelector(sel);
   let onPick = null, onClear = null;
   $('#tp-cancel').addEventListener('click', () => dlg.close());
-  $('#tp-ok').addEventListener('click', () => { onPick?.($('#tp-select').value); dlg.close(); });
   $('#tp-clear').addEventListener('click', () => { onClear?.(); dlg.close(); });
+
+  function buildMaskDiagram(mask) {
+    const grid = document.createElement('div');
+    grid.className = 'tile-picker-mask-inner';
+    for (let row = -1; row <= 1; row++) {
+      for (let col = -1; col <= 1; col++) {
+        const div = document.createElement('div');
+        div.className = 'tile-picker-mask-cell';
+        if (row === 0 && col === 0) {
+          div.classList.add('center');
+        } else {
+          const dir = DIRECTION_OFFSETS.find(d => d.dx === col && d.dy === row);
+          if (mask & dir.bit) div.classList.add('filled');
+        }
+        grid.appendChild(div);
+      }
+    }
+    return grid;
+  }
+
   return {
-    open(sheet, terrainSet, currentTileId, pick, clear) {
+    open(sheet, terrainSet, blobIndex, currentTileId, pick, clear) {
       onPick = pick; onClear = clear;
-      const select = $('#tp-select');
-      select.innerHTML = '';
+      const mask = blobIndexToMask[blobIndex];
+      const classInfo = classifySlots(terrainSet.symmetry).get(blobIndex);
+      $('#tp-desc').textContent = describeMask(mask);
+      $('#tp-badge').textContent = classInfo.mandatory ? 'Mandatory' : 'Optional (derivable via symmetry)';
+
+      const maskHost = $('#tp-mask');
+      maskHost.innerHTML = '';
+      maskHost.appendChild(buildMaskDiagram(mask));
+
+      const grid = $('#tp-grid');
+      grid.innerHTML = '';
       sheet.tiles
         .filter(t => t.w === terrainSet.tileW && t.h === terrainSet.tileH)
         .forEach((t, i) => {
-          const opt = document.createElement('option');
-          opt.value = t.id;
-          opt.textContent = t.name ? `${i}: ${t.name}` : `#${i}`;
-          select.appendChild(opt);
+          const cell = document.createElement('div');
+          cell.className = 'tile-picker-cell';
+          if (t.id === currentTileId) cell.classList.add('selected');
+          const thumb = document.createElement('div');
+          thumb.className = 'tile-picker-thumb';
+          thumb.style.backgroundImage = `url(${tileThumbnailURL(sheet, t)})`;
+          const label = document.createElement('span');
+          label.textContent = t.name ? `${i}: ${t.name}` : `#${i}`;
+          cell.append(thumb, label);
+          cell.addEventListener('click', () => { onPick?.(t.id); dlg.close(); });
+          grid.appendChild(cell);
         });
-      if (currentTileId) select.value = currentTileId;
+
       dlg.showModal();
     },
   };
@@ -1207,7 +1251,7 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
       }
 
       cell.addEventListener('click', () => {
-        tilePickerDialog.open(sheet, terrainSet, terrainSet.slots[blobIndex] ?? null,
+        tilePickerDialog.open(sheet, terrainSet, blobIndex, terrainSet.slots[blobIndex] ?? null,
           (tileId) => {
             const tile = sheet.tiles.find(t => t.id === tileId);
             if (tile) commitAssignSlot(sheet, terrainSet, blobIndex, tile);
