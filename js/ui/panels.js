@@ -548,15 +548,15 @@ export function mountLayersPanel(el) {
     markDirty();
   }
 
-  function doMove(layer, delta) {
+  function doMove(node, delta) {
     const sheet = activeSheet();
-    if (!sheet) return;
-    const loc = findParent(sheet.layerTree, layer.id);
+    if (!sheet || !node) return;
+    const loc = findParent(sheet.layerTree, node.id);
     if (!loc) return;
     const parent = loc.parent;
     const beforeChildren = parent.children.slice();
     const newIndex = Math.max(0, Math.min(parent.children.length - 1, loc.index + delta));
-    moveLayer(sheet, layer.id, newIndex);
+    moveNode(sheet, node.id, parent.id, newIndex);
     const afterChildren = parent.children.slice();
     const cmd = {
       label: 'reorder layers',
@@ -584,6 +584,15 @@ export function mountLayersPanel(el) {
     return sheet?.animations.find(a => a.id === group.animationId) ?? null;
   }
 
+  function autoName(node) {
+    const sheet = activeSheet();
+    if (!sheet) return node.name;
+    const type = node.type === 'group' ? 'group' : 'layer';
+    const prefix = type === 'group' ? 'Group' : 'Layer';
+    const base = countNodes(sheet, type) + 1;
+    return `${prefix} ${base}`;
+  }
+
   function startRename(node, nameEl) {
     const input = document.createElement('input');
     input.type = 'text';
@@ -596,8 +605,9 @@ export function mountLayersPanel(el) {
     function commit() {
       if (done) return;
       done = true;
-      const v = input.value.trim();
-      if (v && v !== node.name) {
+      let v = input.value.trim();
+      if (!v) v = autoName(node);
+      if (v !== node.name) {
         const oldName = node.name;
         const anim = node.type === 'group' ? animationForGroup(node) : null;
         const oldAnimName = anim?.name;
@@ -625,6 +635,19 @@ export function mountLayersPanel(el) {
 
   const thumbCanvases = new Map();
   let draggedId = null;
+  let pendingNameClickTimer = null;
+
+  function scheduleNameSelect(selectFn) {
+    if (pendingNameClickTimer) {
+      clearTimeout(pendingNameClickTimer);
+      pendingNameClickTimer = null;
+    }
+    selectFn();
+    pendingNameClickTimer = setTimeout(() => {
+      pendingNameClickTimer = null;
+      renderList();
+    }, 200);
+  }
 
   function isDescendant(parent, childId) {
     if (parent.id === childId) return true;
@@ -702,7 +725,13 @@ export function mountLayersPanel(el) {
   function onListDragOver(e) {
     e.preventDefault();
     const row = e.target.closest('.layer-row');
-    if (!row || row.dataset.nodeId === draggedId) {
+    // Dropping in empty space below rows silently targets the root.
+    if (!row) {
+      clearDropIndicators();
+      e.dataTransfer.dropEffect = 'move';
+      return;
+    }
+    if (row.dataset.nodeId === draggedId) {
       clearDropIndicators();
       return;
     }
@@ -720,32 +749,40 @@ export function mountLayersPanel(el) {
     const row = e.target.closest('.layer-row');
     const sourceId = draggedId ?? e.dataTransfer.getData('text/plain');
     clearDropIndicators();
-    if (!row || !sourceId) return;
-
-    const targetId = row.dataset.nodeId;
-    if (targetId === sourceId) return;
+    if (!sourceId) return;
 
     const sheet = activeSheet();
     if (!sheet) return;
     const srcNode = findNode(sheet.layerTree, sourceId);
-    const targetNode = findNode(sheet.layerTree, targetId);
-    if (!srcNode || !targetNode) return;
+    if (!srcNode) return;
 
-    const targetLoc = findParent(sheet.layerTree, targetId);
-    if (!targetLoc) return;
-
-    const pos = getDropPosition(row, e.clientY);
     let destParent, destIndex;
-    if (pos === 'into' && targetNode.type === 'group' && !targetNode.animationId) {
-      destParent = targetNode;
-      destIndex = targetNode.children.length;
+    if (!row || row.dataset.nodeId === sourceId) {
+      // Dropping in empty space or on the source row defaults to the root.
+      destParent = sheet.layerTree;
+      destIndex = sheet.layerTree.children.length;
     } else {
-      destParent = targetLoc.parent;
-      destIndex = targetLoc.index + (pos === 'after' ? 1 : 0);
+      const targetId = row.dataset.nodeId;
+      if (targetId === sourceId) return;
+      const targetNode = findNode(sheet.layerTree, targetId);
+      if (!targetNode) return;
+
+      const pos = getDropPosition(row, e.clientY);
+      if (pos === 'into' && targetNode.type === 'group') {
+        // Layers may be dropped into animation-owned groups; groups may not.
+        destParent = targetNode;
+        destIndex = targetNode.children.length;
+      } else {
+        const targetLoc = findParent(sheet.layerTree, targetId);
+        if (!targetLoc) return;
+        destParent = targetLoc.parent;
+        destIndex = targetLoc.index + (pos === 'after' ? 1 : 0);
+      }
     }
 
     // Guards against invalid drops.
-    if (destParent.animationId) return;
+    // Groups cannot be moved into animation-owned groups.
+    if (srcNode.type === 'group' && destParent.animationId) return;
     if (srcNode.type === 'group' && isDescendant(srcNode, destParent.id)) return;
 
     performMove(sheet, sourceId, destParent.id, destIndex);
@@ -762,8 +799,14 @@ export function mountLayersPanel(el) {
     row.style.paddingLeft = (4 + depth * 14) + 'px';
     row.draggable = true;
     row.dataset.nodeId = group.id;
+    row.tabIndex = 0;
     row.addEventListener('dragstart', (e) => onRowDragStart(e, group));
     row.addEventListener('dragend', onRowDragEnd);
+    row.addEventListener('keydown', (e) => {
+      if (group.id !== selectedNodeId) return;
+      if (e.key === 'ArrowUp') { e.preventDefault(); doMove(group, 1); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); doMove(group, -1); }
+    });
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
@@ -778,15 +821,19 @@ export function mountLayersPanel(el) {
     const nameEl = document.createElement('span');
     nameEl.className = 'layer-name';
     nameEl.textContent = group.name;
-    nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(group, nameEl); });
+    nameEl.addEventListener('selectstart', (e) => e.preventDefault());
+    nameEl.addEventListener('dragstart', (e) => e.stopPropagation());
+    nameEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scheduleNameSelect(() => { selectedNodeId = group.id; state.activeLayerId = null; });
+    });
+    nameEl.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      if (pendingNameClickTimer) { clearTimeout(pendingNameClickTimer); pendingNameClickTimer = null; }
+      startRename(group, nameEl);
+    });
 
-    const renameBtn = document.createElement('button');
-    renameBtn.type = 'button';
-    renameBtn.textContent = '✎';
-    renameBtn.title = 'Rename group';
-    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); startRename(group, nameEl); });
-
-    row.append(toggle, icon, nameEl, renameBtn);
+    row.append(toggle, icon, nameEl);
     row.addEventListener('click', () => { selectedNodeId = group.id; state.activeLayerId = null; renderList(); });
     list.appendChild(row);
 
@@ -804,12 +851,20 @@ export function mountLayersPanel(el) {
     row.style.paddingLeft = (4 + depth * 14) + 'px';
     row.draggable = true;
     row.dataset.nodeId = layer.id;
+    row.tabIndex = 0;
     row.addEventListener('dragstart', (e) => onRowDragStart(e, layer));
     row.addEventListener('dragend', onRowDragEnd);
     row.addEventListener('click', () => { state.activeLayerId = layer.id; selectedNodeId = layer.id; renderList(); });
+    row.addEventListener('keydown', (e) => {
+      if (layer.id !== state.activeLayerId) return;
+      if (e.key === 'ArrowUp') { e.preventDefault(); doMove(layer, 1); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); doMove(layer, -1); }
+    });
 
+    // A thin spacer for layer rows keeps a consistent visual rhythm with
+    // group rows while not pushing the thumbnail far to the right.
     const spacer = document.createElement('span');
-    spacer.className = 'tree-spacer';
+    spacer.className = 'tree-spacer leaf-spacer';
 
     const thumb = document.createElement('canvas');
     thumb.className = 'layer-thumb';
@@ -823,18 +878,30 @@ export function mountLayersPanel(el) {
     visBtn.textContent = layer.visible ? '👁' : '🚫';
     visBtn.title = 'Toggle visibility';
     visBtn.addEventListener('click', (e) => { e.stopPropagation(); doToggleVisible(layer); });
+    visBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 
     const nameEl = document.createElement('span');
     nameEl.className = 'layer-name';
     nameEl.textContent = layer.name;
-    nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(layer, nameEl); });
+    nameEl.addEventListener('selectstart', (e) => e.preventDefault());
+    nameEl.addEventListener('dragstart', (e) => e.stopPropagation());
+    nameEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scheduleNameSelect(() => { state.activeLayerId = layer.id; selectedNodeId = layer.id; });
+    });
+    nameEl.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      if (pendingNameClickTimer) { clearTimeout(pendingNameClickTimer); pendingNameClickTimer = null; }
+      startRename(layer, nameEl);
+    });
 
     const opacityInput = document.createElement('input');
     opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100';
     opacityInput.value = String(Math.round(layer.opacity * 100));
     opacityInput.addEventListener('click', (e) => e.stopPropagation());
+    opacityInput.addEventListener('dragstart', (e) => e.stopPropagation());
     let opacityBefore = null;
-    opacityInput.addEventListener('pointerdown', () => { opacityBefore = layer.opacity; });
+    opacityInput.addEventListener('pointerdown', (e) => { e.stopPropagation(); opacityBefore = layer.opacity; });
     opacityInput.addEventListener('input', () => {
       layer.opacity = Number(opacityInput.value) / 100;
       emit('pixels');
@@ -848,13 +915,7 @@ export function mountLayersPanel(el) {
       markDirty();
     });
 
-    const renameBtn = document.createElement('button');
-    renameBtn.type = 'button';
-    renameBtn.textContent = '✎';
-    renameBtn.title = 'Rename layer';
-    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); startRename(layer, nameEl); });
-
-    row.append(spacer, thumb, visBtn, nameEl, renameBtn, opacityInput);
+    row.append(spacer, thumb, visBtn, nameEl, opacityInput);
     list.appendChild(row);
   }
 
@@ -871,7 +932,6 @@ export function mountLayersPanel(el) {
     if (selectedNodeId && !findNode(sheet.layerTree, selectedNodeId)) {
       selectedNodeId = state.activeLayerId;
     }
-    // Don't render the root group itself; show its children as the top level.
     for (let i = sheet.layerTree.children.length - 1; i >= 0; i--) {
       renderNode(sheet.layerTree.children[i], 0);
     }

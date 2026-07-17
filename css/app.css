@@ -85,9 +85,12 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .layer-rename-input { flex: 1; }
 .layer-thumb { width: 40px; height: 40px; flex: none; border: 1px solid var(--border);
   background: var(--bg); image-rendering: pixelated; }
-.tree-toggle { padding: 0 3px; background: transparent; border: none; font-size: 10px; }
-.group-icon { flex: none; font-size: 12px; }
-.tree-spacer { width: 14px; flex: none; }
+.tree-toggle { padding: 0; background: transparent; border: none; font-size: 10px; width: 18px; text-align: center; flex: none; }
+.group-icon { flex: none; font-size: 12px; width: 18px; text-align: center; }
+.tree-spacer { width: 18px; flex: none; }
+.tree-spacer.leaf-spacer { width: 2px; }
+.layer-row.root-row { font-weight: 600; color: #b9bbc6; }
+.layer-row.root-row:hover { background: var(--bg3); }
 .layer-row.dragging { opacity: 0.5; }
 .layer-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .layer-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }

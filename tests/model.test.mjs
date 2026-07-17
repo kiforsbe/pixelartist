@@ -68,12 +68,16 @@ test('moveNode prevents invalid moves', () => {
   // cannot move g1 into its own descendant
   moveNode(s, g1.id, g1.id, 0);
   assert.ok(s.layerTree.children.some(c => c.id === g1.id));
-  // cannot move any node into an animation-owned group
+  // only layer nodes may be moved into an animation-owned group
   const a = addAnimation(s, 'walk');
   const ag = findGroup(s.layerTree, a.layerGroupId);
   const freeLayer = addLayer(s, 'free');
   moveNode(s, freeLayer.id, ag.id, 0);
-  assert.equal(ag.children.findIndex(c => c.id === freeLayer.id), -1);
+  assert.ok(ag.children.some(c => c.id === freeLayer.id));
+  // groups cannot be moved into an animation-owned group
+  const g3 = addGroup(s, 'g3');
+  moveNode(s, g3.id, ag.id, 0);
+  assert.equal(ag.children.findIndex(c => c.id === g3.id), -1);
 });
 
 test('frames and animations; removeFrame cleans references', () => {

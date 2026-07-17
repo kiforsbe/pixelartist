@@ -173,9 +173,9 @@ export function moveNode(sheet, nodeId, toParentId, toIndex) {
   }
   if (node.type === GROUP && contains(node, dstParent.id)) return;
 
-  // Prevent moving any node into an animation-owned group so animation
-  // layer scopes stay isolated.
-  if (dstParent.animationId) return;
+  // Only layer nodes may be moved into animation-owned groups; keep
+  // animation layer scopes isolated from arbitrary group nesting.
+  if (dstParent.animationId && node.type !== LAYER) return;
 
   // Adjust target index when reordering within the same parent.
   let adjustedToIndex = toIndex;
