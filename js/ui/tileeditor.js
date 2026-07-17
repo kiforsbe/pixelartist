@@ -40,7 +40,7 @@
 import { state, on, emit, activeSheet, markDirty } from '../app/state.js';
 import { CanvasView } from './canvasview.js';
 import { bindDrawing } from './tools.js';
-import { flattenSheet, tileRect, tileCount } from '../core/model.js';
+import { flattenSheet } from '../core/model.js';
 import { getPreset, setSlot, resolveNeighborGrid } from '../core/neighbors.js';
 
 function isTypingTarget(el) {
@@ -101,27 +101,25 @@ export function mountTileEditor(hostEl) {
 
   let radius = 1; // 1 = 3x3, 2 = 5x5
 
-  function currentTileIndex() {
+  function currentTile() {
     const sheet = activeSheet();
-    if (!sheet || !sheet.tile) return null;
-    const t = state.editingTileIndex;
-    if (t == null || t < 0 || t >= tileCount(sheet)) return null;
-    return t;
+    if (!sheet) return null;
+    const id = state.editingTileId;
+    if (!id) return null;
+    return sheet.tiles.find(t => t.id === id) ?? null;
   }
 
   // Sheet-global rect of the tile currently being edited, or null.
   function centerRect() {
-    const sheet = activeSheet();
-    const t = currentTileIndex();
-    if (!sheet || t == null) return null;
-    return tileRect(sheet, t);
+    const t = currentTile();
+    return t ? { x: t.x, y: t.y, w: t.w, h: t.h } : null;
   }
 
   function offset() {
-    const sheet = activeSheet();
+    const t = currentTile();
     const r = centerRect();
-    if (!sheet || !r) return { x: 0, y: 0 };
-    return { x: r.x - radius * sheet.tile.tileWidth, y: r.y - radius * sheet.tile.tileHeight };
+    if (!t || !r) return { x: 0, y: 0 };
+    return { x: r.x - radius * t.w, y: r.y - radius * t.h };
   }
 
   // See module comment: overlays (marquee selection) are stored in
@@ -177,40 +175,43 @@ export function mountTileEditor(hostEl) {
     return flatCanvas;
   }
 
-  // Draws tileIndex's current flattened pixels into the neighbor-grid cell
-  // at (dx, dy) (tile units relative to center, 0,0 = center), applying
-  // flips around that cell's own bounds.
-  function drawTileCell(ctx, flatCanvasEl, sheet, tileIndex, dx, dy, flipH, flipV, tw, th) {
-    const src = tileRect(sheet, tileIndex);
+  // Draws `tile`'s current flattened pixels into the neighbor-grid cell at
+  // (dx, dy) (tile units relative to center, 0,0 = center), applying flips
+  // around that cell's own bounds. tw/th are the CENTER tile's own size —
+  // a differently-sized neighbor's source rect is stretched into it (an
+  // accepted, minor visual quirk for mixed-size neighbors; Phase B's terrain
+  // sets are the real fix, since a terrain set requires uniform tile size).
+  function drawTileCell(ctx, flatCanvasEl, tile, dx, dy, flipH, flipV, tw, th) {
     const destX = (dx + radius) * tw;
     const destY = (dy + radius) * th;
     ctx.save();
     ctx.translate(destX + (flipH ? tw : 0), destY + (flipV ? th : 0));
     ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-    ctx.drawImage(flatCanvasEl, src.x, src.y, src.w, src.h, 0, 0, tw, th);
+    ctx.drawImage(flatCanvasEl, tile.x, tile.y, tile.w, tile.h, 0, 0, tw, th);
     ctx.restore();
   }
 
   view.onPaint = (ctx) => {
     const sheet = activeSheet();
-    const t = currentTileIndex();
-    if (!sheet || t == null) return;
-    const tw = sheet.tile.tileWidth, th = sheet.tile.tileHeight;
+    const t = currentTile();
+    if (!sheet || !t) return;
+    const tw = t.w, th = t.h;
     const flat = getFlatCanvas(sheet);
-    const count = tileCount(sheet);
-    const preset = getPreset(sheet, t);
-    const cells = resolveNeighborGrid(preset, t, radius);
+    const preset = getPreset(t);
+    const cells = resolveNeighborGrid(preset, t.id, radius);
 
     ctx.save();
     ctx.globalAlpha = 0.85;
     for (const cell of cells) {
-      if (cell.tileIndex == null || cell.tileIndex < 0 || cell.tileIndex >= count) continue;
-      drawTileCell(ctx, flat, sheet, cell.tileIndex, cell.dx, cell.dy, cell.flipH, cell.flipV, tw, th);
+      if (cell.tileId == null) continue;
+      const nb = sheet.tiles.find(x => x.id === cell.tileId);
+      if (!nb) continue;
+      drawTileCell(ctx, flat, nb, cell.dx, cell.dy, cell.flipH, cell.flipV, tw, th);
     }
     ctx.restore();
 
     // center tile, full alpha, never flipped
-    drawTileCell(ctx, flat, sheet, t, 0, 0, false, false, tw, th);
+    drawTileCell(ctx, flat, t, 0, 0, false, false, tw, th);
   };
 
   view.onOverlay = (ctx) => {
@@ -234,14 +235,14 @@ export function mountTileEditor(hostEl) {
     <div class="row"><label><input type="radio" name="te-mode" value="same"> Same tile (mirrors center)</label></div>
     <div class="row"><label><input type="radio" name="te-mode" value="tile"> Other tile</label></div>
     <div class="row"><label><input type="radio" name="te-mode" value="empty"> Empty</label></div>
-    <div class="row"><label>Tile index <input type="number" id="te-tileindex" min="0" value="0"></label></div>
+    <div class="row"><label>Tile <select id="te-tile-select"></select></label></div>
     <div class="row"><label><input type="checkbox" id="te-fliph"> Flip H</label></div>
     <div class="row"><label><input type="checkbox" id="te-flipv"> Flip V</label></div>
     <div class="row"><button type="button" id="te-ok">OK</button><button type="button" id="te-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const teDirSpan = dlg.querySelector('#te-slot-dir');
-  const teTileIndex = dlg.querySelector('#te-tileindex');
+  const teTileSelect = dlg.querySelector('#te-tile-select');
   const teFlipH = dlg.querySelector('#te-fliph');
   const teFlipV = dlg.querySelector('#te-flipv');
   const teOk = dlg.querySelector('#te-ok');
@@ -250,7 +251,7 @@ export function mountTileEditor(hostEl) {
 
   function setMode(mode) {
     for (const r of teModeRadios) r.checked = r.value === mode;
-    teTileIndex.disabled = mode !== 'tile';
+    teTileSelect.disabled = mode !== 'tile';
   }
   for (const r of teModeRadios) r.addEventListener('change', () => setMode(r.value));
 
@@ -258,50 +259,43 @@ export function mountTileEditor(hostEl) {
 
   function openSlotDialog(dir) {
     const sheet = activeSheet();
-    const t = currentTileIndex();
-    if (!sheet || t == null) return;
+    const t = currentTile();
+    if (!sheet || !t) return;
     dialogDir = dir;
-    const slot = getPreset(sheet, t)[dir];
+    const slot = getPreset(t)[dir];
     teDirSpan.textContent = `${DIR_LABELS[dir]} (${dir})`;
     setMode(slot.mode);
-    teTileIndex.value = String(slot.mode === 'tile' && slot.tileIndex != null ? slot.tileIndex : t);
-    teTileIndex.max = String(Math.max(0, tileCount(sheet) - 1));
+    teTileSelect.innerHTML = '';
+    sheet.tiles.forEach((other, i) => {
+      const opt = document.createElement('option');
+      opt.value = other.id;
+      opt.textContent = other.name ? `${i}: ${other.name}` : `#${i}`;
+      teTileSelect.appendChild(opt);
+    });
+    teTileSelect.value = (slot.mode === 'tile' && slot.tileId != null) ? slot.tileId : t.id;
     teFlipH.checked = slot.flipH;
     teFlipV.checked = slot.flipV;
     dlg.showModal();
   }
 
-  function commitSlot(sheet, tileIndex, dir, slot) {
-    const wasStored = !!sheet.tile.neighbors[tileIndex];
-    const prevSnapshot = wasStored ? structuredClone(sheet.tile.neighbors[tileIndex]) : null;
-    const newSlot = { ...slot };
+  function commitSlot(tile, dir, slot) {
+    const before = tile.neighbors ? structuredClone(tile.neighbors) : null;
     state.commands.push({
       label: 'edit tile neighbor slot',
-      do() { setSlot(sheet, tileIndex, dir, newSlot); },
-      undo() {
-        if (prevSnapshot) sheet.tile.neighbors[tileIndex] = structuredClone(prevSnapshot);
-        else delete sheet.tile.neighbors[tileIndex];
-      },
+      do() { setSlot(tile, dir, slot); },
+      undo() { tile.neighbors = before ? structuredClone(before) : undefined; },
     });
     markDirty();
   }
 
   teCancel.addEventListener('click', () => dlg.close());
   teOk.addEventListener('click', () => {
-    const sheet = activeSheet();
-    const t = currentTileIndex();
-    if (!sheet || t == null || !dialogDir) { dlg.close(); return; }
+    const t = currentTile();
+    if (!t || !dialogDir) { dlg.close(); return; }
     const mode = teModeRadios.find(r => r.checked)?.value ?? 'same';
-    let tileIndex = null;
-    if (mode === 'tile') {
-      const count = tileCount(sheet);
-      let v = parseInt(teTileIndex.value, 10);
-      if (!Number.isFinite(v)) v = 0;
-      v = Math.max(0, Math.min(count - 1, v));
-      tileIndex = v;
-    }
-    const slot = { mode, tileIndex, flipH: teFlipH.checked, flipV: teFlipV.checked };
-    commitSlot(sheet, t, dialogDir, slot);
+    const tileId = mode === 'tile' ? teTileSelect.value : null;
+    const slot = { mode, tileId, flipH: teFlipH.checked, flipV: teFlipV.checked };
+    commitSlot(t, dialogDir, slot);
     dlg.close();
   });
 
@@ -310,21 +304,19 @@ export function mountTileEditor(hostEl) {
   // Editor-local cell lookup: returns {dx, dy} (tile units, 0,0 excluded —
   // that's the center) or null when (x, y) is outside the content grid.
   function cellAt(x, y) {
-    const sheet = activeSheet();
-    if (!sheet) return null;
-    const tw = sheet.tile.tileWidth, th = sheet.tile.tileHeight;
+    const t = currentTile();
+    if (!t) return null;
     if (x < 0 || y < 0 || x >= view.width || y >= view.height) return null;
-    const dx = Math.floor(x / tw) - radius;
-    const dy = Math.floor(y / th) - radius;
+    const dx = Math.floor(x / t.w) - radius;
+    const dy = Math.floor(y / t.h) - radius;
     if (dx === 0 && dy === 0) return null;
     return { dx, dy };
   }
 
   function insideCenter(x, y) {
-    const sheet = activeSheet();
-    if (!sheet) return false;
-    const tw = sheet.tile.tileWidth, th = sheet.tile.tileHeight;
-    return x >= radius * tw && x < radius * tw + tw && y >= radius * th && y < radius * th + th;
+    const t = currentTile();
+    if (!t) return false;
+    return x >= radius * t.w && x < radius * t.w + t.w && y >= radius * t.h && y < radius * t.h + t.h;
   }
 
   const toolPointer = view.onPointer;
@@ -362,10 +354,10 @@ export function mountTileEditor(hostEl) {
 
   function updateStrip() {
     const sheet = activeSheet();
-    const t = currentTileIndex();
-    if (!sheet || t == null) { nameLabel.textContent = ''; return; }
-    const name = sheet.tile.names[t];
-    nameLabel.textContent = name ? `Tile ${t} (${name})` : `Tile ${t}`;
+    const t = currentTile();
+    if (!sheet || !t) { nameLabel.textContent = ''; return; }
+    const idx = sheet.tiles.indexOf(t);
+    nameLabel.textContent = t.name ? `Tile ${idx} (${t.name})` : `Tile ${idx}`;
     radiusSelect.value = String(radius);
   }
 
@@ -391,16 +383,16 @@ export function mountTileEditor(hostEl) {
 
   // ---- content sizing / recentering ----
 
-  let loadedTileIndex = null;
+  let loadedTileId = null;
   let loadedRadius = null;
 
   function loadContent() {
     const sheet = activeSheet();
-    if (!sheet || !sheet.tile) return;
-    const tw = sheet.tile.tileWidth, th = sheet.tile.tileHeight;
-    view.setContent({ width: (2 * radius + 1) * tw, height: (2 * radius + 1) * th });
+    const t = currentTile();
+    if (!sheet || !t) return;
+    view.setContent({ width: (2 * radius + 1) * t.w, height: (2 * radius + 1) * t.h });
     view.centerFit();
-    loadedTileIndex = currentTileIndex();
+    loadedTileId = t.id;
     loadedRadius = radius;
   }
 
@@ -410,13 +402,13 @@ export function mountTileEditor(hostEl) {
   let lastCssW = 0, lastCssH = 0;
 
   function refresh() {
-    const t = currentTileIndex();
-    if (t == null) {
+    const t = currentTile();
+    if (!t) {
       hide();
-      if (state.view === 'tile') { state.view = 'sheet'; state.editingTileIndex = null; emit('view'); }
+      if (state.view === 'tile') { state.view = 'sheet'; state.editingTileId = null; emit('view'); }
       return;
     }
-    if (loadedTileIndex !== t || loadedRadius !== radius) loadContent();
+    if (loadedTileId !== t.id || loadedRadius !== radius) loadContent();
     updateStrip();
     view.requestRender();
   }
@@ -427,7 +419,7 @@ export function mountTileEditor(hostEl) {
     visible = true;
     if (wasHidden) {
       view._resize();
-      if (loadedTileIndex != null && (view.cssWidth !== lastCssW || view.cssHeight !== lastCssH)) {
+      if (loadedTileId != null && (view.cssWidth !== lastCssW || view.cssHeight !== lastCssH)) {
         view.centerFit();
       }
     }
