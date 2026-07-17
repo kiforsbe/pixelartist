@@ -370,7 +370,7 @@ function handleMove(ev, view) {
     const target = snapPoint(drag.frame.x + (ev.x - drag.anchor.x), drag.frame.y + (ev.y - drag.anchor.y));
     drag.delta = { dx: target.x - drag.frame.x, dy: target.y - drag.frame.y };
     const sheet = activeSheet();
-    drag.snap = (drag.anim && sheet) ? findSnap(view, sheet, drag) : null;
+    drag.snap = (drag.anim && sheet && (drag.delta.dx !== 0 || drag.delta.dy !== 0)) ? findSnap(view, sheet, drag) : null;
   } else if (drag.kind === 'resize') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, false));
   }
