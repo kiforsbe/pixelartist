@@ -4,7 +4,6 @@
 // active during onOverlay), never baked into sheet bitmaps or exports.
 
 import { state, activeSheet } from '../app/state.js';
-import { tileCount, tileRect } from '../core/model.js';
 
 const FRAME_STROKE = '#4f8cff';
 const FRAME_FILL = 'rgba(79,140,255,.15)';
@@ -79,36 +78,32 @@ function drawSpriteOverlays(view, ctx, sheet) {
 }
 
 function drawTileOverlays(view, ctx, sheet) {
-  if (!sheet.tile) return;
-  const count = tileCount(sheet);
+  if (!sheet.tiles) return;
+  const tiles = sheet.tiles;
 
-  if (state.overlays.labels && count > 0) {
+  if (state.overlays.labels && tiles.length > 0) {
     ctx.save();
     ctx.strokeStyle = FRAME_STROKE;
     ctx.lineWidth = 1;
-    for (let i = 0; i < count; i++) {
-      const r = tileRect(sheet, i);
-      const p0 = view.imageToScreen(r.x, r.y);
-      const p1 = view.imageToScreen(r.x + r.w, r.y + r.h);
+    for (const t of tiles) {
+      const p0 = view.imageToScreen(t.x, t.y);
+      const p1 = view.imageToScreen(t.x + t.w, t.y + t.h);
       ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, p1.x - p0.x - 1, p1.y - p0.y - 1);
     }
     ctx.restore();
 
-    for (let i = 0; i < count; i++) {
-      const r = tileRect(sheet, i);
-      const p0 = view.imageToScreen(r.x, r.y);
-      const name = sheet.tile.names[i];
-      drawChip(ctx, view, name ? `${i}:${name}` : `${i}`, p0.x, p0.y);
-    }
+    tiles.forEach((t, i) => {
+      const p0 = view.imageToScreen(t.x, t.y);
+      drawChip(ctx, view, t.name ? `${i}:${t.name}` : `${i}`, p0.x, p0.y);
+    });
   }
 
   // Selected-tile highlight (tile tool) — independent of the labels toggle,
   // like sprite mode's selected-frame fill/stroke.
-  const sel = state.selectedTileIndex;
-  if (sel != null && sel >= 0 && sel < count) {
-    const r = tileRect(sheet, sel);
-    const p0 = view.imageToScreen(r.x, r.y);
-    const p1 = view.imageToScreen(r.x + r.w, r.y + r.h);
+  const sel = tiles.find(t => t.id === state.selectedTileId);
+  if (sel) {
+    const p0 = view.imageToScreen(sel.x, sel.y);
+    const p1 = view.imageToScreen(sel.x + sel.w, sel.y + sel.h);
     ctx.save();
     ctx.strokeStyle = FRAME_STROKE;
     ctx.lineWidth = 2;

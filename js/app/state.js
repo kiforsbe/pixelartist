@@ -18,9 +18,9 @@ export const state = {
   brushSize: 1,
   primary: [0, 0, 0, 255], secondary: [255, 255, 255, 255],
   selectedFrameId: null, selectedAnimationId: null,
-  selectedTileIndex: null,    // tile tool selection (tile mode)
+  selectedTileId: null,       // tile tool selection (tile mode)
   editingFrameId: null,       // frame editor target
-  editingTileIndex: null,     // tile editor target
+  editingTileId: null,        // tile editor target
   onion: { enabled: false, back: 1, ahead: 1 },
   overlays: { labels: true, sequences: true },
   commands: new CommandStack(),
@@ -69,6 +69,6 @@ export function setProject(project) {
 export function newDefaultProject(settings = DEFAULT_SETTINGS) {
   const project = createProject('untitled', settings);
   createSheet(project, { name: 'Sprites', width: settings.spriteSheetW, height: settings.spriteSheetH, kind: 'sprite' });
-  createSheet(project, { name: 'Tiles', width: settings.tileSheetW, height: settings.tileSheetH, kind: 'tile', tileW: settings.tileW, tileH: settings.tileH });
+  createSheet(project, { name: 'Tiles', width: settings.tileSheetW, height: settings.tileSheetH, kind: 'tile' });
   return project;
 }
