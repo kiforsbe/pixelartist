@@ -45,6 +45,19 @@ test('drawRect outline vs filled', () => {
   assert.deepEqual(getPixel(b, 2, 2), BLUE);
 });
 
+test('drawRect/drawEllipse fill color array gives two-color shape', () => {
+  const b = createBitmap(8, 8);
+  drawRect(b, 1, 1, 5, 5, RED, BLUE);
+  assert.deepEqual(getPixel(b, 1, 1), RED);   // outline
+  assert.deepEqual(getPixel(b, 5, 3), RED);   // outline
+  assert.deepEqual(getPixel(b, 3, 3), BLUE);  // interior
+  const e = createBitmap(12, 12);
+  drawEllipse(e, 1, 1, 10, 10, RED, BLUE);
+  assert.deepEqual(getPixel(e, 5, 1), RED);   // top of outline ring
+  assert.deepEqual(getPixel(e, 5, 5), BLUE);  // interior
+  assert.deepEqual(getPixel(e, 0, 0), CLEAR); // outside bbox untouched
+});
+
 test('drawEllipse filled covers center, stays in bbox', () => {
   const b = createBitmap(10, 10);
   drawEllipse(b, 1, 1, 8, 8, RED, true);

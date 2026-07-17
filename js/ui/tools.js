@@ -265,9 +265,12 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       }
   }
 
-  function currentColor(ev) {
+  // swap=true returns the OTHER swatch for the pressed button (used as the
+  // interior color of filled rect/ellipse shapes)
+  function currentColor(ev, swap = false) {
     if (state.tool === 'eraser') return [0, 0, 0, 0];
-    let c = (ev.buttons & 2) ? state.secondary : state.primary;
+    const useSecondary = !!(ev.buttons & 2) !== swap;
+    let c = useSecondary ? state.secondary : state.primary;
     const pal = activePalette();
     if (pal && pal.indexed && pal.colors.length) c = nearestColor(pal, c);
     return c;
@@ -349,7 +352,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (SHAPE_TOOLS.has(tool)) {
       const p = clampPoint(ev.x, ev.y);
       if (!p) return;
-      stroke = { tool, layer, before, color, dirty: null, anchor: p };
+      // filled shapes: outline in the pressed button's color, interior in the
+      // opposite swatch (left = primary outline / secondary fill, right = swapped)
+      const fill = (tool !== 'line' && toolOptions.filled) ? currentColor(ev, true) : null;
+      stroke = { tool, layer, before, color, fill, dirty: null, anchor: p };
       emit('pixels');
       return;
     }
@@ -384,10 +390,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         maskOutsideTarget(layer.bitmap, before, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
       } else if (tool === 'rect') {
-        drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, toolOptions.filled);
+        drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
       } else if (tool === 'ellipse') {
-        drawEllipse(layer.bitmap, a.x, a.y, p.x, p.y, color, toolOptions.filled);
+        drawEllipse(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
       }
       emit('pixels');

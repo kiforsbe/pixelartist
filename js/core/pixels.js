@@ -41,16 +41,21 @@ export function drawLine(bmp, x0, y0, x1, y1, rgba, size = 1) {
   }
 }
 
+// `filled` may be `true` (interior = rgba) or an rgba array (two-color shape:
+// rgba outline, `filled` interior); falsy draws the outline only.
 export function drawRect(bmp, x0, y0, x1, y1, rgba, filled) {
+  const fill = filled === true ? rgba : filled;
   const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
   const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
   for (let y = ya; y <= yb; y++)
-    for (let x = xa; x <= xb; x++)
-      if (filled || x === xa || x === xb || y === ya || y === yb)
-        setPixel(bmp, x, y, rgba);
+    for (let x = xa; x <= xb; x++) {
+      if (x === xa || x === xb || y === ya || y === yb) setPixel(bmp, x, y, rgba);
+      else if (fill) setPixel(bmp, x, y, fill);
+    }
 }
 
 export function drawEllipse(bmp, x0, y0, x1, y1, rgba, filled) {
+  const fill = filled === true ? rgba : filled;
   const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
   const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
   const rx = (xb - xa) / 2, ry = (yb - ya) / 2;
@@ -63,10 +68,10 @@ export function drawEllipse(bmp, x0, y0, x1, y1, rgba, filled) {
       const ny = (y + 0.5 - (cy + 0.5)) / (ry + 0.5);
       const inside = nx * nx + ny * ny <= 1;
       if (!inside) continue;
-      if (filled) { setPixel(bmp, x, y, rgba); continue; }
       const ix = (x + 0.5 - (cx + 0.5)) / Math.max(rx - 0.5, 0.5);
       const iy = (y + 0.5 - (cy + 0.5)) / Math.max(ry - 0.5, 0.5);
       if (ix * ix + iy * iy > 1) setPixel(bmp, x, y, rgba);
+      else if (fill) setPixel(bmp, x, y, fill);
     }
   }
 }
