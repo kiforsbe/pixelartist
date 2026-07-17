@@ -42,7 +42,14 @@ identity moves from array index to `id`, matching frames
   verifies drag/resize/swap interactions manually. Automated coverage is
   unit tests (`tests/*.mjs`) for pure logic; UI tasks get a manual
   verification checklist instead of a Playwright script.
-- Run `npm test` after every task; it must stay green throughout.
+- Run `npm test` after every task; it must stay green throughout — **with one
+  known, accepted exception**: `js/app/exports.js` imports `tileCount` from
+  `js/core/model.js`, which Task 1 removes. `tests/exports.test.mjs` will
+  fail from the end of Task 1 until Task 4 (which rewrites `exports.js`)
+  lands — this is an accepted cross-task gap, not a Task 1 defect. Every
+  other task's own new/changed tests must pass in isolation
+  (`node --test tests/<touched-file>.test.mjs`), and the FULL suite must be
+  green again by the end of Task 4 and stay green for every task after that.
 
 ---
 
@@ -156,7 +163,11 @@ test('deserializeProject migrates legacy sheet.tile shape into one grid + tiles'
   const t1 = s2.tiles.find(t => t.gridCol === 1 && t.gridRow === 0);
   assert.equal(t0.name, undefined);
   assert.equal(t1.name, 'grass');
-  assert.deepEqual(t1.neighbors.e, { mode: 'tile', tileIndex: 0, flipH: true, flipV: false });
+  // Legacy neighbor slot referenced tileIndex: 0 (old row-major array
+  // index) — migration must resolve that to t0's new id, not carry the
+  // stale index over, since Task 3 re-keys neighbor cross-references onto
+  // tileId everywhere else in the app.
+  assert.deepEqual(t1.neighbors.e, { mode: 'tile', tileId: t0.id, flipH: true, flipV: false });
 });
 ```
 
@@ -227,9 +238,27 @@ function migrateLegacyTile(sheetJson) {
       tiles.push({
         id: newId('ti'), x: col * t.tileWidth, y: row * t.tileHeight, w: t.tileWidth, h: t.tileHeight,
         name: t.names?.[index], gridId: grid.id, gridCol: col, gridRow: row,
-        neighbors: t.neighbors?.[index] ? { ...t.neighbors[index] } : undefined,
+        neighbors: undefined, // resolved below, once every tile in this grid has an id
       });
     }
+  }
+  // Legacy neighbor slots reference the OTHER tile by its old row-major
+  // array index (tileIndex) — js/core/neighbors.js's Phase A shape keys
+  // that reference on tileId instead (Task 3), so resolve old-index ->
+  // new-tile-id here rather than carrying the stale index over verbatim.
+  for (let i = 0; i < tiles.length; i++) {
+    const legacy = t.neighbors?.[i];
+    if (!legacy) continue;
+    const neighbors = {};
+    for (const dir of Object.keys(legacy)) {
+      const slot = legacy[dir];
+      neighbors[dir] = {
+        mode: slot.mode,
+        tileId: (slot.mode === 'tile' && slot.tileIndex != null) ? (tiles[slot.tileIndex]?.id ?? null) : null,
+        flipH: slot.flipH, flipV: slot.flipV,
+      };
+    }
+    tiles[i].neighbors = neighbors;
   }
   return { tileGrids: [grid], tiles };
 }
@@ -248,8 +277,14 @@ with:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npm test`
+Run: `node --test tests/model.test.mjs`
 Expected: PASS, all tests green.
+
+Then run: `npm test`
+Expected: exactly one failing file, `tests/exports.test.mjs` — this is the
+known, accepted gap from the Global Constraints section
+(`js/app/exports.js` still imports the now-removed `tileCount`; Task 4
+fixes it). Every other test file must still be green.
 
 - [ ] **Step 5: Commit**
 
