@@ -130,29 +130,59 @@ is a pass condition for the whole run, not just the final step.
 
 ## 8. Tile mode
 
-34. [A] Switch to Tile Sheets tab. Tile panel shows tile W/H and tile
-    count; editing W/H recomputes the count.
-35. [A] Tile tool (`T`, tile mode only): click a tile to select it (tile
-    panel shows `#index` + name field).
-36. [A] Drag one tile onto another (no Shift) to swap them — pixels,
-    names, and neighbor presets swap on all layers; undo restores both
-    tiles.
-37. [A] Shift-drag one tile onto another to move it — source tile clears
-    to transparent; undo restores both tiles.
+34. [A] Switch to Tile Sheets tab on a fresh tile sheet: tile panel shows
+    "0 tiles", no grids listed, an "Add Grid…" button, and "No tile
+    selected".
+35. [M] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
+    X/Y, defaulted from the project's tile size setting) with a live
+    dashed-outline preview on the canvas that updates as fields change and
+    disappears on Cancel. Create adds a grid; the panel now lists it with
+    editable Cols/Rows/W/H fields and the tile count updates.
+36. [A] Tile tool (`T`, tile mode only): click a tile in the grid to select
+    it — the panel shows a name field, "Edit tile", and "Detach from grid"
+    (no W/H fields, since a grid-owned tile's size follows its grid).
+37. [M] Drag one tile onto another SAME-SIZE tile (no Shift) to swap them —
+    pixels, names, and neighbor presets swap on all layers; undo restores
+    both. Shift-drag instead moves (source clears to transparent, its
+    name/neighbors move to the target); undo restores both tiles.
+38. [M] Drag a grid-owned tile onto empty space (nothing same-size under
+    the cursor): it snaps back — a single grid cell can't move
+    independently. Dragging the grid's own origin-corner handle instead
+    moves the whole grid and every one of its tiles together; undo
+    restores the prior position.
+39. [M] Click empty canvas space and drag with the tile tool active: creates
+    a new standalone tile there (frame-style create-drag); the panel shows
+    W/H fields for it (no "Detach" button, since it isn't grid-owned).
+    Dragging a standalone tile to empty space (or a different-size tile)
+    repositions it; undo restores its prior position.
+40. [A] Select a grid-owned tile, click "Detach from grid" — it becomes a
+    standalone tile (W/H fields appear, resize handles become available);
+    undo restores its grid membership.
+41. [A] Editing a grid's Cols/Rows in the panel adds/removes tiles at the
+    trailing edge (pixels stay on the sheet; only the tile record and any
+    name/neighbor preset it held are removed on shrink); editing Cell W/H
+    re-lays-out every owned tile from the grid's origin, preserving each
+    cell's name/neighbor preset. Each edit is one undo step.
+42. [A] "Delete grid" removes the grid and every tile it owns; undo restores
+    all of them. Select a standalone tile and press `Delete`: it's removed;
+    undo restores it. Grid-owned tiles have no direct delete (shrink the
+    grid, or detach first).
 
 ## 9. Tile editor
 
-38. [A] Double-click a tile (or "Edit tile") to open the tile editor;
+43. [A] Double-click a tile (or "Edit tile") to open the tile editor;
     center tile is outlined, neighbor cells render the live composite.
-39. [A] Draw inside the center tile: neighbor cells that mirror it (mode
+44. [A] Draw inside the center tile: neighbor cells that mirror it (mode
     `same`) update live as you draw (drag confinement: strokes cannot
     escape the center tile even if the drag leaves it).
-40. [A] Click a neighbor slot (outside the center tile, no drag) to open
-    the slot config dialog; try each mode (`same tile` / `other tile` +
-    index / `empty`), and Flip H/V; OK commits, undo restores the prior
-    preset for that slot.
-41. [A] Switch the neighbor radius to 5×5 and back to 3×3; grid resizes
-    and recenters.
+45. [A] Click a neighbor slot (outside the center tile, no drag) to open
+    the slot config dialog; the "Other tile" field is now a dropdown
+    listing every tile on the sheet (by name, or `#index` if unnamed) —
+    try each mode (`same tile` / `other tile` + selection / `empty`), and
+    Flip H/V; OK commits, undo restores the prior preset for that slot.
+46. [A] Switch the neighbor radius to 5×5 and back to 3×3; grid resizes
+    and recenters, sized from the edited tile's own W/H (not a sheet-wide
+    size).
 
 ## 10. Exports
 
@@ -162,8 +192,10 @@ is a pass condition for the whole run, not just the final step.
     `<sheet>.frames.json`; shape matches README's Export shapes section
     (`sheet`, `width`, `height`, `frames[]`, `animations[]`).
 44. [A] "Tiles JSON" (enabled only for tile sheets) downloads
-    `<sheet>.tiles.json`; shape matches README (`tiles[]` includes only
-    named/preset tiles, with full 8-direction `neighbors`).
+    `<sheet>.tiles.json`; shape is `{ sheet, count, tiles[] }` — `tiles[]`
+    includes only named/preset tiles, each with `index, name, x, y, w, h`
+    and the full 8-direction `neighbors` (each slot's `tileIndex` resolved
+    from the internal tile id to that tile's position in the array).
 
 ## 11. Shortcuts (Task 20)
 
