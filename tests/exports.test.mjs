@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createProject, createSheet, addFrame, addAnimation } from '../js/core/model.js';
+import { createTileGrid } from '../js/core/tilegrids.js';
 import { setSlot } from '../js/core/neighbors.js';
 import { buildFramesJson, buildTilesJson } from '../js/app/exports.js';
 
@@ -41,25 +42,22 @@ test('buildFramesJson: no frames/animations yields empty arrays', () => {
   assert.deepEqual(json.animations, []);
 });
 
-test('buildTilesJson: only named/preset tiles listed, full 8-dir neighbors', () => {
+test('buildTilesJson: only named/preset tiles listed, full 8-dir neighbors, resolved tileIndex', () => {
   const project = createProject('demo');
   const sheet = createSheet(project, { name: 'Ground', width: 32, height: 16, kind: 'tile' });
-  sheet.tile.tileWidth = 16;
-  sheet.tile.tileHeight = 16;
-  // 2 columns x 1 row = 2 tiles, indices 0 and 1.
-  sheet.tile.names[0] = 'grass';
-  setSlot(sheet, 1, 'e', { mode: 'tile', tileIndex: 0, flipH: true, flipV: false });
+  const { tiles } = createTileGrid(sheet, { x: 0, y: 0, cellW: 16, cellH: 16, cols: 2, rows: 1 });
+  const [t0, t1] = tiles;
+  t0.name = 'grass';
+  setSlot(t1, 'e', { mode: 'tile', tileId: t0.id, flipH: true, flipV: false });
 
   const json = buildTilesJson(sheet);
   assert.equal(json.sheet, 'Ground.png');
-  assert.equal(json.tileWidth, 16);
-  assert.equal(json.tileHeight, 16);
-  assert.equal(json.columns, 2);
   assert.equal(json.count, 2);
   assert.equal(json.tiles.length, 2); // both named-or-preset; none unlisted
 
   const named = json.tiles.find(t => t.index === 0);
   assert.equal(named.name, 'grass');
+  assert.deepEqual({ x: named.x, y: named.y, w: named.w, h: named.h }, { x: 0, y: 0, w: 16, h: 16 });
   assert.deepEqual(Object.keys(named.neighbors).sort(), ['e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w']);
   for (const dir of Object.keys(named.neighbors))
     assert.deepEqual(named.neighbors[dir], { mode: 'same', tileIndex: null, flipH: false, flipV: false });
@@ -73,8 +71,7 @@ test('buildTilesJson: only named/preset tiles listed, full 8-dir neighbors', () 
 test('buildTilesJson: unnamed, unset tiles are excluded entirely', () => {
   const project = createProject('demo');
   const sheet = createSheet(project, { name: 'Blank', width: 32, height: 16, kind: 'tile' });
-  sheet.tile.tileWidth = 16;
-  sheet.tile.tileHeight = 16;
+  createTileGrid(sheet, { x: 0, y: 0, cellW: 16, cellH: 16, cols: 2, rows: 1 });
   const json = buildTilesJson(sheet);
   assert.equal(json.count, 2);
   assert.deepEqual(json.tiles, []);

@@ -1,7 +1,6 @@
 // Pure builders for the "Frames JSON" / "Tiles JSON" export shapes (see
 // task-19 brief). Kept free of DOM/io concerns so they're node-testable;
 // main.js wraps the result in a Blob and hands it to io.downloadBlob.
-import { tileCount } from '../core/model.js';
 import { getPreset, NEIGHBOR_DIRS } from '../core/neighbors.js';
 
 // { sheet, width, height,
@@ -28,30 +27,29 @@ export function buildFramesJson(sheet) {
   };
 }
 
-// { sheet, tileWidth, tileHeight, columns, count,
-//   tiles: [{ index, name: <or null>, neighbors: { n: {mode,tileIndex,flipH,flipV}, ... } }] }
+// { sheet, count, tiles: [{ index, name: <or null>, x, y, w, h,
+//   neighbors: { n: {mode,tileIndex,flipH,flipV}, ... } }] }
 // Only tiles with a stored name or a stored neighbor preset are listed;
 // neighbors are always exported as the full 8-dir preset (getPreset fills
-// unset directions with the 'same' default).
+// unset directions with the 'same' default). A neighbor slot's internal
+// tileId is resolved to that tile's position in sheet.tiles for export
+// (mirrors buildFramesJson resolving animation frameId -> frame name).
 export function buildTilesJson(sheet) {
-  const count = tileCount(sheet);
-  const columns = Math.floor(sheet.width / sheet.tile.tileWidth);
+  const indexById = new Map(sheet.tiles.map((t, i) => [t.id, i]));
   const tiles = [];
-  for (let index = 0; index < count; index++) {
-    const name = sheet.tile.names[index] ?? null;
-    const hasPreset = !!sheet.tile.neighbors[index];
-    if (!name && !hasPreset) continue;
-    const preset = getPreset(sheet, index);
+  sheet.tiles.forEach((tile, index) => {
+    if (!tile.name && !tile.neighbors) return;
+    const preset = getPreset(tile);
     const neighbors = {};
-    for (const d of NEIGHBOR_DIRS) neighbors[d] = { ...preset[d] };
-    tiles.push({ index, name, neighbors });
-  }
-  return {
-    sheet: `${sheet.name}.png`,
-    tileWidth: sheet.tile.tileWidth,
-    tileHeight: sheet.tile.tileHeight,
-    columns,
-    count,
-    tiles,
-  };
+    for (const d of NEIGHBOR_DIRS) {
+      const slot = preset[d];
+      neighbors[d] = {
+        mode: slot.mode,
+        tileIndex: slot.tileId != null ? (indexById.get(slot.tileId) ?? null) : null,
+        flipH: slot.flipH, flipV: slot.flipV,
+      };
+    }
+    tiles.push({ index, name: tile.name ?? null, x: tile.x, y: tile.y, w: tile.w, h: tile.h, neighbors });
+  });
+  return { sheet: `${sheet.name}.png`, count: sheet.tiles.length, tiles };
 }
