@@ -16,7 +16,7 @@ import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '.
 import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup, acceptAnimation } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
-import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
+import { createBitmap, copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
 import { drawRectDims, drawChainDims } from './dimlabels.js';
 
@@ -400,9 +400,14 @@ function commitSplitStrip(anim, index) {
 }
 
 // Resize = add/remove whole frames at the dragged end. Grow appends blank
-// frames (right: rightward; left: leftward, prepended in order). Shrink
-// removes frames + entries from that end; PIXELS STAY on the sheet by design
-// (growing back re-adopts the art). Neighbor's duration is copied.
+// frames (right: rightward; left: leftward, prepended in order) -- always a
+// pure array operation, no pixel effects. Shrink removes frames + entries
+// from that end and, once the strip is accepted (has its own layer -- see
+// acceptAnimation in core/model.js), also clears the removed frame's own
+// pixels from it: each strip now owns its own layer, so there's no shared
+// underlying sheet art left to preserve for a future regrow the way there
+// used to be before strips had layers of their own. A floating strip has no
+// layer yet, so shrink stays pixel-free too. Neighbor's duration is copied.
 function commitResizeSegment(sheet, d) {
   const { anim, run, side, fw, fh, bbox } = d;
   const delta = d.count - d.count0;
@@ -412,6 +417,10 @@ function commitResizeSegment(sheet, d) {
   const beforeSelected = state.selectedFrameId;
   const neighbor = side === 'right' ? anim.frames[run.end - 1] : anim.frames[run.start];
   const duration = neighbor?.duration ?? (state.project?.settings?.durationMs ?? 100);
+
+  const group = anim.layerGroupId ? animationGroup(sheet, anim.id) : null;
+  const layer = group ? group.children[0] : null;
+  const clearPatches = [];
 
   if (delta > 0) {
     for (let j = 0; j < delta; j++) {
@@ -428,12 +437,17 @@ function commitResizeSegment(sheet, d) {
     for (let j = 0; j < -delta; j++) {
       const index = side === 'right' ? run.end - 1 - j : run.start;
       const frameId = anim.frames[index].frameId;
+      const frame = sheet.frames.find(f => f.id === frameId);
+      if (layer && frame) {
+        clearPatches.push({ x: frame.x, y: frame.y, before: copyRegion(layer.bitmap, frame.x, frame.y, fw, fh) });
+      }
       sheet.frames = sheet.frames.filter(f => f.id !== frameId);
       const r = removeEntry(anim.frames, anim.breaks, index);
       anim.frames = r.entries;
       anim.breaks = r.breaks;
       if (state.selectedFrameId === frameId) state.selectedFrameId = null;
     }
+    if (layer) for (const p of clearPatches) blitRegion(layer.bitmap, createBitmap(fw, fh), p.x, p.y);
   }
 
   const afterSheetFrames = sheet.frames.slice();
@@ -448,12 +462,14 @@ function commitResizeSegment(sheet, d) {
       anim.frames = afterEntries.map(e => ({ ...e }));
       anim.breaks = afterBreaks.slice();
       state.selectedFrameId = afterSelected;
+      if (layer) for (const p of clearPatches) blitRegion(layer.bitmap, createBitmap(fw, fh), p.x, p.y);
     },
     undo() {
       sheet.frames = beforeSheetFrames.slice();
       anim.frames = beforeEntries.map(e => ({ ...e }));
       anim.breaks = beforeBreaks.slice();
       state.selectedFrameId = beforeSelected;
+      if (layer) for (const p of clearPatches) blitRegion(layer.bitmap, p.before, p.x, p.y);
     },
   });
   markDirty();
