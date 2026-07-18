@@ -1326,6 +1326,14 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
             dupBadge.textContent = `⧉${duplicateCount}`;
             cell.appendChild(dupBadge);
           }
+          if (classInfo.mandatory === false && isExplicit) {
+            cell.classList.add('removable');
+            title += ' — optional: derivable via flip/rotation, safe to clear';
+            const optBadge = document.createElement('span');
+            optBadge.className = 'badge removable-badge';
+            optBadge.textContent = '✓opt';
+            cell.appendChild(optBadge);
+          }
         }
       }
       cell.title = title;
