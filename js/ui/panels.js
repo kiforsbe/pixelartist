@@ -821,6 +821,14 @@ export function mountLayersPanel(el) {
   list.addEventListener('dragleave', onListDragLeave);
   list.addEventListener('drop', onListDrop);
 
+  // Selecting an animation's group node also selects that animation in the
+  // timeline dock, so the two panels stay in sync.
+  function selectGroupNode(group) {
+    selectedNodeId = group.id;
+    state.activeLayerId = null;
+    if (group.animationId) { state.selectedAnimationId = group.animationId; emit('selection'); }
+  }
+
   function renderGroup(group, depth) {
     const sheet = activeSheet();
     const row = document.createElement('div');
@@ -854,7 +862,7 @@ export function mountLayersPanel(el) {
     nameEl.addEventListener('dragstart', (e) => e.stopPropagation());
     nameEl.addEventListener('click', (e) => {
       e.stopPropagation();
-      scheduleNameSelect(() => { selectedNodeId = group.id; state.activeLayerId = null; });
+      scheduleNameSelect(() => selectGroupNode(group));
     });
     nameEl.addEventListener('dblclick', (e) => {
       e.stopPropagation();
@@ -863,7 +871,7 @@ export function mountLayersPanel(el) {
     });
 
     row.append(toggle, icon, nameEl);
-    row.addEventListener('click', () => { selectedNodeId = group.id; state.activeLayerId = null; renderList(); });
+    row.addEventListener('click', () => { selectGroupNode(group); renderList(); });
     list.appendChild(row);
 
     if (group.open !== false) {
