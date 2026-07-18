@@ -13,7 +13,7 @@
 // so it must run after bindDrawing has installed its own).
 
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
-import { addFrame, removeFrame, addAnimation, renameAnimation } from '../core/model.js';
+import { addFrame, removeFrame, addAnimation, renameAnimation, findGroup } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
@@ -1300,11 +1300,18 @@ function buildSliceDialog() {
 function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
   const beforeFrames = sheet.frames.slice();
   const beforeAnimations = sheet.animations.slice();
+  const beforeActiveLayerId = state.activeLayerId;
 
   const descriptors = buildStripFrames(name, x, y, frameW, frameH, count);
   const frames = descriptors.map(d => addFrame(sheet, d));
   const anim = addAnimation(sheet, name, true);
   anim.frames = frames.map(f => ({ frameId: f.id, duration }));
+  // addAnimation seeds the new strip's group with exactly one layer -- make
+  // it the active layer too, or drawing right after creating the strip
+  // would silently target whatever layer was active before (a DIFFERENT
+  // animation's own private layer, or root), invisible in this strip's own
+  // context until the user happened to reselect the right layer by hand.
+  const animLayerId = findGroup(sheet.layerTree, anim.layerGroupId).children[0].id;
 
   const afterFrames = sheet.frames.slice();
   const afterAnimations = sheet.animations.slice();
@@ -1321,12 +1328,14 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
       anim.frames = afterAnimFrames.map(f => ({ ...f }));
       state.selectedFrameId = firstFrameId;
       state.selectedAnimationId = animId;
+      state.activeLayerId = animLayerId;
     },
     undo() {
       sheet.frames = beforeFrames.slice();
       sheet.animations = beforeAnimations.slice();
       if (createdIds.has(state.selectedFrameId)) state.selectedFrameId = null;
       if (state.selectedAnimationId === animId) state.selectedAnimationId = null;
+      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
     },
   };
   state.commands.push(cmd);
@@ -1353,6 +1362,7 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
   const beforeAnimations = sheet.animations.slice();
   const beforeFrameName = frame.name;
   const beforeSelectedAnimationId = state.selectedAnimationId;
+  const beforeActiveLayerId = state.activeLayerId;
 
   const anim = addAnimation(sheet, name, true);
   frame.name = `${name}_0`;
@@ -1364,6 +1374,11 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
     else entries.unshift({ frameId: nf.id, duration });
   }
   anim.frames = entries;
+  // See commitNewStrip's matching comment: without this, drawing right
+  // after dragging a frame out into a strip would silently target whatever
+  // layer was active before (a different strip's own private layer, or
+  // root) -- invisible in this new strip's own context.
+  const animLayerId = findGroup(sheet.layerTree, anim.layerGroupId).children[0].id;
 
   const afterSheetFrames = sheet.frames.slice();
   const afterAnimations = sheet.animations.slice();
@@ -1381,6 +1396,7 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
       frame.name = afterFrameName;
       state.selectedFrameId = frameId;
       state.selectedAnimationId = animId;
+      state.activeLayerId = animLayerId;
     },
     undo() {
       sheet.frames = beforeSheetFrames.slice();
@@ -1388,6 +1404,7 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
       frame.name = beforeFrameName;
       state.selectedFrameId = frameId;
       state.selectedAnimationId = beforeSelectedAnimationId;
+      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
     },
   });
   markDirty();
