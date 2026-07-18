@@ -1236,25 +1236,22 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
 
   const symRow = document.createElement('div');
   symRow.className = 'row';
-  const flipCb = document.createElement('input'); flipCb.type = 'checkbox'; flipCb.checked = terrainSet.symmetry.flip;
-  flipCb.addEventListener('change', () => commitSetSymmetry(terrainSet, 'flip', flipCb.checked));
-  const rotCb = document.createElement('input'); rotCb.type = 'checkbox'; rotCb.checked = terrainSet.symmetry.rotate;
-  rotCb.addEventListener('change', () => commitSetSymmetry(terrainSet, 'rotate', rotCb.checked));
-  const flipLabel = document.createElement('label'); flipLabel.append(flipCb, document.createTextNode(' Allow flip'));
-  const rotLabel = document.createElement('label'); rotLabel.append(rotCb, document.createTextNode(' Allow rotation'));
+  const btnFlip = document.createElement('button');
+  btnFlip.type = 'button';
+  btnFlip.textContent = '↔';
+  btnFlip.title = 'Allow flip (derive flipped slots from their mirror instead of requiring explicit art)';
+  btnFlip.setAttribute('aria-pressed', String(terrainSet.symmetry.flip));
+  btnFlip.classList.toggle('active', terrainSet.symmetry.flip);
+  btnFlip.addEventListener('click', () => commitSetSymmetry(terrainSet, 'flip', !terrainSet.symmetry.flip));
+  const btnRotate = document.createElement('button');
+  btnRotate.type = 'button';
+  btnRotate.textContent = '↻';
+  btnRotate.title = 'Allow rotation (derive rotated slots instead of requiring explicit art)';
+  btnRotate.setAttribute('aria-pressed', String(terrainSet.symmetry.rotate));
+  btnRotate.classList.toggle('active', terrainSet.symmetry.rotate);
+  btnRotate.addEventListener('click', () => commitSetSymmetry(terrainSet, 'rotate', !terrainSet.symmetry.rotate));
 
-  const layerSelect = document.createElement('select');
-  const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
-  layerSelect.appendChild(noneOpt);
-  sheet.layers.forEach((name) => {
-    const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
-    layerSelect.appendChild(opt);
-  });
-  layerSelect.value = terrainSet.layer ?? '';
-  layerSelect.addEventListener('change', () => commitSetTerrainSetLayer(terrainSet, layerSelect.value));
-
-  symRow.append(flipLabel, rotLabel, layerSelect);
+  symRow.append(btnFlip, btnRotate);
   container.appendChild(symRow);
 
   const viewModeRow = document.createElement('div');
