@@ -7,7 +7,7 @@ import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
 import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } from '../ui/frames.js';
-import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel } from '../ui/tilemode.js';
+import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
@@ -424,6 +424,12 @@ bindTileTool(canvasView);
 {
   const priorOverlay = canvasView.onOverlay;
   canvasView.onOverlay = (ctx) => { priorOverlay(ctx); drawStripChrome(ctx, canvasView); };
+}
+// Tile dimension chrome (idle selected-tile/grid dims) chains last too,
+// same reasoning as strip chrome above.
+{
+  const priorOverlay = canvasView.onOverlay;
+  canvasView.onOverlay = (ctx) => { priorOverlay(ctx); drawTileChrome(ctx, canvasView); };
 }
 initFloatSession();
 mountColorPanel(document.getElementById('panel-colors'));

@@ -29,6 +29,7 @@ import {
   DIRECTION_OFFSETS,
 } from '../core/blob47.js';
 import { BLOB47_8X6_RAW, BLOB47_7X7_RAW, BUILTIN_LAYOUT_PRESETS } from '../core/blob47templates.js';
+import { drawRectDims, drawChainDims } from './dimlabels.js';
 
 // ------------------------------------------------------------- geometry
 
@@ -955,6 +956,51 @@ function drawGridHandles(ctx, view, sheet) {
   ctx.restore();
 }
 
+const TILE_HANDLE = '#4f8cff';
+
+// Resize-grip squares at the 4 corners of a standalone selected tile —
+// mirrors frames.js's drawHandles for a non-strip selected frame. Grid-owned
+// tiles never get these (their size is fixed by the grid, matching
+// hitHandle's gridId gate above).
+function drawTileHandles(ctx, view, tile) {
+  ctx.save();
+  ctx.fillStyle = TILE_HANDLE;
+  for (const h of HANDLES) {
+    const ix = h[1] === 'w' ? tile.x : tile.x + tile.w;
+    const iy = h[0] === 'n' ? tile.y : tile.y + tile.h;
+    const p = view.imageToScreen(ix, iy);
+    ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+  }
+  ctx.restore();
+}
+
+// Grid dimension chrome — mirrors frames.js's drawStripDims for a strip:
+// level-0 chains for column widths (bottom edge) and row heights (right
+// edge), level-1 overall bbox dims — same bottom/right edges as the default
+// (side: 'end') drawRectDims/drawChainDims used everywhere else in this app.
+// dx/dy shift everything to the drag-ghost position (grid move); opts
+// carries quiet for idle display.
+function drawGridDims(ctx, view, grid, opts = {}) {
+  const dx = opts.dx ?? 0, dy = opts.dy ?? 0;
+  const shifted = (dx || dy) ? { ...grid, x: grid.x + dx, y: grid.y + dy } : grid;
+  const alpha = opts.quiet ? 0.7 : 1;
+  const last = gridCellRect(shifted, grid.cols - 1, grid.rows - 1);
+  const bottomRow = Array.from({ length: grid.cols }, (_, col) => gridCellRect(shifted, col, grid.rows - 1));
+  const rightCol = Array.from({ length: grid.rows }, (_, row) => gridCellRect(shifted, grid.cols - 1, row));
+  drawChainDims(ctx, view, {
+    axis: 'h', edge: last.y + last.h,
+    spans: bottomRow.map(r => ({ from: r.x, to: r.x + r.w, text: `${r.w}` })),
+    alpha,
+  });
+  drawChainDims(ctx, view, {
+    axis: 'v', edge: last.x + last.w,
+    spans: rightCol.map(r => ({ from: r.y, to: r.y + r.h, text: `${r.h}` })),
+    alpha,
+  });
+  const overall = { x: shifted.x, y: shifted.y, w: last.x + last.w - shifted.x, h: last.y + last.h - shifted.y };
+  drawRectDims(ctx, view, overall, { quiet: opts.quiet, dx: opts.dx, dy: opts.dy, wLevel: 1, hLevel: 1 });
+}
+
 function drawTileToolGhost(ctx, view) {
   if (state.mode !== 'tiles') return;
   const sheet = activeSheet();
@@ -986,6 +1032,44 @@ function drawTileToolGhost(ctx, view) {
     }
   }
   ctx.restore();
+
+  if (drag.kind === 'create' && drag.rect) {
+    drawRectDims(ctx, view, drag.rect);
+  } else if (drag.kind === 'resize' && drag.rect) {
+    drawRectDims(ctx, view, drag.rect, { dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h });
+  } else if (drag.kind === 'gridmove') {
+    drawGridDims(ctx, view, drag.grid, { dx: drag.dx, dy: drag.dy });
+  } else if (drag.kind === 'tiledrag' && drag.to && drag.from.gridId == null) {
+    const target = tileAt(sheet, drag.to.x, drag.to.y);
+    const swapCandidate = target && target !== drag.from && target.w === drag.from.w && target.h === drag.from.h;
+    if (!swapCandidate) {
+      const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
+      const r = { x: drag.from.x + dx, y: drag.from.y + dy, w: drag.from.w, h: drag.from.h };
+      drawRectDims(ctx, view, r, { dx, dy });
+    }
+  }
+}
+
+// Idle selection chrome — the quiet dims shown for the selected tile when
+// not dragging. Mirrors frames.js's drawStripChrome: a grid-owned tile shows
+// the WHOLE GRID's dims (grid ~ strip), a standalone tile shows its own rect
+// dims plus resize grips (grid-owned tiles never get grips — their size is
+// fixed by the grid, matching the "no resize handles on intact-strip
+// members" rule in frames.js). Must render above the tile label overlays,
+// so main.js chains this as the final overlay layer, same as drawStripChrome.
+export function drawTileChrome(ctx, view) {
+  if (state.mode !== 'tiles' || state.tool !== 'tiletool' || drag) return;
+  const sheet = activeSheet();
+  if (!sheet) return;
+  const tile = sheet.tiles.find(t => t.id === state.selectedTileId);
+  if (!tile) return;
+  if (tile.gridId != null) {
+    const grid = sheet.tileGrids.find(g => g.id === tile.gridId);
+    if (grid) drawGridDims(ctx, view, grid, { quiet: true });
+  } else {
+    drawRectDims(ctx, view, tile, { quiet: true });
+    drawTileHandles(ctx, view, tile);
+  }
 }
 
 // ------------------------------------------------------------- public API
