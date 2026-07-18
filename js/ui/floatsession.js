@@ -4,7 +4,7 @@
 // Pointer GESTURES (drag/scale/rotate) live in tools.js's move tool; every
 // state change funnels through here so stepwise undo and auto-commit stay
 // consistent. This module must never import tools.js (tools.js imports us).
-import { state, on, emit, activeSheet, activeLayer, markDirty, currentContextLayers } from '../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, markDirty, activeLayerScope } from '../app/state.js';
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../core/pixels.js';
 import { findLayer } from '../core/model.js';
 import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../core/floating.js';
@@ -34,18 +34,24 @@ function rectIntersect(a, b) {
 }
 
 // region + frozen target for float/cut/copy: the view's selection clamped to
-// its target rect, or the whole target rect when there is no selection
-function resolveRegion(viewApi, requireSelection = false) {
-  const target = viewApi.getTargetRect();
-  if (target.w <= 0 || target.h <= 0) return null;
+// its target rect, or the whole target rect when there is no selection.
+// `anchor` is the point passed to getTargetRect() to resolve which segment
+// of an accepted strip applies (see docs/superpowers/specs/2026-07-18-
+// strip-area-constraint-design.md) -- callers with a more specific point
+// than the current selection (e.g. createFloat's frame-segment region) pass
+// it explicitly; otherwise this falls back to the selection's own corner.
+function resolveRegion(viewApi, requireSelection = false, anchor = null) {
   const sel = viewApi.getSelection();
+  const point = anchor ?? (sel ? { x: sel.x, y: sel.y } : null);
+  const target = viewApi.getTargetRect(point?.x, point?.y);
+  if (target.w <= 0 || target.h <= 0) return null;
   if (!sel) return requireSelection ? null : { region: { ...target }, target };
   const region = rectIntersect(sel, target);
   return region ? { region, target } : null;
 }
 
-function captureLayers(sheet, region, allLayers) {
-  const layers = allLayers ? currentContextLayers() : (activeLayer() ? [activeLayer()] : []);
+function captureLayers(sheet, region, allLayers, explicitLayers = null) {
+  const layers = explicitLayers ?? (allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []));
   return layers.map(l => ({
     layerId: l.id,
     buffer: copyRegion(l.bitmap, region.x, region.y, region.w, region.h),
@@ -66,12 +72,13 @@ function flattenCaptured(captured, w, h) {
 // or strip segment (frame-float): the float cuts exactly that rect, and on
 // commit the named frames' rects move with the pixels. Only honored when no
 // marquee selection exists — an explicit selection always wins.
-export function createFloat({ allLayers = false, region = null, frameIds = null } = {}) {
+export function createFloat({ allLayers = false, region = null, frameIds = null, layers: explicitLayers = null, x = null, y = null } = {}) {
   commitFloatIfAny();
   const viewApi = activeView();
   const sheet = activeSheet();
   if (!viewApi || !sheet) return false;
-  const rr = resolveRegion(viewApi);
+  const anchor = region ? { x: region.x, y: region.y } : (x != null ? { x, y } : null);
+  const rr = resolveRegion(viewApi, false, anchor);
   if (!rr) return false;
   let { region: reg, target } = rr;
   const frameFloat = !!(region && frameIds && !viewApi.getSelection());
@@ -80,7 +87,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null 
     if (!clamped) return false;
     reg = clamped;
   }
-  const captured = captureLayers(sheet, reg, allLayers);
+  const captured = captureLayers(sheet, reg, allLayers, explicitLayers);
   if (!captured.length) return false;
   const float = {
     sheetId: sheet.id, srcRect: { ...reg }, cut: true,
@@ -343,9 +350,12 @@ export function pasteClipboard() {
   const viewApi = activeView();
   const sheet = activeSheet();
   if (!viewApi || !sheet) return;
-  const target = viewApi.getTargetRect();
-  if (target.w <= 0 || target.h <= 0) return;
   const { srcRect } = clipboard;
+  // Anchor the confinement lookup at the ORIGINAL copy position -- pasting
+  // back into the same strip segment it was copied from is the common case,
+  // and more precise than falling back to the currently selected frame.
+  const target = viewApi.getTargetRect(srcRect.x, srcRect.y);
+  if (target.w <= 0 || target.h <= 0) return;
   // land on the source position while it still intersects the target,
   // otherwise centered in the target
   const pos = rectIntersect(srcRect, target)
