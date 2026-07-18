@@ -21,7 +21,7 @@ import { newId } from '../core/palettes.js';
 import { scrubTileReferences, flattenSheet } from '../core/model.js';
 import {
   createTerrainSet, removeTerrainSet, assignSlot, clearSlot,
-  detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset,
+  detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset, groupCellsByBlobIndex,
 } from '../core/terrainsets.js';
 import {
   NEIGHBOR_BITS, blobIndexToMask, maskToBlobIndex, SIXTEEN_TILE_INDICES, resolveTerrainSlot, classifySlots,
@@ -966,6 +966,58 @@ function buildAddGridDialog() {
 
 // ------------------------------------------------------------- terrain sets
 
+// Same "first cell in raster order wins" rule as applyLayoutPreset (shared
+// via groupCellsByBlobIndex) -- draws the preset's reference art, then
+// flags every non-primary duplicate cell with the same dashed-orange
+// treatment js/ui/overlays.js uses on the tile sheet itself, so the user
+// can see which cells will become dead-end duplicates BEFORE creating the
+// grid, not just after.
+//
+// previewGeneration guards against a stale image load finishing after a
+// newer preset was already selected (switching the <select> quickly starts
+// a fresh Image() before the previous one's onload has fired) -- without
+// it, the old image can paint over the new one, or at the wrong size.
+let previewGeneration = 0;
+function drawLayoutPreview(canvas, preset) {
+  const myGeneration = ++previewGeneration;
+  const cellSize = preset.sourceCellSize ?? 32;
+  canvas.width = preset.cols * cellSize;
+  canvas.height = preset.rows * cellSize;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  const duplicateCells = [];
+  for (const cells of groupCellsByBlobIndex(preset.cells).values()) {
+    for (let i = 1; i < cells.length; i++) duplicateCells.push(cells[i]);
+  }
+
+  const img = new Image();
+  img.onload = () => {
+    if (myGeneration !== previewGeneration) return; // superseded by a later preset selection
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+    if (!duplicateCells.length) return;
+    ctx.save();
+    ctx.strokeStyle = '#e0a030';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.font = '9px sans-serif';
+    ctx.textBaseline = 'top';
+    for (const cell of duplicateCells) {
+      const x = cell.col * cellSize, y = cell.row * cellSize;
+      ctx.strokeRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+      const label = 'dup';
+      const w = Math.ceil(ctx.measureText(label).width) + 4;
+      ctx.fillStyle = 'rgba(90,58,0,.85)';
+      ctx.fillRect(x, y, w, 11);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, x + 2, y + 1);
+    }
+    ctx.restore();
+  };
+  img.src = preset.sourceImage;
+}
+
 function buildAddTerrainSetDialog() {
   const dlg = document.createElement('dialog');
   dlg.innerHTML = `
@@ -974,7 +1026,7 @@ function buildAddTerrainSetDialog() {
     <div class="row"><label>Tile W <input type="number" id="ats-tilew" min="1" value="16"></label></div>
     <div class="row"><label>Tile H <input type="number" id="ats-tileh" min="1" value="16"></label></div>
     <div class="row"><label>Layout <select id="ats-layout"><option value="">(none -- add tiles manually)</option></select></label></div>
-    <div class="row"><img id="ats-layout-preview" class="terrain-layout-preview" hidden></div>
+    <div class="row"><canvas id="ats-layout-preview" class="terrain-layout-preview" hidden></canvas></div>
     <div class="row"><button type="button" id="ats-create">Create</button><button type="button" id="ats-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
@@ -982,9 +1034,9 @@ function buildAddTerrainSetDialog() {
   let presets = [];
   const updatePreview = () => {
     const preset = presets[Number($('#ats-layout').value)];
-    const img = $('#ats-layout-preview');
-    if (preset?.sourceImage) { img.src = preset.sourceImage; img.hidden = false; }
-    else { img.removeAttribute('src'); img.hidden = true; }
+    const canvas = $('#ats-layout-preview');
+    if (preset?.sourceImage) { canvas.hidden = false; drawLayoutPreview(canvas, preset); }
+    else { canvas.hidden = true; }
   };
   $('#ats-layout').addEventListener('change', updatePreview);
   $('#ats-cancel').addEventListener('click', () => dlg.close());

@@ -11,6 +11,13 @@ const CHIP_BG = 'rgba(20,20,24,.85)';
 const CHIP_FG = '#fff';
 const CHIP_FONT = '11px sans-serif';
 const CHIP_PAD_X = 4, CHIP_PAD_Y = 2, CHIP_LINE_H = 12;
+// A layout preset can list the same blobIndex on more than one cell (the
+// Blob-47 templates do); only the last such cell ends up bound to the
+// terrain set (see applyLayoutPreset's comment in core/terrainsets.js) --
+// the rest are dead-end duplicates, flagged distinctly so painting on them
+// doesn't look like it should do anything.
+const DUPLICATE_STROKE = '#e0a030';
+const DUPLICATE_CHIP_BG = 'rgba(90,58,0,.85)';
 
 export function drawSheetOverlays(view, ctx) {
   const sheet = activeSheet();
@@ -23,13 +30,13 @@ export function drawSheetOverlays(view, ctx) {
 // (x, y), clamped fully inside the viewport so labels near the sheet edge
 // stay readable. Returns the chip's actual (clamped) screen rect so callers
 // can stack further chips underneath it.
-function drawChip(ctx, view, text, x, y) {
+function drawChip(ctx, view, text, x, y, bg = CHIP_BG) {
   ctx.font = CHIP_FONT;
   const w = Math.ceil(ctx.measureText(text).width) + CHIP_PAD_X * 2;
   const h = CHIP_LINE_H + CHIP_PAD_Y * 2;
   const cx = Math.max(0, Math.min(view.cssWidth - w, x));
   const cy = Math.max(0, Math.min(view.cssHeight - h, y));
-  ctx.fillStyle = CHIP_BG;
+  ctx.fillStyle = bg;
   ctx.fillRect(cx, cy, w, h);
   ctx.fillStyle = CHIP_FG;
   ctx.textBaseline = 'top';
@@ -83,18 +90,25 @@ function drawTileOverlays(view, ctx, sheet) {
 
   if (state.overlays.labels && tiles.length > 0) {
     ctx.save();
-    ctx.strokeStyle = FRAME_STROKE;
     ctx.lineWidth = 1;
     for (const t of tiles) {
       const p0 = view.imageToScreen(t.x, t.y);
       const p1 = view.imageToScreen(t.x + t.w, t.y + t.h);
+      const isDuplicate = t.duplicateOf != null;
+      ctx.strokeStyle = isDuplicate ? DUPLICATE_STROKE : FRAME_STROKE;
+      ctx.setLineDash(isDuplicate ? [3, 3] : []);
       ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, p1.x - p0.x - 1, p1.y - p0.y - 1);
     }
     ctx.restore();
 
     tiles.forEach((t, i) => {
       const p0 = view.imageToScreen(t.x, t.y);
-      drawChip(ctx, view, t.name ? `${i}:${t.name}` : `${i}`, p0.x, p0.y);
+      if (t.duplicateOf != null) {
+        const primaryIndex = tiles.findIndex(x => x.id === t.duplicateOf);
+        drawChip(ctx, view, `${i} → #${primaryIndex}`, p0.x, p0.y, DUPLICATE_CHIP_BG);
+      } else {
+        drawChip(ctx, view, t.name ? `${i}:${t.name}` : `${i}`, p0.x, p0.y);
+      }
     });
   }
 

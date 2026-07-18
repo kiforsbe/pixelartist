@@ -140,6 +140,23 @@ test('applyLayoutPreset skips a source tile whose size doesn\'t match the terrai
   assert.deepEqual(ts.slots, {});
 });
 
+test('applyLayoutPreset marks non-primary duplicate cells (same blobIndex, multiple cells)', () => {
+  const s = tileSheet();
+  const ts = createTerrainSet(s, { name: 'Grass', tileW: 16, tileH: 16 });
+  const grid = [tile('t00'), tile('t10'), tile('t01')]; // 2x2 minus one corner, row-major over a 2-wide grid
+  s.tiles.push(...grid);
+  const preset = {
+    id: 'p1', name: 'Test', cols: 2, rows: 2,
+    cells: [{ col: 0, row: 0, blobIndex: 0 }, { col: 1, row: 0, blobIndex: 0 }, { col: 0, row: 1, blobIndex: 5 }],
+  };
+  applyLayoutPreset(s, ts, preset, grid, 2);
+  // first cell for blobIndex 0 in raster order (col 0, row 0 -> t00) wins the slot
+  assert.equal(ts.slots[0], 't00');
+  assert.equal(grid[0].duplicateOf, undefined); // the winner itself isn't marked
+  assert.equal(grid[1].duplicateOf, 't00');      // t10 loses out -> flagged as a dead-end duplicate
+  assert.equal(grid[2].duplicateOf, undefined);  // blobIndex 5 had only one cell -- not a duplicate
+});
+
 test('saveLayoutPreset pushes a named preset onto sheet.terrainLayoutPresets', () => {
   const s = tileSheet();
   const preset = saveLayoutPreset(s, 'My layout', 2, 2, [{ col: 0, row: 0, blobIndex: 0 }]);

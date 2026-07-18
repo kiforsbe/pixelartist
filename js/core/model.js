@@ -300,6 +300,7 @@ export function renameAnimation(sheet, animId, name) {
 // tilemode.js, grid-shrink in resizeGridCols/resizeGridRows).
 export function scrubTileReferences(sheet, removedTileId) {
   for (const tile of sheet.tiles) {
+    if (tile.duplicateOf === removedTileId) tile.duplicateOf = undefined;
     if (!tile.neighbors) continue;
     for (const dir of NEIGHBOR_DIRS) {
       const slot = tile.neighbors[dir];

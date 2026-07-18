@@ -22,7 +22,7 @@ function makeCellTile(grid, col, row) {
   return {
     id: newId('ti'), x: r.x, y: r.y, w: r.w, h: r.h,
     name: undefined, gridId: grid.id, gridCol: col, gridRow: row, neighbors: undefined,
-    terrainSetId: undefined, blobIndex: undefined, layer: undefined, tags: undefined,
+    terrainSetId: undefined, blobIndex: undefined, layer: undefined, tags: undefined, duplicateOf: undefined,
   };
 }
 
