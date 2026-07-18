@@ -1295,6 +1295,15 @@ function buildAddTerrainSetDialog() {
       if (seededMode) terrainSetViewModes.set(terrainSet.id, seededMode);
       state.selectedTileId = sourceTiles[0]?.id ?? null;
       await importPresetArtOntoLayer(sheet, preset, sourceTiles, preset.cols);
+    } else {
+      // No preset -- seed with one standalone (non-grid) tile assigned to
+      // the "isolated" slot (blobIndex 0, no neighbors) so the set has at
+      // least one referencing tile. A terrain set with zero tiles is what
+      // pruneEmptyTerrainSets treats as garbage once any tile/grid deletion
+      // elsewhere names it as a candidate.
+      commitCreateTile(sheet, { x: 0, y: 0, w: tileW, h: tileH });
+      const created = sheet.tiles.find(t => t.id === state.selectedTileId);
+      if (created) commitAssignSlot(sheet, terrainSet, 0, created);
     }
 
     emit('selection');
