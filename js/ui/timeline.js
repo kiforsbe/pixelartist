@@ -195,19 +195,19 @@ export function mountTimeline(el) {
   header.className = 'timeline-header';
 
   const animSelect = document.createElement('select');
-  const btnNewAnim = document.createElement('button'); btnNewAnim.type = 'button'; btnNewAnim.textContent = '➕'; btnNewAnim.title = 'New animation';
-  const btnRenameAnim = document.createElement('button'); btnRenameAnim.type = 'button'; btnRenameAnim.textContent = '✎'; btnRenameAnim.title = 'Rename animation';
-  const btnDeleteAnim = document.createElement('button'); btnDeleteAnim.type = 'button'; btnDeleteAnim.textContent = '🗑'; btnDeleteAnim.title = 'Delete animation';
+  const btnNewAnim = document.createElement('button'); btnNewAnim.type = 'button'; btnNewAnim.className = 'btn-icon-sm'; btnNewAnim.textContent = '➕'; btnNewAnim.title = 'New animation';
+  const btnRenameAnim = document.createElement('button'); btnRenameAnim.type = 'button'; btnRenameAnim.className = 'btn-icon-sm'; btnRenameAnim.textContent = '✎'; btnRenameAnim.title = 'Rename animation';
+  const btnDeleteAnim = document.createElement('button'); btnDeleteAnim.type = 'button'; btnDeleteAnim.className = 'btn-icon-sm'; btnDeleteAnim.textContent = '🗑'; btnDeleteAnim.title = 'Delete animation';
   const loopCheckbox = document.createElement('input'); loopCheckbox.type = 'checkbox';
   const loopLabel = document.createElement('label'); loopLabel.className = 'timeline-loop';
   loopLabel.append(loopCheckbox, document.createTextNode('Loop'));
   const btnAddFrame = document.createElement('button'); btnAddFrame.type = 'button'; btnAddFrame.textContent = 'Add selected frame';
   // Visible only when the selected animation is an intact strip (strip === true).
-  const btnBreakApart = document.createElement('button'); btnBreakApart.type = 'button'; btnBreakApart.textContent = '✂'; btnBreakApart.title = 'Break apart';
+  const btnBreakApart = document.createElement('button'); btnBreakApart.type = 'button'; btnBreakApart.className = 'btn-icon-sm'; btnBreakApart.textContent = '✂'; btnBreakApart.title = 'Break apart';
 
-  const btnFirst = document.createElement('button'); btnFirst.type = 'button'; btnFirst.textContent = '⏮';
-  const btnPlay = document.createElement('button'); btnPlay.type = 'button'; btnPlay.textContent = '▶';
-  const btnLast = document.createElement('button'); btnLast.type = 'button'; btnLast.textContent = '⏭';
+  const btnFirst = document.createElement('button'); btnFirst.type = 'button'; btnFirst.className = 'btn-icon-sm'; btnFirst.textContent = '⏮';
+  const btnPlay = document.createElement('button'); btnPlay.type = 'button'; btnPlay.className = 'btn-icon-sm'; btnPlay.textContent = '▶';
+  const btnLast = document.createElement('button'); btnLast.type = 'button'; btnLast.className = 'btn-icon-sm'; btnLast.textContent = '⏭';
   const speedSelect = document.createElement('select');
   for (const s of SPEEDS) {
     const opt = document.createElement('option');

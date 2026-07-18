@@ -226,8 +226,15 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .shortcut-desc { color: #9a9ca8; }
 
 /* button size tiers */
-.btn-icon-sm { width: 22px; height: 22px; padding: 0; font-size: 12px; line-height: 1; }
-.btn-icon-md { width: 28px; height: 28px; padding: 0; font-size: 15px; line-height: 1; }
-.btn-icon-lg { width: 42px; height: 42px; padding: 0; font-size: 18px; line-height: 1; }
+.btn-icon-sm { width: 22px; height: 22px; padding: 0; font-size: 12px; line-height: 1;
+  flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.btn-icon-md { width: 28px; height: 28px; padding: 0; font-size: 15px; line-height: 1;
+  flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.btn-icon-lg { width: 42px; height: 42px; padding: 0; font-size: 18px; line-height: 1;
+  flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .btn-sm { padding: 2px 6px; font-size: 12px; }
 .btn-md { padding: 4px 10px; }
+
+/* tight-gap cluster for related icon buttons, used where a larger container
+   gap (e.g. #top-bar) would otherwise space them apart like unrelated items */
+.btn-group { display: flex; gap: 4px; align-items: center; }

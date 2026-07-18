@@ -56,7 +56,7 @@ export function mountFrameEditor(hostEl) {
   container.appendChild(strip);
 
   const btnBack = document.createElement('button');
-  btnBack.type = 'button'; btnBack.textContent = '⬅'; btnBack.title = 'Back to sheet';
+  btnBack.type = 'button'; btnBack.className = 'btn-icon-md'; btnBack.textContent = '⬅'; btnBack.title = 'Back to sheet';
 
   const nameLabel = document.createElement('span');
   nameLabel.className = 'frame-editor-name';

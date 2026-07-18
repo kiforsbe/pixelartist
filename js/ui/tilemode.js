@@ -526,6 +526,7 @@ function terrainSetLayerField(sheet, terrainSet) {
 function btnDeleteTerrainSet(sheet, terrainSet) {
   const btn = document.createElement('button');
   btn.type = 'button';
+  btn.className = 'btn-icon-md';
   btn.textContent = '✕';
   btn.title = 'Delete terrain set';
   btn.addEventListener('click', () => {
@@ -1487,6 +1488,7 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
   symRow.className = 'row';
   const btnFlip = document.createElement('button');
   btnFlip.type = 'button';
+  btnFlip.className = 'btn-icon-sm';
   btnFlip.textContent = '↔';
   btnFlip.title = 'Allow flip (derive flipped slots from their mirror instead of requiring explicit art)';
   btnFlip.setAttribute('aria-pressed', String(terrainSet.symmetry.flip));
@@ -1494,6 +1496,7 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
   btnFlip.addEventListener('click', () => commitSetSymmetry(terrainSet, 'flip', !terrainSet.symmetry.flip));
   const btnRotate = document.createElement('button');
   btnRotate.type = 'button';
+  btnRotate.className = 'btn-icon-sm';
   btnRotate.textContent = '↻';
   btnRotate.title = 'Allow rotation (derive rotated slots instead of requiring explicit art)';
   btnRotate.setAttribute('aria-pressed', String(terrainSet.symmetry.rotate));
@@ -1641,6 +1644,7 @@ export function mountTilePanel(el) {
   const addGridDialog = buildAddGridDialog();
   const btnAddGrid = document.createElement('button');
   btnAddGrid.type = 'button';
+  btnAddGrid.className = 'btn-icon-md';
   btnAddGrid.textContent = '➕';
   btnAddGrid.title = 'Add grid';
   btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
@@ -1648,6 +1652,7 @@ export function mountTilePanel(el) {
   const addTerrainSetDialog = buildAddTerrainSetDialog();
   const btnAddTerrainSet = document.createElement('button');
   btnAddTerrainSet.type = 'button';
+  btnAddTerrainSet.className = 'btn-icon-md';
   btnAddTerrainSet.textContent = '➕';
   btnAddTerrainSet.title = 'Add terrain set';
   btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
@@ -1754,6 +1759,7 @@ export function mountTilePanel(el) {
     actions.className = 'row layer-actions';
     const btnEdit = document.createElement('button');
     btnEdit.type = 'button';
+    btnEdit.className = 'btn-icon-md';
     btnEdit.textContent = '✎';
     btnEdit.title = 'Edit tile';
     btnEdit.addEventListener('click', () => openTileEditor(tile.id));
@@ -1761,11 +1767,13 @@ export function mountTilePanel(el) {
     if (grid) {
       const btnDetach = document.createElement('button');
       btnDetach.type = 'button';
+      btnDetach.className = 'btn-icon-md';
       btnDetach.textContent = '⏏';
       btnDetach.title = 'Detach from grid';
       btnDetach.addEventListener('click', () => commitDetachTile(tile));
       const btnDeleteGrid = document.createElement('button');
       btnDeleteGrid.type = 'button';
+      btnDeleteGrid.className = 'btn-icon-md';
       btnDeleteGrid.textContent = '🗑';
       btnDeleteGrid.title = 'Delete grid';
       btnDeleteGrid.addEventListener('click', () => commitDeleteGrid(sheet, grid));
@@ -1877,6 +1885,7 @@ export function mountTileLayersPanel(el, { showVisibility = false, showOpacity =
   btnRow.className = 'row layer-actions';
   const btnAdd = document.createElement('button');
   btnAdd.type = 'button';
+  btnAdd.className = 'btn-icon-md';
   btnAdd.textContent = '➕';
   btnAdd.title = 'Add layer';
   btnAdd.addEventListener('click', () => {
@@ -1889,6 +1898,7 @@ export function mountTileLayersPanel(el, { showVisibility = false, showOpacity =
   });
   const btnDelete = document.createElement('button');
   btnDelete.type = 'button';
+  btnDelete.className = 'btn-icon-md';
   btnDelete.textContent = '🗑';
   btnDelete.title = 'Delete layer';
   btnDelete.addEventListener('click', () => {
