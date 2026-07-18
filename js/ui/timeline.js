@@ -11,7 +11,7 @@
 // for its own animation-affecting edits (slice grid / delete frame).
 
 import { state, on, emit, activeSheet, markDirty, confirmOrAuto, currentContextLayers } from '../app/state.js';
-import { addAnimation, animationGroup, contextLayers, flattenSheetLayers, findParent, renameAnimation } from '../core/model.js';
+import { addAnimation, contextLayers, flattenSheetLayers, findParent, renameAnimation } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 import { commitBreakApartStrip } from './frames.js';
 
@@ -106,53 +106,36 @@ function changeDuration(anim, index, newDuration) {
 // let do()/undo() just move it in/out of sheet.animations at a remembered
 // index so redo re-adds the SAME object (needed so undo/redo stay coherent
 // with anything else that captured a reference to it, e.g. selection).
+// A new animation starts FLOATING too (see addAnimation/acceptAnimation in
+// core/model.js) -- no layer group until accepted. Unlike a strip, a plain
+// animation has zero frames at creation, so there's nothing to preview yet;
+// acceptance (Enter key or first paint stroke, once frames are assigned)
+// just yields a blank layer.
 function commitNewAnimation(sheet) {
   const name = `anim_${sheet.animations.length}`;
-  const beforeActiveLayerId = state.activeLayerId;
   let anim = null;
   let idx = -1;
-  let group = null;
-  let animLayerId = null;
-  let groupIdx = -1;
   const cmd = {
     label: 'new animation',
     do() {
-      if (!anim) {
-        // addAnimation seeds the new animation's group with exactly one
-        // layer -- see commitNewStrip's matching comment in frames.js:
-        // without activating it, drawing right after "New Animation" would
-        // silently target whatever layer was active before.
-        anim = addAnimation(sheet, name);
-        idx = sheet.animations.indexOf(anim);
-        group = animationGroup(sheet, anim.id);
-        animLayerId = group.children[0].id;
-        groupIdx = sheet.layerTree.children.indexOf(group);
-      } else {
-        if (!sheet.animations.includes(anim)) sheet.animations.splice(Math.min(idx, sheet.animations.length), 0, anim);
-        if (!sheet.layerTree.children.includes(group))
-          sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
-      }
+      if (!anim) { anim = addAnimation(sheet, name); idx = sheet.animations.indexOf(anim); }
+      else if (!sheet.animations.includes(anim)) sheet.animations.splice(Math.min(idx, sheet.animations.length), 0, anim);
       // state.commands is a single global stack shared by every sheet -- only
-      // touch selection/active-layer state while this command's own sheet is
-      // still the one on screen (see frames.js's matching comment).
-      if (sheet === activeSheet()) {
-        state.selectedAnimationId = anim.id;
-        state.activeLayerId = animLayerId;
-      }
+      // touch selection state while this command's own sheet is still the
+      // one on screen (see frames.js's matching comment on commitNewStrip).
+      if (sheet === activeSheet()) state.selectedAnimationId = anim.id;
     },
     undo() {
       idx = sheet.animations.indexOf(anim);
       sheet.animations = sheet.animations.filter(a => a !== anim);
-      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
       if (state.selectedAnimationId === anim.id) state.selectedAnimationId = null;
-      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
     },
   };
   state.commands.push(cmd);
   markDirty();
 }
 
-function commitDeleteAnimation(sheet, animId) {
+export function commitDeleteAnimation(sheet, animId) {
   const anim = sheet.animations.find(a => a.id === animId);
   if (!anim) return;
   const idx = sheet.animations.indexOf(anim);
