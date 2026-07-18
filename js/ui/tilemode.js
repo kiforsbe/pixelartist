@@ -22,6 +22,7 @@ import { scrubTileReferences, flattenSheet } from '../core/model.js';
 import {
   createTerrainSet, removeTerrainSet, assignSlot, clearSlot,
   detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset, groupCellsByBlobIndex,
+  pruneEmptyTerrainSets,
 } from '../core/terrainsets.js';
 import {
   NEIGHBOR_BITS, blobIndexToMask, maskToBlobIndex, SIXTEEN_TILE_INDICES, resolveTerrainSlot, classifySlots,
@@ -327,13 +328,18 @@ function commitAddGrid(sheet, opts) {
 function commitDeleteGrid(sheet, grid) {
   const beforeGrids = sheet.tileGrids.slice();
   const beforeTiles = sheet.tiles.slice();
+  const beforeSets = sheet.terrainSets.slice();
+  const candidateTerrainSetIds = [...new Set(ownedTiles(sheet, grid.id).map(t => t.terrainSetId).filter((id) => id != null))];
   removeTileGrid(sheet, grid.id);
+  const prunedIds = pruneEmptyTerrainSets(sheet, candidateTerrainSetIds);
+  if (prunedIds.includes(state.selectedTerrainSetId)) state.selectedTerrainSetId = null;
   const afterGrids = sheet.tileGrids.slice();
   const afterTiles = sheet.tiles.slice();
+  const afterSets = sheet.terrainSets.slice();
   state.commands.push({
     label: 'delete grid',
-    do() { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); },
-    undo() { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); },
+    do() { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); sheet.terrainSets = afterSets.slice(); },
+    undo() { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); sheet.terrainSets = beforeSets.slice(); },
   });
   markDirty();
 }
