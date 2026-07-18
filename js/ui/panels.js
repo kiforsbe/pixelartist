@@ -991,13 +991,13 @@ export function mountLayersPanel(el) {
     queueMicrotask(() => { thumbRedrawQueued = false; redrawThumbs(); });
   }
 
-  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet() });
+  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
   bindAction(btnAddLayer, 'layer.add');
-  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet() });
+  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
   bindAction(btnAddGroup, 'layer.addGroup');
-  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet() });
+  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
   bindAction(btnDelete, 'layer.delete');
-  defineAction('layer.mergeDown', { label: 'Merge Down', run: doMergeDown, isEnabled: () => !!activeSheet() });
+  defineAction('layer.mergeDown', { label: 'Merge Down', run: doMergeDown, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
   bindAction(btnMerge, 'layer.mergeDown');
 
   on('project', renderList);
