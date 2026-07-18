@@ -13,7 +13,7 @@
 // so it must run after bindDrawing has installed its own).
 
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
-import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup } from '../core/model.js';
+import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup, acceptAnimation } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
@@ -1072,6 +1072,21 @@ export function registerFrameTool() {
     if (strip) commitRemoveMember(sheet, strip, state.selectedFrameId);
     else deleteFrame(sheet, state.selectedFrameId);
   });
+
+  // Accepts whichever animation is currently selected in the timeline dock,
+  // if it's still floating -- works for plain animations too, not just
+  // strips, since it keys off state.selectedAnimationId rather than the
+  // selected frame (a plain animation's frames aren't reliably discoverable
+  // via stripOf(), which requires strip: true).
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
+    if (state.tool !== 'frametool' || state.mode !== 'sprites') return;
+    const sheet = activeSheet();
+    if (!sheet || !state.selectedAnimationId) return;
+    const anim = sheet.animations.find(a => a.id === state.selectedAnimationId);
+    if (anim && !anim.layerGroupId) commitAcceptAnimation(sheet, anim);
+  });
 }
 
 export function bindFrameTool(view) {
@@ -1420,6 +1435,40 @@ export function commitBreakApartStrip(anim) {
     undo() { anim.strip = true; anim.breaks = beforeBreaks.slice(); },
   });
   markDirty();
+}
+
+// Promotes a floating animation (no layer group yet -- see addAnimation/
+// acceptAnimation in core/model.js) into a committed one: freezes whatever's
+// currently visible under its own frames into a brand-new private layer,
+// then activates that layer -- same reasoning as commitNewStrip used to
+// apply at creation time, before strips started floating. Idempotent (a
+// no-op once already accepted) so this Enter-key trigger and tools.js's
+// auto-accept-on-first-paint hook can't double-fire against each other.
+// Exported for tools.js's hook.
+export function commitAcceptAnimation(sheet, anim) {
+  if (anim.layerGroupId) return;
+  const beforeActiveLayerId = state.activeLayerId;
+
+  const group = acceptAnimation(sheet, anim);
+  const animLayerId = group.children[0].id;
+  const groupIdx = sheet.layerTree.children.indexOf(group);
+
+  state.commands.push({
+    label: 'accept animation',
+    do() {
+      anim.layerGroupId = group.id;
+      if (!sheet.layerTree.children.includes(group))
+        sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
+      if (sheet === activeSheet()) state.activeLayerId = animLayerId;
+    },
+    undo() {
+      anim.layerGroupId = null;
+      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
+      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
+    },
+  });
+  markDirty();
+  emit('selection');
 }
 
 // Wires the static #dlg-newstrip markup (index.html) the same way
