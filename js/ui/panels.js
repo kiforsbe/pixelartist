@@ -312,27 +312,19 @@ export function mountColorPanel(el) {
 
   // ---- System palettes dialog ----
   const dlgSys = document.createElement('dialog');
+  dlgSys.className = 'sys-dialog';
   dlgSys.appendChild(Object.assign(document.createElement('h3'), { textContent: 'System Palettes' }));
   const sysList = document.createElement('div'); sysList.className = 'sys-list';
   for (const sys of SYSTEM_PALETTES) {
-    const card = document.createElement('div'); card.className = 'sys-palette-card';
+    // The whole card is the click target (clone-on-click) -- a <button>
+    // so it's focusable/keyboard-activatable for free, no nested controls.
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'sys-palette-card';
+    card.title = `Click to add "${sys.name}" to your project`;
 
-    const header = document.createElement('div'); header.className = 'row sys-palette-header';
-    header.appendChild(Object.assign(document.createElement('span'), {
-      className: 'sys-palette-name', textContent: `${sys.name} (${sys.colors.length})`,
-    }));
-    const cloneBtn = document.createElement('button'); cloneBtn.textContent = 'Clone';
-    cloneBtn.addEventListener('click', () => {
-      if (!state.project) return;
-      const p = clonePalette(sys);
-      state.project.palettes.push(p);
-      state.project.activePaletteId = p.id;
-      dlgSys.close();
-      markDirty();
-      refreshPaletteSelect();
-      refreshSwatchStrip();
-    });
-    header.appendChild(cloneBtn);
+    const header = document.createElement('div'); header.className = 'sys-palette-header';
+    header.textContent = `${sys.name} (${sys.colors.length})`;
     card.appendChild(header);
 
     const preview = document.createElement('div'); preview.className = 'sys-palette-preview';
@@ -343,6 +335,17 @@ export function mountColorPanel(el) {
       preview.appendChild(sw);
     });
     card.appendChild(preview);
+
+    card.addEventListener('click', () => {
+      if (!state.project) return;
+      const p = clonePalette(sys);
+      state.project.palettes.push(p);
+      state.project.activePaletteId = p.id;
+      dlgSys.close();
+      markDirty();
+      refreshPaletteSelect();
+      refreshSwatchStrip();
+    });
 
     sysList.appendChild(card);
   }
