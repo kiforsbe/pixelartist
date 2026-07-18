@@ -562,6 +562,24 @@ function handleDown(ev, view) {
     view.requestRender();
     return;
   }
+  // Standalone frame's own "drag out as a new strip" grip -- checked after
+  // corner handles (so a corner still resizes) but before the plain move/
+  // create checks below. Reuses the 'stripresize' drag kind with anim: null
+  // to mean "no strip exists yet"; handleMove's tracking and the ghost/dims
+  // in drawFrameToolGhost are anim-agnostic already, so only handleUp needs
+  // a branch (commitNewStripFromFrame instead of commitResizeSegment).
+  if (selected && !stripOf(sheet, selected.id)) {
+    const sg = standaloneGripGeometry(view, selected);
+    const gripHit = hitGrip(sg.grips, ev.sx, ev.sy);
+    if (gripHit) {
+      drag = {
+        kind: 'stripresize', anim: null, run: null, frame: selected, side: gripHit.side,
+        fw: sg.fw, fh: sg.fh, bbox: sg.bbox, count0: 1, count: 1,
+      };
+      view.requestRender();
+      return;
+    }
+  }
   const hit = frameAt(sheet, ev.x, ev.y);
   if (hit) {
     if (state.selectedFrameId !== hit.id) { state.selectedFrameId = hit.id; emit('selection'); }
@@ -644,7 +662,9 @@ function handleUp(ev, view) {
     return;
   }
   if (d.kind === 'stripresize') {
-    if (d.count !== d.count0) commitResizeSegment(sheet, d);
+    if (d.count === d.count0) return;
+    if (d.anim) commitResizeSegment(sheet, d);
+    else commitNewStripFromFrame(sheet, d.frame, d.side, d.count);
     return;
   }
 }
@@ -774,15 +794,35 @@ function chromeGeometry(view, sheet, anim, run) {
   return { members, bbox: b, fw, inserts, splits, grips };
 }
 
+function hitGrip(grips, sx, sy) {
+  for (const gr of grips)
+    if (sx >= gr.x - 2 && sx <= gr.x + gr.w + 2 && sy >= gr.y && sy <= gr.y + gr.h)
+      return { type: 'grip', side: gr.side };
+  return null;
+}
+
 function hitChrome(g, sx, sy) {
   for (const c of g.inserts)
     if (Math.hypot(sx - c.cx, sy - c.cy) <= CALLOUT_R + 2) return { type: 'insert', k: c.k };
   for (const c of g.splits)
     if (Math.hypot(sx - c.cx, sy - c.cy) <= CALLOUT_R + 2) return { type: 'split', k: c.k };
-  for (const gr of g.grips)
-    if (sx >= gr.x - 2 && sx <= gr.x + gr.w + 2 && sy >= gr.y && sy <= gr.y + gr.h)
-      return { type: 'grip', side: gr.side };
-  return null;
+  return hitGrip(g.grips, sx, sy);
+}
+
+// Same edge-grip geometry as chromeGeometry's, but for a single standalone
+// (non-strip) frame with no run/segment behind it -- lets a bare frame show
+// and hit-test the exact same "drag out" grips an intact strip uses to grow
+// itself (handleDown starts the strip's grow drag with anim: null, promoting
+// the frame into a brand-new strip -- see commitNewStripFromFrame).
+function standaloneGripGeometry(view, frame) {
+  const b = { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+  const p0 = view.imageToScreen(b.x, b.y);
+  const p1 = view.imageToScreen(b.x + b.w, b.y + b.h);
+  const grips = [
+    { side: 'left', x: p0.x - 3, y: p0.y, w: 6, h: p1.y - p0.y },
+    { side: 'right', x: p1.x - 3, y: p0.y, w: 6, h: p1.y - p0.y },
+  ];
+  return { bbox: b, fw: b.w, fh: b.h, grips };
 }
 
 // Chrome only ever targets the segment containing the currently SELECTED
@@ -803,8 +843,14 @@ function updateHover(ev, view) {
   const sheet = activeSheet();
   if (sheet && state.mode === 'sprites' && state.tool === 'frametool' && !drag) {
     const sel = selectedSegment(sheet);
-    const g = sel && chromeGeometry(view, sheet, sel.anim, sel.run);
-    if (g) next = hitChrome(g, ev.sx, ev.sy);
+    if (sel) {
+      const g = chromeGeometry(view, sheet, sel.anim, sel.run);
+      if (g) next = hitChrome(g, ev.sx, ev.sy);
+    } else {
+      const selectedFrame = sheet.frames.find(f => f.id === state.selectedFrameId);
+      if (selectedFrame && !stripOf(sheet, selectedFrame.id))
+        next = hitGrip(standaloneGripGeometry(view, selectedFrame).grips, ev.sx, ev.sy);
+    }
   }
   if (JSON.stringify(next) !== JSON.stringify(hover)) {
     hover = next;
@@ -827,6 +873,16 @@ function drawCallout(ctx, c, glyph, active) {
   ctx.fillText(glyph, c.cx, c.cy + 0.5);
 }
 
+function drawGrips(ctx, grips) {
+  for (const gr of grips) {
+    const active = hover?.type === 'grip' && hover.side === gr.side;
+    ctx.globalAlpha = active ? 1 : 0.7;
+    ctx.fillStyle = '#4f8cff';
+    ctx.fillRect(gr.x, gr.y, gr.w, gr.h);
+    ctx.globalAlpha = 1;
+  }
+}
+
 function drawChrome(ctx, view, sheet) {
   if (drag) return;
   const sel = selectedSegment(sheet);
@@ -838,13 +894,20 @@ function drawChrome(ctx, view, sheet) {
     drawCallout(ctx, c, '+', hover?.type === 'insert' && hover.k === c.k);
   for (const c of g.splits)
     drawCallout(ctx, c, '✂', hover?.type === 'split' && hover.k === c.k);
-  for (const gr of g.grips) {
-    const active = hover?.type === 'grip' && hover.side === gr.side;
-    ctx.globalAlpha = active ? 1 : 0.7;
-    ctx.fillStyle = '#4f8cff';
-    ctx.fillRect(gr.x, gr.y, gr.w, gr.h);
-    ctx.globalAlpha = 1;
-  }
+  drawGrips(ctx, g.grips);
+  ctx.restore();
+}
+
+// "Drag out as a new strip" chrome for a selected standalone frame: reuses
+// an intact strip's own edge-grip look (drawGrips) and geometry
+// (standaloneGripGeometry) so grabbing an edge and dragging away reads as
+// exactly the same gesture as growing an existing strip -- because that's
+// literally what handleDown/handleUp/commitNewStripFromFrame do with it.
+function drawStandaloneStripGrips(ctx, view, frame) {
+  if (drag) return;
+  const g = standaloneGripGeometry(view, frame);
+  ctx.save();
+  drawGrips(ctx, g.grips);
   ctx.restore();
 }
 
@@ -965,7 +1028,10 @@ export function drawStripChrome(ctx, view) {
     else drawRectDims(ctx, view, selected, { quiet: true });
   }
   // No resize handles on intact-strip members.
-  if (selected && !strip) drawHandles(ctx, view, selected);
+  if (selected && !strip) {
+    drawHandles(ctx, view, selected);
+    drawStandaloneStripGrips(ctx, view, selected);
+  }
   drawChrome(ctx, view, sheet);
 }
 
@@ -1264,6 +1330,66 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
     },
   };
   state.commands.push(cmd);
+  markDirty();
+  emit('selection');
+}
+
+// Dragging a standalone (non-strip) frame's own edge grip (standaloneGripGeometry
+// above) promotes it into a brand-new intact-strip animation: the frame
+// itself becomes member 0 (kept at its own id/position -- never duplicated),
+// renamed to match the new strip, and `count - 1` additional blank frames
+// are appended in the dragged direction, exactly like growing an existing
+// strip via commitResizeSegment's grip. One undoable command, mirroring
+// commitNewStrip's whole-array-snapshot idiom (frames/animations; the
+// frame's own name is snapshotted alongside since it gets renamed too).
+function commitNewStripFromFrame(sheet, frame, side, count) {
+  const extra = count - 1;
+  if (extra <= 0) return;
+  const fw = frame.w, fh = frame.h;
+  const duration = state.project?.settings?.durationMs ?? 100;
+  const name = `strip_${sheet.animations.length}`;
+
+  const beforeSheetFrames = sheet.frames.slice();
+  const beforeAnimations = sheet.animations.slice();
+  const beforeFrameName = frame.name;
+  const beforeSelectedAnimationId = state.selectedAnimationId;
+
+  const anim = addAnimation(sheet, name, true);
+  frame.name = `${name}_0`;
+  const entries = [{ frameId: frame.id, duration }];
+  for (let j = 0; j < extra; j++) {
+    const x = side === 'right' ? frame.x + (j + 1) * fw : frame.x - (j + 1) * fw;
+    const nf = addFrame(sheet, { name: `${name}_${j + 1}`, x, y: frame.y, w: fw, h: fh });
+    if (side === 'right') entries.push({ frameId: nf.id, duration });
+    else entries.unshift({ frameId: nf.id, duration });
+  }
+  anim.frames = entries;
+
+  const afterSheetFrames = sheet.frames.slice();
+  const afterAnimations = sheet.animations.slice();
+  const afterAnimFrames = anim.frames.map(e => ({ ...e }));
+  const afterFrameName = frame.name;
+  const animId = anim.id;
+  const frameId = frame.id;
+
+  state.commands.push({
+    label: 'new strip from frame',
+    do() {
+      sheet.frames = afterSheetFrames.slice();
+      sheet.animations = afterAnimations.slice();
+      anim.frames = afterAnimFrames.map(e => ({ ...e }));
+      frame.name = afterFrameName;
+      state.selectedFrameId = frameId;
+      state.selectedAnimationId = animId;
+    },
+    undo() {
+      sheet.frames = beforeSheetFrames.slice();
+      sheet.animations = beforeAnimations.slice();
+      frame.name = beforeFrameName;
+      state.selectedFrameId = frameId;
+      state.selectedAnimationId = beforeSelectedAnimationId;
+    },
+  });
   markDirty();
   emit('selection');
 }
