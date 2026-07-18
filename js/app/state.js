@@ -1,5 +1,5 @@
 import { CommandStack } from '../core/commands.js';
-import { createProject, createSheet, DEFAULT_SETTINGS, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers } from '../core/model.js';
+import { createProject, createSheet, DEFAULT_SETTINGS, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers, flattenLayers, layerAnimationContext } from '../core/model.js';
 
 // Test mode (?autotest): automated browser sessions suppress modal dialogs
 // (beforeunload guard, autosave-restore prompt, confirm() gates auto-accept).
@@ -54,6 +54,19 @@ export function currentContextLayers() {
   const sheet = activeSheet();
   if (!sheet) return [];
   return modelContextLayers(sheet, state.selectedAnimationId);
+}
+// Layers to sweep for an "all layers" operation (Alt+cut/copy, Alt+drag-
+// marquee-move) anchored to the CURRENTLY ACTIVE LAYER's own tree position,
+// not state.selectedAnimationId -- so it never disagrees with what's
+// actually selected in the layers panel. Narrows to just that layer's own
+// animation group (strip or plain) when it's nested under one; otherwise the
+// whole sheet, same as currentContextLayers()'s root fallback. See
+// docs/superpowers/specs/2026-07-18-strip-area-constraint-design.md.
+export function activeLayerScope() {
+  const sheet = activeSheet();
+  if (!sheet) return [];
+  const ctx = layerAnimationContext(sheet, activeLayer());
+  return ctx ? flattenLayers(ctx.group) : sheetLayers(sheet);
 }
 export function markDirty() { state.dirty = true; emit('project'); }
 export function setProject(project) {
