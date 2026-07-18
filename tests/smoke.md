@@ -196,9 +196,9 @@ is a pass condition for the whole run, not just the final step.
 48. [A] Clicking a terrain set's row opens its 47-slot editor below,
     grouped in ascending neighbor-count rows; the 16 core slots show a
     distinct (blue, thicker) border.
-48b. [A] Terrain-set editor's "View" dropdown (Staircase / Grid 6×8 / Grid
+48b. [A] Terrain-set editor's "View" dropdown (Staircase / Grid 8×6 / Grid
     7×7 / 16-tile only) rearranges the 47 slots on screen without changing
-    any slot's assignment (cosmetic only); "Grid 6×8"/"Grid 7×7" mirror the
+    any slot's assignment (cosmetic only); "Grid 8×6"/"Grid 7×7" mirror the
     real reference template's row/col layout 1:1 (including its duplicate
     "isolated"/"full surround" cells, which render as two on-screen cells
     bound to the same underlying slot). The layout-preset dropdown

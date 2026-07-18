@@ -47,7 +47,7 @@ function blobStaircaseGroups() {
 
 // Cosmetic-only arrangement of the same 47 slots in the terrain-set editor
 // -- never touches terrainSet.slots or any saved/imported layout preset.
-// 'staircase' | 'grid6x8' | 'grid7x7' | 'sixteen'.
+// 'staircase' | 'grid8x6' | 'grid7x7' | 'sixteen'.
 let terrainViewMode = 'staircase';
 
 // Mirrors the real reference template's row/col arrangement (not an
@@ -61,7 +61,7 @@ function gridFromRawTemplate(rawGrid) {
 }
 
 function slotGroupsForViewMode(mode) {
-  if (mode === 'grid6x8') return gridFromRawTemplate(BLOB47_8X6_RAW);
+  if (mode === 'grid8x6') return gridFromRawTemplate(BLOB47_8X6_RAW);
   if (mode === 'grid7x7') return gridFromRawTemplate(BLOB47_7X7_RAW);
   if (mode === 'sixteen') return [[...SIXTEEN_TILE_INDICES].sort((a, b) => a - b)];
   return blobStaircaseGroups();
@@ -1326,7 +1326,7 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
   const viewModeSelect = document.createElement('select');
   [
     ['staircase', 'Staircase'],
-    ['grid6x8', 'Grid 6×8'],
+    ['grid8x6', 'Grid 8×6'],
     ['grid7x7', 'Grid 7×7'],
     ['sixteen', '16-tile only'],
   ].forEach(([value, label]) => {

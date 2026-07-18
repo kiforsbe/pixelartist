@@ -18,7 +18,7 @@ Today, `classifySlots` already marks each blobIndex mandatory or optional (deriv
 
 New treatment, visually distinct from the existing duplicate-tile marker (orange) to avoid conflating "does nothing at all" with "works fine, just not required":
 - Terrain-slot grid (`renderTerrainSetEditor`): when `classInfo.mandatory === false && isExplicit === true`, add a `.terrain-slot.removable` class — muted blue/grey dashed outline + a small badge (e.g. `✓opt`), title text explains it's safe to clear.
-- Tile sheet overlay (`js/ui/overlays.js`): a tile with `t.terrainSetId != null` whose slot (`classifySlots(terrainSet.symmetry).get(t.blobIndex)`) is non-mandatory gets the same muted treatment on its chip/outline, distinct from the existing orange duplicate styling.
+- Tile sheet overlay (`js/ui/overlays.js`): an outline alone is too easy to miss here (unlike the small terrain-slot cells, sheet tiles are surrounded by other outlined tiles already). Instead, a tile with `t.terrainSetId != null` whose slot (`classifySlots(terrainSet.symmetry).get(t.blobIndex)`) is non-mandatory gets a translucent color wash filled across the *whole* tile (a semi-transparent muted blue/grey rectangle, distinct from the duplicate marker's orange), not just its border, plus its label chip. Covers the full cell so it reads at a glance even at small zoom levels, without obscuring the art underneath (low alpha).
 
 ## 3 & 10. Tiles panel — selection-driven, like Frames
 
@@ -50,7 +50,9 @@ Trigger: only on **grid deletion** (`commitDeleteGrid`/`removeTileGrid`), not in
 
 ## 7. Default view mode from creation preset
 
-`terrainViewMode` is currently a single module-level variable shared by *every* terrain set, always starting at `'staircase'`. That's actually two bugs: it never defaults to the preset that created it, and switching between two terrain sets leaks one's view-mode choice into the other. Fix both: replace the single variable with a `Map<terrainSetId, viewMode>` (module-level, transient — not persisted/exported, purely a UI nicety). When a terrain set is created from a built-in preset in the Add Terrain Set dialog, seed its entry with the matching mode (`'grid7x7'` for the 7×7 preset, `'grid6x8'` for 8×6, `'staircase'` otherwise). `renderTerrainSetEditor` reads/writes through this map keyed by `terrainSet.id` instead of a bare variable, falling back to `'staircase'` for terrain sets with no entry (e.g. ones created before this change, or via "(none — add tiles manually)").
+`terrainViewMode` is currently a single module-level variable shared by *every* terrain set, always starting at `'staircase'`. That's actually two bugs: it never defaults to the preset that created it, and switching between two terrain sets leaks one's view-mode choice into the other. Fix both: replace the single variable with a `Map<terrainSetId, viewMode>` (module-level, transient — not persisted/exported, purely a UI nicety). When a terrain set is created from a built-in preset in the Add Terrain Set dialog, seed its entry with the matching mode (`'grid7x7'` for the 7×7 preset, `'grid8x6'` for 8×6, `'staircase'` otherwise). `renderTerrainSetEditor` reads/writes through this map keyed by `terrainSet.id` instead of a bare variable, falling back to `'staircase'` for terrain sets with no entry (e.g. ones created before this change, or via "(none — add tiles manually)").
+
+**Note:** while implementing this, also fix the pre-existing `grid6x8`/"Grid 6×8" identifier and label to `grid8x6`/"Grid 8×6" — the layout is 8 columns × 6 rows (matches `BLOB47_8X6_RAW` and the correctly-named `blob47-8x6-reference.png` asset); only this view-mode id/label had the digits transposed. *(Already fixed directly in `js/ui/tilemode.js` and `tests/smoke.md`, ahead of this plan, since it was an isolated pre-existing bug unrelated to today's redesign.)*
 
 ## 8. Remove "View" label
 
