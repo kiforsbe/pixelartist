@@ -116,6 +116,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .terrain-slot.mandatory { border-color: #4f8cff; border-width: 2px; }
 .terrain-slot.optional { border-style: dashed; }
 .terrain-slot .badge { position: absolute; bottom: 0; right: 0; font-size: 8px; background: #000a; color: #fff; padding: 0 2px; }
+.terrain-slot.has-duplicates { outline: 2px dashed #e0a030; outline-offset: 1px; }
+.terrain-slot .duplicate-badge { bottom: auto; right: auto; top: 0; left: 0; background: rgba(90,58,0,.85); }
 .tile-picker-header { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
 .tile-picker-mask-inner { display: grid; grid-template-columns: repeat(3, 12px); grid-template-rows: repeat(3, 12px); gap: 1px; }
 .tile-picker-mask-cell { background: #222; border: 1px solid #444; }

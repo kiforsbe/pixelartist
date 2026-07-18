@@ -1254,15 +1254,6 @@ function renderLayoutPresetRow(container, sheet, terrainSet) {
     gridSelect.appendChild(opt);
   });
 
-  const preview = document.createElement('canvas');
-  preview.className = 'terrain-layout-preview';
-  const updatePreview = () => {
-    const preset = allPresets[Number(presetSelect.value)];
-    if (preset?.sourceImage) { preview.hidden = false; drawLayoutPreview(preview, preset); }
-    else { preview.hidden = true; }
-  };
-  presetSelect.addEventListener('change', updatePreview);
-
   const btnImport = document.createElement('button');
   btnImport.type = 'button';
   btnImport.textContent = '⬇';
@@ -1299,8 +1290,6 @@ function renderLayoutPresetRow(container, sheet, terrainSet) {
 
   row.append(presetSelect, gridSelect, btnImport, btnSave);
   container.appendChild(row);
-  container.appendChild(preview);
-  updatePreview();
 }
 
 function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) {
@@ -1369,7 +1358,6 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
       const mask = blobIndexToMask[blobIndex];
       let title = `${describeMask(mask)} — ${classInfo.mandatory ? 'mandatory' : 'optional'}`;
       if (resolved && !isExplicit) title += ` (derived: flipH=${resolved.flipH}, rotate=${resolved.rotate})`;
-      cell.title = title;
 
       if (resolved) {
         const tile = sheet.tiles.find(t => t.id === resolved.tileId);
@@ -1385,8 +1373,24 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
             badge.textContent = icons.join(' ');
             cell.appendChild(badge);
           }
+          // Some layout presets repeat a blobIndex across multiple physical
+          // tiles (js/core/terrainsets.js's applyLayoutPreset picks one as
+          // primary); those extras carry duplicateOf pointing back at this
+          // cell's tile. Flag it here too, not just on the tile sheet, so
+          // this thumbnail explains why identical-looking tiles elsewhere
+          // don't do anything when painted on.
+          const duplicateCount = sheet.tiles.filter(t => t.duplicateOf === tile.id).length;
+          if (duplicateCount > 0) {
+            cell.classList.add('has-duplicates');
+            title += ` — ${duplicateCount} linked duplicate tile(s) elsewhere on the sheet (safe to ignore)`;
+            const dupBadge = document.createElement('span');
+            dupBadge.className = 'badge duplicate-badge';
+            dupBadge.textContent = `⧉${duplicateCount}`;
+            cell.appendChild(dupBadge);
+          }
         }
       }
+      cell.title = title;
 
       cell.addEventListener('click', () => {
         tilePickerDialog.open(sheet, terrainSet, blobIndex, terrainSet.slots[blobIndex] ?? null,
