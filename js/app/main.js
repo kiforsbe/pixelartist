@@ -1,7 +1,8 @@
-import { state, on, emit, activeSheet, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
+import { state, on, emit, activeSheet, activeLayer, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
-import { flattenSheet, createSheet, sheetLayers } from '../core/model.js';
+import { flattenSheet, createSheet, sheetLayers, layerAnimationContext } from '../core/model.js';
+import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../core/strips.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
@@ -392,12 +393,32 @@ on('history', () => { invalidateScratch(); refreshCanvasView(); });
 // so the label-overlay highlight tracks state.selectedFrameId immediately.
 on('selection', () => canvasView.requestRender());
 
+// The sheet view's paint/float/paste target: normally the whole sheet, but
+// narrowed to the current SEGMENT of an accepted strip's own frames when the
+// active layer belongs to one (see docs/superpowers/specs/2026-07-18-strip-
+// area-constraint-design.md) -- painting/copy/paste/move on a strip's own
+// layer must never touch pixels outside the area its own frames occupy.
+// `x, y` is the point of interest (a stroke's down-point, a marquee/frame-
+// float's anchor corner, or a paste's original source position) -- when
+// omitted (pasting from the OS clipboard, with no natural anchor), falls
+// back to the segment of the currently selected frame, else the strip's
+// first segment.
+function sheetTargetRect(x, y) {
+  const sheet = activeSheet();
+  if (!sheet) return { x: 0, y: 0, w: 0, h: 0 };
+  const whole = { x: 0, y: 0, w: sheet.width, h: sheet.height };
+  const ctx = layerAnimationContext(sheet, activeLayer());
+  if (!ctx?.anim.strip) return whole;
+  const { anim } = ctx;
+  let run = (x != null && y != null) ? segmentOfPoint(sheet, anim, x, y)
+    : state.selectedFrameId ? segmentOfFrame(anim, state.selectedFrameId) : null;
+  if (!run && x == null && y == null) run = segmentsOf(anim)[0] ?? null;
+  return run ? segmentBounds(sheet, anim, run) : { x: 0, y: 0, w: 0, h: 0 };
+}
+
 // ---- drawing tools + panels ----
 mountToolPalette(document.getElementById('tool-panel'));
-bindDrawing(canvasView, () => {
-  const sheet = activeSheet();
-  return sheet ? { x: 0, y: 0, w: sheet.width, h: sheet.height } : { x: 0, y: 0, w: 0, h: 0 };
-});
+bindDrawing(canvasView, sheetTargetRect);
 // Frame tool: registerFrameTool() adds the palette button + its options row
 // (must run after mountToolPalette so the button can be appended to the
 // already-rendered palette — see tools.js's registerTool() hook). bindFrameTool

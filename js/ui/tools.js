@@ -277,24 +277,28 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     view.requestRender();
   });
 
-  // Clamp an image-space point into getTargetRect(); null when the target is
-  // empty (no sheet). Live drawing pre-masks coordinates with this so strokes
-  // cannot start or extend outside the editable rect.
-  function clampPoint(x, y) {
-    const t = getTargetRect();
-    if (t.w <= 0 || t.h <= 0) return null;
+  // Clamp an image-space point into `target`; null when the target is empty
+  // (no sheet, or outside any paintable segment). Live drawing pre-masks
+  // coordinates with this so strokes cannot start or extend outside the
+  // editable rect. `target` is resolved ONCE per stroke at handleDown and
+  // threaded through explicitly (not re-queried via getTargetRect() on every
+  // event) so a strip with multiple segments can't "flicker" mid-drag if the
+  // pointer strays near another segment -- mirrors how the select tool
+  // already freezes `selStroke.target` once at handleSelectDown.
+  function clampPoint(x, y, target) {
+    if (target.w <= 0 || target.h <= 0) return null;
     return {
-      x: Math.max(t.x, Math.min(t.x + t.w - 1, x)),
-      y: Math.max(t.y, Math.min(t.y + t.h - 1, y)),
+      x: Math.max(target.x, Math.min(target.x + target.w - 1, x)),
+      y: Math.max(target.y, Math.min(target.y + target.h - 1, y)),
     };
   }
 
-  // Restore `before` pixels outside the target rect within the given step
-  // bounds. Catches writes that coordinate clamping alone cannot prevent
-  // (brush stamps overflow up to brushSize-1 px past a clamped coordinate;
+  // Restore `before` pixels outside `target` within the given step bounds.
+  // Catches writes that coordinate clamping alone cannot prevent (brush
+  // stamps overflow up to brushSize-1 px past a clamped coordinate;
   // select-move can drag content past the target edge).
-  function maskOutsideTarget(bitmap, before, x0, y0, x1, y1) {
-    const t = getTargetRect();
+  function maskOutsideTarget(bitmap, before, x0, y0, x1, y1, target) {
+    const t = target;
     const bx0 = Math.max(0, x0), by0 = Math.max(0, y0);
     const bx1 = Math.min(bitmap.width - 1, x1), by1 = Math.min(bitmap.height - 1, y1);
     for (let y = by0; y <= by1; y++)
@@ -327,14 +331,13 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     };
   }
 
-  function finalize(layer, before, dirty, label) {
+  function finalize(layer, before, dirty, label, target) {
     if (!dirty) return;
     const bmp = layer.bitmap;
     // full extent the stroke may have touched, clamped to bitmap bounds only
     const fx0 = Math.max(dirty.minX, 0), fy0 = Math.max(dirty.minY, 0);
     const fx1 = Math.min(dirty.maxX, bmp.width - 1), fy1 = Math.min(dirty.maxY, bmp.height - 1);
     if (fx1 < fx0 || fy1 < fy0) return;
-    const target = getTargetRect();
     const x0 = Math.max(fx0, target.x);
     const y0 = Math.max(fy0, target.y);
     const x1 = Math.min(fx1, target.x + target.w - 1);
@@ -383,7 +386,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (tool === 'fill') {
       // only act when the seed is inside the target; flood a copy of the
       // target region so the fill cannot leak outside it
-      const t = getTargetRect();
+      const t = getTargetRect(ev.x, ev.y);
       if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
       const sub = copyRegion(layer.bitmap, t.x, t.y, t.w, t.h);
       const r = floodFill(sub, ev.x - t.x, ev.y - t.y, color, toolOptions.contiguous);
@@ -392,28 +395,30 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         blitRegion(layer.bitmap, sub, t.x, t.y);
         dirty = extend(null, t.x + r.x, t.y + r.y, t.x + r.x + r.w - 1, t.y + r.y + r.h - 1);
       }
-      finalize(layer, before, dirty, 'fill');
+      finalize(layer, before, dirty, 'fill', t);
       stroke = null;
       emit('pixels');
       return;
     }
     if (BRUSH_TOOLS.has(tool)) {
-      const p = clampPoint(ev.x, ev.y);
+      const target = getTargetRect(ev.x, ev.y);
+      const p = clampPoint(ev.x, ev.y, target);
       if (!p) return;
       drawLine(layer.bitmap, p.x, p.y, p.x, p.y, color, state.brushSize);
-      maskOutsideTarget(layer.bitmap, before, p.x, p.y, p.x + state.brushSize - 1, p.y + state.brushSize - 1);
+      maskOutsideTarget(layer.bitmap, before, p.x, p.y, p.x + state.brushSize - 1, p.y + state.brushSize - 1, target);
       const dirty = extend(null, p.x, p.y, p.x + state.brushSize - 1, p.y + state.brushSize - 1);
-      stroke = { tool, layer, before, color, dirty, last: p };
+      stroke = { tool, layer, before, color, dirty, last: p, target };
       emit('pixels');
       return;
     }
     if (SHAPE_TOOLS.has(tool)) {
-      const p = clampPoint(ev.x, ev.y);
+      const target = getTargetRect(ev.x, ev.y);
+      const p = clampPoint(ev.x, ev.y, target);
       if (!p) return;
       // filled shapes: outline in the pressed button's color, interior in the
       // opposite swatch (left = primary outline / secondary fill, right = swapped)
       const fill = (tool !== 'line' && toolOptions.filled) ? currentColor(ev, true) : null;
-      stroke = { tool, layer, before, color, fill, dirty: null, anchor: p };
+      stroke = { tool, layer, before, color, fill, dirty: null, anchor: p, target };
       emit('pixels');
       return;
     }
@@ -423,21 +428,21 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (!stroke) return;
     const { tool, layer, before, color } = stroke;
     if (BRUSH_TOOLS.has(tool)) {
-      const p = clampPoint(ev.x, ev.y);
+      const p = clampPoint(ev.x, ev.y, stroke.target);
       if (!p) return;
       const last = stroke.last;
       drawLine(layer.bitmap, last.x, last.y, p.x, p.y, color, state.brushSize);
       const sx0 = Math.min(last.x, p.x), sy0 = Math.min(last.y, p.y);
       const sx1 = Math.max(last.x, p.x) + state.brushSize - 1;
       const sy1 = Math.max(last.y, p.y) + state.brushSize - 1;
-      maskOutsideTarget(layer.bitmap, before, sx0, sy0, sx1, sy1);
+      maskOutsideTarget(layer.bitmap, before, sx0, sy0, sx1, sy1, stroke.target);
       stroke.dirty = extend(stroke.dirty, sx0, sy0, sx1, sy1);
       stroke.last = p;
       emit('pixels');
       return;
     }
     if (SHAPE_TOOLS.has(tool)) {
-      const p = clampPoint(ev.x, ev.y);
+      const p = clampPoint(ev.x, ev.y, stroke.target);
       if (!p) return;
       blitRegion(layer.bitmap, before, 0, 0);
       const a = stroke.anchor;
@@ -445,7 +450,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, state.brushSize);
         const sx1 = Math.max(a.x, p.x) + state.brushSize - 1;
         const sy1 = Math.max(a.y, p.y) + state.brushSize - 1;
-        maskOutsideTarget(layer.bitmap, before, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
+        maskOutsideTarget(layer.bitmap, before, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1, stroke.target);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
       } else if (tool === 'rect') {
         drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill);
@@ -462,8 +467,8 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   function handleUp(ev) {
     if (!stroke) return;
     handleMove(ev); // commit final pointer position (handles click-without-move too)
-    const { tool, layer, before, dirty } = stroke;
-    finalize(layer, before, dirty, tool);
+    const { tool, layer, before, dirty, target } = stroke;
+    finalize(layer, before, dirty, tool, target);
     stroke = null;
   }
 
@@ -512,7 +517,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   function handleSelectDown(ev) {
     acceptFloatingContextIfAny();
     if (!activeLayer()) return;
-    const target = getTargetRect();
+    const target = getTargetRect(ev.x, ev.y);
     const handle = hitSelHandle(ev);
     if (handle) {
       selStroke = { mode: 'resize', target, handle, orig: { ...selection }, anchor: { x: ev.x, y: ev.y }, moved: false };
