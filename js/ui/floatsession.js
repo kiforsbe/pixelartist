@@ -13,7 +13,7 @@ import { exportPngBlob } from '../app/io.js';
 
 const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, setSelection, getTargetRect}
 let floatCtx = null;     // { viewKind, targetRect } frozen at float creation (frame-editor confinement)
-let clipboard = null;    // { srcRect, layers: [{layerId, buffer}] }
+let clipboard = null;    // { srcRect, layers: [{layerId, buffer}], allLayers }
 
 export function registerFloatView(viewKind, api) { views.set(viewKind, api); }
 function activeView() { return views.get(state.view) ?? null; }
@@ -277,7 +277,7 @@ function clipboardCapture(allLayers, clearSource) {
   const { region } = rr;
   const captured = captureLayers(sheet, region, allLayers);
   if (!captured.length) return;
-  clipboard = { srcRect: { ...region }, layers: captured };
+  clipboard = { srcRect: { ...region }, layers: captured, allLayers };
   writeSystemClipboardImage(captured, region.w, region.h);
   if (!clearSource) return;
   state.commands.push({
@@ -351,15 +351,27 @@ export function pasteClipboard() {
   const pos = rectIntersect(srcRect, target)
     ? { x: srcRect.x, y: srcRect.y }
     : { x: target.x + Math.floor((target.w - srcRect.w) / 2), y: target.y + Math.floor((target.h - srcRect.h) / 2) };
-  // buffers reattach to their original layers when those still exist;
-  // otherwise flatten them (captured z-order) onto the active layer
-  let layers = clipboard.layers
-    .filter(e => layerIn(sheet, e.layerId))
-    .map(e => ({ layerId: e.layerId, buffer: cloneBitmap(e.buffer) }));
-  if (!layers.length) {
+  let layers;
+  if (clipboard.allLayers) {
+    // Multi-layer copy: each buffer reattaches to its own original layer
+    // when that layer still exists (preserves which pixels belonged to
+    // which layer); otherwise flatten the whole capture onto the active layer.
+    layers = clipboard.layers
+      .filter(e => layerIn(sheet, e.layerId))
+      .map(e => ({ layerId: e.layerId, buffer: cloneBitmap(e.buffer) }));
+    if (!layers.length) {
+      const al = activeLayer();
+      if (!al) return;
+      layers = [{ layerId: al.id, buffer: flattenCaptured(clipboard.layers, srcRect.w, srcRect.h) }];
+    }
+  } else {
+    // Single-layer copy: always pastes onto whichever layer is active RIGHT
+    // NOW, not the one it was copied from -- reattaching to the original
+    // layer regardless of the current selection meant copying from layer A,
+    // selecting layer B, and pasting still landed back on A.
     const al = activeLayer();
     if (!al) return;
-    layers = [{ layerId: al.id, buffer: flattenCaptured(clipboard.layers, srcRect.w, srcRect.h) }];
+    layers = [{ layerId: al.id, buffer: cloneBitmap(clipboard.layers[0].buffer) }];
   }
   installPastedFloat(viewApi, sheet, target, layers, srcRect.w, srcRect.h, pos);
 }
