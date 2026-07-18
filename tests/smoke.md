@@ -423,6 +423,19 @@ is a pass condition for the whole run, not just the final step.
     floating copy (source intact) that commits on `Enter` or tool switch.
     `Ctrl+X` cuts (one undo step); `Ctrl+Alt+C`/`Ctrl+Alt+X` capture all
     layers. Paste lands at the source position when visible, else centered.
+85a. [A] OS clipboard sync: after `Ctrl+C`/`Ctrl+Alt+C`, `navigator.clipboard
+    .read()` has one `image/png` item matching the copied region's size
+    (merged/blended pixels for `+Alt`). With the internal clipboard empty
+    (fresh reload), writing a PNG to the OS clipboard and dispatching a real
+    `Ctrl+V` keydown creates a floating selection on the active layer,
+    centered in the target rect, that commits normally. With the internal
+    clipboard non-empty, `Ctrl+V` still prefers it (source position,
+    per-layer reattachment) over the OS clipboard.
+85b. [M] Cross-app clipboard: copy a region in PixelArtist, `Ctrl+V` into
+    Word/Paint/another app — the flattened image pastes correctly. Copy an
+    image in Windows Photos/Snipping Tool, switch to PixelArtist with the
+    internal clipboard empty, `Ctrl+V` — it lands as a floating selection
+    centered on the canvas.
 86. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
     first; switching sheets or opening the frame editor also commits.
 

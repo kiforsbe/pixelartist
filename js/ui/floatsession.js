@@ -8,6 +8,8 @@ import { state, on, emit, activeSheet, activeLayer, markDirty, currentContextLay
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../core/pixels.js';
 import { findLayer } from '../core/model.js';
 import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../core/floating.js';
+import { decodePng } from '../app/pngcodec.js';
+import { exportPngBlob } from '../app/io.js';
 
 const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, setSelection, getTargetRect}
 let floatCtx = null;     // { viewKind, targetRect } frozen at float creation (frame-editor confinement)
@@ -48,6 +50,16 @@ function captureLayers(sheet, region, allLayers) {
     layerId: l.id,
     buffer: copyRegion(l.bitmap, region.x, region.y, region.w, region.h),
   }));
+}
+
+// Composites captured {layerId, buffer} entries (bottom-to-top, same order
+// captureLayers/currentContextLayers produced) into one bitmap -- used both
+// for the OS-clipboard PNG (always merged) and for pasteClipboard's
+// reattach-fails fallback (paste merged onto the active layer).
+function flattenCaptured(captured, w, h) {
+  const flat = createBitmap(w, h);
+  for (const e of captured) blitOver(flat, e.buffer, 0, 0);
+  return flat;
 }
 
 // region/frameIds: the move tool passes these when the drag starts on a frame
@@ -240,6 +252,21 @@ export function pushTransformCommand(before, after) {
 
 // ---- clipboard ----
 
+// Fire-and-forget: mirrors a copy/cut onto the OS clipboard as a flattened
+// PNG so it can be pasted into other apps (Word, an image editor, etc).
+// Silently no-ops without navigator.clipboard/ClipboardItem support (older
+// browsers, insecure context) or without permission -- the internal
+// clipboard variable above already covers same-app paste either way.
+async function writeSystemClipboardImage(captured, w, h) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') return;
+  try {
+    const blob = await exportPngBlob(flattenCaptured(captured, w, h));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+  } catch (e) {
+    console.warn(`Could not write image to system clipboard: ${e.message}`);
+  }
+}
+
 function clipboardCapture(allLayers, clearSource) {
   commitFloatIfAny();
   const viewApi = activeView();
@@ -251,6 +278,7 @@ function clipboardCapture(allLayers, clearSource) {
   const captured = captureLayers(sheet, region, allLayers);
   if (!captured.length) return;
   clipboard = { srcRect: { ...region }, layers: captured };
+  writeSystemClipboardImage(captured, region.w, region.h);
   if (!clearSource) return;
   state.commands.push({
     label: 'cut',
@@ -275,34 +303,12 @@ function clipboardCapture(allLayers, clearSource) {
 export function cutSelection(allLayers = false) { clipboardCapture(allLayers, true); }
 export function copySelection(allLayers = false) { clipboardCapture(allLayers, false); }
 
-export function pasteClipboard() {
-  if (!clipboard) return;
-  commitFloatIfAny();
-  const viewApi = activeView();
-  const sheet = activeSheet();
-  if (!viewApi || !sheet) return;
-  const target = viewApi.getTargetRect();
-  if (target.w <= 0 || target.h <= 0) return;
-  const { srcRect } = clipboard;
-  // land on the source position while it still intersects the target,
-  // otherwise centered in the target
-  const pos = rectIntersect(srcRect, target)
-    ? { x: srcRect.x, y: srcRect.y }
-    : { x: target.x + Math.floor((target.w - srcRect.w) / 2), y: target.y + Math.floor((target.h - srcRect.h) / 2) };
-  // buffers reattach to their original layers when those still exist;
-  // otherwise flatten them (captured z-order) onto the active layer
-  let layers = clipboard.layers
-    .filter(e => layerIn(sheet, e.layerId))
-    .map(e => ({ layerId: e.layerId, buffer: cloneBitmap(e.buffer) }));
-  if (!layers.length) {
-    const flat = createBitmap(srcRect.w, srcRect.h);
-    for (const e of clipboard.layers) blitOver(flat, e.buffer, 0, 0);
-    const al = activeLayer();
-    if (!al) return;
-    layers = [{ layerId: al.id, buffer: flat }];
-  }
+// Shared by pasteClipboard (internal) and pasteSystemImage (OS clipboard):
+// lands `layers` as a new cut:false float at `pos`, switches to the move
+// tool, and pushes one undoable 'paste' command.
+function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
   const float = {
-    sheetId: sheet.id, srcRect: { x: pos.x, y: pos.y, w: srcRect.w, h: srcRect.h },
+    sheetId: sheet.id, srcRect: { x: pos.x, y: pos.y, w, h },
     cut: false, layers, transform: makeTransform(),
   };
   const ctx = { viewKind: state.view, targetRect: { ...target } };
@@ -331,6 +337,77 @@ export function pasteClipboard() {
   markDirty();
 }
 
+export function pasteClipboard() {
+  if (!clipboard) return;
+  commitFloatIfAny();
+  const viewApi = activeView();
+  const sheet = activeSheet();
+  if (!viewApi || !sheet) return;
+  const target = viewApi.getTargetRect();
+  if (target.w <= 0 || target.h <= 0) return;
+  const { srcRect } = clipboard;
+  // land on the source position while it still intersects the target,
+  // otherwise centered in the target
+  const pos = rectIntersect(srcRect, target)
+    ? { x: srcRect.x, y: srcRect.y }
+    : { x: target.x + Math.floor((target.w - srcRect.w) / 2), y: target.y + Math.floor((target.h - srcRect.h) / 2) };
+  // buffers reattach to their original layers when those still exist;
+  // otherwise flatten them (captured z-order) onto the active layer
+  let layers = clipboard.layers
+    .filter(e => layerIn(sheet, e.layerId))
+    .map(e => ({ layerId: e.layerId, buffer: cloneBitmap(e.buffer) }));
+  if (!layers.length) {
+    const al = activeLayer();
+    if (!al) return;
+    layers = [{ layerId: al.id, buffer: flattenCaptured(clipboard.layers, srcRect.w, srcRect.h) }];
+  }
+  installPastedFloat(viewApi, sheet, target, layers, srcRect.w, srcRect.h, pos);
+}
+
+// Reads the first image/* item off the OS clipboard and decodes it to a
+// bitmap. decodePng's actual decode (createImageBitmap) sniffs the real
+// image format from content, not the Blob's declared type, so this works
+// for whatever format the source app offered (Windows normalizes most
+// clipboard image sources -- Photos, Snipping Tool, Paint -- to image/png).
+async function readSystemClipboardBitmap() {
+  if (!navigator.clipboard?.read) return null;
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (!type) continue;
+      const blob = await item.getType(type);
+      return await decodePng(new Uint8Array(await blob.arrayBuffer()));
+    }
+  } catch (e) {
+    console.warn(`Could not read system clipboard: ${e.message}`);
+  }
+  return null;
+}
+
+// Pastes an image from the OS clipboard (e.g. copied in Windows Photos, a
+// browser, Snipping Tool) as a new float on the active layer. Only called
+// when the internal clipboard is empty -- see onKeydown -- so a same-app
+// copy/paste always keeps its richer per-layer reattachment behavior.
+// There's no "original position" for an externally-sourced image, so it
+// always lands centered in the current view's target rect.
+async function pasteSystemImage() {
+  const bitmap = await readSystemClipboardBitmap();
+  if (!bitmap) return;
+  commitFloatIfAny();
+  const viewApi = activeView();
+  const sheet = activeSheet();
+  const al = activeLayer();
+  if (!viewApi || !sheet || !al) return;
+  const target = viewApi.getTargetRect();
+  if (target.w <= 0 || target.h <= 0) return;
+  const pos = {
+    x: target.x + Math.floor((target.w - bitmap.width) / 2),
+    y: target.y + Math.floor((target.h - bitmap.height) / 2),
+  };
+  installPastedFloat(viewApi, sheet, target, [{ layerId: al.id, buffer: bitmap }], bitmap.width, bitmap.height, pos);
+}
+
 // ---- auto-commit hooks + keyboard ----
 
 function onKeydown(e) {
@@ -340,7 +417,10 @@ function onKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
     if (key === 'x') { e.preventDefault(); cutSelection(e.altKey); return; }
     if (key === 'c') { e.preventDefault(); copySelection(e.altKey); return; }
-    if (key === 'v') { e.preventDefault(); pasteClipboard(); return; }
+    // internal clipboard wins when set (richer: per-layer reattachment,
+    // lands back at the source position) -- system clipboard is the
+    // fallback for pasting an image copied in another app.
+    if (key === 'v') { e.preventDefault(); if (clipboard) pasteClipboard(); else pasteSystemImage(); return; }
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey || !state.floating) return;
