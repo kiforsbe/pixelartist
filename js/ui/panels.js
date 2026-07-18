@@ -315,8 +315,12 @@ export function mountColorPanel(el) {
   dlgSys.appendChild(Object.assign(document.createElement('h3'), { textContent: 'System Palettes' }));
   const sysList = document.createElement('div'); sysList.className = 'sys-list';
   for (const sys of SYSTEM_PALETTES) {
-    const row = document.createElement('div'); row.className = 'row';
-    row.appendChild(Object.assign(document.createElement('span'), { textContent: `${sys.name} (${sys.colors.length})` }));
+    const card = document.createElement('div'); card.className = 'sys-palette-card';
+
+    const header = document.createElement('div'); header.className = 'row sys-palette-header';
+    header.appendChild(Object.assign(document.createElement('span'), {
+      className: 'sys-palette-name', textContent: `${sys.name} (${sys.colors.length})`,
+    }));
     const cloneBtn = document.createElement('button'); cloneBtn.textContent = 'Clone';
     cloneBtn.addEventListener('click', () => {
       if (!state.project) return;
@@ -328,8 +332,19 @@ export function mountColorPanel(el) {
       refreshPaletteSelect();
       refreshSwatchStrip();
     });
-    row.appendChild(cloneBtn);
-    sysList.appendChild(row);
+    header.appendChild(cloneBtn);
+    card.appendChild(header);
+
+    const preview = document.createElement('div'); preview.className = 'sys-palette-preview';
+    sys.colors.forEach((c) => {
+      const sw = document.createElement('span');
+      sw.className = 'sys-palette-swatch';
+      sw.style.background = cssColor(c);
+      preview.appendChild(sw);
+    });
+    card.appendChild(preview);
+
+    sysList.appendChild(card);
   }
   dlgSys.appendChild(sysList);
   const sysCloseRow = document.createElement('div'); sysCloseRow.className = 'row';
