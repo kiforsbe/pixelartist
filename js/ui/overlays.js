@@ -4,6 +4,7 @@
 // active during onOverlay), never baked into sheet bitmaps or exports.
 
 import { state, activeSheet } from '../app/state.js';
+import { classifySlots } from '../core/blob47.js';
 
 const FRAME_STROKE = '#4f8cff';
 const FRAME_FILL = 'rgba(79,140,255,.15)';
@@ -18,6 +19,9 @@ const CHIP_PAD_X = 4, CHIP_PAD_Y = 2, CHIP_LINE_H = 12;
 // doesn't look like it should do anything.
 const DUPLICATE_STROKE = '#e0a030';
 const DUPLICATE_CHIP_BG = 'rgba(90,58,0,.85)';
+// Distinct from DUPLICATE_STROKE/DUPLICATE_CHIP_BG's orange -- this is
+// "works fine, just not required", not "does nothing at all".
+const REMOVABLE_FILL = 'rgba(120,130,170,.35)';
 
 export function drawSheetOverlays(view, ctx) {
   const sheet = activeSheet();
@@ -95,6 +99,16 @@ function drawTileOverlays(view, ctx, sheet) {
       const p0 = view.imageToScreen(t.x, t.y);
       const p1 = view.imageToScreen(t.x + t.w, t.y + t.h);
       const isDuplicate = t.duplicateOf != null;
+      if (!isDuplicate && t.terrainSetId != null && t.blobIndex != null) {
+        const ts = sheet.terrainSets?.find(s => s.id === t.terrainSetId);
+        if (ts) {
+          const classInfo = classifySlots(ts.symmetry).get(t.blobIndex);
+          if (classInfo && !classInfo.mandatory) {
+            ctx.fillStyle = REMOVABLE_FILL;
+            ctx.fillRect(p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
+          }
+        }
+      }
       ctx.strokeStyle = isDuplicate ? DUPLICATE_STROKE : FRAME_STROKE;
       ctx.setLineDash(isDuplicate ? [3, 3] : []);
       ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, p1.x - p0.x - 1, p1.y - p0.y - 1);
