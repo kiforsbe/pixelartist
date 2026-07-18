@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createBitmap, cloneBitmap, getPixel, setPixel, drawLine, drawRect,
   drawEllipse, floodFill, copyRegion, blitRegion, fillRegion, flipBitmap,
-  colorsEqual,
+  colorsEqual, scaleBitmap,
 } from '../js/core/pixels.js';
 
 const RED = [255, 0, 0, 255], BLUE = [0, 0, 255, 255], CLEAR = [0, 0, 0, 0];
@@ -96,4 +96,19 @@ test('copy/blit/fill region and flip', () => {
   const f = flipBitmap(cut, true, false);
   assert.deepEqual(getPixel(f, 0, 0), BLUE);
   assert.ok(colorsEqual(getPixel(f, 1, 0), RED));
+});
+
+test('scaleBitmap: nearest-neighbor up/down-scale, no interpolation', () => {
+  const b = createBitmap(2, 2);
+  setPixel(b, 0, 0, RED); setPixel(b, 1, 0, BLUE);
+  setPixel(b, 0, 1, BLUE); setPixel(b, 1, 1, RED);
+  const up = scaleBitmap(b, 4, 4);
+  assert.equal(up.width, 4); assert.equal(up.height, 4);
+  assert.deepEqual(getPixel(up, 0, 0), RED);
+  assert.deepEqual(getPixel(up, 1, 0), RED); // still in the left half -> nearest source pixel
+  assert.deepEqual(getPixel(up, 2, 0), BLUE);
+  assert.deepEqual(getPixel(up, 3, 3), RED);
+  const down = scaleBitmap(b, 1, 1);
+  assert.equal(down.width, 1); assert.equal(down.height, 1);
+  assert.deepEqual(getPixel(down, 0, 0), RED); // samples source (0,0)
 });

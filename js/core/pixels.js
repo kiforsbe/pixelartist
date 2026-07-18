@@ -139,6 +139,20 @@ export function fillRegion(bmp, x, y, w, h, rgba) {
     for (let px = x; px < x + w; px++) setPixel(bmp, px, py, rgba);
 }
 
+// Nearest-neighbor resize -- pixel-art content should never end up blurred
+// by interpolation, even when destW/destH doesn't evenly divide bmp's size.
+export function scaleBitmap(bmp, destW, destH) {
+  const out = createBitmap(destW, destH);
+  for (let y = 0; y < destH; y++) {
+    const sy = Math.min(bmp.height - 1, Math.floor((y * bmp.height) / destH));
+    for (let x = 0; x < destW; x++) {
+      const sx = Math.min(bmp.width - 1, Math.floor((x * bmp.width) / destW));
+      setPixel(out, x, y, getPixel(bmp, sx, sy));
+    }
+  }
+  return out;
+}
+
 export function flipBitmap(bmp, flipH, flipV) {
   const out = createBitmap(bmp.width, bmp.height);
   for (let y = 0; y < bmp.height; y++)

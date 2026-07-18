@@ -47,14 +47,20 @@ export function cellsFromRawGrid(rawGrid) {
   return cells;
 }
 
+// sourceImage/sourceCellSize point at the bundled reference PNGs these
+// presets were pixel-derived from (see tests/blob47templates.test.mjs).
+// Only the two Blob-47 presets have a reference image to import art from;
+// the 16-tile preset is a synthetic ascending layout with no source art.
 export const BUILTIN_LAYOUT_PRESETS = [
   {
     name: 'Blob-47 (8×6)', cols: 8, rows: 6,
     cells: cellsFromRawGrid(BLOB47_8X6_RAW),
+    sourceImage: 'assets/blob47-templates/blob47-8x6-reference.png', sourceCellSize: 32,
   },
   {
     name: 'Blob-47 (7×7)', cols: 7, rows: 7,
     cells: cellsFromRawGrid(BLOB47_7X7_RAW),
+    sourceImage: 'assets/blob47-templates/blob47-7x7-reference.png', sourceCellSize: 32,
   },
   {
     name: '16-tile (4×4, ascending)', cols: 4, rows: 4,

@@ -8,8 +8,10 @@
 // element frames.js's mountFramesPanel does — see mountFramesPanel's wrap-div
 // comment for how the two coexist without clobbering each other.
 
-import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
-import { copyRegion, blitRegion, fillRegion } from '../core/pixels.js';
+import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto, currentContextLayers } from '../app/state.js';
+import { copyRegion, blitRegion, fillRegion, scaleBitmap } from '../core/pixels.js';
+import { makePixelPatch } from '../core/commands.js';
+import { decodePng } from '../app/pngcodec.js';
 import { registerTool } from './tools.js';
 import {
   gridCellRect, ownedTiles, relayoutGrid, resizeGridCols, resizeGridRows,
@@ -508,6 +510,53 @@ function commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, cols) {
   markDirty();
 }
 
+// Paints preset.sourceImage's reference art onto the active paint layer, one
+// crop per cell, at the freshly-created sourceTiles' sheet coordinates --
+// gives a terrain set real, recognizable slot art immediately instead of
+// blank tiles the user has to hand-draw one by one. Only wired into the "Add
+// terrain set" creation flow (fresh, definitely-blank tiles); never into
+// "import layout" onto an existing grid, which could carry real user art.
+async function importPresetArtOntoLayer(sheet, preset, sourceTiles, cols) {
+  if (!preset.sourceImage || !sourceTiles.length) return;
+  const layer = activeLayer();
+  if (!layer) return;
+
+  let refBitmap;
+  try {
+    const res = await fetch(preset.sourceImage);
+    refBitmap = await decodePng(new Uint8Array(await res.arrayBuffer()));
+  } catch (e) {
+    console.warn(`Could not import template art from ${preset.sourceImage}: ${e.message}`);
+    return;
+  }
+
+  const cellSize = preset.sourceCellSize ?? 32;
+  const minX = Math.min(...sourceTiles.map(t => t.x));
+  const minY = Math.min(...sourceTiles.map(t => t.y));
+  const maxX = Math.max(...sourceTiles.map(t => t.x + t.w));
+  const maxY = Math.max(...sourceTiles.map(t => t.y + t.h));
+  const rect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  const before = copyRegion(layer.bitmap, rect.x, rect.y, rect.w, rect.h);
+
+  const alreadyPainted = before.data.some((v, i) => i % 4 === 3 && v !== 0);
+  if (alreadyPainted && !confirmOrAuto(
+    `"${layer.name}" already has pixels where this grid lands. Overwrite them with the "${preset.name}" reference art?`
+  )) return;
+
+  for (const cell of preset.cells) {
+    const tile = sourceTiles[cell.row * cols + cell.col];
+    if (!tile) continue;
+    const cropped = copyRegion(refBitmap, cell.col * cellSize, cell.row * cellSize, cellSize, cellSize);
+    const painted = (tile.w === cellSize && tile.h === cellSize) ? cropped : scaleBitmap(cropped, tile.w, tile.h);
+    blitRegion(layer.bitmap, painted, tile.x, tile.y);
+  }
+
+  const after = copyRegion(layer.bitmap, rect.x, rect.y, rect.w, rect.h);
+  state.commands.push(makePixelPatch(layer.bitmap, rect, before, after, 'import terrain layout art'));
+  markDirty();
+  emit('pixels');
+}
+
 // Save-as-preset is metadata-only bookkeeping (terrainLayoutPresets), not
 // worth undo tracking on its own -- it doesn't touch tiles/terrainSets.
 function commitSaveLayoutPreset(sheet, name, cols, rows, cells) {
@@ -925,13 +974,21 @@ function buildAddTerrainSetDialog() {
     <div class="row"><label>Tile W <input type="number" id="ats-tilew" min="1" value="16"></label></div>
     <div class="row"><label>Tile H <input type="number" id="ats-tileh" min="1" value="16"></label></div>
     <div class="row"><label>Layout <select id="ats-layout"><option value="">(none -- add tiles manually)</option></select></label></div>
+    <div class="row"><img id="ats-layout-preview" class="terrain-layout-preview" hidden></div>
     <div class="row"><button type="button" id="ats-create">Create</button><button type="button" id="ats-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const $ = (sel) => dlg.querySelector(sel);
   let presets = [];
+  const updatePreview = () => {
+    const preset = presets[Number($('#ats-layout').value)];
+    const img = $('#ats-layout-preview');
+    if (preset?.sourceImage) { img.src = preset.sourceImage; img.hidden = false; }
+    else { img.removeAttribute('src'); img.hidden = true; }
+  };
+  $('#ats-layout').addEventListener('change', updatePreview);
   $('#ats-cancel').addEventListener('click', () => dlg.close());
-  $('#ats-create').addEventListener('click', () => {
+  $('#ats-create').addEventListener('click', async () => {
     const sheet = activeSheet();
     if (!sheet) { dlg.close(); return; }
     const intVal = (el) => Math.max(1, parseInt(el.value, 10) || 1);
@@ -948,6 +1005,7 @@ function buildAddTerrainSetDialog() {
       const { tiles } = commitAddGrid(sheet, { x: 0, y: 0, cellW: tileW, cellH: tileH, cols: preset.cols, rows: preset.rows });
       const sourceTiles = tiles.slice().sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
       commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, preset.cols);
+      await importPresetArtOntoLayer(sheet, preset, sourceTiles, preset.cols);
     }
 
     dlg.close();
@@ -968,6 +1026,7 @@ function buildAddTerrainSetDialog() {
         opt.textContent = `${p.name} (${p.cols}×${p.rows})`;
         layoutSelect.appendChild(opt);
       });
+      updatePreview();
 
       dlg.showModal();
     },
