@@ -5,7 +5,7 @@ import {
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
-  scrubTileReferences,
+  scrubTileReferences, layerAnimationContext,
 } from '../js/core/model.js';
 import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
 
@@ -213,6 +213,50 @@ test('flattenSheet leaves a floating (not-yet-accepted) strip transparent to wha
   a.frames = [{ frameId: f1.id, duration: 100 }];
   // not accepted -- a.layerGroupId is still null
   assert.deepEqual(getPixel(flattenSheet(s), 0, 0), [255, 0, 0, 255]);
+});
+
+test('layerAnimationContext returns null for a root layer', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  assert.equal(layerAnimationContext(s, sheetLayers(s)[0]), null);
+});
+
+test('layerAnimationContext returns null for a layer under a plain (non-animation) group', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  const g = addGroup(s, 'g1');
+  const layer = addLayer(s, 'inside', g.id);
+  assert.equal(layerAnimationContext(s, layer), null);
+});
+
+test('layerAnimationContext returns null for a null layer', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  assert.equal(layerAnimationContext(s, null), null);
+});
+
+test('layerAnimationContext resolves the owning animation for an accepted strip\'s own layer', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  const a = addAnimation(s, 'walk', true);
+  acceptAnimation(s, a);
+  const group = findGroup(s.layerTree, a.layerGroupId);
+  const layer = flattenLayers(group)[0];
+  const ctx = layerAnimationContext(s, layer);
+  assert.equal(ctx.anim, a);
+  assert.equal(ctx.group, group);
+});
+
+test('layerAnimationContext also resolves a plain (non-strip) animation\'s own layer', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  const a = addAnimation(s, 'anim_0'); // strip: false
+  acceptAnimation(s, a);
+  const group = findGroup(s.layerTree, a.layerGroupId);
+  const layer = flattenLayers(group)[0];
+  const ctx = layerAnimationContext(s, layer);
+  assert.equal(ctx.anim, a);
+  assert.equal(ctx.anim.strip, false);
 });
 
 test('createSheet tile kind starts with empty grids/tiles', () => {

@@ -269,6 +269,23 @@ export function contextLayers(sheet, animId = null) {
   return group ? flattenLayers(group) : sheetLayers(sheet);
 }
 
+// Given a layer, resolves the animation that owns it -- i.e. the layer is
+// nested directly under an animation-owned group (group.animationId set).
+// Returns null for a root layer, a layer under a plain (non-animation)
+// group, or a null layer. A layer can only be nested under an animation-
+// owned group after that animation has been accepted (see acceptAnimation)
+// -- a floating animation has no group/layer at all, so this never needs to
+// special-case "floating". Works for both strip and plain animations;
+// callers that care about strip-ness check ctx.anim.strip themselves.
+export function layerAnimationContext(sheet, layer) {
+  if (!layer) return null;
+  const loc = findParent(sheet.layerTree, layer.id);
+  const group = loc?.parent;
+  if (!group?.animationId) return null;
+  const anim = sheet.animations.find(a => a.id === group.animationId);
+  return anim ? { anim, group } : null;
+}
+
 // ---------------------------------------------------------------- frames / animations
 
 export function addFrame(sheet, { name, x, y, w, h, pivotX = 0, pivotY = 0 }) {
