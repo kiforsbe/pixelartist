@@ -334,10 +334,10 @@ test('contextLayers scopes to animation group or returns all layers', () => {
   addLayer(s, 'global');
   const beforeAnim = sheetLayers(s).map(l => l.id);
   const a = addAnimation(s, 'walk');
-  // all sheet layers include both root layers plus the two copied into the anim group
-  assert.equal(contextLayers(s).length, 4);
-  // scoped to the animation, only its private layers are returned
-  assert.equal(contextLayers(s, a.id).length, 2);
+  // 2 root layers + the single flattened layer copied into the new anim group
+  assert.equal(contextLayers(s).length, 3);
+  // scoped to the animation, only its own (single, flattened) layer is returned
+  assert.equal(contextLayers(s, a.id).length, 1);
   const animLayerIds = new Set(contextLayers(s, a.id).map(l => l.id));
   // animation layers are independent copies with new ids, not the originals
   for (const id of animLayerIds) assert.ok(!beforeAnim.includes(id));
@@ -346,11 +346,40 @@ test('contextLayers scopes to animation group or returns all layers', () => {
 test('flattenSheetLayers respects context and visibility', () => {
   const p = createProject('t');
   const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  addLayer(s, 'global');
-  const a = addAnimation(s, 'walk');
-  const animLayers = contextLayers(s, a.id);
-  animLayers[0].visible = false;
-  setPixel(animLayers[1].bitmap, 1, 1, [255, 0, 0, 255]);
-  const flat = flattenSheetLayers(animLayers, s.width, s.height);
+  const top = addLayer(s, 'global');
+  const layers = sheetLayers(s);
+  layers[0].visible = false;
+  setPixel(top.bitmap, 1, 1, [255, 0, 0, 255]);
+  const flat = flattenSheetLayers(layers, s.width, s.height);
   assert.deepEqual(getPixel(flat, 1, 1), [255, 0, 0, 255]);
+});
+
+test('addAnimation copies only root-level layers, never another animation\'s private layers', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  const a1 = addAnimation(s, 'walk');
+  // a1's own private layer must NOT be picked up when creating a2 -- only
+  // the sheet's root-level layers count, no matter how many other
+  // animation groups already sit under root.
+  const a2 = addAnimation(s, 'run');
+  const g2 = findGroup(s.layerTree, a2.layerGroupId);
+  assert.equal(flattenLayers(g2).length, 1);
+  const a1LayerIds = new Set(contextLayers(s, a1.id).map(l => l.id));
+  assert.ok(!a1LayerIds.has(flattenLayers(g2)[0].id));
+});
+
+test('addAnimation flattens multiple root layers into one for the new group', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]); // opaque red, full opacity
+  const top = addLayer(s, 'top');
+  top.opacity = 0.5;
+  setPixel(top.bitmap, 0, 0, [0, 0, 255, 255]); // blue @ 50% over red
+  const a = addAnimation(s, 'walk');
+  const g = findGroup(s.layerTree, a.layerGroupId);
+  const groupLayers = flattenLayers(g);
+  assert.equal(groupLayers.length, 1);
+  assert.equal(groupLayers[0].visible, true);
+  assert.equal(groupLayers[0].opacity, 1);
+  assert.deepEqual(getPixel(groupLayers[0].bitmap, 0, 0), [128, 0, 128, 255]);
 });

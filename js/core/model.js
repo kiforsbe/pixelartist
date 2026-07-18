@@ -265,17 +265,28 @@ export function removeFrame(sheet, frameId) {
 }
 
 export function addAnimation(sheet, name, strip = false) {
-  // Each animation owns a dedicated group under the root. The group is
-  // initialized with a copy of the current sheet-wide layers so the
-  // animation starts from the existing art.
+  // Each animation owns a dedicated group under the root, seeded from the
+  // sheet's OWN root-level layers only -- sheetLayers() flattens the WHOLE
+  // tree, which would wrongly pull in every OTHER animation's private
+  // layers too (they live in their own group, nested under root just like
+  // this new one is about to be). A single root layer is copied as-is
+  // (name/visible/opacity preserved); multiple root layers are flattened
+  // into one first, since a new animation starts from one merged snapshot
+  // of the base art, not a full copy of an unrelated layer stack.
   const group = createGroupNode(name);
-  for (const src of sheetLayers(sheet)) {
-    const copy = createLayerNode(src.name, sheet.width, sheet.height);
-    copy.bitmap = cloneBitmap(src.bitmap);
-    copy.visible = src.visible;
-    copy.opacity = src.opacity;
-    group.children.push(copy);
+  const rootLayers = sheet.layerTree.children.filter(n => n.type === LAYER);
+  const copy = createLayerNode(
+    rootLayers.length === 1 ? rootLayers[0].name : 'Layer 1',
+    sheet.width, sheet.height,
+  );
+  if (rootLayers.length === 1) {
+    copy.bitmap = cloneBitmap(rootLayers[0].bitmap);
+    copy.visible = rootLayers[0].visible;
+    copy.opacity = rootLayers[0].opacity;
+  } else if (rootLayers.length > 1) {
+    copy.bitmap = flattenSheetLayers(rootLayers, sheet.width, sheet.height);
   }
+  group.children.push(copy);
   sheet.layerTree.children.push(group);
 
   const anim = { id: newId('an'), name, loop: true, strip, breaks: [], frames: [], layerGroupId: group.id };
