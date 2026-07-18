@@ -1254,6 +1254,15 @@ function renderLayoutPresetRow(container, sheet, terrainSet) {
     gridSelect.appendChild(opt);
   });
 
+  const preview = document.createElement('canvas');
+  preview.className = 'terrain-layout-preview';
+  const updatePreview = () => {
+    const preset = allPresets[Number(presetSelect.value)];
+    if (preset?.sourceImage) { preview.hidden = false; drawLayoutPreview(preview, preset); }
+    else { preview.hidden = true; }
+  };
+  presetSelect.addEventListener('change', updatePreview);
+
   const btnImport = document.createElement('button');
   btnImport.type = 'button';
   btnImport.textContent = '⬇';
@@ -1290,6 +1299,8 @@ function renderLayoutPresetRow(container, sheet, terrainSet) {
 
   row.append(presetSelect, gridSelect, btnImport, btnSave);
   container.appendChild(row);
+  container.appendChild(preview);
+  updatePreview();
 }
 
 function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) {
