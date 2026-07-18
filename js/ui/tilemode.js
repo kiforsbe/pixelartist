@@ -48,8 +48,16 @@ function blobStaircaseGroups() {
 
 // Cosmetic-only arrangement of the same 47 slots in the terrain-set editor
 // -- never touches terrainSet.slots or any saved/imported layout preset.
-// 'staircase' | 'grid8x6' | 'grid7x7' | 'sixteen'.
-let terrainViewMode = 'staircase';
+// 'staircase' | 'grid8x6' | 'grid7x7' | 'sixteen'. Keyed per terrain set
+// (not a single shared variable) so switching between two terrain sets
+// doesn't leak one's view-mode choice into the other; transient, not
+// persisted/exported -- purely a UI nicety, seeded at creation time by
+// commitAddTerrainSet's caller (see buildAddTerrainSetDialog) to match
+// whichever built-in preset was used.
+const terrainSetViewModes = new Map();
+function viewModeFor(terrainSetId) {
+  return terrainSetViewModes.get(terrainSetId) ?? 'staircase';
+}
 
 // Mirrors the real reference template's row/col arrangement (not an
 // arbitrary ascending-index chunking) so this cosmetic view is a 1:1
@@ -1055,6 +1063,8 @@ function buildAddTerrainSetDialog() {
       const { tiles } = commitAddGrid(sheet, { x: 0, y: 0, cellW: tileW, cellH: tileH, cols: preset.cols, rows: preset.rows });
       const sourceTiles = tiles.slice().sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
       commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, preset.cols);
+      const seededMode = preset.name.includes('8×6') ? 'grid8x6' : preset.name.includes('7×7') ? 'grid7x7' : null;
+      if (seededMode) terrainSetViewModes.set(terrainSet.id, seededMode);
       await importPresetArtOntoLayer(sheet, preset, sourceTiles, preset.cols);
     }
 
@@ -1256,8 +1266,6 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
 
   const viewModeRow = document.createElement('div');
   viewModeRow.className = 'row';
-  const viewModeLabel = document.createElement('label');
-  viewModeLabel.appendChild(document.createTextNode('View '));
   const viewModeSelect = document.createElement('select');
   [
     ['staircase', 'Staircase'],
@@ -1269,17 +1277,16 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
     opt.value = value; opt.textContent = label;
     viewModeSelect.appendChild(opt);
   });
-  viewModeSelect.value = terrainViewMode;
+  viewModeSelect.value = viewModeFor(terrainSet.id);
   viewModeSelect.addEventListener('change', () => {
-    terrainViewMode = viewModeSelect.value;
+    terrainSetViewModes.set(terrainSet.id, viewModeSelect.value);
     renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog);
   });
-  viewModeLabel.appendChild(viewModeSelect);
-  viewModeRow.appendChild(viewModeLabel);
+  viewModeRow.appendChild(viewModeSelect);
   container.appendChild(viewModeRow);
 
   const classification = classifySlots(terrainSet.symmetry);
-  for (const group of slotGroupsForViewMode(terrainViewMode)) {
+  for (const group of slotGroupsForViewMode(viewModeFor(terrainSet.id))) {
     const groupRow = document.createElement('div');
     groupRow.className = 'terrain-slot-group';
     for (const blobIndex of group) {
