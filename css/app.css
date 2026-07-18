@@ -111,6 +111,20 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 /* tiles panel */
 .tile-selected { cursor: default; }
 .tile-selected input[type="text"] { flex: 1; min-width: 0; }
+.tile-name-field { font-size: 10px; margin-bottom: 2px; }
+.tag-field { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.tag-field-label { font-size: 10px; color: #9a9ca8; }
+.tag-input { display: flex; flex-wrap: wrap; gap: 3px; align-items: center;
+  padding: 3px 4px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg); cursor: text; }
+.tag-input:focus-within { border-color: var(--accent); }
+.tag-pill { display: inline-flex; align-items: center; gap: 2px; background: var(--bg3);
+  border-radius: 3px; padding: 1px 4px; font-size: 10px; white-space: nowrap; }
+.tag-pill button { background: none; border: none; padding: 0; margin: 0;
+  color: #9a9ca8; cursor: pointer; font-size: 10px; line-height: 1; }
+.tag-pill button:hover { color: #fff; }
+.tag-entry { flex: 1; min-width: 60px; background: transparent; border: none;
+  outline: none; color: inherit; font-size: 11px; padding: 1px 2px; }
 .terrain-slot-group { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
 .terrain-slot { width: 28px; height: 28px; border: 1px solid #444; cursor: pointer; position: relative; background-size: cover; }
 .terrain-slot.mandatory { border-color: #4f8cff; border-width: 2px; }

@@ -488,10 +488,11 @@ function syncSelectedTerrainSetFromTile(tile) {
 function terrainSetNameField(terrainSet) {
   const field = document.createElement('label');
   field.className = 'frame-field';
-  field.appendChild(document.createTextNode('Name'));
+  field.appendChild(document.createTextNode('Set name'));
   const input = document.createElement('input');
   input.type = 'text';
   input.value = terrainSet.name;
+  input.title = 'Name of the whole terrain set (shared by every tile in it) — separate from this tile\'s own name above';
   input.addEventListener('click', (e) => e.stopPropagation());
   input.addEventListener('change', () => {
     const v = input.value.trim();
@@ -717,6 +718,80 @@ function commitTileTags(tile, tagsText) {
     undo() { tile.tags = before ? [...before] : undefined; },
   });
   markDirty();
+}
+
+// Singleton-panel UI state (mirrors terrainSetViewModes above): tracks
+// whether the tags pill editor's live entry field should reclaim focus
+// after the next render. Committing a tag rebuilds the whole Tiles panel
+// DOM (same debounced schedule() as every other field here), which would
+// otherwise steal focus out of the entry mid-edit.
+let tagsFocusPending = false;
+
+// Renders tile.tags as removable pills plus a live entry field that commits
+// a new pill on Space/Comma/Enter, on blur (so trailing text isn't lost if
+// the user just clicks away), or via Backspace-on-empty (removes the last
+// pill). Pasting a comma/space-separated string splits it into multiple
+// pills at once. Meant to be appended as its own full-width row (a sibling
+// of the W/H/Layer fields grid, not a cell inside it) so pills have room to
+// wrap onto multiple lines.
+function buildTagsField(tile) {
+  const wrap = document.createElement('div');
+  wrap.className = 'tag-field';
+  const label = document.createElement('span');
+  label.className = 'tag-field-label';
+  label.textContent = 'Tags';
+  const box = document.createElement('div');
+  box.className = 'tag-input';
+
+  const tags = (tile.tags ?? []).slice();
+  const commit = (next) => { tagsFocusPending = true; commitTileTags(tile, next.join(',')); };
+
+  const entry = document.createElement('input');
+  entry.type = 'text';
+  entry.className = 'tag-entry';
+  entry.placeholder = tags.length ? '' : 'add tag…';
+
+  tags.forEach((tag, i) => {
+    const pill = document.createElement('span');
+    pill.className = 'tag-pill';
+    pill.appendChild(document.createTextNode(tag));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '✕';
+    remove.title = `Remove "${tag}"`;
+    remove.addEventListener('click', (e) => { e.stopPropagation(); commit(tags.filter((_, j) => j !== i)); });
+    pill.appendChild(remove);
+    box.appendChild(pill);
+  });
+
+  function addFromEntry() {
+    const parts = entry.value.split(/[, ]+/).map(s => s.trim()).filter(Boolean);
+    if (!parts.length) return;
+    // Cleared BEFORE commit: render() rebuilds this whole panel (wiping
+    // this now-stale entry out of the DOM), which fires a native blur on
+    // it since it's still focused -- the blur handler below re-reads
+    // entry.value, so a leftover value here would resubmit itself as a
+    // duplicate commit.
+    entry.value = '';
+    commit([...tags, ...parts]);
+  }
+
+  entry.addEventListener('keydown', (e) => {
+    if (e.key === ',' || e.key === ' ' || e.key === 'Enter') { e.preventDefault(); addFromEntry(); }
+    else if (e.key === 'Backspace' && entry.value === '' && tags.length) commit(tags.slice(0, -1));
+  });
+  entry.addEventListener('blur', () => { if (entry.value.trim()) addFromEntry(); });
+  entry.addEventListener('paste', (e) => {
+    e.preventDefault();
+    entry.value += (e.clipboardData ?? window.clipboardData).getData('text');
+    addFromEntry();
+  });
+  box.addEventListener('click', (e) => { if (e.target === box) entry.focus(); });
+
+  box.appendChild(entry);
+  wrap.append(label, box);
+  if (tagsFocusPending) { tagsFocusPending = false; queueMicrotask(() => entry.focus()); }
+  return wrap;
 }
 
 function commitTileName(tile, name) {
@@ -1527,17 +1602,26 @@ export function mountTilePanel(el) {
     }
     selRow.classList.add('active');
 
+    const grid = tile.gridId != null ? sheet.tileGrids.find(g => g.id === tile.gridId) : null;
+    const terrainSet = tile.terrainSetId != null ? sheet.terrainSets.find(ts => ts.id === tile.terrainSetId) : null;
+
+    const nameField = document.createElement('label');
+    nameField.className = 'frame-field tile-name-field';
+    nameField.appendChild(document.createTextNode('Tile name'));
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.className = 'frame-name';
     nameInput.value = tile.name || '';
-    nameInput.placeholder = 'name';
+    nameInput.placeholder = `#${sheet.tiles.indexOf(tile)}`;
+    nameInput.title = terrainSet
+      ? 'Optional alias for this one tile — tiles are identified by their index (#N) on the sheet when unnamed. Separate from the whole terrain set\'s own "Set name" below.'
+      : 'Optional alias for this tile — tiles are identified by their index (#N) on the sheet when unnamed.';
     nameInput.addEventListener('change', () => commitTileName(tile, nameInput.value.trim()));
+    nameField.appendChild(nameInput);
 
     const fields = document.createElement('div');
     fields.className = 'frame-fields';
 
-    const grid = tile.gridId != null ? sheet.tileGrids.find(g => g.id === tile.gridId) : null;
     if (grid) {
       fields.append(
         sizeField('W', grid.cellW, (v) => commitGridCellField(sheet, grid, 'cellW', v)),
@@ -1550,7 +1634,6 @@ export function mountTilePanel(el) {
       );
     }
 
-    const terrainSet = tile.terrainSetId != null ? sheet.terrainSets.find(ts => ts.id === tile.terrainSetId) : null;
     if (terrainSet) {
       fields.append(terrainSetNameField(terrainSet), terrainSetLayerField(sheet, terrainSet));
     } else {
@@ -1572,17 +1655,7 @@ export function mountTilePanel(el) {
       fields.appendChild(layerField);
     }
 
-    const tagsField = document.createElement('label');
-    tagsField.className = 'frame-field';
-    tagsField.appendChild(document.createTextNode('Tags'));
-    const tagsInput = document.createElement('input');
-    tagsInput.type = 'text';
-    tagsInput.placeholder = 'comma, separated';
-    tagsInput.value = (tile.tags ?? []).join(', ');
-    tagsInput.addEventListener('change', () => commitTileTags(tile, tagsInput.value));
-    tagsField.appendChild(tagsInput);
-
-    fields.appendChild(tagsField);
+    const tagsField = buildTagsField(tile);
 
     const actions = document.createElement('div');
     actions.className = 'row layer-actions';
@@ -1607,7 +1680,7 @@ export function mountTilePanel(el) {
     }
     if (terrainSet) actions.appendChild(btnDeleteTerrainSet(sheet, terrainSet));
 
-    selRow.append(nameInput, fields, actions);
+    selRow.append(nameField, fields, tagsField, actions);
   }
 
   let queued = false;
