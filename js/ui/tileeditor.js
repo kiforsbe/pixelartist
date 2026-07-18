@@ -464,5 +464,5 @@ export function mountTileEditor(hostEl) {
   on('pixels', () => { invalidateFlat(); if (visible) view.requestRender(); });
   on('selection', () => { if (visible) view.requestRender(); });
 
-  return { show, hide };
+  return { show, hide, view };
 }

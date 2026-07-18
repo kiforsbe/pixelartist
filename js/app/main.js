@@ -542,6 +542,15 @@ const frameEditor = mountFrameEditor(canvasHost);
 // the app's lifetime.
 const tileEditor = mountTileEditor(canvasHost);
 
+// ---- view: zoom ----
+function activeCanvasView() {
+  return state.view === 'frame' ? frameEditor.view : state.view === 'tile' ? tileEditor.view : canvasView;
+}
+defineAction('view.zoomIn', { label: 'Zoom In', run: () => activeCanvasView().zoomIn() });
+defineAction('view.zoomOut', { label: 'Zoom Out', run: () => activeCanvasView().zoomOut() });
+defineAction('view.actualSize', { label: 'Actual Size (100%)', run: () => activeCanvasView().actualSize() });
+defineAction('view.zoomToFit', { label: 'Zoom to Fit', run: () => activeCanvasView().fitToView() });
+
 // ---- menu bar ----
 // Later tasks extend this array (more items per menu, more menus) and add
 // the defineAction calls those items reference — menubar.js skips any item
@@ -565,7 +574,8 @@ const MENUS = [
     { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' },
   ] },
   { label: 'View', items: [
-    { action: 'view.toggleLabels' }, { action: 'view.toggleSequences' },
+    { action: 'view.toggleLabels' }, { action: 'view.toggleSequences' }, { separator: true },
+    { action: 'view.zoomIn' }, { action: 'view.zoomOut' }, { action: 'view.actualSize' }, { action: 'view.zoomToFit' },
   ] },
 ];
 mountMenuBar(document.getElementById('menubar'), MENUS);

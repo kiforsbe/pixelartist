@@ -222,15 +222,26 @@ export class CanvasView {
   _onWheel(e) {
     e.preventDefault();
     const { sx, sy } = this._localPos(e);
+    this._zoomAround(sx, sy, stepZoom(this.zoom, e.deltaY < 0 ? 1 : -1));
+    this._reportStatus(sx, sy);
+  }
+
+  // Shared by wheel-zoom (anchored at the cursor) and the zoom actions below
+  // (anchored at the viewport center, since there's no cursor position to
+  // anchor a menu click to).
+  _zoomAround(sx, sy, newZoom) {
     const imgX = (sx - this.panX) / this.zoom;
     const imgY = (sy - this.panY) / this.zoom;
-    const newZoom = stepZoom(this.zoom, e.deltaY < 0 ? 1 : -1);
     this.zoom = newZoom;
     this.panX = sx - imgX * newZoom;
     this.panY = sy - imgY * newZoom;
-    this._reportStatus(sx, sy);
     this.requestRender();
   }
+
+  zoomIn() { this._zoomAround(this.cssWidth / 2, this.cssHeight / 2, stepZoom(this.zoom, 1)); }
+  zoomOut() { this._zoomAround(this.cssWidth / 2, this.cssHeight / 2, stepZoom(this.zoom, -1)); }
+  actualSize() { this._zoomAround(this.cssWidth / 2, this.cssHeight / 2, 1); }
+  fitToView() { this.centerFit(); this.requestRender(); }
 
   _onPointerDown(e) {
     try { this.canvas.setPointerCapture(e.pointerId); } catch { /* no active pointer to capture */ }
