@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { BLOB47_8X6_RAW, BLOB47_7X7_RAW } from '../js/core/blob47templates.js';
+import { BLOB47_8X6_RAW, BLOB47_7X7_RAW, neighborBlobIndex, terrainNeighborPreviewCells } from '../js/core/blob47templates.js';
+import { maskToBlobIndex } from '../js/core/blob47.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSET_DIR = path.join(__dirname, '..', 'assets', 'blob47-templates');
@@ -165,4 +166,54 @@ test('BLOB47_7X7_RAW matches its bundled reference image, re-derived from the ar
   assert.equal(bmp.height, 224);
   const derived = deriveMaskGrid(bmp, 7, 7, 32);
   assert.deepEqual(derived, BLOB47_7X7_RAW);
+});
+
+// Reported bug: mask 85 (N+E+S+W, no corners) sits at (col:2, row:2) in the
+// 8x6 template (row2 = [29, 117, 85, 95, 247, 215, 209, 1]) -- its N/S/E/W
+// grid-adjacent neighbors are masks 87/81/95/117, not itself.
+test('neighborBlobIndex: mask-85 example matches the 8x6 reference template exactly', () => {
+  const center = maskToBlobIndex[85];
+  assert.equal(neighborBlobIndex(center, 0, -1), maskToBlobIndex[87]); // N
+  assert.equal(neighborBlobIndex(center, 0, 1), maskToBlobIndex[81]); // S
+  assert.equal(neighborBlobIndex(center, 1, 0), maskToBlobIndex[95]); // E
+  assert.equal(neighborBlobIndex(center, -1, 0), maskToBlobIndex[117]); // W
+});
+
+test('neighborBlobIndex returns null one step past the 8x6 grid edge', () => {
+  // top-left cell (mask 20, col:0 row:0) has no tile further north or west.
+  assert.equal(neighborBlobIndex(maskToBlobIndex[20], 0, -1), null);
+  assert.equal(neighborBlobIndex(maskToBlobIndex[20], -1, 0), null);
+});
+
+test('terrainNeighborPreviewCells: mask-85 center resolves distinct N/S/E/W tiles from the terrain set, not itself', () => {
+  const center = maskToBlobIndex[85];
+  const tile = { id: 'center-tile', blobIndex: center };
+  const terrainSet = {
+    symmetry: { flip: false, rotate: false },
+    slots: {
+      [maskToBlobIndex[87]]: 'tile-N',
+      [maskToBlobIndex[81]]: 'tile-S',
+      [maskToBlobIndex[95]]: 'tile-E',
+      [maskToBlobIndex[117]]: 'tile-W',
+    },
+  };
+  const cells = terrainNeighborPreviewCells(tile, terrainSet);
+  const byDir = Object.fromEntries(cells.map(c => [`${c.dx},${c.dy}`, c]));
+  assert.equal(byDir['0,-1'].tileId, 'tile-N');
+  assert.equal(byDir['0,1'].tileId, 'tile-S');
+  assert.equal(byDir['1,0'].tileId, 'tile-E');
+  assert.equal(byDir['-1,0'].tileId, 'tile-W');
+  // corner directions carry no connection in mask 85 -- must stay empty,
+  // never fall back to the center tile itself.
+  for (const [dx, dy] of [[1, -1], [1, 1], [-1, 1], [-1, -1]]) {
+    assert.equal(byDir[`${dx},${dy}`].tileId, null);
+  }
+});
+
+test('terrainNeighborPreviewCells: unresolved neighbor slot stays empty rather than showing the center tile', () => {
+  const center = maskToBlobIndex[85];
+  const tile = { id: 'center-tile', blobIndex: center };
+  const terrainSet = { symmetry: { flip: false, rotate: false }, slots: {} };
+  const cells = terrainNeighborPreviewCells(tile, terrainSet);
+  assert.ok(cells.every(c => c.tileId === null));
 });

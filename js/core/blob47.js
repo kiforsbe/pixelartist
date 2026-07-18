@@ -52,17 +52,6 @@ export const DIRECTION_OFFSETS = [
   { dx: -1, dy: -1, bit: NEIGHBOR_BITS.NW },
 ];
 
-// No spatial lookup: a terrain tile's OWN blobIndex already states which
-// directions its terrain continues in, so the preview is self-contained.
-export function terrainPreviewCells(tile) {
-  const mask = blobIndexToMask[tile.blobIndex];
-  return DIRECTION_OFFSETS.map(({ dx, dy, bit }) => ({
-    dx, dy,
-    tileId: (mask & bit) ? tile.id : null,
-    flipH: false, flipV: false,
-  }));
-}
-
 // ---------------------------------------------------------------- 16-tile subset
 
 const CARDINAL_BITS = [NEIGHBOR_BITS.N, NEIGHBOR_BITS.E, NEIGHBOR_BITS.S, NEIGHBOR_BITS.W];

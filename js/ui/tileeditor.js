@@ -43,7 +43,7 @@ import { CanvasView } from './canvasview.js';
 import { bindDrawing } from './tools.js';
 import { flattenSheet } from '../core/model.js';
 import { getPreset, setSlot, resolveNeighborGrid } from '../core/neighbors.js';
-import { terrainPreviewCells } from '../core/blob47.js';
+import { terrainNeighborPreviewCells } from '../core/blob47templates.js';
 
 function isTypingTarget(el) {
   if (!el) return false;
@@ -182,17 +182,26 @@ export function mountTileEditor(hostEl) {
   }
 
   // Draws `tile`'s current flattened pixels into the neighbor-grid cell at
-  // (dx, dy) (tile units relative to center, 0,0 = center), applying flips
-  // around that cell's own bounds. tw/th are the CENTER tile's own size —
-  // a differently-sized neighbor's source rect is stretched into it (an
+  // (dx, dy) (tile units relative to center, 0,0 = center), applying flip
+  // and (for terrain-set symmetry-derived slots) rotation around that
+  // cell's own bounds -- same transform order as tilemode.js's
+  // tileThumbnailURL, so a slot previews identically here and in the
+  // Autotiles panel. tw/th are the CENTER tile's own size — a
+  // differently-sized neighbor's source rect is stretched into it (an
   // accepted, minor visual quirk for mixed-size neighbors; Phase B's terrain
   // sets are the real fix, since a terrain set requires uniform tile size).
-  function drawTileCell(ctx, flatCanvasEl, tile, dx, dy, flipH, flipV, tw, th) {
+  function drawTileCell(ctx, flatCanvasEl, tile, dx, dy, flipH, flipV, tw, th, rotate = 0) {
     const destX = (dx + radius) * tw;
     const destY = (dy + radius) * th;
     ctx.save();
-    ctx.translate(destX + (flipH ? tw : 0), destY + (flipV ? th : 0));
+    ctx.translate(destX, destY);
+    ctx.translate(flipH ? tw : 0, flipV ? th : 0);
     ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+    if (rotate) {
+      ctx.translate(tw / 2, th / 2);
+      ctx.rotate((rotate * Math.PI) / 180);
+      ctx.translate(-tw / 2, -th / 2);
+    }
     ctx.drawImage(flatCanvasEl, tile.x, tile.y, tile.w, tile.h, 0, 0, tw, th);
     ctx.restore();
   }
@@ -203,7 +212,13 @@ export function mountTileEditor(hostEl) {
     if (!sheet || !t) return;
     const tw = t.w, th = t.h;
     const flat = getFlatCanvas(sheet);
-    const cells = t.terrainSetId != null ? terrainPreviewCells(t) : resolveNeighborGrid(getPreset(t), t.id, radius);
+    let cells;
+    if (t.terrainSetId != null) {
+      const ts = sheet.terrainSets.find(x => x.id === t.terrainSetId);
+      cells = ts ? terrainNeighborPreviewCells(t, ts) : [];
+    } else {
+      cells = resolveNeighborGrid(getPreset(t), t.id, radius);
+    }
 
     ctx.save();
     ctx.globalAlpha = 0.85;
@@ -211,7 +226,7 @@ export function mountTileEditor(hostEl) {
       if (cell.tileId == null) continue;
       const nb = sheet.tiles.find(x => x.id === cell.tileId);
       if (!nb) continue;
-      drawTileCell(ctx, flat, nb, cell.dx, cell.dy, cell.flipH, cell.flipV, tw, th);
+      drawTileCell(ctx, flat, nb, cell.dx, cell.dy, cell.flipH, cell.flipV, tw, th, cell.rotate);
     }
     ctx.restore();
 

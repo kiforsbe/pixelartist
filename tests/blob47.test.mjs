@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  maskToBlobIndex, blobIndexToMask, terrainPreviewCells,
+  maskToBlobIndex, blobIndexToMask,
   SIXTEEN_TILE_INDICES, sixteenTileBlobIndex, resolveTerrainSlot, classifySlots,
 } from '../js/core/blob47.js';
 
@@ -46,18 +46,6 @@ test('sixteenTileBlobIndex produces exactly 16 distinct canonical indices', () =
   }
   assert.equal(indices.size, 16);
   assert.deepEqual(SIXTEEN_TILE_INDICES, indices);
-});
-
-test('terrainPreviewCells: bit set in own blobIndex -> self, unset -> empty', () => {
-  const fullIndex = maskToBlobIndex[255];
-  const tile = { id: 'center', blobIndex: fullIndex };
-  const cells = terrainPreviewCells(tile);
-  assert.equal(cells.length, 8);
-  assert.ok(cells.every(c => c.tileId === 'center'));
-
-  const isolatedIndex = maskToBlobIndex[0];
-  const cells2 = terrainPreviewCells({ id: 'center', blobIndex: isolatedIndex });
-  assert.ok(cells2.every(c => c.tileId === null));
 });
 
 test('resolveTerrainSlot: explicit assignment wins, no symmetry needed', () => {
