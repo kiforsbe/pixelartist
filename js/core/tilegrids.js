@@ -95,9 +95,14 @@ export function moveGrid(sheet, grid, dx, dy) {
   relayoutGrid(sheet, grid);
 }
 
+// Mirrors resizeGridCols/resizeGridRows's shrink path: every removed tile
+// must be scrubbed from other tiles' neighbors and any terrain set's slots,
+// or those references dangle. Whole-grid deletion was missing this.
 export function removeTileGrid(sheet, gridId) {
+  const removed = sheet.tiles.filter(t => t.gridId === gridId);
   sheet.tileGrids = sheet.tileGrids.filter(g => g.id !== gridId);
   sheet.tiles = sheet.tiles.filter(t => t.gridId !== gridId);
+  for (const t of removed) scrubTileReferences(sheet, t.id);
 }
 
 export function detachTile(tile) {

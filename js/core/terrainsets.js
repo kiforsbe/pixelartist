@@ -115,6 +115,26 @@ export function applyLayoutPreset(sheet, terrainSet, preset, sourceTiles, cols) 
   }
 }
 
+// Called after a bulk tile removal (grid deletion) that may have left a
+// terrain set with nothing referencing it. Only checks the given
+// candidates (the terrainSetIds the removed tiles used to belong to) --
+// never sweeps the whole sheet, so a terrain set that was already empty
+// for unrelated reasons (e.g. just created via "(none -- add tiles
+// manually)") is never touched by this call. Returns the ids actually
+// removed, so the caller can clear any UI selection pointing at them.
+export function pruneEmptyTerrainSets(sheet, candidateIds) {
+  const removedIds = [];
+  for (const id of candidateIds) {
+    const ts = sheet.terrainSets.find(t => t.id === id);
+    if (!ts) continue;
+    if (!sheet.tiles.some(t => t.terrainSetId === id)) {
+      removeTerrainSet(sheet, id);
+      removedIds.push(id);
+    }
+  }
+  return removedIds;
+}
+
 // Captures a `{col,row} -> blobIndex` mapping as a new named, reusable
 // preset. `cells` is built by the caller (it needs grid-specific context --
 // which (col,row) each currently-assigned tile sits at within the source

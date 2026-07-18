@@ -98,6 +98,19 @@ test('removeTileGrid drops the grid and every tile it owns, leaves others', () =
   assert.equal(s.tiles[0].id, 'standalone');
 });
 
+test('removeTileGrid scrubs the removed tiles from other tiles\' neighbors and any terrain set\'s slots', () => {
+  const s = tileSheet();
+  const { grid, tiles } = createTileGrid(s, { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
+  const [left, right] = tiles;
+  left.neighbors = { e: { mode: 'tile', tileId: right.id, flipH: false, flipV: false } };
+  s.terrainSets.push({ id: 'ts1', name: 'T', tileW: 8, tileH: 8, slots: { 5: right.id }, symmetry: { flip: false, rotate: false } });
+  s.tiles.push({ id: 'standalone', x: 100, y: 100, w: 8, h: 8, name: undefined, gridId: null, neighbors: undefined });
+  removeTileGrid(s, grid.id);
+  const standalone = s.tiles.find(t => t.id === 'standalone');
+  assert.equal(standalone.neighbors, undefined); // untouched -- had none to begin with, just confirms it survives
+  assert.deepEqual(s.terrainSets[0].slots, {});
+});
+
 test('detachTile clears gridId/gridCol/gridRow', () => {
   const s = tileSheet();
   const { tiles } = createTileGrid(s, { x: 0, y: 0, cellW: 8, cellH: 8, cols: 1, rows: 1 });

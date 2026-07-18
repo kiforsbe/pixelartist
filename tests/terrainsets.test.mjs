@@ -4,6 +4,7 @@ import { createProject, createSheet } from '../js/core/model.js';
 import {
   createTerrainSet, removeTerrainSet, assignSlot, clearSlot,
   detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset,
+  groupCellsByBlobIndex, pruneEmptyTerrainSets,
 } from '../js/core/terrainsets.js';
 
 function tileSheet() {
@@ -155,6 +156,23 @@ test('applyLayoutPreset marks non-primary duplicate cells (same blobIndex, multi
   assert.equal(grid[0].duplicateOf, undefined); // the winner itself isn't marked
   assert.equal(grid[1].duplicateOf, 't00');      // t10 loses out -> flagged as a dead-end duplicate
   assert.equal(grid[2].duplicateOf, undefined);  // blobIndex 5 had only one cell -- not a duplicate
+});
+
+test('pruneEmptyTerrainSets removes only candidates that ended up with zero referencing tiles', () => {
+  const s = tileSheet();
+  const tsEmptiedOut = createTerrainSet(s, { name: 'Emptied', tileW: 16, tileH: 16 });
+  const tsStillHasTiles = createTerrainSet(s, { name: 'Survives', tileW: 16, tileH: 16 });
+  const tsUnrelatedAndAlreadyEmpty = createTerrainSet(s, { name: 'PreExistingEmpty', tileW: 16, tileH: 16 });
+  const survivor = tile('t-survivor');
+  s.tiles.push(survivor);
+  assignSlot(s, tsStillHasTiles, 0, survivor);
+  // tsEmptiedOut has no tiles at all (as if its only tile was just scrubbed by removeTileGrid)
+  // tsUnrelatedAndAlreadyEmpty also has none, but is NOT a candidate -- must survive untouched
+  const removedIds = pruneEmptyTerrainSets(s, [tsEmptiedOut.id, tsStillHasTiles.id]);
+  assert.deepEqual(removedIds, [tsEmptiedOut.id]);
+  assert.equal(s.terrainSets.some(ts => ts.id === tsEmptiedOut.id), false);
+  assert.equal(s.terrainSets.some(ts => ts.id === tsStillHasTiles.id), true);
+  assert.equal(s.terrainSets.some(ts => ts.id === tsUnrelatedAndAlreadyEmpty.id), true);
 });
 
 test('saveLayoutPreset pushes a named preset onto sheet.terrainLayoutPresets', () => {
