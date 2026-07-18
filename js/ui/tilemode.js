@@ -524,7 +524,8 @@ function terrainSetLayerField(sheet, terrainSet) {
 function btnDeleteTerrainSet(sheet, terrainSet) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = 'Delete terrain set';
+  btn.textContent = '✕';
+  btn.title = 'Delete terrain set';
   btn.addEventListener('click', () => {
     commitDeleteTerrainSet(sheet, terrainSet.id);
     if (state.selectedTerrainSetId === terrainSet.id) state.selectedTerrainSetId = null;
@@ -1514,7 +1515,7 @@ export function mountTilePanel(el) {
         fields.className = 'frame-fields';
         fields.append(terrainSetNameField(terrainSet), terrainSetLayerField(sheet, terrainSet));
         const actions = document.createElement('div');
-        actions.className = 'row';
+        actions.className = 'row layer-actions';
         actions.appendChild(btnDeleteTerrainSet(sheet, terrainSet));
         selRow.append(title, fields, actions);
         return;
@@ -1584,20 +1585,23 @@ export function mountTilePanel(el) {
     fields.appendChild(tagsField);
 
     const actions = document.createElement('div');
-    actions.className = 'row';
+    actions.className = 'row layer-actions';
     const btnEdit = document.createElement('button');
     btnEdit.type = 'button';
-    btnEdit.textContent = 'Edit tile';
+    btnEdit.textContent = '✎';
+    btnEdit.title = 'Edit tile';
     btnEdit.addEventListener('click', () => openTileEditor(tile.id));
     actions.appendChild(btnEdit);
     if (grid) {
       const btnDetach = document.createElement('button');
       btnDetach.type = 'button';
-      btnDetach.textContent = 'Detach from grid';
+      btnDetach.textContent = '⏏';
+      btnDetach.title = 'Detach from grid';
       btnDetach.addEventListener('click', () => commitDetachTile(tile));
       const btnDeleteGrid = document.createElement('button');
       btnDeleteGrid.type = 'button';
-      btnDeleteGrid.textContent = 'Delete grid';
+      btnDeleteGrid.textContent = '🗑';
+      btnDeleteGrid.title = 'Delete grid';
       btnDeleteGrid.addEventListener('click', () => commitDeleteGrid(sheet, grid));
       actions.append(btnDetach, btnDeleteGrid);
     }
