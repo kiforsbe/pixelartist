@@ -280,21 +280,35 @@ function commitCreateTile(sheet, rect) {
 }
 
 // Grid-owned tiles aren't deleted individually (that would desync the grid
-// — shrink the grid, or detach first).
+// — shrink the grid, or detach first). A standalone tile CAN belong to a
+// terrain set (assigned via the slot editor's tile picker), so this mirrors
+// commitDeleteGrid's pruning: if this was the last tile referencing its
+// terrain set, that set is deleted too.
 function deleteTile(sheet, tileId) {
   const tile = sheet.tiles.find(t => t.id === tileId);
   if (!tile || tile.gridId != null) return;
   const idx = sheet.tiles.indexOf(tile);
   const wasSelected = state.selectedTileId === tileId;
+  const candidateTerrainSetId = tile.terrainSetId ?? null;
+  const beforeTiles = sheet.tiles.slice();
+  const beforeSets = sheet.terrainSets.slice();
+  sheet.tiles = sheet.tiles.filter(t => t !== tile);
+  scrubTileReferences(sheet, tile.id);
+  const prunedIds = candidateTerrainSetId != null ? pruneEmptyTerrainSets(sheet, [candidateTerrainSetId]) : [];
+  if (prunedIds.includes(state.selectedTerrainSetId)) state.selectedTerrainSetId = null;
+  if (state.selectedTileId === tile.id) state.selectedTileId = null;
+  const afterTiles = sheet.tiles.slice();
+  const afterSets = sheet.terrainSets.slice();
   state.commands.push({
     label: 'delete tile',
     do() {
-      sheet.tiles = sheet.tiles.filter(t => t !== tile);
-      scrubTileReferences(sheet, tile.id);
+      sheet.tiles = afterTiles.slice();
+      sheet.terrainSets = afterSets.slice();
       if (state.selectedTileId === tile.id) state.selectedTileId = null;
     },
     undo() {
-      sheet.tiles.splice(Math.min(idx, sheet.tiles.length), 0, tile);
+      sheet.tiles = beforeTiles.slice();
+      sheet.terrainSets = beforeSets.slice();
       if (wasSelected) state.selectedTileId = tile.id;
     },
   });
@@ -341,6 +355,7 @@ function commitDeleteGrid(sheet, grid) {
   removeTileGrid(sheet, grid.id);
   const prunedIds = pruneEmptyTerrainSets(sheet, candidateTerrainSetIds);
   if (prunedIds.includes(state.selectedTerrainSetId)) state.selectedTerrainSetId = null;
+  if (state.selectedTileId != null && !sheet.tiles.some(t => t.id === state.selectedTileId)) state.selectedTileId = null;
   const afterGrids = sheet.tileGrids.slice();
   const afterTiles = sheet.tiles.slice();
   const afterSets = sheet.terrainSets.slice();
@@ -451,6 +466,70 @@ function commitRenameTerrainSet(terrainSet, name) {
     undo() { terrainSet.name = before; },
   });
   markDirty();
+}
+
+// Keeps state.selectedTerrainSetId following the selected tile -- there's
+// no explicit terrain-set list to click any more (Autotiles panel just
+// shows whichever set is "current"), so this is the only way that state
+// tracks selection. Any tile selection updates it, INCLUDING clearing it
+// back to null (selecting an unrelated standalone/grid tile shouldn't
+// leave a stale terrain set showing). Deselecting entirely (tile === null)
+// is the one case left untouched: state.selectedTerrainSetId persists so a
+// just-created, still-empty terrain set (nothing on the sheet to derive it
+// from) stays reachable.
+function syncSelectedTerrainSetFromTile(tile) {
+  if (tile) state.selectedTerrainSetId = tile.terrainSetId ?? null;
+}
+
+// Shared by the Tiles panel's per-tile detail (when the tile belongs to a
+// terrain set) and its terrain-set-only fallback card (a just-created set
+// with no tiles assigned yet) -- both need the same Name/Layer/Delete
+// controls, just reached via a different selection path.
+function terrainSetNameField(terrainSet) {
+  const field = document.createElement('label');
+  field.className = 'frame-field';
+  field.appendChild(document.createTextNode('Name'));
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = terrainSet.name;
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('change', () => {
+    const v = input.value.trim();
+    if (v) commitRenameTerrainSet(terrainSet, v);
+    else input.value = terrainSet.name;
+  });
+  field.appendChild(input);
+  return field;
+}
+
+function terrainSetLayerField(sheet, terrainSet) {
+  const field = document.createElement('label');
+  field.className = 'frame-field';
+  field.appendChild(document.createTextNode('Layer'));
+  const select = document.createElement('select');
+  const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
+  select.appendChild(noneOpt);
+  sheet.layers.forEach((name) => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    select.appendChild(opt);
+  });
+  select.value = terrainSet.layer ?? '';
+  select.title = 'Tile Layer for this whole terrain set (shared by every tile in it)';
+  select.addEventListener('change', () => commitSetTerrainSetLayer(terrainSet, select.value));
+  field.appendChild(select);
+  return field;
+}
+
+function btnDeleteTerrainSet(sheet, terrainSet) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Delete terrain set';
+  btn.addEventListener('click', () => {
+    commitDeleteTerrainSet(sheet, terrainSet.id);
+    if (state.selectedTerrainSetId === terrainSet.id) state.selectedTerrainSetId = null;
+  });
+  return btn;
 }
 
 function commitAssignSlot(sheet, terrainSet, blobIndex, tile) {
@@ -599,21 +678,6 @@ function commitRemoveLayerName(sheet, name) {
       sheet.layers = before.slice();
       for (const b of beforeTileLayers) b.t.layer = b.layer;
     },
-  });
-  markDirty();
-}
-
-function commitMoveLayerName(sheet, index, delta) {
-  const to = index + delta;
-  if (to < 0 || to >= sheet.layers.length) return;
-  const before = sheet.layers.slice();
-  const arr = sheet.layers.slice();
-  [arr[index], arr[to]] = [arr[to], arr[index]];
-  const after = arr;
-  state.commands.push({
-    label: 'reorder layer names',
-    do() { sheet.layers = after.slice(); },
-    undo() { sheet.layers = before.slice(); },
   });
   markDirty();
 }
@@ -1056,6 +1120,10 @@ function buildAddTerrainSetDialog() {
       name: $('#ats-name').value.trim() || 'Terrain',
       tileW, tileH,
     });
+    // No terrain-set list to click any more -- auto-select the new set so
+    // the Autotiles panel (and, once a tile exists, the Tiles panel) shows
+    // it immediately instead of whatever was selected before.
+    state.selectedTerrainSetId = terrainSet.id;
 
     const presetValue = $('#ats-layout').value;
     if (presetValue !== '') {
@@ -1065,9 +1133,11 @@ function buildAddTerrainSetDialog() {
       commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, preset.cols);
       const seededMode = preset.name.includes('8×6') ? 'grid8x6' : preset.name.includes('7×7') ? 'grid7x7' : null;
       if (seededMode) terrainSetViewModes.set(terrainSet.id, seededMode);
+      state.selectedTileId = sourceTiles[0]?.id ?? null;
       await importPresetArtOntoLayer(sheet, preset, sourceTiles, preset.cols);
     }
 
+    emit('selection');
     dlg.close();
   });
   return {
@@ -1427,7 +1497,28 @@ export function mountTilePanel(el) {
     if (!sheet) return;
 
     const tile = sheet.tiles.find(t => t.id === state.selectedTileId);
+    syncSelectedTerrainSetFromTile(tile);
     if (!tile) {
+      // No tile selected -- if a terrain set is still "current" (e.g. just
+      // created via Add Terrain Set with no preset, so no tile belongs to
+      // it yet to select), show its own compact card instead of the tile
+      // detail. Without this, a freshly created empty terrain set would
+      // have no reachable naming/delete UI at all.
+      const terrainSet = sheet.terrainSets.find(ts => ts.id === state.selectedTerrainSetId);
+      if (terrainSet) {
+        selRow.classList.add('active');
+        const title = document.createElement('div');
+        title.className = 'frame-field';
+        title.textContent = `Terrain set · ${terrainSet.tileW}×${terrainSet.tileH}`;
+        const fields = document.createElement('div');
+        fields.className = 'frame-fields';
+        fields.append(terrainSetNameField(terrainSet), terrainSetLayerField(sheet, terrainSet));
+        const actions = document.createElement('div');
+        actions.className = 'row';
+        actions.appendChild(btnDeleteTerrainSet(sheet, terrainSet));
+        selRow.append(title, fields, actions);
+        return;
+      }
       const hint = document.createElement('span');
       hint.textContent = 'No tile selected';
       selRow.appendChild(hint);
@@ -1459,27 +1550,26 @@ export function mountTilePanel(el) {
     }
 
     const terrainSet = tile.terrainSetId != null ? sheet.terrainSets.find(ts => ts.id === tile.terrainSetId) : null;
-    const layerField = document.createElement('label');
-    layerField.className = 'frame-field';
-    layerField.appendChild(document.createTextNode('Layer'));
-    const layerSelect = document.createElement('select');
-    const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
-    layerSelect.appendChild(noneOpt);
-    sheet.layers.forEach((name) => {
-      const opt = document.createElement('option');
-      opt.value = name; opt.textContent = name;
-      layerSelect.appendChild(opt);
-    });
     if (terrainSet) {
-      layerSelect.value = terrainSet.layer ?? '';
-      layerSelect.title = 'Tile Layer for this whole terrain set (shared by every tile in it)';
-      layerSelect.addEventListener('change', () => commitSetTerrainSetLayer(terrainSet, layerSelect.value));
+      fields.append(terrainSetNameField(terrainSet), terrainSetLayerField(sheet, terrainSet));
     } else {
+      const layerField = document.createElement('label');
+      layerField.className = 'frame-field';
+      layerField.appendChild(document.createTextNode('Layer'));
+      const layerSelect = document.createElement('select');
+      const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
+      layerSelect.appendChild(noneOpt);
+      sheet.layers.forEach((name) => {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        layerSelect.appendChild(opt);
+      });
       layerSelect.value = tile.layer ?? '';
       layerSelect.title = 'Tile Layer for this tile';
       layerSelect.addEventListener('change', () => commitTileLayer(tile, layerSelect.value));
+      layerField.appendChild(layerSelect);
+      fields.appendChild(layerField);
     }
-    layerField.appendChild(layerSelect);
 
     const tagsField = document.createElement('label');
     tagsField.className = 'frame-field';
@@ -1491,7 +1581,7 @@ export function mountTilePanel(el) {
     tagsInput.addEventListener('change', () => commitTileTags(tile, tagsInput.value));
     tagsField.appendChild(tagsInput);
 
-    fields.append(layerField, tagsField);
+    fields.appendChild(tagsField);
 
     const actions = document.createElement('div');
     actions.className = 'row';
@@ -1511,6 +1601,7 @@ export function mountTilePanel(el) {
       btnDeleteGrid.addEventListener('click', () => commitDeleteGrid(sheet, grid));
       actions.append(btnDetach, btnDeleteGrid);
     }
+    if (terrainSet) actions.appendChild(btnDeleteTerrainSet(sheet, terrainSet));
 
     selRow.append(nameInput, fields, actions);
   }
@@ -1544,10 +1635,6 @@ export function mountAutotilesPanel(el) {
 
   const tilePickerDialog = buildTilePickerDialog();
 
-  const terrainSetList = document.createElement('div');
-  terrainSetList.className = 'terrain-set-list';
-  wrap.appendChild(terrainSetList);
-
   const terrainSetEditor = document.createElement('div');
   terrainSetEditor.className = 'terrain-set-editor';
   wrap.appendChild(terrainSetEditor);
@@ -1556,35 +1643,22 @@ export function mountAutotilesPanel(el) {
     if (state.mode !== 'tiles') { wrap.hidden = true; return; }
     wrap.hidden = false;
     const sheet = activeSheet();
-    terrainSetList.innerHTML = '';
     terrainSetEditor.innerHTML = '';
     if (!sheet) return;
 
-    for (const ts of sheet.terrainSets) {
-      const row = document.createElement('div');
-      row.className = 'row terrain-set-row';
-      const nameBtn = document.createElement('button');
-      nameBtn.type = 'button';
-      nameBtn.textContent = `${ts.name} (${ts.tileW}×${ts.tileH})`;
-      nameBtn.addEventListener('click', () => {
-        state.selectedTerrainSetId = state.selectedTerrainSetId === ts.id ? null : ts.id;
-        schedule();
-      });
-      const btnDel = document.createElement('button');
-      btnDel.type = 'button';
-      btnDel.textContent = '🗑';
-      btnDel.title = 'Delete terrain set';
-      btnDel.addEventListener('click', () => {
-        commitDeleteTerrainSet(sheet, ts.id);
-        if (state.selectedTerrainSetId === ts.id) state.selectedTerrainSetId = null;
-      });
-      row.append(nameBtn, btnDel);
-      terrainSetList.appendChild(row);
-    }
+    // No explicit terrain-set list any more -- membership is already
+    // visible via each tile's info (Tiles panel), so which set shows here
+    // just follows the selected tile when it belongs to one.
+    syncSelectedTerrainSetFromTile(sheet.tiles.find(t => t.id === state.selectedTileId));
 
     const selectedTerrainSet = sheet.terrainSets.find(ts => ts.id === state.selectedTerrainSetId);
     if (selectedTerrainSet) {
       renderTerrainSetEditor(terrainSetEditor, sheet, selectedTerrainSet, tilePickerDialog);
+    } else {
+      const hint = document.createElement('div');
+      hint.className = 'frame-field';
+      hint.textContent = 'No terrain set selected — select a tile that belongs to one, or add a new set in the Tiles panel.';
+      terrainSetEditor.appendChild(hint);
     }
   }
 
@@ -1606,9 +1680,16 @@ export function mountAutotilesPanel(el) {
 // sheet.layers (the named "Tile Layer" categories tiles/terrain sets can be
 // tagged with -- unrelated to the real paint-layer stack in the Layers
 // panel; see mountAutotilesPanel's header comment for that disambiguation).
-// Moved out of mountAutotilesPanel verbatim so it's its own panel instead
-// of buried under the terrain-set editor.
-export function mountTileLayersPanel(el) {
+// Deliberately built like a slimmed-down mountLayersPanel (panels.js) --
+// reuses its .layer-list/.layer-row/.layer-name/.layer-actions classes
+// rather than inventing new ones -- since this is meant to grow into a
+// real tile-layer visibility/compositing panel once a map editor mode
+// exists to preview terrain sets and sprites together. `showVisibility`/
+// `showOpacity` are reserved for that: sheet.layers is currently just an
+// array of name strings, so there's no per-layer visible/opacity data yet
+// to bind those controls to -- they're plumbed through as options now so
+// the map editor can turn them on later without a signature change.
+export function mountTileLayersPanel(el, { showVisibility = false, showOpacity = false } = {}) {
   const wrap = document.createElement('div');
   el.appendChild(wrap);
 
@@ -1616,43 +1697,62 @@ export function mountTileLayersPanel(el) {
   h3.textContent = 'Tile Layers';
   wrap.appendChild(h3);
 
-  const layerList = document.createElement('div');
-  layerList.className = 'tile-layer-list';
-  wrap.appendChild(layerList);
+  const list = document.createElement('div');
+  list.className = 'layer-list';
+  wrap.appendChild(list);
 
-  const btnAddLayerName = document.createElement('button');
-  btnAddLayerName.type = 'button';
-  btnAddLayerName.textContent = '➕';
-  btnAddLayerName.title = 'Add tile layer';
-  btnAddLayerName.addEventListener('click', () => {
+  let selectedName = null;
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'row layer-actions';
+  const btnAdd = document.createElement('button');
+  btnAdd.type = 'button';
+  btnAdd.textContent = '➕';
+  btnAdd.title = 'Add layer';
+  btnAdd.addEventListener('click', () => {
     const sheet = activeSheet();
     if (!sheet) return;
     const name = prompt('Layer name?');
     if (!name) return;
     commitAddLayerName(sheet, name);
+    selectedName = name;
   });
-  wrap.appendChild(btnAddLayerName);
+  const btnDelete = document.createElement('button');
+  btnDelete.type = 'button';
+  btnDelete.textContent = '🗑';
+  btnDelete.title = 'Delete layer';
+  btnDelete.addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet || selectedName == null) return;
+    commitRemoveLayerName(sheet, selectedName);
+    selectedName = null;
+  });
+  btnRow.append(btnAdd, btnDelete);
+  wrap.appendChild(btnRow);
 
   function render() {
     if (state.mode !== 'tiles') { wrap.hidden = true; return; }
     wrap.hidden = false;
     const sheet = activeSheet();
-    layerList.innerHTML = '';
+    list.innerHTML = '';
     if (!sheet) return;
+    if (selectedName != null && !sheet.layers.includes(selectedName)) selectedName = null;
 
-    sheet.layers.forEach((name, i) => {
+    sheet.layers.forEach((name) => {
       const row = document.createElement('div');
-      row.className = 'row';
-      const label = document.createElement('span');
-      label.textContent = name;
-      const btnUp = document.createElement('button'); btnUp.type = 'button'; btnUp.textContent = '↑'; btnUp.title = 'Move up';
-      btnUp.addEventListener('click', () => commitMoveLayerName(sheet, i, -1));
-      const btnDown = document.createElement('button'); btnDown.type = 'button'; btnDown.textContent = '↓'; btnDown.title = 'Move down';
-      btnDown.addEventListener('click', () => commitMoveLayerName(sheet, i, 1));
-      const btnDel = document.createElement('button'); btnDel.type = 'button'; btnDel.textContent = '🗑'; btnDel.title = 'Delete';
-      btnDel.addEventListener('click', () => commitRemoveLayerName(sheet, name));
-      row.append(label, btnUp, btnDown, btnDel);
-      layerList.appendChild(row);
+      row.className = 'layer-row' + (name === selectedName ? ' active' : '');
+      row.tabIndex = 0;
+      row.addEventListener('click', () => { selectedName = name; render(); });
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'layer-name';
+      nameEl.textContent = name;
+      row.appendChild(nameEl);
+
+      // showVisibility / showOpacity controls would be appended here once
+      // the map editor gives tile layers real visible/opacity data.
+
+      list.appendChild(row);
     });
   }
 
