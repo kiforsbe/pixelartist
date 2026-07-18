@@ -109,35 +109,35 @@ function boundingBoxOf(frames) {
 
 const SNAP_SCREEN_PX = 10;
 
-// While dragging a segment, find the best end-to-end join: dragged RIGHT edge
-// to a target's LEFT edge (side 'before' — dragged frames come first) or
-// dragged LEFT edge to a target's RIGHT edge (side 'after'). Same frame w/h
-// required; snapped position must stay on-sheet.
+// While dragging a segment, find the best end-to-end join WITHIN THE SAME
+// overall strip only -- merging across different strip animations is
+// disabled for now (see docs/superpowers/specs/2026-07-18-strip-area-
+// constraint-design.md): dragged RIGHT edge to a target's LEFT edge (side
+// 'before' — dragged frames come first) or dragged LEFT edge to a target's
+// RIGHT edge (side 'after'). Same frame w/h required; snapped position must
+// stay on-sheet. Only called when drag.anim is truthy (see handleMove).
 function findSnap(view, sheet, drag) {
   const d = drag.bbox;
   const fw = drag.members[0].w, fh = drag.members[0].h;
   const tol = SNAP_SCREEN_PX / view.zoom;
   const gx = d.x + drag.delta.dx, gy = d.y + drag.delta.dy;
   let best = null;
-  for (const a of sheet.animations) {
-    if (!a.strip) continue;
-    for (const run of segmentsOf(a)) {
-      if (a === drag.anim && run.index === drag.run.index) continue;
-      const members = segmentMembers(sheet, a, run);
-      if (!members.length || members[0].w !== fw || members[0].h !== fh) continue;
-      const t = boundingBoxOf(members);
-      const cands = [
-        { side: 'before', dx: t.x - d.w - d.x, dy: t.y - d.y,
-          err: Math.hypot(gx + d.w - t.x, gy - t.y) },
-        { side: 'after', dx: t.x + t.w - d.x, dy: t.y - d.y,
-          err: Math.hypot(gx - (t.x + t.w), gy - t.y) },
-      ];
-      for (const c of cands) {
-        if (c.err > tol) continue;
-        if (d.x + c.dx < 0 || d.x + c.dx + d.w > sheet.width) continue;
-        if (d.y + c.dy < 0 || d.y + c.dy + d.h > sheet.height) continue;
-        if (!best || c.err < best.err) best = { anim: a, run, side: c.side, dx: c.dx, dy: c.dy, err: c.err };
-      }
+  for (const run of segmentsOf(drag.anim)) {
+    if (run.index === drag.run.index) continue;
+    const members = segmentMembers(sheet, drag.anim, run);
+    if (!members.length || members[0].w !== fw || members[0].h !== fh) continue;
+    const t = boundingBoxOf(members);
+    const cands = [
+      { side: 'before', dx: t.x - d.w - d.x, dy: t.y - d.y,
+        err: Math.hypot(gx + d.w - t.x, gy - t.y) },
+      { side: 'after', dx: t.x + t.w - d.x, dy: t.y - d.y,
+        err: Math.hypot(gx - (t.x + t.w), gy - t.y) },
+    ];
+    for (const c of cands) {
+      if (c.err > tol) continue;
+      if (d.x + c.dx < 0 || d.x + c.dx + d.w > sheet.width) continue;
+      if (d.y + c.dy < 0 || d.y + c.dy + d.h > sheet.height) continue;
+      if (!best || c.err < best.err) best = { anim: drag.anim, run, side: c.side, dx: c.dx, dy: c.dy, err: c.err };
     }
   }
   return best;
@@ -279,8 +279,14 @@ function commitMergeSegments(sheet, d, snap) {
     animations: sheet.animations.slice(),
     selectedAnimationId: state.selectedAnimationId,
   };
-  const coords = d.members.map(f => ({ frame: f, x: f.x, y: f.y }));
-  for (const f of d.members) { f.x += snap.dx; f.y += snap.dy; }
+  // findSnap only ever offers same-strip targets now (cross-animation
+  // merging is disabled -- see findSnap), so this is always same-strip
+  // pixel motion when the strip is accepted; stripLayersOf returns null for
+  // a floating strip, falling back to the old metadata-only reposition.
+  const layers = stripLayersOf(sheet, srcAnim);
+  const mv = layers ? buildMovePatches(sheet, d.members, snap.dx, snap.dy, layers) : null;
+  const coords = mv ? null : d.members.map(f => ({ frame: f, x: f.x, y: f.y }));
+  if (!mv) for (const f of d.members) { f.x += snap.dx; f.y += snap.dy; }
   if (sameAnim) {
     const r = mergeSegments(srcAnim, d.run.index, snap.run.index, snap.side);
     srcAnim.frames = r.frames; srcAnim.breaks = r.breaks;
@@ -299,14 +305,24 @@ function commitMergeSegments(sheet, d, snap) {
   state.commands.push({
     label: 'merge strips',
     do() {
-      for (const c of coords) { c.frame.x = c.x + snap.dx; c.frame.y = c.y + snap.dy; }
+      if (mv) {
+        for (const p of mv.patches) blitRegion(p.layer.bitmap, p.after, mv.ur.x, mv.ur.y);
+        for (const c of mv.afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      } else {
+        for (const c of coords) { c.frame.x = c.x + snap.dx; c.frame.y = c.y + snap.dy; }
+      }
       srcAnim.frames = after.srcFrames.map(e => ({ ...e })); srcAnim.breaks = after.srcBreaks.slice();
       dstAnim.frames = after.dstFrames.map(e => ({ ...e })); dstAnim.breaks = after.dstBreaks.slice();
       sheet.animations = after.animations.slice();
       state.selectedAnimationId = dstAnim.id;
     },
     undo() {
-      for (const c of coords) { c.frame.x = c.x; c.frame.y = c.y; }
+      if (mv) {
+        for (const p of mv.patches) blitRegion(p.layer.bitmap, p.before, mv.ur.x, mv.ur.y);
+        for (const c of mv.beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+      } else {
+        for (const c of coords) { c.frame.x = c.x; c.frame.y = c.y; }
+      }
       srcAnim.frames = before.srcFrames.map(e => ({ ...e })); srcAnim.breaks = before.srcBreaks.slice();
       dstAnim.frames = before.dstFrames.map(e => ({ ...e })); dstAnim.breaks = before.dstBreaks.slice();
       sheet.animations = before.animations.slice();
