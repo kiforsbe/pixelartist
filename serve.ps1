@@ -1,2 +1,7 @@
-# Serves the app at http://localhost:8080 (ES modules need a server, file:// won't work)
-npx --yes serve -l 8080 .
+# Serves the app on a random unused port (ES modules need a server, file:// won't work)
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$listener.Start()
+$port = $listener.LocalEndpoint.Port
+$listener.Stop()
+
+npx --yes serve -l $port .
