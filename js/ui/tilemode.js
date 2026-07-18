@@ -1391,10 +1391,6 @@ export function mountTilePanel(el) {
   h3.textContent = 'Tiles';
   wrap.appendChild(h3);
 
-  const gridList = document.createElement('div');
-  gridList.className = 'tile-grid-list';
-  wrap.appendChild(gridList);
-
   const addGridDialog = buildAddGridDialog();
   const btnAddGrid = document.createElement('button');
   btnAddGrid.type = 'button';
@@ -1403,9 +1399,13 @@ export function mountTilePanel(el) {
   btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
   wrap.appendChild(btnAddGrid);
 
-  const countRow = document.createElement('div');
-  countRow.className = 'row';
-  wrap.appendChild(countRow);
+  const addTerrainSetDialog = buildAddTerrainSetDialog();
+  const btnAddTerrainSet = document.createElement('button');
+  btnAddTerrainSet.type = 'button';
+  btnAddTerrainSet.textContent = '➕ Autotile set';
+  btnAddTerrainSet.title = 'Add terrain set';
+  btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
+  wrap.appendChild(btnAddTerrainSet);
 
   const selRow = document.createElement('div');
   selRow.className = 'row tile-selected';
@@ -1415,30 +1415,8 @@ export function mountTilePanel(el) {
     if (state.mode !== 'tiles') { wrap.hidden = true; return; }
     wrap.hidden = false;
     const sheet = activeSheet();
-    gridList.innerHTML = '';
-    countRow.innerHTML = '';
     selRow.innerHTML = '';
     if (!sheet) return;
-
-    for (const grid of sheet.tileGrids) {
-      const row = document.createElement('div');
-      row.className = 'row tile-grid-row';
-      row.append(
-        sizeField('Cols', grid.cols, (v) => commitResizeGridCols(sheet, grid, v)),
-        sizeField('Rows', grid.rows, (v) => commitResizeGridRows(sheet, grid, v)),
-        sizeField('W', grid.cellW, (v) => commitGridCellField(sheet, grid, 'cellW', v)),
-        sizeField('H', grid.cellH, (v) => commitGridCellField(sheet, grid, 'cellH', v)),
-      );
-      const btnDel = document.createElement('button');
-      btnDel.type = 'button';
-      btnDel.textContent = 'Delete grid';
-      btnDel.addEventListener('click', () => commitDeleteGrid(sheet, grid));
-      row.appendChild(btnDel);
-      gridList.appendChild(row);
-    }
-
-    const count = sheet.tiles.length;
-    countRow.textContent = `${count} tile${count === 1 ? '' : 's'}`;
 
     const tile = sheet.tiles.find(t => t.id === state.selectedTileId);
     if (!tile) {
@@ -1459,12 +1437,21 @@ export function mountTilePanel(el) {
     btnEdit.addEventListener('click', () => openTileEditor(tile.id));
     selRow.append(nameInput, btnEdit);
 
-    if (tile.gridId != null) {
+    const grid = tile.gridId != null ? sheet.tileGrids.find(g => g.id === tile.gridId) : null;
+    if (grid) {
+      selRow.append(
+        sizeField('W', grid.cellW, (v) => commitGridCellField(sheet, grid, 'cellW', v)),
+        sizeField('H', grid.cellH, (v) => commitGridCellField(sheet, grid, 'cellH', v)),
+      );
       const btnDetach = document.createElement('button');
       btnDetach.type = 'button';
       btnDetach.textContent = 'Detach from grid';
       btnDetach.addEventListener('click', () => commitDetachTile(tile));
-      selRow.appendChild(btnDetach);
+      const btnDeleteGrid = document.createElement('button');
+      btnDeleteGrid.type = 'button';
+      btnDeleteGrid.textContent = 'Delete grid';
+      btnDeleteGrid.addEventListener('click', () => commitDeleteGrid(sheet, grid));
+      selRow.append(btnDetach, btnDeleteGrid);
     } else {
       selRow.append(
         sizeField('W', tile.w, (v) => commitTileSize(sheet, tile, 'w', v)),
@@ -1472,6 +1459,7 @@ export function mountTilePanel(el) {
       );
     }
 
+    const terrainSet = tile.terrainSetId != null ? sheet.terrainSets.find(ts => ts.id === tile.terrainSetId) : null;
     const layerSelect = document.createElement('select');
     const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
     layerSelect.appendChild(noneOpt);
@@ -1480,8 +1468,15 @@ export function mountTilePanel(el) {
       opt.value = name; opt.textContent = name;
       layerSelect.appendChild(opt);
     });
-    layerSelect.value = tile.layer ?? '';
-    layerSelect.addEventListener('change', () => commitTileLayer(tile, layerSelect.value));
+    if (terrainSet) {
+      layerSelect.value = terrainSet.layer ?? '';
+      layerSelect.title = 'Tile Layer for this whole terrain set (shared by every tile in it)';
+      layerSelect.addEventListener('change', () => commitSetTerrainSetLayer(terrainSet, layerSelect.value));
+    } else {
+      layerSelect.value = tile.layer ?? '';
+      layerSelect.title = 'Tile Layer for this tile';
+      layerSelect.addEventListener('change', () => commitTileLayer(tile, layerSelect.value));
+    }
 
     const tagsInput = document.createElement('input');
     tagsInput.type = 'text';
@@ -1519,19 +1514,11 @@ export function mountAutotilesPanel(el) {
   h3.textContent = 'Autotiles';
   wrap.appendChild(h3);
 
-  const addTerrainSetDialog = buildAddTerrainSetDialog();
   const tilePickerDialog = buildTilePickerDialog();
 
   const terrainSetList = document.createElement('div');
   terrainSetList.className = 'terrain-set-list';
   wrap.appendChild(terrainSetList);
-
-  const btnAddTerrainSet = document.createElement('button');
-  btnAddTerrainSet.type = 'button';
-  btnAddTerrainSet.textContent = '➕';
-  btnAddTerrainSet.title = 'Add terrain set';
-  btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
-  wrap.appendChild(btnAddTerrainSet);
 
   const terrainSetEditor = document.createElement('div');
   terrainSetEditor.className = 'terrain-set-editor';
