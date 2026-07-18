@@ -14,6 +14,8 @@ import { mountTimeline } from '../ui/timeline.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
 import { initFloatSession, commitFloatIfAny } from '../ui/floatsession.js';
+import { defineAction, runAction } from './actions.js';
+import { mountMenuBar } from '../ui/menubar.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -30,15 +32,6 @@ function isTypingTarget(el) {
 // ---- element refs ----
 const tabSprites = document.getElementById('tab-sprites');
 const tabTiles = document.getElementById('tab-tiles');
-const btnNew = document.getElementById('btn-new');
-const btnOpen = document.getElementById('btn-open');
-const btnSave = document.getElementById('btn-save');
-const btnSaveAs = document.getElementById('btn-save-as');
-const btnExport = document.getElementById('btn-export');
-const btnUndo = document.getElementById('btn-undo');
-const btnRedo = document.getElementById('btn-redo');
-const ovlLabels = document.getElementById('ovl-labels');
-const ovlSeq = document.getElementById('ovl-seq');
 const statusTool = document.getElementById('status-tool');
 const statusPos = document.getElementById('status-pos');
 const statusZoom = document.getElementById('status-zoom');
@@ -330,25 +323,29 @@ btnDeleteSheet.addEventListener('click', () => {
 });
 
 // ---- undo/redo ----
-function updateHistoryButtons() {
-  btnUndo.disabled = !state.commands.canUndo();
-  btnRedo.disabled = !state.commands.canRedo();
-}
-state.commands.onChange = () => { updateHistoryButtons(); emit('history'); };
-btnUndo.addEventListener('click', () => state.commands.undo());
-btnRedo.addEventListener('click', () => state.commands.redo());
+state.commands.onChange = () => emit('history');
+defineAction('edit.undo', {
+  label: 'Undo', shortcut: 'Ctrl+Z',
+  run: () => state.commands.undo(),
+  isEnabled: () => state.commands.canUndo(),
+});
+defineAction('edit.redo', {
+  label: 'Redo', shortcut: 'Ctrl+Y',
+  run: () => state.commands.redo(),
+  isEnabled: () => state.commands.canRedo(),
+});
 window.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const key = e.key.toLowerCase();
-  if (key === 'z' && !e.shiftKey) { e.preventDefault(); state.commands.undo(); }
-  else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); state.commands.redo(); }
+  if (key === 'z' && !e.shiftKey) { e.preventDefault(); runAction('edit.undo'); }
+  else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); runAction('edit.redo'); }
   else if (key === 's') {
     // Gated (unlike undo/redo above): Ctrl+S is a global browser shortcut
     // users may also press while a text field or dialog has focus, where we
     // want the browser/native field behavior, not a project save.
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     e.preventDefault();
-    doSave();
+    runAction('file.save');
   }
 });
 
@@ -372,13 +369,15 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---- overlay toggles ----
-ovlLabels.addEventListener('change', () => {
-  state.overlays.labels = ovlLabels.checked;
-  emit('view');
+defineAction('view.toggleLabels', {
+  label: 'Show Labels',
+  run: () => { state.overlays.labels = !state.overlays.labels; emit('view'); },
+  isChecked: () => state.overlays.labels,
 });
-ovlSeq.addEventListener('change', () => {
-  state.overlays.sequences = ovlSeq.checked;
-  emit('view');
+defineAction('view.toggleSequences', {
+  label: 'Show Sequences',
+  run: () => { state.overlays.sequences = !state.overlays.sequences; emit('view'); },
+  isChecked: () => state.overlays.sequences,
 });
 
 // ---- status bar ----
@@ -520,6 +519,25 @@ const frameEditor = mountFrameEditor(canvasHost);
 // the app's lifetime.
 const tileEditor = mountTileEditor(canvasHost);
 
+// ---- menu bar ----
+// Later tasks extend this array (more items per menu, more menus) and add
+// the defineAction calls those items reference — menubar.js skips any item
+// whose action id isn't registered yet, so this can be built up incrementally.
+const MENUS = [
+  { label: 'File', items: [
+    { action: 'file.new' }, { action: 'file.open' }, { separator: true },
+    { action: 'file.save' }, { action: 'file.saveAs' }, { separator: true },
+    { action: 'file.export' },
+  ] },
+  { label: 'Edit', items: [
+    { action: 'edit.undo' }, { action: 'edit.redo' },
+  ] },
+  { label: 'View', items: [
+    { action: 'view.toggleLabels' }, { action: 'view.toggleSequences' },
+  ] },
+];
+mountMenuBar(document.getElementById('menubar'), MENUS);
+
 // ---- view switching: sheet canvas vs frame editor vs tile editor.
 // Only one is visible at a time; each owns its own CanvasView. The sheet
 // view's <canvas> is hidden directly (its host, #canvas-host, is shared with
@@ -544,9 +562,12 @@ on('view', applyView);
 applyView();
 
 // ---- file: New ----
-btnNew.addEventListener('click', () => {
-  if (state.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
-  dlgNewProject.showModal();
+defineAction('file.new', {
+  label: 'New',
+  run: () => {
+    if (state.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
+    dlgNewProject.showModal();
+  },
 });
 npCancel.addEventListener('click', () => dlgNewProject.close());
 npCreate.addEventListener('click', () => {
@@ -585,18 +606,21 @@ npCreate.addEventListener('click', () => {
 // Folder ("unpacked") projects are disabled for now (see io.saveUnpacked/
 // openUnpacked, kept but unwired) -- Open always goes straight to the
 // packed (.pixelproj) file picker, no format-choice dialog.
-btnOpen.addEventListener('click', async () => {
-  if (state.dirty && !confirmOrAuto('Discard unsaved changes and open another project?')) return;
-  try {
-    const { project, handle } = await io.openPacked();
-    state.fileHandle = handle;
-    state.dirHandle = null;
-    state.saveMode = handle ? 'packed' : null;
-    setProject(project);
-  } catch (e) {
-    if (isCancel(e)) return;
-    alert(e.message);
-  }
+defineAction('file.open', {
+  label: 'Open',
+  run: async () => {
+    if (state.dirty && !confirmOrAuto('Discard unsaved changes and open another project?')) return;
+    try {
+      const { project, handle } = await io.openPacked();
+      state.fileHandle = handle;
+      state.dirHandle = null;
+      state.saveMode = handle ? 'packed' : null;
+      setProject(project);
+    } catch (e) {
+      if (isCancel(e)) return;
+      alert(e.message);
+    }
+  },
 });
 
 // ---- file: Save ----
@@ -612,10 +636,10 @@ async function doSave() {
     if (!isCancel(e)) alert(`Save failed: ${e.message}`);
   }
 }
-btnSave.addEventListener('click', doSave);
+defineAction('file.save', { label: 'Save', shortcut: 'Ctrl+S', run: doSave, isEnabled: () => !!state.project });
 
 // ---- file: Save As ----
-btnSaveAs.addEventListener('click', async () => {
+async function doSaveAs() {
   commitFloatIfAny();
   try {
     state.fileHandle = await io.savePacked(state.project, null);
@@ -627,7 +651,8 @@ btnSaveAs.addEventListener('click', async () => {
   } catch (e) {
     if (!isCancel(e)) alert(`Save failed: ${e.message}`);
   }
-});
+}
+defineAction('file.saveAs', { label: 'Save As…', run: doSaveAs, isEnabled: () => !!state.project });
 
 // ---- export ----
 function updateExportButtons() {
@@ -639,7 +664,11 @@ function updateExportButtons() {
   btnExportTiles.disabled = !isTile;
   btnExportTiles.title = isTile ? '' : 'Only available for tile sheets';
 }
-btnExport.addEventListener('click', () => { updateExportButtons(); dlgExport.showModal(); });
+defineAction('file.export', {
+  label: 'Export…',
+  run: () => { updateExportButtons(); dlgExport.showModal(); },
+  isEnabled: () => !!state.project,
+});
 btnExportCancel.addEventListener('click', () => dlgExport.close());
 btnExportPng.addEventListener('click', async () => {
   dlgExport.close();
@@ -692,5 +721,4 @@ setInterval(() => {
   } else {
     setProject(newDefaultProject());
   }
-  updateHistoryButtons();
 })();
