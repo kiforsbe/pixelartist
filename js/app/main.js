@@ -557,7 +557,8 @@ document.getElementById('about-ok').addEventListener('click', () => dlgAbout.clo
 defineAction('help.about', {
   label: 'About PixelArtist',
   run: () => {
-    document.getElementById('about-version').textContent = 'PixelArtist v0.1.0';
+    document.getElementById('about-version').textContent = 'Version 0.1.0';
+    document.getElementById('about-license').textContent = '© 2026 Kim Forsberg. All rights reserved.';
     dlgAbout.showModal();
   },
 });
