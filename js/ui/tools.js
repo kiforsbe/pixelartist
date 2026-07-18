@@ -19,10 +19,10 @@ import {
 import { makePixelPatch } from '../core/commands.js';
 import { forwardPoint, inversePoint, floatBounds } from '../core/floating.js';
 import { nearestColor } from '../core/palettes.js';
-import { flattenSheet } from '../core/model.js';
+import { flattenSheet, animationGroup, flattenLayers } from '../core/model.js';
 import { segmentAt } from '../core/strips.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat } from './floatsession.js';
-import { commitAcceptAnimation } from './frames.js';
+import { commitAcceptAnimation, stripOf } from './frames.js';
 import { resizeRect } from '../core/resizerect.js';
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 
@@ -643,20 +643,29 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       return;
     }
     // No float yet. On the sheet view with no marquee, a down on a frame or
-    // strip segment starts a FRAME-FLOAT: the region's pixels (all layers)
-    // float exactly like a selection — live preview, commit on Enter/outside
-    // click — but translate-only, and on commit the frame rects move with
-    // the pixels. Everything else keeps the classic behavior: cut the
-    // selection (or whole target) and drag it.
+    // strip segment starts a FRAME-FLOAT: the region's pixels float exactly
+    // like a selection — live preview, commit on Enter/outside click — but
+    // translate-only, and on commit the frame rects move with the pixels.
+    // Everything else keeps the classic behavior: cut the selection (or
+    // whole target) and drag it.
     if (state.view === 'sheet' && !selection) {
       const seg = segmentAt(sheet, ev.x, ev.y);
       if (seg) {
-        if (!createFloat({ allLayers: true, region: seg.rect, frameIds: seg.frameIds })) return;
+        // An accepted strip's own segment carries only ITS OWN layer(s) --
+        // resolved from the segment's owning strip, never from whatever's
+        // ambiently selected in the timeline (see docs/superpowers/specs/
+        // 2026-07-18-strip-area-constraint-design.md). A floating strip or a
+        // plain frame has no strip-owned layer to resolve, so falls back to
+        // today's ambient allLayers:true capture.
+        const owner = stripOf(sheet, seg.frameIds[0]);
+        const ownGroup = owner?.layerGroupId ? animationGroup(sheet, owner.id) : null;
+        const layers = ownGroup ? flattenLayers(ownGroup) : null;
+        if (!createFloat({ allLayers: true, region: seg.rect, frameIds: seg.frameIds, layers, x: ev.x, y: ev.y })) return;
         moveStroke = { kind: 'translate', t0: { ...state.floating.transform }, anchor: { x: ev.x, y: ev.y } };
         return;
       }
     }
-    if (!createFloat({ allLayers: !!ev.altKey })) return;
+    if (!createFloat({ allLayers: !!ev.altKey, x: ev.x, y: ev.y })) return;
     moveStroke = { kind: 'translate', t0: { ...state.floating.transform }, anchor: { x: ev.x, y: ev.y } };
   }
 
