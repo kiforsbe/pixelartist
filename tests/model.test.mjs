@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PROJECT_VERSION, DEFAULT_SETTINGS, createProject, createSheet, addLayer, removeLayer,
-  moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet, flattenSheetLayers,
+  moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
   scrubTileReferences,
@@ -71,6 +71,7 @@ test('moveNode prevents invalid moves', () => {
   assert.ok(s.layerTree.children.some(c => c.id === g1.id));
   // only layer nodes may be moved into an animation-owned group
   const a = addAnimation(s, 'walk');
+  acceptAnimation(s, a);
   const ag = findGroup(s.layerTree, a.layerGroupId);
   const freeLayer = addLayer(s, 'free');
   moveNode(s, freeLayer.id, ag.id, 0);
@@ -90,6 +91,84 @@ test('frames and animations; removeFrame cleans references', () => {
   removeFrame(s, f1.id);
   assert.equal(s.frames.length, 1);
   assert.deepEqual(a.frames.map(x => x.frameId), [f2.id]);
+});
+
+test('addAnimation creates a floating animation with no layer group yet', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  const a = addAnimation(s, 'walk');
+  assert.equal(a.layerGroupId, null);
+  assert.equal(a.name, 'walk');
+  assert.deepEqual(a.frames, []);
+  assert.deepEqual(a.breaks, []);
+  assert.equal(contextLayers(s, a.id).length, sheetLayers(s).length, 'falls back to whole sheet while floating');
+});
+
+test('acceptAnimation freezes the current composite under the animation\'s own frames into a new layer', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
+  setPixel(sheetLayers(s)[0].bitmap, 1, 1, [1, 2, 3, 255]);
+  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
+  const a = addAnimation(s, 'walk', true);
+  a.frames = [{ frameId: f1.id, duration: 100 }];
+  assert.equal(a.layerGroupId, null, 'floating until accepted');
+
+  acceptAnimation(s, a);
+  assert.ok(a.layerGroupId, 'animation has layerGroupId after accept');
+  const g = findGroup(s.layerTree, a.layerGroupId);
+  assert.equal(g.animationId, a.id);
+  assert.equal(flattenLayers(g).length, 1);
+  assert.deepEqual(getPixel(flattenLayers(g)[0].bitmap, 1, 1), [1, 2, 3, 255]);
+  // mutation on the strip's own layer does not bleed back to the root layer
+  setPixel(flattenLayers(g)[0].bitmap, 1, 1, [9, 9, 9, 255]);
+  assert.deepEqual(getPixel(sheetLayers(s)[0].bitmap, 1, 1), [1, 2, 3, 255]);
+});
+
+test('acceptAnimation with zero frames yields a blank layer', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [1, 2, 3, 255]);
+  const a = addAnimation(s, 'walk'); // plain animation, no frames yet
+  acceptAnimation(s, a);
+  const g = findGroup(s.layerTree, a.layerGroupId);
+  assert.deepEqual(getPixel(flattenLayers(g)[0].bitmap, 0, 0), [0, 0, 0, 0]);
+});
+
+test('acceptAnimation only freezes pixels under its own frames, not another animation\'s private layer', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
+  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
+  const a1 = addAnimation(s, 'walk', true);
+  a1.frames = [{ frameId: f1.id, duration: 100 }];
+  acceptAnimation(s, a1);
+  setPixel(flattenLayers(findGroup(s.layerTree, a1.layerGroupId))[0].bitmap, 0, 0, [255, 0, 0, 255]);
+
+  const f2 = addFrame(s, { name: 'f1', x: 4, y: 0, w: 4, h: 4 }); // adjacent, non-overlapping rect
+  const a2 = addAnimation(s, 'run', true);
+  a2.frames = [{ frameId: f2.id, duration: 100 }];
+  acceptAnimation(s, a2);
+  const g2 = findGroup(s.layerTree, a2.layerGroupId);
+  // a2's own frame rect (x:4..8) never touched a1's red pixel at (0,0)
+  assert.deepEqual(getPixel(flattenLayers(g2)[0].bitmap, 0, 0), [0, 0, 0, 0]);
+});
+
+test('acceptAnimation flattens multiple visible layers (with opacity) under its own frames', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
+  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]); // opaque red
+  const top = addLayer(s, 'top');
+  top.opacity = 0.5;
+  setPixel(top.bitmap, 0, 0, [0, 0, 255, 255]); // blue @ 50% over red
+  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
+  const a = addAnimation(s, 'walk', true);
+  a.frames = [{ frameId: f1.id, duration: 100 }];
+  acceptAnimation(s, a);
+  const g = findGroup(s.layerTree, a.layerGroupId);
+  const groupLayers = flattenLayers(g);
+  assert.equal(groupLayers.length, 1);
+  assert.equal(groupLayers[0].visible, true);
+  assert.equal(groupLayers[0].opacity, 1);
+  assert.deepEqual(getPixel(groupLayers[0].bitmap, 0, 0), [128, 0, 128, 255]);
 });
 
 test('flattenSheet composites visible layers only', () => {
@@ -312,31 +391,16 @@ test('removeFrame adjusts breaks (shift down, drop degenerate)', () => {
   assert.deepEqual(a.breaks, []);    // one segment [2,3]
 });
 
-test('addAnimation creates a group with a copy of current layers', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [1, 2, 3, 255]);
-  const a = addAnimation(s, 'walk');
-  assert.ok(a.layerGroupId, 'animation has layerGroupId');
-  const g = findGroup(s.layerTree, a.layerGroupId);
-  assert.ok(g, 'group exists');
-  assert.equal(g.animationId, a.id);
-  assert.equal(flattenLayers(g).length, 1);
-  assert.deepEqual(getPixel(flattenLayers(g)[0].bitmap, 0, 0), [1, 2, 3, 255]);
-  // mutation on animation layer does not bleed back to sheet layer
-  setPixel(flattenLayers(g)[0].bitmap, 0, 0, [9, 9, 9, 255]);
-  assert.deepEqual(getPixel(sheetLayers(s)[0].bitmap, 0, 0), [1, 2, 3, 255]);
-});
-
 test('contextLayers scopes to animation group or returns all layers', () => {
   const p = createProject('t');
   const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
   addLayer(s, 'global');
   const beforeAnim = sheetLayers(s).map(l => l.id);
   const a = addAnimation(s, 'walk');
-  // 2 root layers + the single flattened layer copied into the new anim group
+  acceptAnimation(s, a);
+  // 2 root layers + the single (blank, since the animation has no frames yet) layer created for the new anim group
   assert.equal(contextLayers(s).length, 3);
-  // scoped to the animation, only its own (single, flattened) layer is returned
+  // scoped to the animation, only its own (single) layer is returned
   assert.equal(contextLayers(s, a.id).length, 1);
   const animLayerIds = new Set(contextLayers(s, a.id).map(l => l.id));
   // animation layers are independent copies with new ids, not the originals
@@ -354,32 +418,3 @@ test('flattenSheetLayers respects context and visibility', () => {
   assert.deepEqual(getPixel(flat, 1, 1), [255, 0, 0, 255]);
 });
 
-test('addAnimation copies only root-level layers, never another animation\'s private layers', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  const a1 = addAnimation(s, 'walk');
-  // a1's own private layer must NOT be picked up when creating a2 -- only
-  // the sheet's root-level layers count, no matter how many other
-  // animation groups already sit under root.
-  const a2 = addAnimation(s, 'run');
-  const g2 = findGroup(s.layerTree, a2.layerGroupId);
-  assert.equal(flattenLayers(g2).length, 1);
-  const a1LayerIds = new Set(contextLayers(s, a1.id).map(l => l.id));
-  assert.ok(!a1LayerIds.has(flattenLayers(g2)[0].id));
-});
-
-test('addAnimation flattens multiple root layers into one for the new group', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]); // opaque red, full opacity
-  const top = addLayer(s, 'top');
-  top.opacity = 0.5;
-  setPixel(top.bitmap, 0, 0, [0, 0, 255, 255]); // blue @ 50% over red
-  const a = addAnimation(s, 'walk');
-  const g = findGroup(s.layerTree, a.layerGroupId);
-  const groupLayers = flattenLayers(g);
-  assert.equal(groupLayers.length, 1);
-  assert.equal(groupLayers[0].visible, true);
-  assert.equal(groupLayers[0].opacity, 1);
-  assert.deepEqual(getPixel(groupLayers[0].bitmap, 0, 0), [128, 0, 128, 255]);
-});

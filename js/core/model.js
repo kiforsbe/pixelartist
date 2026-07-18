@@ -1,4 +1,4 @@
-import { createBitmap, cloneBitmap, getPixel, setPixel } from './pixels.js';
+import { createBitmap, cloneBitmap, getPixel, setPixel, copyRegion, blitRegion } from './pixels.js';
 import { newId } from './palettes.js';
 import { compositeFloatOnLayer } from './floating.js';
 import { removeEntry } from './strips.js';
@@ -264,35 +264,41 @@ export function removeFrame(sheet, frameId) {
   }
 }
 
+// A new animation starts FLOATING: no group, no layer, layerGroupId null.
+// It previews whatever's already on the sheet under its own frames (see
+// contextLayers()'s null-group fallback and flattenSheet()'s exclusive-
+// compositing skip for floating strips below) until acceptAnimation() is
+// called -- explicitly (Enter key, frames.js) or automatically (first
+// paint stroke, tools.js). This lets a strip be freely repositioned/resized
+// to align with existing imported artwork before committing to a layer.
 export function addAnimation(sheet, name, strip = false) {
-  // Each animation owns a dedicated group under the root, seeded from the
-  // sheet's OWN root-level layers only -- sheetLayers() flattens the WHOLE
-  // tree, which would wrongly pull in every OTHER animation's private
-  // layers too (they live in their own group, nested under root just like
-  // this new one is about to be). A single root layer is copied as-is
-  // (name/visible/opacity preserved); multiple root layers are flattened
-  // into one first, since a new animation starts from one merged snapshot
-  // of the base art, not a full copy of an unrelated layer stack.
-  const group = createGroupNode(name);
-  const rootLayers = sheet.layerTree.children.filter(n => n.type === LAYER);
-  const copy = createLayerNode(
-    rootLayers.length === 1 ? rootLayers[0].name : 'Layer 1',
-    sheet.width, sheet.height,
-  );
-  if (rootLayers.length === 1) {
-    copy.bitmap = cloneBitmap(rootLayers[0].bitmap);
-    copy.visible = rootLayers[0].visible;
-    copy.opacity = rootLayers[0].opacity;
-  } else if (rootLayers.length > 1) {
-    copy.bitmap = flattenSheetLayers(rootLayers, sheet.width, sheet.height);
-  }
-  group.children.push(copy);
-  sheet.layerTree.children.push(group);
-
-  const anim = { id: newId('an'), name, loop: true, strip, breaks: [], frames: [], layerGroupId: group.id };
-  group.animationId = anim.id;
+  const anim = { id: newId('an'), name, loop: true, strip, breaks: [], frames: [], layerGroupId: null };
   sheet.animations.push(anim);
   return anim;
+}
+
+// Promotes a floating animation into a committed one: freezes whatever's
+// currently visible under each of its own frames (i.e. flattenSheet(sheet)
+// cropped to that frame's rect -- for an accepted strip elsewhere this
+// already respects that strip's own exclusive ownership, so overlapping an
+// already-accepted strip freezes ITS content, not something hidden below
+// it) into one brand-new layer, then wires the group in. Caller's
+// responsibility to only call this once, while anim.layerGroupId is still
+// null -- see commitAcceptAnimation's idempotency guard in ui/frames.js.
+export function acceptAnimation(sheet, anim) {
+  const group = createGroupNode(anim.name, { animationId: anim.id });
+  const layer = createLayerNode('Layer 1', sheet.width, sheet.height);
+  const flat = flattenSheet(sheet);
+  for (const entry of anim.frames) {
+    const frame = sheet.frames.find(f => f.id === entry.frameId);
+    if (!frame) continue;
+    const region = copyRegion(flat, frame.x, frame.y, frame.w, frame.h);
+    blitRegion(layer.bitmap, region, frame.x, frame.y);
+  }
+  group.children.push(layer);
+  sheet.layerTree.children.push(group);
+  anim.layerGroupId = group.id;
+  return group;
 }
 
 export function renameAnimation(sheet, animId, name) {
