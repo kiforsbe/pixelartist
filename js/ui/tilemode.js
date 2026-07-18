@@ -1391,13 +1391,20 @@ export function mountTilePanel(el) {
   h3.textContent = 'Tiles';
   wrap.appendChild(h3);
 
+  // Selection detail comes first (mirrors frames.js's mountFramesPanel:
+  // list/detail before the creation buttons) — reuses the frame-row/
+  // frame-fields/frame-field classes so the two selection-driven panels
+  // look and behave the same way.
+  const selRow = document.createElement('div');
+  selRow.className = 'frame-row tile-selected';
+  wrap.appendChild(selRow);
+
   const addGridDialog = buildAddGridDialog();
   const btnAddGrid = document.createElement('button');
   btnAddGrid.type = 'button';
   btnAddGrid.textContent = '➕';
   btnAddGrid.title = 'Add grid';
   btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
-  wrap.appendChild(btnAddGrid);
 
   const addTerrainSetDialog = buildAddTerrainSetDialog();
   const btnAddTerrainSet = document.createElement('button');
@@ -1405,17 +1412,18 @@ export function mountTilePanel(el) {
   btnAddTerrainSet.textContent = '➕ Autotile set';
   btnAddTerrainSet.title = 'Add terrain set';
   btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
-  wrap.appendChild(btnAddTerrainSet);
 
-  const selRow = document.createElement('div');
-  selRow.className = 'row tile-selected';
-  wrap.appendChild(selRow);
+  const btnRow = document.createElement('div');
+  btnRow.className = 'row';
+  btnRow.append(btnAddGrid, btnAddTerrainSet);
+  wrap.appendChild(btnRow);
 
   function render() {
     if (state.mode !== 'tiles') { wrap.hidden = true; return; }
     wrap.hidden = false;
     const sheet = activeSheet();
     selRow.innerHTML = '';
+    selRow.classList.remove('active');
     if (!sheet) return;
 
     const tile = sheet.tiles.find(t => t.id === state.selectedTileId);
@@ -1425,41 +1433,35 @@ export function mountTilePanel(el) {
       selRow.appendChild(hint);
       return;
     }
+    selRow.classList.add('active');
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
+    nameInput.className = 'frame-name';
     nameInput.value = tile.name || '';
     nameInput.placeholder = 'name';
     nameInput.addEventListener('change', () => commitTileName(tile, nameInput.value.trim()));
-    const btnEdit = document.createElement('button');
-    btnEdit.type = 'button';
-    btnEdit.textContent = 'Edit tile';
-    btnEdit.addEventListener('click', () => openTileEditor(tile.id));
-    selRow.append(nameInput, btnEdit);
+
+    const fields = document.createElement('div');
+    fields.className = 'frame-fields';
 
     const grid = tile.gridId != null ? sheet.tileGrids.find(g => g.id === tile.gridId) : null;
     if (grid) {
-      selRow.append(
+      fields.append(
         sizeField('W', grid.cellW, (v) => commitGridCellField(sheet, grid, 'cellW', v)),
         sizeField('H', grid.cellH, (v) => commitGridCellField(sheet, grid, 'cellH', v)),
       );
-      const btnDetach = document.createElement('button');
-      btnDetach.type = 'button';
-      btnDetach.textContent = 'Detach from grid';
-      btnDetach.addEventListener('click', () => commitDetachTile(tile));
-      const btnDeleteGrid = document.createElement('button');
-      btnDeleteGrid.type = 'button';
-      btnDeleteGrid.textContent = 'Delete grid';
-      btnDeleteGrid.addEventListener('click', () => commitDeleteGrid(sheet, grid));
-      selRow.append(btnDetach, btnDeleteGrid);
     } else {
-      selRow.append(
+      fields.append(
         sizeField('W', tile.w, (v) => commitTileSize(sheet, tile, 'w', v)),
         sizeField('H', tile.h, (v) => commitTileSize(sheet, tile, 'h', v)),
       );
     }
 
     const terrainSet = tile.terrainSetId != null ? sheet.terrainSets.find(ts => ts.id === tile.terrainSetId) : null;
+    const layerField = document.createElement('label');
+    layerField.className = 'frame-field';
+    layerField.appendChild(document.createTextNode('Layer'));
     const layerSelect = document.createElement('select');
     const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
     layerSelect.appendChild(noneOpt);
@@ -1477,14 +1479,40 @@ export function mountTilePanel(el) {
       layerSelect.title = 'Tile Layer for this tile';
       layerSelect.addEventListener('change', () => commitTileLayer(tile, layerSelect.value));
     }
+    layerField.appendChild(layerSelect);
 
+    const tagsField = document.createElement('label');
+    tagsField.className = 'frame-field';
+    tagsField.appendChild(document.createTextNode('Tags'));
     const tagsInput = document.createElement('input');
     tagsInput.type = 'text';
-    tagsInput.placeholder = 'tags, comma, separated';
+    tagsInput.placeholder = 'comma, separated';
     tagsInput.value = (tile.tags ?? []).join(', ');
     tagsInput.addEventListener('change', () => commitTileTags(tile, tagsInput.value));
+    tagsField.appendChild(tagsInput);
 
-    selRow.append(layerSelect, tagsInput);
+    fields.append(layerField, tagsField);
+
+    const actions = document.createElement('div');
+    actions.className = 'row';
+    const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
+    btnEdit.textContent = 'Edit tile';
+    btnEdit.addEventListener('click', () => openTileEditor(tile.id));
+    actions.appendChild(btnEdit);
+    if (grid) {
+      const btnDetach = document.createElement('button');
+      btnDetach.type = 'button';
+      btnDetach.textContent = 'Detach from grid';
+      btnDetach.addEventListener('click', () => commitDetachTile(tile));
+      const btnDeleteGrid = document.createElement('button');
+      btnDeleteGrid.type = 'button';
+      btnDeleteGrid.textContent = 'Delete grid';
+      btnDeleteGrid.addEventListener('click', () => commitDeleteGrid(sheet, grid));
+      actions.append(btnDetach, btnDeleteGrid);
+    }
+
+    selRow.append(nameInput, fields, actions);
   }
 
   let queued = false;

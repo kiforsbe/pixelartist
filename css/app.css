@@ -109,6 +109,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .frame-row .row { margin: 2px 0 0; }
 
 /* tiles panel */
+.tile-selected { cursor: default; }
 .tile-selected input[type="text"] { flex: 1; min-width: 0; }
 .terrain-set-list .row { justify-content: space-between; }
 .terrain-slot-group { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
