@@ -22,6 +22,7 @@ import { nearestColor } from '../core/palettes.js';
 import { flattenSheet } from '../core/model.js';
 import { segmentAt } from '../core/strips.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat } from './floatsession.js';
+import { commitAcceptAnimation } from './frames.js';
 import { resizeRect } from '../core/resizerect.js';
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 
@@ -355,9 +356,24 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     markDirty();
   }
 
+  // If the currently selected animation is floating (no layer yet -- see
+  // acceptAnimation in core/model.js), accept it before resolving the
+  // active layer to write into, so drawing "just works" without the user
+  // needing to explicitly accept first (Enter key, frames.js's
+  // registerFrameTool). No-ops for read-only tools (eyedropper doesn't call
+  // this), tile mode (state.selectedAnimationId isn't used there), or
+  // when nothing is selected/already accepted.
+  function acceptFloatingContextIfAny() {
+    const sheet = activeSheet();
+    if (!sheet || !state.selectedAnimationId) return;
+    const anim = sheet.animations.find(a => a.id === state.selectedAnimationId);
+    if (anim && !anim.layerGroupId) commitAcceptAnimation(sheet, anim);
+  }
+
   // ---- pencil / eraser / fill / line / rect / ellipse ----
 
   function handleDown(ev) {
+    acceptFloatingContextIfAny();
     const layer = activeLayer();
     if (!layer) return;
     const tool = state.tool;
@@ -494,6 +510,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   }
 
   function handleSelectDown(ev) {
+    acceptFloatingContextIfAny();
     if (!activeLayer()) return;
     const target = getTargetRect();
     const handle = hitSelHandle(ev);
