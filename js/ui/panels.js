@@ -1,6 +1,7 @@
 // Color/palette panel and layers panel.
 
 import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
+import { commitDeleteAnimation } from './timeline.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
 import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, moveNode } from '../core/model.js';
 import { compositeFloatOnLayer } from '../core/floating.js';
@@ -502,8 +503,21 @@ export function mountLayersPanel(el) {
     if (selectedNodeId) {
       const g = findGroup(sheet.layerTree, selectedNodeId);
       if (g) {
-        if (g.animationId && !confirmOrAuto(`Delete group "${g.name}"? Its animation will keep its frames but lose its layer group.`)) return;
-        else if (!g.animationId && !confirmOrAuto(`Delete group "${g.name}" and its contents?`)) return;
+        if (g.animationId) {
+          const anim = sheet.animations.find(a => a.id === g.animationId);
+          if (!confirmOrAuto(`Delete animation "${anim?.name ?? g.name}" and its frames?`)) return;
+          commitDeleteAnimation(sheet, g.animationId);
+          // commitDeleteAnimation lives in timeline.js and has no knowledge
+          // of this panel's own local selectedNodeId -- clear it so a stale
+          // id (pointing at the now-deleted group) doesn't linger, matching
+          // the layer-delete branch above which resets it after its own
+          // deletion too. No explicit renderList() call needed here: like
+          // every other branch in this function, commitDeleteAnimation's own
+          // markDirty() already triggers this panel's on('project', renderList).
+          selectedNodeId = null;
+          return;
+        }
+        if (!confirmOrAuto(`Delete group "${g.name}" and its contents?`)) return;
         const loc = findParent(sheet.layerTree, g.id);
         if (!loc) return;
         const parent = loc.parent;
@@ -513,18 +527,10 @@ export function mountLayersPanel(el) {
           label: 'delete group',
           do() {
             parent.children = parent.children.filter(c => c.id !== g.id);
-            if (g.animationId) {
-              const anim = sheet.animations.find(a => a.id === g.animationId);
-              if (anim) anim.layerGroupId = null;
-            }
             selectedNodeId = state.activeLayerId;
           },
           undo() {
             parent.children = beforeChildren.slice();
-            if (g.animationId) {
-              const anim = sheet.animations.find(a => a.id === g.animationId);
-              if (anim) anim.layerGroupId = g.id;
-            }
             selectedNodeId = g.id;
             state.activeLayerId = beforeActive;
           },
