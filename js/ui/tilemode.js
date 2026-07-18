@@ -1648,7 +1648,7 @@ export function mountTilePanel(el) {
   const addTerrainSetDialog = buildAddTerrainSetDialog();
   const btnAddTerrainSet = document.createElement('button');
   btnAddTerrainSet.type = 'button';
-  btnAddTerrainSet.textContent = '➕ Autotile set';
+  btnAddTerrainSet.textContent = '➕';
   btnAddTerrainSet.title = 'Add terrain set';
   btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
 

@@ -1578,13 +1578,15 @@ export function mountFramesPanel(el) {
   const sliceDialog = buildSliceDialog();
   const btnSlice = document.createElement('button');
   btnSlice.type = 'button';
-  btnSlice.textContent = 'Slice grid…';
+  btnSlice.textContent = '▦';
+  btnSlice.title = 'Slice grid…';
   btnSlice.addEventListener('click', () => sliceDialog.open());
 
   const stripDialog = wireNewStripDialog();
   const btnNewStrip = document.createElement('button');
   btnNewStrip.type = 'button';
-  btnNewStrip.textContent = 'New strip…';
+  btnNewStrip.textContent = '🎞';
+  btnNewStrip.title = 'New strip…';
   btnNewStrip.addEventListener('click', () => {
     const sheet = activeSheet();
     if (!sheet || !stripDialog) return;
@@ -1602,7 +1604,8 @@ export function mountFramesPanel(el) {
   // intact strip; toggled in renderList() below on every re-render.
   const btnBreakApart = document.createElement('button');
   btnBreakApart.type = 'button';
-  btnBreakApart.textContent = 'Break apart';
+  btnBreakApart.textContent = '✂';
+  btnBreakApart.title = 'Break apart';
   btnBreakApart.addEventListener('click', () => {
     const sheet = activeSheet();
     if (!sheet || !state.selectedFrameId) return;

@@ -79,7 +79,7 @@ export function mountTileEditor(hostEl) {
   container.appendChild(strip);
 
   const btnBack = document.createElement('button');
-  btnBack.type = 'button'; btnBack.textContent = '← Back to sheet';
+  btnBack.type = 'button'; btnBack.textContent = '⬅'; btnBack.title = 'Back to sheet';
 
   const nameLabel = document.createElement('span');
   nameLabel.className = 'tile-editor-name';
