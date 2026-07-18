@@ -7,7 +7,7 @@ import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
 import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } from '../ui/frames.js';
-import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel } from '../ui/tilemode.js';
+import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
@@ -431,6 +431,7 @@ mountLayersPanel(document.getElementById('panel-layers'));
 mountFramesPanel(document.getElementById('panel-context'));
 mountTilePanel(document.getElementById('panel-context'));
 mountAutotilesPanel(document.getElementById('panel-autotiles'));
+mountTileLayersPanel(document.getElementById('panel-tilelayers'));
 mountTimeline(document.getElementById('timeline-dock'));
 
 // ---- frame editor (Task 16) ----

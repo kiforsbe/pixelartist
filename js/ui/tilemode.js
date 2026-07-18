@@ -1524,34 +1524,12 @@ export function mountAutotilesPanel(el) {
   terrainSetEditor.className = 'terrain-set-editor';
   wrap.appendChild(terrainSetEditor);
 
-  const layersHeading = document.createElement('h4');
-  layersHeading.textContent = 'Tile Layers';
-  wrap.appendChild(layersHeading);
-
-  const layerList = document.createElement('div');
-  layerList.className = 'tile-layer-list';
-  wrap.appendChild(layerList);
-
-  const btnAddLayerName = document.createElement('button');
-  btnAddLayerName.type = 'button';
-  btnAddLayerName.textContent = '➕';
-  btnAddLayerName.title = 'Add tile layer';
-  btnAddLayerName.addEventListener('click', () => {
-    const sheet = activeSheet();
-    if (!sheet) return;
-    const name = prompt('Layer name?');
-    if (!name) return;
-    commitAddLayerName(sheet, name);
-  });
-  wrap.appendChild(btnAddLayerName);
-
   function render() {
     if (state.mode !== 'tiles') { wrap.hidden = true; return; }
     wrap.hidden = false;
     const sheet = activeSheet();
     terrainSetList.innerHTML = '';
     terrainSetEditor.innerHTML = '';
-    layerList.innerHTML = '';
     if (!sheet) return;
 
     for (const ts of sheet.terrainSets) {
@@ -1580,6 +1558,59 @@ export function mountAutotilesPanel(el) {
     if (selectedTerrainSet) {
       renderTerrainSetEditor(terrainSetEditor, sheet, selectedTerrainSet, tilePickerDialog);
     }
+  }
+
+  let queued = false;
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => { queued = false; render(); });
+  }
+  on('project', () => { invalidateFlat(); schedule(); });
+  on('history', () => { invalidateFlat(); schedule(); });
+  on('pixels', () => { invalidateFlat(); schedule(); });
+  on('view', schedule);
+  on('selection', schedule);
+  render();
+}
+
+// Third stacked section in the tile-mode sidebar, below Autotiles: manages
+// sheet.layers (the named "Tile Layer" categories tiles/terrain sets can be
+// tagged with -- unrelated to the real paint-layer stack in the Layers
+// panel; see mountAutotilesPanel's header comment for that disambiguation).
+// Moved out of mountAutotilesPanel verbatim so it's its own panel instead
+// of buried under the terrain-set editor.
+export function mountTileLayersPanel(el) {
+  const wrap = document.createElement('div');
+  el.appendChild(wrap);
+
+  const h3 = document.createElement('h3');
+  h3.textContent = 'Tile Layers';
+  wrap.appendChild(h3);
+
+  const layerList = document.createElement('div');
+  layerList.className = 'tile-layer-list';
+  wrap.appendChild(layerList);
+
+  const btnAddLayerName = document.createElement('button');
+  btnAddLayerName.type = 'button';
+  btnAddLayerName.textContent = '➕';
+  btnAddLayerName.title = 'Add tile layer';
+  btnAddLayerName.addEventListener('click', () => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    const name = prompt('Layer name?');
+    if (!name) return;
+    commitAddLayerName(sheet, name);
+  });
+  wrap.appendChild(btnAddLayerName);
+
+  function render() {
+    if (state.mode !== 'tiles') { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    const sheet = activeSheet();
+    layerList.innerHTML = '';
+    if (!sheet) return;
 
     sheet.layers.forEach((name, i) => {
       const row = document.createElement('div');
@@ -1603,9 +1634,8 @@ export function mountAutotilesPanel(el) {
     queued = true;
     queueMicrotask(() => { queued = false; render(); });
   }
-  on('project', () => { invalidateFlat(); schedule(); });
-  on('history', () => { invalidateFlat(); schedule(); });
-  on('pixels', () => { invalidateFlat(); schedule(); });
+  on('project', schedule);
+  on('history', schedule);
   on('view', schedule);
   on('selection', schedule);
   render();
