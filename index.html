@@ -17,10 +17,10 @@
       <button id="tab-tiles">Tile Sheets</button>
     </nav>
     <select id="sheet-select"></select>
-    <button id="btn-new-sheet" title="New sheet">+</button>
-    <button id="btn-import-sheet" title="Import sheet from image">📥</button>
-    <button id="btn-rename-sheet" title="Rename sheet">✎</button>
-    <button id="btn-delete-sheet" title="Delete sheet">🗑</button>
+    <button id="btn-new-sheet" class="btn-icon-md" title="New sheet">+</button>
+    <button id="btn-import-sheet" class="btn-icon-md" title="Import sheet from image">📥</button>
+    <button id="btn-rename-sheet" class="btn-icon-md" title="Rename sheet">✎</button>
+    <button id="btn-delete-sheet" class="btn-icon-md" title="Delete sheet">🗑</button>
   </div>
 </header>
 <main id="workspace">
@@ -41,11 +41,11 @@
 <dialog id="dlg-export">
   <h3>Export</h3>
   <div class="row">
-    <button id="export-png">Sheet PNG (flattened)</button>
-    <button id="export-frames" disabled>Frames JSON</button>
-    <button id="export-tiles" disabled>Tiles JSON</button>
+    <button id="export-png" class="btn-sm">Sheet PNG (flattened)</button>
+    <button id="export-frames" class="btn-sm" disabled>Frames JSON</button>
+    <button id="export-tiles" class="btn-sm" disabled>Tiles JSON</button>
   </div>
-  <div class="row"><button id="export-cancel">Cancel</button></div>
+  <div class="row"><button id="export-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-newproject">
   <h3>New Project</h3>
@@ -61,7 +61,7 @@
     <span>Frame time</span><input id="np-duration" type="number" min="1" value="100">
     <span>ms</span><span></span>
   </div>
-  <div class="row"><button id="np-create">Create</button><button id="np-cancel">Cancel</button></div>
+  <div class="row"><button id="np-create" class="btn-sm">Create</button><button id="np-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-newsheet">
   <h3>New Sheet</h3>
@@ -70,14 +70,14 @@
     <span>Size</span><input id="ns-w" type="number" min="1" max="4096" value="256">
     <span>×</span><input id="ns-h" type="number" min="1" max="4096" value="256">
   </div>
-  <div class="row"><button id="ns-create">Create</button><button id="ns-cancel">Cancel</button></div>
+  <div class="row"><button id="ns-create" class="btn-sm">Create</button><button id="ns-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-renamesheet">
   <h3>Rename Sheet</h3>
   <div class="row">
     <span>Name</span><input id="rs-name" type="text">
   </div>
-  <div class="row"><button id="rs-ok">OK</button><button id="rs-cancel">Cancel</button></div>
+  <div class="row"><button id="rs-ok" class="btn-sm">OK</button><button id="rs-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-newstrip">
   <h3>New Animation Strip</h3>
@@ -89,17 +89,17 @@
     <span>Duration</span><input id="strip-duration" type="number" min="1" value="100">
     <span>ms</span><span></span>
   </div>
-  <div class="row"><button id="strip-create">Create</button><button id="strip-cancel">Cancel</button></div>
+  <div class="row"><button id="strip-create" class="btn-sm">Create</button><button id="strip-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-about">
   <h3>About PixelArtist</h3>
   <p id="about-version"></p>
-  <div class="row"><button id="about-ok">OK</button></div>
+  <div class="row"><button id="about-ok" class="btn-sm">OK</button></div>
 </dialog>
 <dialog id="dlg-shortcuts" class="sys-dialog">
   <h3>Keyboard Shortcuts</h3>
   <div class="sys-list" id="shortcuts-list"></div>
-  <div class="row"><button id="shortcuts-ok">OK</button></div>
+  <div class="row"><button id="shortcuts-ok" class="btn-sm">OK</button></div>
 </dialog>
 <script type="module" src="js/app/main.js"></script>
 </body>

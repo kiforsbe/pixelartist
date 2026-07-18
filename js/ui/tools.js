@@ -91,6 +91,7 @@ export function mountToolPalette(el) {
   function makeButton(t) {
     const btn = document.createElement('button');
     btn.type = 'button';
+    btn.className = 'btn-icon-lg';
     btn.dataset.tool = t.id;
     btn.textContent = t.icon;
     btn.title = `${t.id} (${t.key})`;

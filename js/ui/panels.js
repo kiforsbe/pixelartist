@@ -382,10 +382,10 @@ export function mountLayersPanel(el) {
   el.appendChild(list);
 
   const btnRow = document.createElement('div'); btnRow.className = 'row layer-actions';
-  const btnAddLayer = document.createElement('button'); btnAddLayer.textContent = '➕'; btnAddLayer.title = 'Add layer';
-  const btnAddGroup = document.createElement('button'); btnAddGroup.textContent = '📁'; btnAddGroup.title = 'Add group';
-  const btnDelete = document.createElement('button'); btnDelete.textContent = '🗑'; btnDelete.title = 'Delete';
-  const btnMerge = document.createElement('button'); btnMerge.textContent = '⬇'; btnMerge.title = 'Merge down';
+  const btnAddLayer = document.createElement('button'); btnAddLayer.className = 'btn-icon-md'; btnAddLayer.textContent = '➕'; btnAddLayer.title = 'Add layer';
+  const btnAddGroup = document.createElement('button'); btnAddGroup.className = 'btn-icon-md'; btnAddGroup.textContent = '📁'; btnAddGroup.title = 'Add group';
+  const btnDelete = document.createElement('button'); btnDelete.className = 'btn-icon-md'; btnDelete.textContent = '🗑'; btnDelete.title = 'Delete';
+  const btnMerge = document.createElement('button'); btnMerge.className = 'btn-icon-md'; btnMerge.textContent = '⬇'; btnMerge.title = 'Merge down';
   btnRow.append(btnAddLayer, btnAddGroup, btnDelete, btnMerge);
   el.appendChild(btnRow);
 
