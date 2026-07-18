@@ -7,6 +7,7 @@ import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, fin
 import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
+import { defineAction, bindAction } from '../app/actions.js';
 
 function rgbaToHex([r, g, b]) {
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
@@ -990,10 +991,14 @@ export function mountLayersPanel(el) {
     queueMicrotask(() => { thumbRedrawQueued = false; redrawThumbs(); });
   }
 
-  btnAddLayer.addEventListener('click', doAddLayer);
-  btnAddGroup.addEventListener('click', doAddGroup);
-  btnDelete.addEventListener('click', doDelete);
-  btnMerge.addEventListener('click', doMergeDown);
+  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet() });
+  bindAction(btnAddLayer, 'layer.add');
+  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet() });
+  bindAction(btnAddGroup, 'layer.addGroup');
+  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet() });
+  bindAction(btnDelete, 'layer.delete');
+  defineAction('layer.mergeDown', { label: 'Merge Down', run: doMergeDown, isEnabled: () => !!activeSheet() });
+  bindAction(btnMerge, 'layer.mergeDown');
 
   on('project', renderList);
   on('history', renderList);

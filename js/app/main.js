@@ -556,6 +556,10 @@ const MENUS = [
     { action: 'document.newSheet' }, { action: 'document.importSheet' }, { separator: true },
     { action: 'document.renameSheet' }, { action: 'document.deleteSheet' },
   ] },
+  { label: 'Layer', items: [
+    { action: 'layer.add' }, { action: 'layer.addGroup' }, { separator: true },
+    { action: 'layer.delete' }, { action: 'layer.mergeDown' },
+  ] },
   { label: 'Edit', items: [
     { action: 'edit.undo' }, { action: 'edit.redo' }, { separator: true },
     { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' },
