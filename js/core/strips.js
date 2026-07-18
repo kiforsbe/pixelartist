@@ -47,6 +47,35 @@ export function segmentOfFrame(anim, frameId) {
   return segmentsOf(anim).find(r => i >= r.start && i < r.end) ?? null;
 }
 
+// Frame objects of one segment run, in animation order (=== spatial order per
+// the segment invariant). Skips dangling frameIds defensively.
+export function segmentMembers(sheet, anim, run) {
+  return anim.frames.slice(run.start, run.end)
+    .map(e => sheet.frames.find(f => f.id === e.frameId))
+    .filter(Boolean);
+}
+
+// Union bounding box of one segment's current member frames.
+export function segmentBounds(sheet, anim, run) {
+  const members = segmentMembers(sheet, anim, run);
+  const x0 = Math.min(...members.map(f => f.x));
+  const y0 = Math.min(...members.map(f => f.y));
+  const x1 = Math.max(...members.map(f => f.x + f.w));
+  const y1 = Math.max(...members.map(f => f.y + f.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+// The segment of `anim` (its own frames only -- unlike segmentAt below,
+// which searches every animation on the sheet) whose members contain
+// (x, y), else null.
+export function segmentOfPoint(sheet, anim, x, y) {
+  const within = (f) => x >= f.x && y >= f.y && x < f.x + f.w && y < f.y + f.h;
+  for (const run of segmentsOf(anim)) {
+    if (segmentMembers(sheet, anim, run).some(within)) return run;
+  }
+  return null;
+}
+
 // Movable content under a point, for the move tool: the strip SEGMENT whose
 // members contain (x, y) — a sub-strip wins over its parent strip by
 // construction — else the topmost plain frame. Returns the bounding rect plus
@@ -56,17 +85,9 @@ export function segmentAt(sheet, x, y) {
   const within = (f) => x >= f.x && y >= f.y && x < f.x + f.w && y < f.y + f.h;
   for (const a of sheet.animations) {
     if (!a.strip) continue;
-    for (const run of segmentsOf(a)) {
-      const members = a.frames.slice(run.start, run.end)
-        .map(e => sheet.frames.find(f => f.id === e.frameId))
-        .filter(Boolean);
-      if (!members.length || !members.some(within)) continue;
-      const x0 = Math.min(...members.map(f => f.x));
-      const y0 = Math.min(...members.map(f => f.y));
-      const x1 = Math.max(...members.map(f => f.x + f.w));
-      const y1 = Math.max(...members.map(f => f.y + f.h));
-      return { rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, frameIds: members.map(f => f.id) };
-    }
+    const run = segmentOfPoint(sheet, a, x, y);
+    if (!run) continue;
+    return { rect: segmentBounds(sheet, a, run), frameIds: segmentMembers(sheet, a, run).map(f => f.id) };
   }
   for (let i = sheet.frames.length - 1; i >= 0; i--) {
     const f = sheet.frames[i];

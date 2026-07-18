@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import {
   normalizeBreaks, segmentsOf, segmentOfFrame,
   insertEntry, removeEntry, mergeSegments, transferSegment,
+  segmentMembers, segmentBounds, segmentOfPoint, segmentAt,
 } from '../js/core/strips.js';
 
 const entries = (...ids) => ids.map(id => ({ frameId: id, duration: 100 }));
 const ids = (list) => list.map(e => e.frameId);
+function sheetWith(frames, animations = []) {
+  return { width: 256, height: 256, frames, animations };
+}
 
 test('normalizeBreaks sorts, dedupes, clamps to 1..len-1', () => {
   assert.deepEqual(normalizeBreaks([3, 1, 3, 0, 9, -2, 2.5], 4), [1, 3]);
@@ -26,6 +30,53 @@ test('segmentOfFrame finds the containing run', () => {
   const anim = { frames: entries('a', 'b', 'c', 'd'), breaks: [2] };
   assert.deepEqual(segmentOfFrame(anim, 'c'), { start: 2, end: 4, index: 1 });
   assert.equal(segmentOfFrame(anim, 'zz'), null);
+});
+
+test('segmentMembers returns frame objects in order, skipping dangling frameIds', () => {
+  const f0 = { id: 'a', x: 0, y: 0, w: 16, h: 16 };
+  const f1 = { id: 'b', x: 16, y: 0, w: 16, h: 16 };
+  const sheet = sheetWith([f0, f1]);
+  const anim = { frames: entries('a', 'zz', 'b'), breaks: [] };
+  const run = segmentsOf(anim)[0];
+  assert.deepEqual(segmentMembers(sheet, anim, run), [f0, f1]);
+});
+
+test("segmentBounds computes the union bbox of a segment's member frames", () => {
+  const f0 = { id: 'a', x: 0, y: 0, w: 16, h: 16 };
+  const f1 = { id: 'b', x: 16, y: 4, w: 16, h: 20 };
+  const sheet = sheetWith([f0, f1]);
+  const anim = { frames: entries('a', 'b'), breaks: [] };
+  const run = segmentsOf(anim)[0];
+  assert.deepEqual(segmentBounds(sheet, anim, run), { x: 0, y: 0, w: 32, h: 24 });
+});
+
+test('segmentOfPoint finds the run containing a point, across multiple segments', () => {
+  const f0 = { id: 'a', x: 0, y: 0, w: 16, h: 16 };
+  const f1 = { id: 'b', x: 100, y: 0, w: 16, h: 16 }; // second segment, moved away
+  const sheet = sheetWith([f0, f1]);
+  const anim = { frames: entries('a', 'b'), breaks: [1] }; // two segments
+  const runs = segmentsOf(anim);
+  assert.deepEqual(segmentOfPoint(sheet, anim, 5, 5), runs[0]);
+  assert.deepEqual(segmentOfPoint(sheet, anim, 105, 5), runs[1]);
+  assert.equal(segmentOfPoint(sheet, anim, 50, 5), null); // gap between segments
+});
+
+test("segmentOfPoint never matches a different animation's frames", () => {
+  const f0 = { id: 'a', x: 0, y: 0, w: 16, h: 16 };
+  const sheet = sheetWith([f0]);
+  const anim = { frames: [], breaks: [] }; // this anim owns no frames
+  assert.equal(segmentOfPoint(sheet, anim, 5, 5), null);
+});
+
+test('segmentAt finds a strip segment at a point, else the topmost plain frame, else null', () => {
+  const stripF0 = { id: 's0', x: 0, y: 0, w: 16, h: 16 };
+  const stripF1 = { id: 's1', x: 16, y: 0, w: 16, h: 16 };
+  const plainF = { id: 'p0', x: 0, y: 32, w: 16, h: 16 };
+  const sheet = sheetWith([stripF0, stripF1, plainF],
+    [{ strip: true, frames: entries('s0', 's1'), breaks: [] }]);
+  assert.deepEqual(segmentAt(sheet, 20, 5), { rect: { x: 0, y: 0, w: 32, h: 16 }, frameIds: ['s0', 's1'] });
+  assert.deepEqual(segmentAt(sheet, 5, 35), { rect: { x: 0, y: 32, w: 16, h: 16 }, frameIds: ['p0'] });
+  assert.equal(segmentAt(sheet, 200, 200), null);
 });
 
 test('insertEntry interior: breaks above shift', () => {

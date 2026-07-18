@@ -15,7 +15,7 @@
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
 import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup, acceptAnimation } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
-import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
+import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, segmentMembers, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { createBitmap, copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
 import { drawRectDims, drawChainDims } from './dimlabels.js';
@@ -95,14 +95,6 @@ function frameAt(sheet, x, y) {
 export function stripOf(sheet, frameId) {
   if (!sheet) return null;
   return sheet.animations.find(a => a.strip && a.frames.some(af => af.frameId === frameId)) ?? null;
-}
-
-// Frame objects of one segment run, in animation order (=== spatial order per
-// the segment invariant). Skips dangling frameIds defensively.
-function segmentMembers(sheet, anim, run) {
-  return anim.frames.slice(run.start, run.end)
-    .map(e => sheet.frames.find(f => f.id === e.frameId))
-    .filter(Boolean);
 }
 
 // Union bounding box of a list of frames (their CURRENT x/y/w/h) — used both
