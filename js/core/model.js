@@ -227,7 +227,32 @@ export function flattenSheetLayers(layers, width, height, floating = null, sheet
 }
 
 export function flattenSheet(sheet, floating = null) {
-  return flattenSheetLayers(sheetLayers(sheet), sheet.width, sheet.height, floating, sheet.id);
+  const acceptedStrips = sheet.animations
+    .filter(a => a.strip && a.layerGroupId)
+    .map(a => ({ anim: a, group: findGroup(sheet.layerTree, a.layerGroupId) }))
+    .filter(s => s.group);
+
+  const stripLayerIds = new Set();
+  for (const { group } of acceptedStrips) for (const l of flattenLayers(group)) stripLayerIds.add(l.id);
+
+  // Everything except an accepted strip's own layers composites normally.
+  const baseLayers = sheetLayers(sheet).filter(l => !stripLayerIds.has(l.id));
+  const out = flattenSheetLayers(baseLayers, sheet.width, sheet.height, floating, sheet.id);
+
+  // Each accepted strip then exclusively (hard-replace, not alpha-blend)
+  // owns its own frame rects: opaque to whatever's on `out` underneath,
+  // genuinely transparent (not a peek-through) wherever the strip itself
+  // has none of its own content.
+  for (const { anim, group } of acceptedStrips) {
+    const stripComposite = flattenSheetLayers(flattenLayers(group), sheet.width, sheet.height, floating, sheet.id);
+    for (const entry of anim.frames) {
+      const frame = sheet.frames.find(f => f.id === entry.frameId);
+      if (!frame) continue;
+      const region = copyRegion(stripComposite, frame.x, frame.y, frame.w, frame.h);
+      blitRegion(out, region, frame.x, frame.y);
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- animation layer groups

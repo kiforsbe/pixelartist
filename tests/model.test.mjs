@@ -182,6 +182,39 @@ test('flattenSheet composites visible layers only', () => {
   assert.deepEqual(getPixel(flattenSheet(s), 1, 1), [0, 255, 0, 255]);
 });
 
+test('flattenSheet gives an accepted strip exclusive, opaque ownership of its own frame rects', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
+  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]); // root pixel under the strip's frame
+  setPixel(sheetLayers(s)[0].bitmap, 8, 0, [0, 255, 0, 255]); // root pixel OUTSIDE the strip's frame
+
+  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
+  const a = addAnimation(s, 'walk', true);
+  a.frames = [{ frameId: f1.id, duration: 100 }];
+  acceptAnimation(s, a); // freezes root's (0,0) red pixel into the strip's own layer
+
+  // erase the strip's own copy of that pixel so it's transparent on the strip's layer
+  const g = findGroup(s.layerTree, a.layerGroupId);
+  setPixel(flattenLayers(g)[0].bitmap, 0, 0, [0, 0, 0, 0]);
+
+  const flat = flattenSheet(s);
+  // inside the strip's own frame rect: transparent strip pixel wins -- root's red does NOT show through
+  assert.deepEqual(getPixel(flat, 0, 0), [0, 0, 0, 0]);
+  // outside the strip's frame rect: root layer composites normally
+  assert.deepEqual(getPixel(flat, 8, 0), [0, 255, 0, 255]);
+});
+
+test('flattenSheet leaves a floating (not-yet-accepted) strip transparent to whatever is underneath', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
+  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]);
+  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
+  const a = addAnimation(s, 'walk', true);
+  a.frames = [{ frameId: f1.id, duration: 100 }];
+  // not accepted -- a.layerGroupId is still null
+  assert.deepEqual(getPixel(flattenSheet(s), 0, 0), [255, 0, 0, 255]);
+});
+
 test('createSheet tile kind starts with empty grids/tiles', () => {
   const p = createProject('t');
   const s = createSheet(p, { name: 'x', width: 64, height: 64, kind: 'tile' });
