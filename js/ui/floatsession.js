@@ -310,6 +310,8 @@ function clipboardCapture(allLayers, clearSource) {
 export function cutSelection(allLayers = false) { clipboardCapture(allLayers, true); }
 export function copySelection(allLayers = false) { clipboardCapture(allLayers, false); }
 
+export function hasSelection() { return !!activeView()?.getSelection(); }
+
 // Shared by pasteClipboard (internal) and pasteSystemImage (OS clipboard):
 // lands `layers` as a new cut:false float at `pos`, switches to the move
 // tool, and pushes one undoable 'paste' command.
@@ -428,6 +430,13 @@ async function pasteSystemImage() {
     y: target.y + Math.floor((target.h - bitmap.height) / 2),
   };
   installPastedFloat(viewApi, sheet, target, [{ layerId: al.id, buffer: bitmap }], bitmap.width, bitmap.height, pos);
+}
+
+// Menu-facing paste: mirrors what Ctrl+V already does (internal clipboard
+// first, OS clipboard image as fallback) as a single callable, since the
+// keydown handler below inlines that branch instead of calling a function.
+export function paste() {
+  if (clipboard) pasteClipboard(); else pasteSystemImage();
 }
 
 // ---- auto-commit hooks + keyboard ----

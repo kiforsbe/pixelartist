@@ -13,7 +13,7 @@ import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
-import { initFloatSession, commitFloatIfAny } from '../ui/floatsession.js';
+import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../ui/floatsession.js';
 import { defineAction, runAction } from './actions.js';
 import { mountMenuBar } from '../ui/menubar.js';
 
@@ -334,6 +334,9 @@ defineAction('edit.redo', {
   run: () => state.commands.redo(),
   isEnabled: () => state.commands.canRedo(),
 });
+defineAction('edit.cut', { label: 'Cut', shortcut: 'Ctrl+X', run: () => cutSelection(false), isEnabled: hasSelection });
+defineAction('edit.copy', { label: 'Copy', shortcut: 'Ctrl+C', run: () => copySelection(false), isEnabled: hasSelection });
+defineAction('edit.paste', { label: 'Paste', shortcut: 'Ctrl+V', run: paste });
 window.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const key = e.key.toLowerCase();
@@ -530,7 +533,8 @@ const MENUS = [
     { action: 'file.export' },
   ] },
   { label: 'Edit', items: [
-    { action: 'edit.undo' }, { action: 'edit.redo' },
+    { action: 'edit.undo' }, { action: 'edit.redo' }, { separator: true },
+    { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' },
   ] },
   { label: 'View', items: [
     { action: 'view.toggleLabels' }, { action: 'view.toggleSequences' },
