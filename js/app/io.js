@@ -3,7 +3,11 @@ import { encodePng, decodePng } from './pngcodec.js';
 
 export const PACKED_TYPE = {
   description: 'PixelArtist project',
-  accept: { 'application/octet-stream': ['.pixelproj'] },
+  // A unique, unregistered mime type -- 'application/octet-stream' is
+  // treated by Windows/Chromium as the generic "binary" bucket, which pulls
+  // every other extension registered under that same bucket (.exe, .com,
+  // .bin, ...) into the native picker's filter alongside .pixelproj.
+  accept: { 'application/vnd.pixelartist.project': ['.pixelproj'] },
 };
 
 const IMAGE_TYPE = {
