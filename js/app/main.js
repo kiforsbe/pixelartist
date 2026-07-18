@@ -14,7 +14,7 @@ import { mountTimeline } from '../ui/timeline.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
 import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../ui/floatsession.js';
-import { defineAction, runAction } from './actions.js';
+import { defineAction, runAction, bindAction } from './actions.js';
 import { mountMenuBar } from '../ui/menubar.js';
 
 function isCancel(e) {
@@ -172,16 +172,21 @@ function commitAddSheet(sheet) {
 }
 
 // ---- new sheet dialog ----
-btnNewSheet.addEventListener('click', () => {
-  if (!state.project) return;
-  const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
-  const settings = state.project.settings;
-  const n = state.project.sheets.filter(s => s.kind === kind).length + 1;
-  nsName.value = `sheet_${n}`;
-  nsW.value = kind === 'sprite' ? settings.spriteSheetW : settings.tileSheetW;
-  nsH.value = kind === 'sprite' ? settings.spriteSheetH : settings.tileSheetH;
-  dlgNewSheet.showModal();
+defineAction('document.newSheet', {
+  label: 'New Sheet',
+  run: () => {
+    if (!state.project) return;
+    const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+    const settings = state.project.settings;
+    const n = state.project.sheets.filter(s => s.kind === kind).length + 1;
+    nsName.value = `sheet_${n}`;
+    nsW.value = kind === 'sprite' ? settings.spriteSheetW : settings.tileSheetW;
+    nsH.value = kind === 'sprite' ? settings.spriteSheetH : settings.tileSheetH;
+    dlgNewSheet.showModal();
+  },
+  isEnabled: () => !!state.project,
 });
+bindAction(btnNewSheet, 'document.newSheet');
 nsCancel.addEventListener('click', () => dlgNewSheet.close());
 nsCreate.addEventListener('click', () => {
   if (!state.project) return;
@@ -205,37 +210,42 @@ nsCreate.addEventListener('click', () => {
 });
 
 // ---- import sheet from image ----
-btnImportSheet.addEventListener('click', async () => {
-  if (!state.project) return;
-  let file;
-  try {
-    file = await io.pickImageFile();
-  } catch (e) {
-    if (isCancel(e)) return;
-    alert(`Import failed: ${e.message}`);
-    return;
-  }
-  let bitmap;
-  try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    bitmap = await decodePng(bytes);
-  } catch (e) {
-    alert(`Import failed: ${e.message}`);
-    return;
-  }
-  if (bitmap.width > 4096 || bitmap.height > 4096) {
-    alert('Image is too large (max 4096×4096).');
-    return;
-  }
-  const project = state.project;
-  const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
-  const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
-  const sheet = createSheet(project, {
-    name, width: bitmap.width, height: bitmap.height, kind,
-  });
-  sheetLayers(sheet)[0].bitmap = bitmap;
-  commitAddSheet(sheet);
+defineAction('document.importSheet', {
+  label: 'Import Sheet from Image',
+  run: async () => {
+    if (!state.project) return;
+    let file;
+    try {
+      file = await io.pickImageFile();
+    } catch (e) {
+      if (isCancel(e)) return;
+      alert(`Import failed: ${e.message}`);
+      return;
+    }
+    let bitmap;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      bitmap = await decodePng(bytes);
+    } catch (e) {
+      alert(`Import failed: ${e.message}`);
+      return;
+    }
+    if (bitmap.width > 4096 || bitmap.height > 4096) {
+      alert('Image is too large (max 4096×4096).');
+      return;
+    }
+    const project = state.project;
+    const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+    const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
+    const sheet = createSheet(project, {
+      name, width: bitmap.width, height: bitmap.height, kind,
+    });
+    sheetLayers(sheet)[0].bitmap = bitmap;
+    commitAddSheet(sheet);
+  },
+  isEnabled: () => !!state.project,
 });
+bindAction(btnImportSheet, 'document.importSheet');
 
 // ---- rename sheet ----
 const btnRenameSheet = document.getElementById('btn-rename-sheet');
@@ -243,12 +253,17 @@ const dlgRenameSheet = document.getElementById('dlg-renamesheet');
 const rsName = document.getElementById('rs-name');
 const rsOk = document.getElementById('rs-ok');
 const rsCancel = document.getElementById('rs-cancel');
-btnRenameSheet.addEventListener('click', () => {
-  const sheet = activeSheet();
-  if (!sheet) return;
-  rsName.value = sheet.name;
-  dlgRenameSheet.showModal();
+defineAction('document.renameSheet', {
+  label: 'Rename Sheet',
+  run: () => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    rsName.value = sheet.name;
+    dlgRenameSheet.showModal();
+  },
+  isEnabled: () => !!activeSheet(),
 });
+bindAction(btnRenameSheet, 'document.renameSheet');
 rsCancel.addEventListener('click', () => dlgRenameSheet.close());
 rsOk.addEventListener('click', () => {
   const sheet = activeSheet();
@@ -315,12 +330,17 @@ function commitDeleteSheet(sheet) {
   };
   state.commands.push(cmd);
 }
-btnDeleteSheet.addEventListener('click', () => {
-  const sheet = activeSheet();
-  if (!sheet) return;
-  if (!confirmOrAuto(`Delete sheet "${sheet.name}" and everything in it (layers, frames, animations${sheet.kind === 'tile' ? ', tiles, terrain sets' : ''})?`)) return;
-  commitDeleteSheet(sheet);
+defineAction('document.deleteSheet', {
+  label: 'Delete Sheet',
+  run: () => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+    if (!confirmOrAuto(`Delete sheet "${sheet.name}" and everything in it (layers, frames, animations${sheet.kind === 'tile' ? ', tiles, terrain sets' : ''})?`)) return;
+    commitDeleteSheet(sheet);
+  },
+  isEnabled: () => !!activeSheet(),
 });
+bindAction(btnDeleteSheet, 'document.deleteSheet');
 
 // ---- undo/redo ----
 state.commands.onChange = () => emit('history');
@@ -531,6 +551,10 @@ const MENUS = [
     { action: 'file.new' }, { action: 'file.open' }, { separator: true },
     { action: 'file.save' }, { action: 'file.saveAs' }, { separator: true },
     { action: 'file.export' },
+  ] },
+  { label: 'Document', items: [
+    { action: 'document.newSheet' }, { action: 'document.importSheet' }, { separator: true },
+    { action: 'document.renameSheet' }, { action: 'document.deleteSheet' },
   ] },
   { label: 'Edit', items: [
     { action: 'edit.undo' }, { action: 'edit.redo' }, { separator: true },
