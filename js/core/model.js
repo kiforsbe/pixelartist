@@ -41,6 +41,17 @@ export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
     sheets: [], palettes: [], activePaletteId: null };
 }
 
+// A sheet owns everything about it (layerTree, frames, animations, and for
+// tile sheets tileGrids/tiles/terrainSets/terrainLayoutPresets) inline on the
+// sheet object itself -- nothing elsewhere in the project references a sheet
+// by id -- so removing it from project.sheets is the whole operation; there's
+// no separate cascade to walk.
+export function removeSheet(project, sheetId) {
+  const i = project.sheets.findIndex(s => s.id === sheetId);
+  if (i === -1) return null;
+  return project.sheets.splice(i, 1)[0];
+}
+
 export function createSheet(project, { name, width, height, kind }) {
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 1 || height < 1 || width > MAX_DIM || height > MAX_DIM)

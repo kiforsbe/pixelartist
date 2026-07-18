@@ -5,7 +5,7 @@ import {
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
-  scrubTileReferences, layerAnimationContext,
+  scrubTileReferences, layerAnimationContext, removeSheet,
 } from '../js/core/model.js';
 import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
 
@@ -14,6 +14,22 @@ function proj() {
   const s = createSheet(p, { name: 'sheet1', width: 32, height: 16, kind: 'sprite' });
   return { p, s };
 }
+
+test('removeSheet splices the matching sheet out of project.sheets and returns it', () => {
+  const p = createProject('t');
+  const s1 = createSheet(p, { name: 'a', width: 8, height: 8, kind: 'sprite' });
+  const s2 = createSheet(p, { name: 'b', width: 8, height: 8, kind: 'tile' });
+  const removed = removeSheet(p, s1.id);
+  assert.equal(removed, s1);
+  assert.deepEqual(p.sheets, [s2]);
+});
+
+test('removeSheet returns null and leaves sheets untouched for an unknown id', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'a', width: 8, height: 8, kind: 'sprite' });
+  assert.equal(removeSheet(p, 'nope'), null);
+  assert.deepEqual(p.sheets, [s]);
+});
 
 test('createSheet defaults: one layer, bounds enforced', () => {
   const { p, s } = proj();

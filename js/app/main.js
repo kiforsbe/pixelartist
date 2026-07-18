@@ -1,7 +1,7 @@
 import { state, on, emit, activeSheet, activeLayer, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
-import { flattenSheet, createSheet, sheetLayers, layerAnimationContext } from '../core/model.js';
+import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext } from '../core/model.js';
 import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../core/strips.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
@@ -281,6 +281,62 @@ rsOk.addEventListener('click', () => {
     undo() { sheet.name = old; markDirty(); },
   });
   dlgRenameSheet.close();
+});
+
+// ---- delete sheet ----
+// A sheet owns its layerTree/frames/animations/tiles/terrainSets inline (see
+// removeSheet's comment in core/model.js), so the only other cleanup is app
+// state that points at the sheet being removed: active sheet/layer,
+// per-sheet selections, any open frame/tile editor, and an in-progress
+// floating selection.
+const btnDeleteSheet = document.getElementById('btn-delete-sheet');
+function commitDeleteSheet(sheet) {
+  const project = state.project;
+  const index = project.sheets.indexOf(sheet);
+  if (index === -1) return;
+  const wasActive = state.activeSheetId === sheet.id;
+  const prev = {
+    activeSheetId: state.activeSheetId, activeLayerId: state.activeLayerId,
+    selectedFrameId: state.selectedFrameId, selectedAnimationId: state.selectedAnimationId,
+    selectedTileId: state.selectedTileId, selectedTerrainSetId: state.selectedTerrainSetId,
+    editingFrameId: state.editingFrameId, editingTileId: state.editingTileId,
+    view: state.view, floating: state.floating,
+  };
+  const cmd = {
+    label: 'delete sheet',
+    do() {
+      removeSheet(project, sheet.id);
+      if (state.floating?.sheetId === sheet.id) state.floating = null;
+      if (wasActive) {
+        const siblings = project.sheets.filter(s => s.kind === sheet.kind);
+        const next = siblings[Math.min(index, siblings.length - 1)] ?? null;
+        state.activeSheetId = next ? next.id : null;
+        state.activeLayerId = next ? (sheetLayers(next)[0]?.id ?? null) : null;
+        state.selectedFrameId = null;
+        state.selectedAnimationId = null;
+        state.selectedTileId = null;
+        state.selectedTerrainSetId = null;
+        state.editingFrameId = null;
+        state.editingTileId = null;
+        state.view = 'sheet';
+      }
+      markDirty();
+      emit('view');
+    },
+    undo() {
+      project.sheets.splice(index, 0, sheet);
+      Object.assign(state, prev);
+      markDirty();
+      emit('view');
+    },
+  };
+  state.commands.push(cmd);
+}
+btnDeleteSheet.addEventListener('click', () => {
+  const sheet = activeSheet();
+  if (!sheet) return;
+  if (!confirmOrAuto(`Delete sheet "${sheet.name}" and everything in it (layers, frames, animations${sheet.kind === 'tile' ? ', tiles, terrain sets' : ''})?`)) return;
+  commitDeleteSheet(sheet);
 });
 
 // ---- undo/redo ----
