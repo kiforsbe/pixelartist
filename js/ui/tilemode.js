@@ -1069,6 +1069,12 @@ function getFlatBitmap(sheet) {
 }
 let flatCanvas = null;
 let flatCanvasSrc = null;
+// Bumped every time flatCanvas's *content* is actually redrawn. flatCanvas
+// itself is a stable object reused across same-size repaints (mutated in
+// place via putImageData), so object identity alone can't signal "this
+// thumbnail was cropped from stale pixels" -- tileThumbnailURL's cache
+// needs this counter instead.
+let flatGeneration = 0;
 function getFlatCanvas(sheet) {
   const bmp = getFlatBitmap(sheet);
   if (flatCanvasSrc !== bmp) {
@@ -1081,6 +1087,7 @@ function getFlatCanvas(sheet) {
     c.imageSmoothingEnabled = false;
     c.putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
     flatCanvasSrc = bmp;
+    flatGeneration++;
   }
   return flatCanvas;
 }
@@ -1093,7 +1100,7 @@ function tileThumbnailURL(sheet, tile, { flipH = false, flipV = false, rotate = 
   const flat = getFlatCanvas(sheet);
   const key = `${tile.id}|${flipH}|${flipV}|${rotate}`;
   const cached = thumbnailCache.get(key);
-  if (cached && cached.src === flat) return cached.url;
+  if (cached && cached.gen === flatGeneration) return cached.url;
 
   const scratch = document.createElement('canvas');
   scratch.width = tile.w;
@@ -1111,7 +1118,7 @@ function tileThumbnailURL(sheet, tile, { flipH = false, flipV = false, rotate = 
   ctx.drawImage(flat, tile.x, tile.y, tile.w, tile.h, 0, 0, tile.w, tile.h);
   ctx.restore();
   const url = scratch.toDataURL();
-  thumbnailCache.set(key, { url, src: flat });
+  thumbnailCache.set(key, { url, gen: flatGeneration });
   return url;
 }
 
