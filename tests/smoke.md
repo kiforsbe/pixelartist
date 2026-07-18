@@ -130,20 +130,23 @@ is a pass condition for the whole run, not just the final step.
 
 ## 8. Tile mode
 
-34. [A] Switch to Tile Sheets tab on a fresh tile sheet: tile panel shows
-    "0 tiles", no grids listed, an "Add Grid…" button, and "No tile
-    selected".
-34b. [A] The Tile Sheets tab shows two separate sidebar panels: "Tiles"
-    (grid list, Add Grid, tile detail) and "Autotiles" (terrain sets, view
-    modes, Tile Layers) — both hidden while on the Sprite Sheets tab.
+34. [A] Switch to Tile Sheets tab on a fresh tile sheet: Tiles panel shows
+    "Add Grid…" and "➕ Autotile set" buttons and "No tile selected" — no
+    grid list or tile count (selection-driven, like the Frames panel).
+34b. [A] The Tile Sheets tab shows three separate sidebar panels: "Tiles"
+    (Add Grid…/Add Terrain Set… buttons, selected-tile detail), "Autotiles"
+    (terrain sets, view modes, symmetry toggles), and "Tile Layers" (the
+    sheet.layers name list) — all three hidden while on the Sprite Sheets
+    tab.
 35. [A] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
     X/Y, defaulted from the project's tile size setting) with a live
     dashed-outline preview on the canvas that updates as fields change and
-    disappears on Cancel. Create adds a grid; the panel now lists it with
-    editable Cols/Rows/W/H fields and the tile count updates.
+    disappears on Cancel. Create adds a grid; selecting any tile inside it
+    afterward shows that grid's info in the Tiles panel (item 36).
 36. [A] Tile tool (`T`, tile mode only): click a tile in the grid to select
-    it — the panel shows a name field, "Edit tile", and "Detach from grid"
-    (no W/H fields, since a grid-owned tile's size follows its grid).
+    it — the Tiles panel shows a name field, "Edit tile", the owning grid's
+    Cell W/H fields (editing either re-lays-out every tile in that grid),
+    "Detach from grid", "Delete grid", and a Layer dropdown (item 56).
 37. [M] Drag one tile onto another SAME-SIZE tile (no Shift) to swap them —
     pixels, names, and neighbor presets swap on all layers; undo restores
     both. Shift-drag instead moves (source clears to transparent, its
@@ -161,15 +164,19 @@ is a pass condition for the whole run, not just the final step.
 40. [A] Select a grid-owned tile, click "Detach from grid" — it becomes a
     standalone tile (W/H fields appear, resize handles become available);
     undo restores its grid membership.
-41. [A] Editing a grid's Cols/Rows in the panel adds/removes tiles at the
-    trailing edge (pixels stay on the sheet; only the tile record and any
-    name/neighbor preset it held are removed on shrink); editing Cell W/H
-    re-lays-out every owned tile from the grid's origin, preserving each
-    cell's name/neighbor preset. Each edit is one undo step.
-42. [A] "Delete grid" removes the grid and every tile it owns; undo restores
-    all of them. Select a standalone tile and press `Delete`: it's removed;
-    undo restores it. Grid-owned tiles have no direct delete (shrink the
-    grid, or detach first).
+41. [A] Selecting a tile in a grid and editing that grid's Cell W/H fields
+    (Tiles panel, item 36) re-lays-out every owned tile from the grid's
+    origin, preserving each cell's name/neighbor preset; each edit is one
+    undo step. (Cols/Rows are fixed at grid creation — no in-panel resize
+    UI as of the Tiles/Autotiles panel cleanup.)
+42. [A] "Delete grid" (Tiles panel, item 36) removes the grid and every
+    tile it owns; if that empties out a terrain set (no tile references it
+    anymore), the terrain set is deleted too and its row disappears from
+    the Autotiles panel's list — a DIFFERENT, still-empty terrain set
+    created via "(none — add tiles manually)" is untouched. Undo restores
+    the grid, its tiles, and any implicitly-deleted terrain set in one
+    step. Select a standalone tile and press `Delete`: it's removed; undo
+    restores it. Grid-owned tiles have no direct delete (detach first).
 
 ## 9. Tile editor
 
@@ -190,29 +197,42 @@ is a pass condition for the whole run, not just the final step.
 
 ## 9a. Terrain sets, layers & tags
 
-47. [A] Terrain Sets list starts empty; "Add Terrain Set…" dialog defaults
-    Tile W/H from the project's tile size setting; creating one adds a row
-    with its name and size.
+47. [A] Terrain Sets list (Autotiles panel) starts empty; the "➕ Autotile
+    set" button — now in the Tiles panel, alongside "Add Grid…" — opens a
+    dialog that defaults Tile W/H from the project's tile size setting;
+    creating one adds a row to the Autotiles panel's list with its name and
+    size.
 48. [A] Clicking a terrain set's row opens its 47-slot editor below,
     grouped in ascending neighbor-count rows; the 16 core slots show a
     distinct (blue, thicker) border.
-48b. [A] Terrain-set editor's "View" dropdown (Staircase / Grid 8×6 / Grid
-    7×7 / 16-tile only) rearranges the 47 slots on screen without changing
-    any slot's assignment (cosmetic only); "Grid 8×6"/"Grid 7×7" mirror the
-    real reference template's row/col layout 1:1 (including its duplicate
+48b. [A] Terrain-set editor's view-mode dropdown (no "View " label text —
+    just the `<select>`: Staircase / Grid 8×6 / Grid 7×7 / 16-tile only)
+    rearranges the 47 slots on screen without changing any slot's
+    assignment (cosmetic only); "Grid 8×6"/"Grid 7×7" mirror the real
+    reference template's row/col layout 1:1 (including its duplicate
     "isolated"/"full surround" cells, which render as two on-screen cells
-    bound to the same underlying slot). The layout-preset dropdown
-    (Import/Save row) lists "Blob-47 (8×6)" (the corrected/renamed former
-    "6×8, ascending" built-in) and "Blob-47 (7×7)" alongside the 4×4
-    16-tile built-in — both now use the real reference template mapping
-    rather than ascending index order, so importing a matching grid of
-    real terrain art places visually-continuous tiles into their slots.
-48c. [A] Toggling "Allow flip"/"Allow rotation" immediately reclassifies
-    each slot as mandatory (solid border) or optional (dashed border)
-    based on symmetry alone, independent of whether the slot currently has
-    a tile assigned. A filled slot shows the actual tile's cropped pixels
-    as its background, with a small ↔/↕/↻ icon overlay only when that
-    fill came from symmetry (not an explicit assignment).
+    bound to the same underlying slot — the first cell in raster order is
+    primary; the others show a `.has-duplicates` outline + `⧉N` badge).
+    Creating a terrain set from the "Blob-47 (7×7)" or "Blob-47 (8×6)"
+    preset (Add Terrain Set dialog) seeds that set's view dropdown to the
+    matching grid mode on first open, not always "Staircase"; switching
+    between two open terrain sets keeps each one's own choice (no leaking
+    one set's view into another's). There is no layout-preset import/save
+    row in the editor anymore — presets are only applied at terrain-set
+    creation time (Add Terrain Set dialog, item 51).
+48c. [A] "Allow flip"/"Allow rotation" are icon toggle buttons (↔/↻, not
+    checkboxes) — clicking one toggles its pressed state (filled accent
+    background, `aria-pressed`) and immediately reclassifies each slot as
+    mandatory (solid border) or optional (dashed border) based on symmetry
+    alone, independent of whether the slot currently has a tile assigned.
+    A filled slot shows the actual tile's cropped pixels as its
+    background, with a small ↔/↕/↻ icon overlay only when that fill came
+    from symmetry (not an explicit assignment). A slot that's optional AND
+    explicitly assigned (art placed there even though it's now derivable)
+    additionally shows a muted blue-grey dashed outline + a "✓opt" badge,
+    distinct from the orange duplicate-tile marker — on the tile sheet
+    itself, the corresponding tile cell shows a translucent blue-grey wash
+    across the whole cell (not just an outline) for the same condition.
 49. [A] Clicking an empty slot opens the tile picker (filtered to tiles
     matching the terrain set's size); assigning a tile fills that slot;
     "Clear" empties it again.
@@ -225,12 +245,12 @@ is a pass condition for the whole run, not just the final step.
 50. [A] Toggling "Allow flip" / "Allow rotation" changes which otherwise-
     empty slots show a derived (dashed-border) state, with a badge/tooltip
     reflecting a real flip or rotation transform (not identity).
-51. [A] "Import from layout…" with the built-in "16-tile (4×4, ascending)"
-    preset against a matching 4×4 grid fills exactly the 16 core slots;
-    against a mismatched grid, shows an alert instead of silently
-    misapplying.
-52. [A] "Save current as preset…" prompts for a name and adds a new entry
-    to the layout dropdown, usable immediately after.
+51. [A] Add Terrain Set dialog: picking "Blob-47 (7×7)" or "Blob-47 (8×6)"
+    from the Layout dropdown shows a live reference-image preview (with a
+    dashed "dup" overlay on non-primary duplicate cells); "(none — add
+    tiles manually)" hides the preview. Create with a preset selected both
+    fills the matching slots and paints the preset's reference art onto the
+    active paint layer, on a matching grid it creates for you.
 53. [A] Deleting a terrain set clears every referencing tile's terrain
     badge/detail without deleting the tiles themselves.
 54. [A] Tile editor: opening a terrain-set tile shows the "Terrain:
@@ -239,15 +259,20 @@ is a pass condition for the whole run, not just the final step.
     before this feature.
 55. [A] Layers list: Add/rename/reorder (↑/↓)/Delete all work; deleting a
     layer name clears it from any tile that had it selected.
-55b. [A] The Tile Layers section (in the Autotiles panel) reads "Tile
-    Layers", with an icon-only Add button and hover tooltips on its
-    add/up/down/delete controls; it is visually and structurally
-    independent from the app's real Layers panel. A terrain set's own
-    Layer dropdown (next to its symmetry checkboxes) sets that set's
-    layer without changing any member tile's own Layer selection.
-56. [A] Tile detail panel: Layer dropdown lists the Layers list plus
-    "(none)"; Tags field accepts a comma-separated list and round-trips on
-    reselecting the tile.
+55b. [A] The Tile Layers panel (its own sidebar section below Autotiles)
+    reads "Tile Layers", with an icon-only Add button and hover tooltips on
+    its add/up/down/delete controls; it is visually and structurally
+    independent from the app's real Layers panel and from the Autotiles
+    panel's symmetry row (which no longer has a Layer dropdown — that
+    control moved to the Tiles panel, item 56).
+56. [A] Tiles panel: selecting a standalone tile shows a Layer dropdown
+    bound to that tile's own `layer` (lists the Tile Layers list plus
+    "(none)"); selecting a tile that belongs to a terrain set shows the
+    SAME dropdown bound to `terrainSet.layer` instead — changing it from
+    any one member tile updates it for every tile in that terrain set
+    (select a different member tile from the same set and confirm the
+    dropdown shows the same, now-changed value). Tags field accepts a
+    comma-separated list and round-trips on reselecting the tile.
 57. [A] Tiles JSON export: a sheet with a filled terrain set and layers
     produces the new `terrainSets`/`layers` top-level keys, and a
     terrain-set tile's exported entry has no `neighbors` key.
