@@ -2,7 +2,7 @@
 
 import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
-import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, findGroup, findLayer, createLayerNode, createGroupNode, moveNode } from '../core/model.js';
+import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, moveNode } from '../core/model.js';
 import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
@@ -467,11 +467,16 @@ export function mountLayersPanel(el) {
     if (!sheet) return;
     const layer = activeLayer();
     if (layer) {
-      if (sheetLayers(sheet).length <= 1) { alert('Cannot delete the last layer.'); return; }
-      if (!confirmOrAuto(`Delete layer "${layer.name}"?`)) return;
       const loc = findParent(sheet.layerTree, layer.id);
       if (!loc) return;
       const parent = loc.parent;
+      // Scoped to this layer's own group (root, or an animation's private
+      // group), not the whole sheet: a whole-sheet count lets you empty a
+      // single animation's group down to zero layers as long as some OTHER
+      // animation (or root) still has layers, leaving that animation with a
+      // blank composite.
+      if (flattenLayers(parent).length <= 1) { alert('Cannot delete the last layer in this group.'); return; }
+      if (!confirmOrAuto(`Delete layer "${layer.name}"?`)) return;
       const beforeChildren = parent.children.slice();
       const beforeActive = state.activeLayerId;
       const idx = loc.index;
@@ -979,6 +984,7 @@ export function mountLayersPanel(el) {
   on('project', renderList);
   on('history', renderList);
   on('view', renderList);
+  on('selection', renderList);
   on('pixels', scheduleThumbRedraw);
   renderList();
 }

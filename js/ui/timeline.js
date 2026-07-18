@@ -11,7 +11,7 @@
 // for its own animation-affecting edits (slice grid / delete frame).
 
 import { state, on, emit, activeSheet, markDirty, confirmOrAuto, currentContextLayers } from '../app/state.js';
-import { addAnimation, flattenSheetLayers, findParent, renameAnimation } from '../core/model.js';
+import { addAnimation, animationGroup, contextLayers, flattenSheetLayers, findParent, renameAnimation } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 import { commitBreakApartStrip } from './frames.js';
 
@@ -108,19 +108,44 @@ function changeDuration(anim, index, newDuration) {
 // with anything else that captured a reference to it, e.g. selection).
 function commitNewAnimation(sheet) {
   const name = `anim_${sheet.animations.length}`;
+  const beforeActiveLayerId = state.activeLayerId;
   let anim = null;
   let idx = -1;
+  let group = null;
+  let animLayerId = null;
+  let groupIdx = -1;
   const cmd = {
     label: 'new animation',
     do() {
-      if (!anim) { anim = addAnimation(sheet, name); idx = sheet.animations.indexOf(anim); }
-      else if (!sheet.animations.includes(anim)) sheet.animations.splice(Math.min(idx, sheet.animations.length), 0, anim);
-      state.selectedAnimationId = anim.id;
+      if (!anim) {
+        // addAnimation seeds the new animation's group with exactly one
+        // layer -- see commitNewStrip's matching comment in frames.js:
+        // without activating it, drawing right after "New Animation" would
+        // silently target whatever layer was active before.
+        anim = addAnimation(sheet, name);
+        idx = sheet.animations.indexOf(anim);
+        group = animationGroup(sheet, anim.id);
+        animLayerId = group.children[0].id;
+        groupIdx = sheet.layerTree.children.indexOf(group);
+      } else {
+        if (!sheet.animations.includes(anim)) sheet.animations.splice(Math.min(idx, sheet.animations.length), 0, anim);
+        if (!sheet.layerTree.children.includes(group))
+          sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
+      }
+      // state.commands is a single global stack shared by every sheet -- only
+      // touch selection/active-layer state while this command's own sheet is
+      // still the one on screen (see frames.js's matching comment).
+      if (sheet === activeSheet()) {
+        state.selectedAnimationId = anim.id;
+        state.activeLayerId = animLayerId;
+      }
     },
     undo() {
       idx = sheet.animations.indexOf(anim);
       sheet.animations = sheet.animations.filter(a => a !== anim);
+      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
       if (state.selectedAnimationId === anim.id) state.selectedAnimationId = null;
+      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
     },
   };
   state.commands.push(cmd);
@@ -341,10 +366,24 @@ export function mountTimeline(el) {
 
   // ---- header controls ----
   animSelect.addEventListener('change', () => {
+    const sheet = activeSheet();
     state.selectedAnimationId = animSelect.value || null;
     stopPlaying();
     position = 0; acc = 0;
+    // Keep the active layer inside whatever context is now on screen -- see
+    // commitNewStrip's matching comment in frames.js. Only reassign when the
+    // current active layer doesn't already belong to the newly selected
+    // context, so a deliberate in-context choice survives switching away and
+    // back. contextLayers(sheet, null) (deselecting to "(none)") returns
+    // every layer in the sheet, matching how a null selection is already
+    // treated everywhere else -- so an in-context layer stays active rather
+    // than being forced back to a root layer.
+    if (sheet) {
+      const layers = contextLayers(sheet, state.selectedAnimationId);
+      if (!layers.some(l => l.id === state.activeLayerId)) state.activeLayerId = layers[0]?.id ?? null;
+    }
     render();
+    emit('selection');
   });
 
   btnNewAnim.addEventListener('click', () => {
@@ -465,14 +504,22 @@ export function mountTimeline(el) {
   // ---- full render ----
   function renderAnimSelect(sheet) {
     animSelect.innerHTML = '';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = '(none)';
+    animSelect.appendChild(noneOpt);
     if (!sheet) return;
     for (const a of sheet.animations) {
       const opt = document.createElement('option');
       opt.value = a.id; opt.textContent = a.name;
       animSelect.appendChild(opt);
     }
-    if (!sheet.animations.find(a => a.id === state.selectedAnimationId))
-      state.selectedAnimationId = sheet.animations[0]?.id ?? null;
+    // Only clear a STALE id (pointing at a deleted animation) -- never force
+    // a selection just because it's null, or "(none)" could never stick:
+    // render() runs after every project/selection event, so forcing a pick
+    // here would snap back to animations[0] on the very next render.
+    if (state.selectedAnimationId && !sheet.animations.find(a => a.id === state.selectedAnimationId))
+      state.selectedAnimationId = null;
     animSelect.value = state.selectedAnimationId ?? '';
   }
 

@@ -13,7 +13,7 @@
 // so it must run after bindDrawing has installed its own).
 
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
-import { addFrame, removeFrame, addAnimation, renameAnimation, findGroup } from '../core/model.js';
+import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
@@ -1311,7 +1311,9 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
   // would silently target whatever layer was active before (a DIFFERENT
   // animation's own private layer, or root), invisible in this strip's own
   // context until the user happened to reselect the right layer by hand.
-  const animLayerId = findGroup(sheet.layerTree, anim.layerGroupId).children[0].id;
+  const group = animationGroup(sheet, anim.id);
+  const animLayerId = group.children[0].id;
+  const groupIdx = sheet.layerTree.children.indexOf(group);
 
   const afterFrames = sheet.frames.slice();
   const afterAnimations = sheet.animations.slice();
@@ -1326,13 +1328,25 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
       sheet.frames = afterFrames.slice();
       sheet.animations = afterAnimations.slice();
       anim.frames = afterAnimFrames.map(f => ({ ...f }));
-      state.selectedFrameId = firstFrameId;
-      state.selectedAnimationId = animId;
-      state.activeLayerId = animLayerId;
+      // Undo pulled the private group back out of the layer tree (below) --
+      // redo needs to put it back at its original position.
+      if (!sheet.layerTree.children.includes(group))
+        sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
+      // state.commands is a single global stack shared by every sheet, so a
+      // redo can replay this do() while a DIFFERENT sheet is now active --
+      // only touch the global selection/active-layer state when this
+      // command's own sheet is still the one on screen, or we'd point
+      // activeLayerId/selectedAnimationId at ids from a sheet that isn't showing.
+      if (sheet === activeSheet()) {
+        state.selectedFrameId = firstFrameId;
+        state.selectedAnimationId = animId;
+        state.activeLayerId = animLayerId;
+      }
     },
     undo() {
       sheet.frames = beforeFrames.slice();
       sheet.animations = beforeAnimations.slice();
+      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
       if (createdIds.has(state.selectedFrameId)) state.selectedFrameId = null;
       if (state.selectedAnimationId === animId) state.selectedAnimationId = null;
       if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
@@ -1378,7 +1392,9 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
   // after dragging a frame out into a strip would silently target whatever
   // layer was active before (a different strip's own private layer, or
   // root) -- invisible in this new strip's own context.
-  const animLayerId = findGroup(sheet.layerTree, anim.layerGroupId).children[0].id;
+  const group = animationGroup(sheet, anim.id);
+  const animLayerId = group.children[0].id;
+  const groupIdx = sheet.layerTree.children.indexOf(group);
 
   const afterSheetFrames = sheet.frames.slice();
   const afterAnimations = sheet.animations.slice();
@@ -1394,14 +1410,20 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
       sheet.animations = afterAnimations.slice();
       anim.frames = afterAnimFrames.map(e => ({ ...e }));
       frame.name = afterFrameName;
-      state.selectedFrameId = frameId;
-      state.selectedAnimationId = animId;
-      state.activeLayerId = animLayerId;
+      // See commitNewStrip's matching comments on both blocks below.
+      if (!sheet.layerTree.children.includes(group))
+        sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
+      if (sheet === activeSheet()) {
+        state.selectedFrameId = frameId;
+        state.selectedAnimationId = animId;
+        state.activeLayerId = animLayerId;
+      }
     },
     undo() {
       sheet.frames = beforeSheetFrames.slice();
       sheet.animations = beforeAnimations.slice();
       frame.name = beforeFrameName;
+      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
       state.selectedFrameId = frameId;
       state.selectedAnimationId = beforeSelectedAnimationId;
       if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
