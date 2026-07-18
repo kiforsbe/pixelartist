@@ -1,4 +1,9 @@
 * { box-sizing: border-box; margin: 0; }
+/* the browser's own [hidden] rule loses to any author-stylesheet class that
+   sets `display` directly (e.g. .btn-icon-*) since both have equal
+   specificity and author rules win over user-agent rules -- this keeps
+   [hidden] authoritative regardless of what else targets the element */
+[hidden] { display: none !important; }
 :root {
   --bg: #1e1f24; --bg2: #26272e; --bg3: #2f3038; --fg: #d6d7dc;
   --accent: #4f8cff; --border: #3a3b44;
