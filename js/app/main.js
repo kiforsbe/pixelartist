@@ -551,6 +551,53 @@ defineAction('view.zoomOut', { label: 'Zoom Out', run: () => activeCanvasView().
 defineAction('view.actualSize', { label: 'Actual Size (100%)', run: () => activeCanvasView().actualSize() });
 defineAction('view.zoomToFit', { label: 'Zoom to Fit', run: () => activeCanvasView().fitToView() });
 
+// ---- help ----
+const dlgAbout = document.getElementById('dlg-about');
+document.getElementById('about-ok').addEventListener('click', () => dlgAbout.close());
+defineAction('help.about', {
+  label: 'About PixelArtist',
+  run: () => {
+    document.getElementById('about-version').textContent = 'PixelArtist v0.1.0';
+    dlgAbout.showModal();
+  },
+});
+
+const dlgShortcuts = document.getElementById('dlg-shortcuts');
+const shortcutsList = document.getElementById('shortcuts-list');
+document.getElementById('shortcuts-ok').addEventListener('click', () => dlgShortcuts.close());
+const SHORTCUTS = [
+  ['Ctrl+Z', 'Undo'],
+  ['Ctrl+Y / Ctrl+Shift+Z', 'Redo'],
+  ['Ctrl+S', 'Save'],
+  ['[ / ]', 'Decrease / increase brush size'],
+  ['X', 'Swap primary/secondary color'],
+  ['B / E / G / L / U / O / I / M / V', 'Pencil / Eraser / Fill / Line / Rect / Ellipse / Eyedropper / Select / Move'],
+  ['F', 'Frame tool (sprite sheets mode)'],
+  ['T', 'Tile tool (tile sheets mode)'],
+  ['Escape', 'Clear selection / cancel floating selection / back to sheet'],
+  ['Space + drag', 'Pan'],
+  ['Mouse wheel', 'Zoom'],
+  ['Ctrl+X / Ctrl+C / Ctrl+V', 'Cut / copy / paste selection (hold Alt too = all layers)'],
+  ['Enter (while floating)', 'Commit the floating selection'],
+  ['Delete', 'Delete the selected frame or tile'],
+  ['Arrow Up / Down', 'Reorder the selected layer in the Layers panel'],
+];
+defineAction('help.shortcuts', {
+  label: 'Keyboard Shortcuts',
+  run: () => {
+    shortcutsList.innerHTML = '';
+    for (const [keys, desc] of SHORTCUTS) {
+      const row = document.createElement('div');
+      row.className = 'shortcut-row';
+      const k = document.createElement('span'); k.className = 'shortcut-keys'; k.textContent = keys;
+      const d = document.createElement('span'); d.className = 'shortcut-desc'; d.textContent = desc;
+      row.append(k, d);
+      shortcutsList.appendChild(row);
+    }
+    dlgShortcuts.showModal();
+  },
+});
+
 // ---- menu bar ----
 // Later tasks extend this array (more items per menu, more menus) and add
 // the defineAction calls those items reference — menubar.js skips any item
@@ -576,6 +623,9 @@ const MENUS = [
   { label: 'View', items: [
     { action: 'view.toggleLabels' }, { action: 'view.toggleSequences' }, { separator: true },
     { action: 'view.zoomIn' }, { action: 'view.zoomOut' }, { action: 'view.actualSize' }, { action: 'view.zoomToFit' },
+  ] },
+  { label: 'Help', items: [
+    { action: 'help.shortcuts' }, { action: 'help.about' },
   ] },
 ];
 mountMenuBar(document.getElementById('menubar'), MENUS);

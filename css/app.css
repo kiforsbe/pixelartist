@@ -220,3 +220,8 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .menubar-dropdown-shortcut { font-size: 11px; color: #9a9ca8; }
 .menubar-dropdown-item:hover:not(:disabled) .menubar-dropdown-shortcut { color: #dbe6ff; }
 .menubar-separator { height: 1px; background: var(--border); margin: 3px 2px; }
+
+/* help dialogs */
+.shortcut-row { display: flex; gap: 12px; padding: 3px 0; font-size: 12px; }
+.shortcut-keys { min-width: 200px; flex: none; font-weight: 600; color: #b9bbc6; }
+.shortcut-desc { color: #9a9ca8; }
