@@ -65,12 +65,52 @@ next to the code that already implements them — `panels.js` defines
 etc. No central file needs to know how every feature works; `menubar.js` only
 ever references action ids.
 
-**Binding existing buttons:** a `bindAction(el, id)` helper (same file) wires
-a real DOM button: click → `runAction(id)`, and re-derives `disabled` (and
-`.active`/`checked` for toggles) whenever the app's existing pub/sub
-(`on('history'|'project'|'selection'|'view', …)`) fires — replacing today's
-one-off refresh functions like `updateHistoryButtons()` with a call that
-refreshes whatever's bound to `edit.undo`/`edit.redo`.
+**Binding existing buttons — event-driven refresh:** a `bindAction(el, id)`
+helper (same file) wires a real DOM button: click → `runAction(id)`, and
+registers it so its `disabled`/`hidden`/checked-state gets re-derived
+automatically. Rather than each caller remembering to refresh the right
+buttons after a mutation (which is exactly the drift bug this registry
+exists to kill), `actions.js` subscribes once to the app's existing pub/sub
+wildcard listener, `on('*', …)` (`state.js` already supports this — `emit()`
+fans out to both the named event and `'*'`), and re-derives *every* bound
+element's state on *every* app event:
+
+```js
+import { on } from './state.js';
+
+const bound = new Map(); // id -> Set<{ el, toggle }>
+
+export function bindAction(el, id, { toggle = false } = {}) {
+  const a = registry.get(id);
+  el.title = a.shortcut ? `${a.label} (${a.shortcut})` : a.label;
+  el.addEventListener('click', () => runAction(id));
+  if (!bound.has(id)) bound.set(id, new Set());
+  bound.get(id).add({ el, toggle });
+  refreshAction(id);
+}
+
+function refreshAction(id) {
+  const a = registry.get(id);
+  for (const { el, toggle } of bound.get(id) ?? []) {
+    const available = a.isAvailable();
+    el.hidden = !available;
+    el.disabled = !available || !a.isEnabled();
+    if (toggle && a.isChecked) {
+      const checked = a.isChecked();
+      'checked' in el ? el.checked = checked : el.classList.toggle('active', checked);
+    }
+  }
+}
+
+on('*', () => { for (const id of bound.keys()) refreshAction(id); });
+```
+
+This replaces today's scattered one-off refresh functions (e.g.
+`updateHistoryButtons()`, called manually from `state.commands.onChange`)
+with a single sweep that runs whenever *anything* changes app state. At this
+app's scale (a few dozen bound elements) that sweep is free; the payoff is
+that no feature module ever has to know which other events might affect its
+action's enabled state — bind once, correctness is automatic from then on.
 
 **Keyboard shortcuts:** existing keydown handlers call `runAction(id)`
 instead of invoking the raw function directly, so keyboard, button, and menu
