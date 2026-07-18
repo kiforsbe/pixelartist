@@ -1617,7 +1617,7 @@ export function mountFramesPanel(el) {
   });
 
   const btnRow = document.createElement('div');
-  btnRow.className = 'row';
+  btnRow.className = 'row layer-actions';
   btnRow.append(btnSlice, btnNewStrip, btnBreakApart);
   wrap.appendChild(btnRow);
 

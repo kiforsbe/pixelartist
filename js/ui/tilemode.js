@@ -1485,7 +1485,7 @@ function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) 
   container.innerHTML = '';
 
   const symRow = document.createElement('div');
-  symRow.className = 'row';
+  symRow.className = 'row layer-actions';
   const btnFlip = document.createElement('button');
   btnFlip.type = 'button';
   btnFlip.className = 'btn-icon-sm';
@@ -1658,7 +1658,7 @@ export function mountTilePanel(el) {
   btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
 
   const btnRow = document.createElement('div');
-  btnRow.className = 'row';
+  btnRow.className = 'row layer-actions';
   btnRow.append(btnAddGrid, btnAddTerrainSet);
   wrap.appendChild(btnRow);
 
