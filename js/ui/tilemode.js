@@ -563,14 +563,6 @@ async function importPresetArtOntoLayer(sheet, preset, sourceTiles, cols) {
   emit('pixels');
 }
 
-// Save-as-preset is metadata-only bookkeeping (terrainLayoutPresets), not
-// worth undo tracking on its own -- it doesn't touch tiles/terrainSets.
-function commitSaveLayoutPreset(sheet, name, cols, rows, cells) {
-  saveLayoutPreset(sheet, name, cols, rows, cells);
-  markDirty();
-  emit('project');
-}
-
 function commitAddLayerName(sheet, name) {
   const before = sheet.layers.slice();
   sheet.layers.push(name);
@@ -1239,68 +1231,8 @@ function tileThumbnailURL(sheet, tile, { flipH = false, flipV = false, rotate = 
   return url;
 }
 
-function renderLayoutPresetRow(container, sheet, terrainSet) {
-  const row = document.createElement('div');
-  row.className = 'row';
-
-  const presetSelect = document.createElement('select');
-  const allPresets = [...BUILTIN_LAYOUT_PRESETS, ...sheet.terrainLayoutPresets];
-  allPresets.forEach((p, i) => {
-    const opt = document.createElement('option');
-    opt.value = String(i);
-    opt.textContent = `${p.name} (${p.cols}×${p.rows})`;
-    presetSelect.appendChild(opt);
-  });
-
-  const gridSelect = document.createElement('select');
-  sheet.tileGrids.forEach((g) => {
-    const opt = document.createElement('option');
-    opt.value = g.id;
-    opt.textContent = `Grid ${g.cols}×${g.rows} @ (${g.x},${g.y})`;
-    gridSelect.appendChild(opt);
-  });
-
-  const btnImport = document.createElement('button');
-  btnImport.type = 'button';
-  btnImport.textContent = '⬇';
-  btnImport.title = 'Import from layout';
-  btnImport.addEventListener('click', () => {
-    const preset = allPresets[Number(presetSelect.value)];
-    const grid = sheet.tileGrids.find(g => g.id === gridSelect.value);
-    if (!preset || !grid || grid.cols !== preset.cols || grid.rows !== preset.rows) {
-      alert(`Selected grid must be exactly ${preset?.cols ?? '?'}×${preset?.rows ?? '?'} to use this layout.`);
-      return;
-    }
-    const sourceTiles = ownedTiles(sheet, grid.id).sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
-    commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, grid.cols);
-  });
-
-  const btnSave = document.createElement('button');
-  btnSave.type = 'button';
-  btnSave.textContent = '💾';
-  btnSave.title = 'Save current as preset';
-  btnSave.addEventListener('click', () => {
-    const grid = sheet.tileGrids.find(g => g.id === gridSelect.value);
-    if (!grid) { alert('Select a grid to save its current slot layout as a preset.'); return; }
-    const name = prompt('Preset name?');
-    if (!name) return;
-    const sourceTiles = ownedTiles(sheet, grid.id).sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
-    const cells = [];
-    sourceTiles.forEach((t, i) => {
-      if (t.terrainSetId === terrainSet.id && t.blobIndex != null) {
-        cells.push({ col: i % grid.cols, row: Math.floor(i / grid.cols), blobIndex: t.blobIndex });
-      }
-    });
-    commitSaveLayoutPreset(sheet, name, grid.cols, grid.rows, cells);
-  });
-
-  row.append(presetSelect, gridSelect, btnImport, btnSave);
-  container.appendChild(row);
-}
-
 function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerDialog) {
   container.innerHTML = '';
-  renderLayoutPresetRow(container, sheet, terrainSet);
 
   const symRow = document.createElement('div');
   symRow.className = 'row';
