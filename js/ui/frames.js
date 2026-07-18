@@ -1297,23 +1297,19 @@ function buildSliceDialog() {
 // immediately, matching the codebase's eager-mutate-then-snapshot idiom),
 // snapshot before/after of sheet.frames/sheet.animations plus the new
 // animation's own .frames array, then do()/undo() just swap whole arrays.
+// A new strip starts FLOATING (see addAnimation/acceptAnimation in
+// core/model.js) -- no layer group yet, so there's nothing to add to or
+// remove from sheet.layerTree here. Its frames simply preview whatever's
+// already on the sheet underneath until it's accepted (Enter key or first
+// paint stroke -- see commitAcceptAnimation below and tools.js's hook).
 function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
   const beforeFrames = sheet.frames.slice();
   const beforeAnimations = sheet.animations.slice();
-  const beforeActiveLayerId = state.activeLayerId;
 
   const descriptors = buildStripFrames(name, x, y, frameW, frameH, count);
   const frames = descriptors.map(d => addFrame(sheet, d));
   const anim = addAnimation(sheet, name, true);
   anim.frames = frames.map(f => ({ frameId: f.id, duration }));
-  // addAnimation seeds the new strip's group with exactly one layer -- make
-  // it the active layer too, or drawing right after creating the strip
-  // would silently target whatever layer was active before (a DIFFERENT
-  // animation's own private layer, or root), invisible in this strip's own
-  // context until the user happened to reselect the right layer by hand.
-  const group = animationGroup(sheet, anim.id);
-  const animLayerId = group.children[0].id;
-  const groupIdx = sheet.layerTree.children.indexOf(group);
 
   const afterFrames = sheet.frames.slice();
   const afterAnimations = sheet.animations.slice();
@@ -1328,28 +1324,21 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
       sheet.frames = afterFrames.slice();
       sheet.animations = afterAnimations.slice();
       anim.frames = afterAnimFrames.map(f => ({ ...f }));
-      // Undo pulled the private group back out of the layer tree (below) --
-      // redo needs to put it back at its original position.
-      if (!sheet.layerTree.children.includes(group))
-        sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
       // state.commands is a single global stack shared by every sheet, so a
       // redo can replay this do() while a DIFFERENT sheet is now active --
-      // only touch the global selection/active-layer state when this
-      // command's own sheet is still the one on screen, or we'd point
-      // activeLayerId/selectedAnimationId at ids from a sheet that isn't showing.
+      // only touch the global selection state when this command's own sheet
+      // is still the one on screen, or we'd point selectedAnimationId at an
+      // id from a sheet that isn't showing.
       if (sheet === activeSheet()) {
         state.selectedFrameId = firstFrameId;
         state.selectedAnimationId = animId;
-        state.activeLayerId = animLayerId;
       }
     },
     undo() {
       sheet.frames = beforeFrames.slice();
       sheet.animations = beforeAnimations.slice();
-      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
       if (createdIds.has(state.selectedFrameId)) state.selectedFrameId = null;
       if (state.selectedAnimationId === animId) state.selectedAnimationId = null;
-      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
     },
   };
   state.commands.push(cmd);
@@ -1376,7 +1365,6 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
   const beforeAnimations = sheet.animations.slice();
   const beforeFrameName = frame.name;
   const beforeSelectedAnimationId = state.selectedAnimationId;
-  const beforeActiveLayerId = state.activeLayerId;
 
   const anim = addAnimation(sheet, name, true);
   frame.name = `${name}_0`;
@@ -1388,13 +1376,6 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
     else entries.unshift({ frameId: nf.id, duration });
   }
   anim.frames = entries;
-  // See commitNewStrip's matching comment: without this, drawing right
-  // after dragging a frame out into a strip would silently target whatever
-  // layer was active before (a different strip's own private layer, or
-  // root) -- invisible in this new strip's own context.
-  const group = animationGroup(sheet, anim.id);
-  const animLayerId = group.children[0].id;
-  const groupIdx = sheet.layerTree.children.indexOf(group);
 
   const afterSheetFrames = sheet.frames.slice();
   const afterAnimations = sheet.animations.slice();
@@ -1410,23 +1391,17 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
       sheet.animations = afterAnimations.slice();
       anim.frames = afterAnimFrames.map(e => ({ ...e }));
       frame.name = afterFrameName;
-      // See commitNewStrip's matching comments on both blocks below.
-      if (!sheet.layerTree.children.includes(group))
-        sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
       if (sheet === activeSheet()) {
         state.selectedFrameId = frameId;
         state.selectedAnimationId = animId;
-        state.activeLayerId = animLayerId;
       }
     },
     undo() {
       sheet.frames = beforeSheetFrames.slice();
       sheet.animations = beforeAnimations.slice();
       frame.name = beforeFrameName;
-      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
       state.selectedFrameId = frameId;
       state.selectedAnimationId = beforeSelectedAnimationId;
-      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
     },
   });
   markDirty();

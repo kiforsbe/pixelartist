@@ -227,7 +227,7 @@ export function flattenSheetLayers(layers, width, height, floating = null, sheet
 }
 
 export function flattenSheet(sheet, floating = null) {
-  const acceptedStrips = sheet.animations
+  const acceptedStrips = (sheet.animations ?? [])
     .filter(a => a.strip && a.layerGroupId)
     .map(a => ({ anim: a, group: findGroup(sheet.layerTree, a.layerGroupId) }))
     .filter(s => s.group);
