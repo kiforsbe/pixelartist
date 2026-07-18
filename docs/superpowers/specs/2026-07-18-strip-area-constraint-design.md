@@ -19,8 +19,15 @@ occupy. Two gaps let that happen today:
    from whatever's ambiently selected in the timeline, not necessarily the
    strip actually being dragged.
 
-This closes both gaps for **accepted strips only** (see Scope). Floating
-strips and plain animations are unaffected.
+A third, related gap: multi-layer operations (Alt+cut/copy, Alt+drag-move of
+a marquee) resolve "all layers in context" from `state.selectedAnimationId`
+(the timeline dropdown) rather than from which layer is actually selected in
+the layers panel — so which layers get swept up can silently disagree with
+what's selected.
+
+This closes all three for **accepted strips only** where the area/segment
+concept applies (see Scope); the layer-selection-scoping rule below applies
+more broadly, to any animation node (strip or plain).
 
 ## Scope
 
@@ -39,6 +46,8 @@ strips and plain animations are unaffected.
 - Clipboard paste and float-commit generally: constrained the same way as
   painting, confined to "the active substrip" at commit time (see Move
   mechanisms).
+- Layer-selection scoping (below): **any animation node**, strip or plain —
+  broader than the area/segment rules, which stay strip-only.
 
 ## Painting constraint
 
@@ -81,6 +90,37 @@ The select tool (marquee) also starts threading `(ev.x, ev.y)` into its own
 `getTargetRect()` call at `handleSelectDown`, so a marquee drawn while an
 accepted strip's layer is active is likewise confined to the segment it
 started in — free consistency from the same mechanism.
+
+## Layer-selection scoping
+
+Selecting a specific layer in the layers panel that's nested under **any**
+animation's group (strip or plain — not the group/animation row itself, a
+leaf layer inside it) narrows every operation to that one layer:
+
+- **Painting** already only ever touches `activeLayer()` — no change needed,
+  this just confirms the existing behavior is correct and is the reason the
+  area constraint (previous section) derives its strip from `activeLayer()`'s
+  own parent, never from `state.selectedAnimationId`.
+- **Cut/copy without Alt** already default to `activeLayer()` alone
+  (`cutSelection(false)`/`copySelection(false)`) — already correct, no change.
+- **Cut/copy with Alt, and the move tool's marquee-drag with Alt**
+  (`allLayers: true`) currently resolve via `currentContextLayers()`, driven
+  by `state.selectedAnimationId`. This is replaced, for these call sites,
+  by a new resolution keyed off `activeLayer()`'s actual parent: if
+  `activeLayer()` is nested under an animation's group (strip or plain),
+  Alt's "all layers" scope narrows to `flattenLayers(group)` — **that
+  animation's own layers only**, never root layers or another animation's
+  layers, regardless of what `state.selectedAnimationId` says. If
+  `activeLayer()` is a root layer, Alt keeps today's whole-sheet behavior.
+- Switching the active-layer selection to a layer nested under a strip
+  immediately activates the area/segment constraints from the previous
+  section too — both rules are driven by the same underlying
+  "`activeLayer()`'s own parent group" lookup, so there's one source of
+  truth for "what am I actually allowed to touch right now."
+
+This does not change move-tool frame/segment dragging (`segmentAt`-based):
+that resolves its layers from the **dragged frame's** owning strip, not from
+whatever layer happens to be active — see Move mechanisms below.
 
 ## Move mechanisms
 
