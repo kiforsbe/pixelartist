@@ -13,7 +13,7 @@
 // so it must run after bindDrawing has installed its own).
 
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
-import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup, acceptAnimation } from '../core/model.js';
+import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup, acceptAnimation, flattenLayers } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, segmentMembers, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { createBitmap, copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
@@ -197,7 +197,7 @@ function commitCreate(sheet, rect) {
 // if A and B overlap/touch). Captures a per-layer clone of the UNION of
 // every member's before/after rect so undo restores all pixels and all
 // frames' x/y in one step.
-function buildMovePatches(sheet, frames, dx, dy) {
+function buildMovePatches(sheet, frames, dx, dy, layers = currentContextLayers()) {
   const ux0 = Math.min(...frames.map(f => Math.min(f.x, f.x + dx)));
   const uy0 = Math.min(...frames.map(f => Math.min(f.y, f.y + dy)));
   const ux1 = Math.max(...frames.map(f => Math.max(f.x + f.w, f.x + dx + f.w)));
@@ -205,7 +205,7 @@ function buildMovePatches(sheet, frames, dx, dy) {
   const ur = { x: ux0, y: uy0, w: ux1 - ux0, h: uy1 - uy0 };
 
   const beforeCoords = frames.map(f => ({ frame: f, x: f.x, y: f.y }));
-  const patches = currentContextLayers().map((layer) => {
+  const patches = layers.map((layer) => {
     const before = copyRegion(layer.bitmap, ur.x, ur.y, ur.w, ur.h);
     const copies = frames.map(f => copyRegion(layer.bitmap, f.x, f.y, f.w, f.h));
     for (const f of frames) fillRegion(layer.bitmap, f.x, f.y, f.w, f.h, [0, 0, 0, 0]);
@@ -218,15 +218,49 @@ function buildMovePatches(sheet, frames, dx, dy) {
   return { patches, ur, beforeCoords, afterCoords };
 }
 
-// Metadata-only move: frames are viewports onto the sheet, so dragging them
-// with the frame tool never moves or clears pixels — exactly like dragging a
-// selection marquee. Use the move tool to move the underlying content.
+// Metadata-only move: frames are viewports onto the sheet, so dragging a
+// PLAIN frame or a still-FLOATING strip with the frame tool never moves or
+// clears pixels. An ACCEPTED strip's own frames use
+// commitMoveFramesWithPixels below instead -- see stripLayersOf's callers.
 function commitMoveFrames(sheet, frames, dx, dy) {
   const coords = frames.map(f => ({ frame: f, x: f.x, y: f.y }));
   const cmd = {
     label: frames.length > 1 ? 'move strip' : 'move frame',
     do() { for (const c of coords) { c.frame.x = c.x + dx; c.frame.y = c.y + dy; } },
     undo() { for (const c of coords) { c.frame.x = c.x; c.frame.y = c.y; } },
+  };
+  state.commands.push(cmd);
+  markDirty();
+}
+
+// The accepted strip's own layers to move pixels on when repositioning
+// `anim`'s frames -- null when `anim` is null (a single plain frame, not
+// part of an intact strip) or floating (no layer yet), meaning the caller
+// falls back to its own pre-existing metadata-only behavior. See
+// docs/superpowers/specs/2026-07-18-strip-area-constraint-design.md.
+function stripLayersOf(sheet, anim) {
+  if (!anim?.strip || !anim.layerGroupId) return null;
+  const group = animationGroup(sheet, anim.id);
+  return group ? flattenLayers(group) : null;
+}
+
+// Pixel-carrying counterpart to commitMoveFrames, for frames belonging to an
+// ACCEPTED strip: reuses buildMovePatches's eager copy/clear/blit (already
+// used by commitInsertFrame/commitRemoveMember's tail-shift below) so the
+// strip's own layers move together with its frames, instead of leaving
+// pixels behind at the old position.
+function commitMoveFramesWithPixels(sheet, frames, dx, dy, layers) {
+  const { patches, ur, beforeCoords, afterCoords } = buildMovePatches(sheet, frames, dx, dy, layers);
+  const cmd = {
+    label: frames.length > 1 ? 'move strip' : 'move frame',
+    do() {
+      for (const p of patches) blitRegion(p.layer.bitmap, p.after, ur.x, ur.y);
+      for (const c of afterCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+    },
+    undo() {
+      for (const p of patches) blitRegion(p.layer.bitmap, p.before, ur.x, ur.y);
+      for (const c of beforeCoords) { c.frame.x = c.x; c.frame.y = c.y; }
+    },
   };
   state.commands.push(cmd);
   markDirty();
@@ -335,7 +369,7 @@ function commitInsertFrame(sheet, anim, run, k) {
   const beforeBreaks = (anim.breaks ?? []).slice();
 
   const tail = members.slice(k);
-  const mv = tail.length ? buildMovePatches(sheet, tail, fw, 0) : null;
+  const mv = tail.length ? buildMovePatches(sheet, tail, fw, 0, stripLayersOf(sheet, anim) ?? currentContextLayers()) : null;
   const frame = addFrame(sheet, {
     name: `${anim.name}_${anim.frames.length}`,
     x: b.x + k * fw, y: b.y, w: fw, h: fh,
@@ -484,7 +518,7 @@ function commitRemoveMember(sheet, anim, frameId) {
   const wasSelected = state.selectedFrameId === frameId;
 
   const tail = members.slice(k + 1);
-  const mv = tail.length ? buildMovePatches(sheet, tail, -fw, 0) : null;
+  const mv = tail.length ? buildMovePatches(sheet, tail, -fw, 0, stripLayersOf(sheet, anim) ?? currentContextLayers()) : null;
   removeFrame(sheet, frameId);
 
   const afterSheetFrames = sheet.frames.slice();
@@ -660,7 +694,11 @@ function handleUp(ev, view) {
     // write/read).
     const dx = Math.max(-d.bbox.x, Math.min(sheet.width - (d.bbox.x + d.bbox.w), d.delta.dx));
     const dy = Math.max(-d.bbox.y, Math.min(sheet.height - (d.bbox.y + d.bbox.h), d.delta.dy));
-    if (dx !== 0 || dy !== 0) commitMoveFrames(sheet, d.members, dx, dy);
+    if (dx !== 0 || dy !== 0) {
+      const layers = stripLayersOf(sheet, d.anim);
+      if (layers) commitMoveFramesWithPixels(sheet, d.members, dx, dy, layers);
+      else commitMoveFrames(sheet, d.members, dx, dy);
+    }
     return;
   }
   if (d.kind === 'resize') {
