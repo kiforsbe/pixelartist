@@ -197,14 +197,16 @@ is a pass condition for the whole run, not just the final step.
     grouped in ascending neighbor-count rows; the 16 core slots show a
     distinct (blue, thicker) border.
 48b. [A] Terrain-set editor's "View" dropdown (Staircase / Grid 6×8 / Grid
-    7×7 / 16-tile only) rearranges the same 47 slots on screen without
-    changing any slot's assignment (cosmetic only); the layout-preset
-    dropdown (Import/Save row) lists "Blob-47 (8×6)" (the corrected/renamed
-    former "6×8, ascending" built-in) and "Blob-47 (7×7)" alongside the
-    4×4 16-tile built-in — both now use the real reference template
-    mapping rather than ascending index order, so importing a matching
-    grid of real terrain art places visually-continuous tiles into their
-    slots.
+    7×7 / 16-tile only) rearranges the 47 slots on screen without changing
+    any slot's assignment (cosmetic only); "Grid 6×8"/"Grid 7×7" mirror the
+    real reference template's row/col layout 1:1 (including its duplicate
+    "isolated"/"full surround" cells, which render as two on-screen cells
+    bound to the same underlying slot). The layout-preset dropdown
+    (Import/Save row) lists "Blob-47 (8×6)" (the corrected/renamed former
+    "6×8, ascending" built-in) and "Blob-47 (7×7)" alongside the 4×4
+    16-tile built-in — both now use the real reference template mapping
+    rather than ascending index order, so importing a matching grid of
+    real terrain art places visually-continuous tiles into their slots.
 48c. [A] Toggling "Allow flip"/"Allow rotation" immediately reclassifies
     each slot as mandatory (solid border) or optional (dashed border)
     based on symmetry alone, independent of whether the slot currently has

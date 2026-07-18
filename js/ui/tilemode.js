@@ -47,19 +47,19 @@ function blobStaircaseGroups() {
 // 'staircase' | 'grid6x8' | 'grid7x7' | 'sixteen'.
 let terrainViewMode = 'staircase';
 
-function ascendingIndices() {
-  return Array.from({ length: blobIndexToMask.length }, (_, i) => i);
-}
-
-function chunk(arr, size) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+// Mirrors the real reference template's row/col arrangement (not an
+// arbitrary ascending-index chunking) so this cosmetic view is a 1:1
+// visual match for the actual tilemap when that built-in preset was used
+// to fill the slots -- including duplicate cells (e.g. the 7x7 template's
+// three "isolated" corners), which render as separate cells for the same
+// underlying slot, exactly as they appear in the source tilemap.
+function gridFromRawTemplate(rawGrid) {
+  return rawGrid.map(rowVals => rowVals.map(raw => maskToBlobIndex[raw]));
 }
 
 function slotGroupsForViewMode(mode) {
-  if (mode === 'grid6x8') return chunk(ascendingIndices(), 6);
-  if (mode === 'grid7x7') return chunk(ascendingIndices(), 7);
+  if (mode === 'grid6x8') return gridFromRawTemplate(BLOB47_8X6_RAW);
+  if (mode === 'grid7x7') return gridFromRawTemplate(BLOB47_7X7_RAW);
   if (mode === 'sixteen') return [[...SIXTEEN_TILE_INDICES].sort((a, b) => a - b)];
   return blobStaircaseGroups();
 }
@@ -355,7 +355,7 @@ function openTileEditor(tileId) {
 function commitAddGrid(sheet, opts) {
   const beforeGrids = sheet.tileGrids.slice();
   const beforeTiles = sheet.tiles.slice();
-  createTileGrid(sheet, opts);
+  const created = createTileGrid(sheet, opts);
   const afterGrids = sheet.tileGrids.slice();
   const afterTiles = sheet.tiles.slice();
   state.commands.push({
@@ -364,6 +364,7 @@ function commitAddGrid(sheet, opts) {
     undo() { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); },
   });
   markDirty();
+  return created;
 }
 
 function commitDeleteGrid(sheet, grid) {
@@ -439,7 +440,7 @@ function commitDetachTile(tile) {
 
 function commitAddTerrainSet(sheet, opts) {
   const before = sheet.terrainSets.slice();
-  createTerrainSet(sheet, opts);
+  const created = createTerrainSet(sheet, opts);
   const after = sheet.terrainSets.slice();
   state.commands.push({
     label: 'add terrain set',
@@ -447,6 +448,7 @@ function commitAddTerrainSet(sheet, opts) {
     undo() { sheet.terrainSets = before.slice(); },
   });
   markDirty();
+  return created;
 }
 
 function commitDeleteTerrainSet(sheet, terrainSetId) {
@@ -967,26 +969,51 @@ function buildAddTerrainSetDialog() {
     <div class="row"><label>Name <input type="text" id="ats-name" value="Terrain"></label></div>
     <div class="row"><label>Tile W <input type="number" id="ats-tilew" min="1" value="16"></label></div>
     <div class="row"><label>Tile H <input type="number" id="ats-tileh" min="1" value="16"></label></div>
+    <div class="row"><label>Layout <select id="ats-layout"><option value="">(none -- add tiles manually)</option></select></label></div>
     <div class="row"><button type="button" id="ats-create">Create</button><button type="button" id="ats-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const $ = (sel) => dlg.querySelector(sel);
+  let presets = [];
   $('#ats-cancel').addEventListener('click', () => dlg.close());
   $('#ats-create').addEventListener('click', () => {
     const sheet = activeSheet();
     if (!sheet) { dlg.close(); return; }
     const intVal = (el) => Math.max(1, parseInt(el.value, 10) || 1);
-    commitAddTerrainSet(sheet, {
+    const tileW = intVal($('#ats-tilew'));
+    const tileH = intVal($('#ats-tileh'));
+    const terrainSet = commitAddTerrainSet(sheet, {
       name: $('#ats-name').value.trim() || 'Terrain',
-      tileW: intVal($('#ats-tilew')), tileH: intVal($('#ats-tileh')),
+      tileW, tileH,
     });
+
+    const presetValue = $('#ats-layout').value;
+    if (presetValue !== '') {
+      const preset = presets[Number(presetValue)];
+      const { tiles } = commitAddGrid(sheet, { x: 0, y: 0, cellW: tileW, cellH: tileH, cols: preset.cols, rows: preset.rows });
+      const sourceTiles = tiles.slice().sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
+      commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, preset.cols);
+    }
+
     dlg.close();
   });
   return {
     open() {
+      const sheet = activeSheet();
       const settings = state.project?.settings ?? {};
       $('#ats-tilew').value = String(settings.tileW ?? 16);
       $('#ats-tileh').value = String(settings.tileH ?? 16);
+
+      presets = [...BUILTIN_LAYOUT_PRESETS, ...(sheet?.terrainLayoutPresets ?? [])];
+      const layoutSelect = $('#ats-layout');
+      layoutSelect.innerHTML = '<option value="">(none -- add tiles manually)</option>';
+      presets.forEach((p, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = `${p.name} (${p.cols}×${p.rows})`;
+        layoutSelect.appendChild(opt);
+      });
+
       dlg.showModal();
     },
   };
