@@ -3,7 +3,7 @@ import { encodePng, decodePng } from './pngcodec.js';
 
 export const PACKED_TYPE = {
   description: 'PixelArtist project',
-  accept: { 'application/zip': ['.pixelproj'] },
+  accept: { 'application/octet-stream': ['.pixelproj'] },
 };
 
 const IMAGE_TYPE = {
@@ -18,7 +18,7 @@ export async function savePacked(project, handle = null) {
   if (supportsFS()) {
     if (!handle)
       handle = await window.showSaveFilePicker({
-        suggestedName: `${project.name}.pixelproj`, types: [PACKED_TYPE] });
+        suggestedName: `${project.name}.pixelproj`, types: [PACKED_TYPE], excludeAcceptAllOption: true });
     const w = await handle.createWritable();
     await w.write(bytes); await w.close();
     return handle;
@@ -29,7 +29,7 @@ export async function savePacked(project, handle = null) {
 
 export async function openPacked() {
   if (supportsFS()) {
-    const [handle] = await window.showOpenFilePicker({ types: [PACKED_TYPE] });
+    const [handle] = await window.showOpenFilePicker({ types: [PACKED_TYPE], excludeAcceptAllOption: true });
     const file = await handle.getFile();
     const project = await unpackProject(new Uint8Array(await file.arrayBuffer()), decodePng);
     return { project, handle };

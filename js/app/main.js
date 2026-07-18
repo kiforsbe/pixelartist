@@ -44,16 +44,6 @@ const statusPos = document.getElementById('status-pos');
 const statusZoom = document.getElementById('status-zoom');
 const canvasHost = document.getElementById('canvas-host');
 
-const dlgOpen = document.getElementById('dlg-open');
-const btnOpenPacked = document.getElementById('open-packed');
-const btnOpenUnpacked = document.getElementById('open-unpacked');
-const btnOpenCancel = document.getElementById('open-cancel');
-
-const dlgSaveAs = document.getElementById('dlg-saveas');
-const btnSaveAsPacked = document.getElementById('saveas-packed');
-const btnSaveAsUnpacked = document.getElementById('saveas-unpacked');
-const btnSaveAsCancel = document.getElementById('saveas-cancel');
-
 const dlgExport = document.getElementById('dlg-export');
 const btnExportPng = document.getElementById('export-png');
 const btnExportFrames = document.getElementById('export-frames');
@@ -592,14 +582,11 @@ npCreate.addEventListener('click', () => {
 });
 
 // ---- file: Open ----
-if (!io.supportsFS()) btnOpenUnpacked.hidden = true;
-btnOpen.addEventListener('click', () => {
+// Folder ("unpacked") projects are disabled for now (see io.saveUnpacked/
+// openUnpacked, kept but unwired) -- Open always goes straight to the
+// packed (.pixelproj) file picker, no format-choice dialog.
+btnOpen.addEventListener('click', async () => {
   if (state.dirty && !confirmOrAuto('Discard unsaved changes and open another project?')) return;
-  dlgOpen.showModal();
-});
-btnOpenCancel.addEventListener('click', () => dlgOpen.close());
-btnOpenPacked.addEventListener('click', async () => {
-  dlgOpen.close();
   try {
     const { project, handle } = await io.openPacked();
     state.fileHandle = handle;
@@ -611,31 +598,13 @@ btnOpenPacked.addEventListener('click', async () => {
     alert(e.message);
   }
 });
-btnOpenUnpacked.addEventListener('click', async () => {
-  dlgOpen.close();
-  try {
-    const { project, dirHandle } = await io.openUnpacked();
-    state.dirHandle = dirHandle;
-    state.fileHandle = null;
-    state.saveMode = 'unpacked';
-    setProject(project);
-  } catch (e) {
-    if (isCancel(e)) return;
-    alert(e.message);
-  }
-});
 
 // ---- file: Save ----
 async function doSave() {
   commitFloatIfAny();
-  if (!state.saveMode) { dlgSaveAs.showModal(); return; }
   try {
-    if (state.saveMode === 'unpacked') {
-      state.dirHandle = await io.saveUnpacked(state.project, state.dirHandle);
-    } else {
-      state.fileHandle = await io.savePacked(state.project, state.fileHandle);
-      state.saveMode = 'packed';
-    }
+    state.fileHandle = await io.savePacked(state.project, state.fileHandle);
+    state.saveMode = 'packed';
     state.dirty = false;
     await io.clearAutosave().catch(() => {});
     emit('project');
@@ -646,30 +615,12 @@ async function doSave() {
 btnSave.addEventListener('click', doSave);
 
 // ---- file: Save As ----
-if (!io.supportsFS()) btnSaveAsUnpacked.hidden = true;
-btnSaveAs.addEventListener('click', () => dlgSaveAs.showModal());
-btnSaveAsCancel.addEventListener('click', () => dlgSaveAs.close());
-btnSaveAsPacked.addEventListener('click', async () => {
-  dlgSaveAs.close();
+btnSaveAs.addEventListener('click', async () => {
   commitFloatIfAny();
   try {
     state.fileHandle = await io.savePacked(state.project, null);
     state.dirHandle = null;
     state.saveMode = 'packed';
-    state.dirty = false;
-    await io.clearAutosave().catch(() => {});
-    emit('project');
-  } catch (e) {
-    if (!isCancel(e)) alert(`Save failed: ${e.message}`);
-  }
-});
-btnSaveAsUnpacked.addEventListener('click', async () => {
-  dlgSaveAs.close();
-  commitFloatIfAny();
-  try {
-    state.dirHandle = await io.saveUnpacked(state.project, null);
-    state.fileHandle = null;
-    state.saveMode = 'unpacked';
     state.dirty = false;
     await io.clearAutosave().catch(() => {});
     emit('project');
