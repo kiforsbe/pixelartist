@@ -288,7 +288,15 @@ export function mountFrameEditor(hostEl) {
   // identity actually changes (initial open, prev/next, double-click a
   // different timeline cell) — NOT on every cosmetic 'view' event (overlay
   // toggles, etc.) or every pixel edit, so drawing never resets zoom/pan.
+  // A different frame can belong to a different animation, i.e. a different
+  // layer group (currentContextLayers() scopes to state.selectedAnimationId)
+  // -- the flat-bitmap cache below is keyed only on the SHEET reference and
+  // a dirty flag toggled by project/history/pixels events, none of which
+  // fire on a plain frame switch (double-click, Prev/Next), so without this
+  // it kept showing/editing-through whatever animation's layers were
+  // flattened for the PREVIOUSLY open frame.
   function loadFrame(f) {
+    invalidateFlat();
     view.setContent({ width: f.w, height: f.h });
     view.centerFit();
     loadedFrameId = f.id;
