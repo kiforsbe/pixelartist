@@ -13,7 +13,7 @@
 // so it must run after bindDrawing has installed its own).
 
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
-import { addFrame, removeFrame, addAnimation, renameAnimation, animationGroup, acceptAnimation, flattenLayers } from '../core/model.js';
+import { addFrame, removeFrame, addAnimation, animationGroup, acceptAnimation, flattenLayers } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
 import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, segmentMembers, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { createBitmap, copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
@@ -1220,18 +1220,6 @@ function commitStripEdit(label, members, mutate) {
   markDirty();
 }
 
-// Renames the animation, its layer group, AND its member frames (`name_0`, `name_1`, …).
-function commitRenameStrip(sheet, anim, members, newName) {
-  const beforeAnim = anim.name;
-  const beforeNames = members.map(f => f.name);
-  state.commands.push({
-    label: 'rename strip',
-    do() { renameAnimation(sheet, anim.id, newName); members.forEach((f, i) => { f.name = `${newName}_${i}`; }); },
-    undo() { renameAnimation(sheet, anim.id, beforeAnim); members.forEach((f, i) => { f.name = beforeNames[i]; }); },
-  });
-  markDirty();
-}
-
 // Rigid move of the whole strip (every segment keeps its relative offset) so
 // its bounding box lands at (nx, ny), clamped on-sheet. Metadata-only.
 function moveStripTo(sheet, members, nx, ny) {
@@ -1680,16 +1668,6 @@ export function mountFramesPanel(el) {
     title.className = 'frame-field';
     title.textContent = `Strip · ${members.length} frames${segs > 1 ? ` · ${segs} sub-strips` : ''}`;
 
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'frame-name';
-    nameInput.value = anim.name;
-    nameInput.addEventListener('change', () => {
-      const v = nameInput.value.trim();
-      if (v && v !== anim.name) commitRenameStrip(sheet, anim, members, v);
-      else nameInput.value = anim.name;
-    });
-
     const fields = document.createElement('div');
     fields.className = 'frame-fields';
     fields.append(
@@ -1701,7 +1679,7 @@ export function mountFramesPanel(el) {
       fieldRow('PivotY', members[0].pivotY, { step: 0.5, onCommit: (v) => setStripPivot(members, 'pivotY', v) }),
     );
 
-    row.append(title, nameInput, fields, actionsRow(sheet, selected, true));
+    row.append(title, fields, actionsRow(sheet, selected, true));
     list.appendChild(row);
   }
 
