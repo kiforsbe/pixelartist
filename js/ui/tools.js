@@ -23,7 +23,7 @@ import { flattenSheet, animationGroup, flattenLayers } from '../core/model.js';
 import { segmentAt } from '../core/strips.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat } from './floatsession.js';
 import { commitAcceptAnimation, stripOf } from './frames.js';
-import { HANDLES_ALL, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
+import { HANDLES_ALL, handlePoint, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 
 export const TOOLS = [
@@ -501,15 +501,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
 
   // 8 handle anchor points on the marquee, image-space EDGE coords
   const SEL_HANDLES = HANDLES_ALL;
-  function selHandlePoint(sel, h) {
-    const x = h.includes('w') ? sel.x : h.includes('e') ? sel.x + sel.w : sel.x + sel.w / 2;
-    const y = h.includes('n') ? sel.y : h.includes('s') ? sel.y + sel.h : sel.y + sel.h / 2;
-    return { x, y };
-  }
   function hitSelHandle(ev) {
     if (!selection) return null;
     for (const h of SEL_HANDLES) {
-      const p = toScreen(selHandlePoint(selection, h));
+      const p = toScreen(handlePoint(selection, h));
       if (Math.abs(ev.sx - p.x) <= HANDLE_PX + 2 && Math.abs(ev.sy - p.y) <= HANDLE_PX + 2) return h;
     }
     return null;
@@ -831,7 +826,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1);
     ctx.restore();
     if (state.tool === 'select') {
-      for (const h of SEL_HANDLES) drawHandleSquare(ctx, toScreen(selHandlePoint(selection, h)));
+      for (const h of SEL_HANDLES) drawHandleSquare(ctx, toScreen(handlePoint(selection, h)));
       if (selStroke?.mode === 'resize') {
         drawRectDims(ctx, view, selection, {
           dw: selection.w - selStroke.orig.w, dh: selection.h - selStroke.orig.h,
