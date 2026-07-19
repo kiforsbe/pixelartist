@@ -14,6 +14,38 @@ export const DEFAULT_SETTINGS = {
 };
 const MAX_DIM = 4096;
 
+// 8 maximally-distinct hues (one per possible Back/Ahead step count), reused
+// for both directions -- so "step 3 back" and "step 3 ahead" read the same
+// color family and every step within a direction is unambiguous from its
+// neighbors at a glance, out of the box (still fully overridable per-step
+// via the frame editor's ⚙ dialog).
+const ONION_STEP_PALETTE = [
+  '#ff4040', '#ff9640', '#ffe640', '#7aff40',
+  '#40ffc8', '#40a0ff', '#9640ff', '#ff40c8',
+];
+
+// A fresh object every call (never a shared constant) -- project.settings.onion
+// is mutated in place as the user drags sliders/pickers in the frame editor,
+// so aliasing this across projects would leak one project's onion tweaks into
+// every other project's "default". See setProject() in app/state.js, which
+// points state.onion at this object so the frame editor's existing
+// state.onion.* reads/writes persist as part of the project automatically.
+export function defaultOnionSettings() {
+  const stepColors = { back: {}, ahead: {} };
+  for (let k = 1; k <= 8; k++) {
+    stepColors.back[k] = ONION_STEP_PALETTE[k - 1];
+    stepColors.ahead[k] = ONION_STEP_PALETTE[k - 1];
+  }
+  return {
+    enabled: false, back: 1, ahead: 0, mask: false, outline: true,
+    currentAlpha: 1,
+    backMaskAlpha: 0.35, backOutlineAlpha: 0.35,
+    aheadMaskAlpha: 0.35, aheadOutlineAlpha: 0.35,
+    backColor: '#ff4040', aheadColor: '#40ff40',
+    stepColors,
+  };
+}
+
 export const LAYER = 'layer';
 export const GROUP = 'group';
 
@@ -37,7 +69,7 @@ export function createGroupNode(name, { animationId = null, open = true } = {}) 
 }
 
 export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
-  return { version: PROJECT_VERSION, name, settings: { ...settings },
+  return { version: PROJECT_VERSION, name, settings: { onion: defaultOnionSettings(), ...settings },
     sheets: [], palettes: [], activePaletteId: null };
 }
 
@@ -546,7 +578,10 @@ export function deserializeProject(json, imagesByPath) {
   if (!v.ok) throw new Error(v.error);
   return {
     version: json.version, name: json.name,
-    settings: { ...json.settings },
+    // onion falls back to a fresh default for files saved before this field
+    // existed -- deserializeProject only ever runs on a freshly-parsed json,
+    // so this is never aliased to another live project.
+    settings: { onion: defaultOnionSettings(), ...json.settings },
     activePaletteId: json.activePaletteId ?? null,
     palettes: json.palettes ?? [],
     sheets: json.sheets.map(s => {

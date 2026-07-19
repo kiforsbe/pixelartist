@@ -117,22 +117,26 @@ is a pass condition for the whole run, not just the final step.
     Frames panel, "Add selected frame" appends it to the timeline strip.
 26. [A] Drag-reorder two cells in the strip; undo restores original
     order.
-27. [A] Edit a cell's duration number input; undo restores the prior
+27. [A] Clicking a timeline cell once: scrubs the preview playhead to it,
+    sets `state.selectedFrameId` to its frame (so the Frames panel and the
+    sprite-sheet highlight follow), AND opens the frame editor on that
+    frame directly — no double-click needed.
+28. [A] Edit a cell's duration number input; undo restores the prior
     value.
-28. [A] Toggle "Preview Loop"; Play (▶) advances the preview canvas through
+29. [A] Toggle "Preview Loop"; Play (▶) advances the preview canvas through
     frames, wrapping if Preview Loop is on; Pause stops it. First/Last
     transport buttons jump to the ends. Speed selector changes playback
     rate. Preview Loop never touches the animation's export `loop` flag
     (checked via `browser_evaluate`, not visually).
 
-29. [A] Animation panel (below Frames): shows name/Loop/duration for the
+30. [A] Animation panel (below Frames): shows name/Loop/duration for the
     timeline's selected animation, independent of the Frames panel's own
     selection. Renaming via the panel and via the timeline's ✎ button both
     update the same animation name. Loop here is the export flag, distinct
     from the timeline's Preview Loop. Switching the duration control between
     ms and fps+Step changes what the timeline's per-frame cells accept
     (plain ms vs a Frames/step count with a read-only ms caption).
-30. [A] Animation selection stays in sync across the timeline's animation
+31. [A] Animation selection stays in sync across the timeline's animation
     dropdown, the Layers panel, and the sprite sheet: selecting an
     animation-owned group in the Layers panel selects it in the timeline
     dropdown and vice versa; clicking a frame on the sprite sheet that
@@ -144,22 +148,50 @@ is a pass condition for the whole run, not just the final step.
 
 ## 7. Frame editor
 
-31. [A] Double-click a frame (or its Edit button) to open the frame
-    editor; canvas re-centers on just that frame.
-32. [A] Draw inside the frame editor — same tools as the sheet view,
+32. [A] Click a frame (via its Edit button, or a single click on its
+    timeline cell — see item 27) to open the frame editor; canvas
+    re-centers on just that frame.
+33. [A] Draw inside the frame editor — same tools as the sheet view,
     confined to the frame's rect.
-33. [A] Enable Onion skin, set Back/Ahead counts: past frames tint red,
-    future frames tint green, faded by distance.
-34. [A] Prev/Next step through the animation's frame order (or sheet
+34. [A] Enable Onion skin: defaults to Back 1 / Ahead 0 (no future ghosts
+    until Ahead is raised) and Outline on / Mask off. Outline traces a 1px
+    edge around each ghost frame's silhouette (hollow interior, not a
+    filled tint); enabling Mask too layers a soft filled tint underneath
+    the outline — both can be on at once, or either alone, or neither
+    (no ghosts drawn). The onion controls are visually grouped into three
+    clusters in the toolbar: overall (Onion/Mask/Outline toggles + Current
+    fade), Back/past-only, and Ahead/future-only, separated from the
+    Prev/Next nav controls by a divider. Set Back/Ahead counts and confirm
+    ghosts appear/disappear accordingly.
+34b. [A] Mask and Outline each have their OWN opacity slider per direction
+    (Back group: ■ Mask α, □ Outline α; Ahead group: same, independent
+    values) — raising Back's Outline α without touching Ahead's changes
+    only past ghosts. The Back/Ahead color swatches in the toolbar set each
+    direction's default ghost tint; the ⚙ button opens a dialog listing all
+    8 possible Back steps and 8 Ahead steps, each with its own color and a
+    "default" checkbox (checked = falls back to the toolbar swatch,
+    unchecked = uses that step's own color) — out of the box every step is
+    pre-seeded with a distinct color from a shared 8-color palette (same
+    palette for both directions) so e.g. step 3 back and step 3 ahead are
+    both yellow, and neighboring steps never share a color. "Current α"
+    (main group, no visible label — check its tooltip) fades the frame
+    being edited, only while Onion is checked, so ghosts (especially
+    Outline) read more clearly against it; unaffected when Onion is off.
+    All of the above (`state.onion` — enabled/back/ahead/mask/outline/
+    currentAlpha/back·aheadMaskAlpha/back·aheadOutlineAlpha/back·aheadColor/
+    stepColors) lives in `project.settings.onion` and round-trips through
+    Save/Open (verify via `serializeProject`/`deserializeProject` or a real
+    save-reload), not just an in-session preference.
+35. [A] Prev/Next step through the animation's frame order (or sheet
     order if the frame isn't in the selected animation).
-35. [A] `Escape` returns to the sheet view (also via "← Back to sheet").
+36. [A] `Escape` returns to the sheet view (also via "← Back to sheet").
 
 ## 8. Tile mode
 
-36. [A] Switch to Tile Sheets tab on a fresh tile sheet: Tiles panel shows
+37. [A] Switch to Tile Sheets tab on a fresh tile sheet: Tiles panel shows
     "Add Grid…" and "➕ Autotile set" buttons and "No tile selected" — no
     grid list or tile count (selection-driven, like the Frames panel).
-36b. [A] The Tile Sheets tab shows three separate sidebar panels: "Tiles"
+37b. [A] The Tile Sheets tab shows three separate sidebar panels: "Tiles"
     (Add Grid…/Add Terrain Set… buttons, selected-tile detail), "Autotiles"
     (terrain sets, view modes, symmetry toggles), and "Tile Layers" (the
     sheet.layers name list). On the Sprite Sheets tab, Autotiles and Tile
@@ -167,38 +199,38 @@ is a pass condition for the whole run, not just the final step.
     `#panel-autotiles`/`#panel-tilelayers` containers themselves have
     `hidden` set (`getComputedStyle(el).display === 'none'`), so no empty
     bordered/padded box is left behind in the sidebar.
-37. [A] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
+38. [A] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
     X/Y, defaulted from the project's tile size setting) with a live
     dashed-outline preview on the canvas that updates as fields change and
     disappears on Cancel. Create adds a grid; selecting any tile inside it
-    afterward shows that grid's info in the Tiles panel (item 38).
-38. [A] Tile tool (`T`, tile mode only): click a tile in the grid to select
+    afterward shows that grid's info in the Tiles panel (item 39).
+39. [A] Tile tool (`T`, tile mode only): click a tile in the grid to select
     it — the Tiles panel shows a name field, "Edit tile", the owning grid's
     Cell W/H fields (editing either re-lays-out every tile in that grid),
-    "Detach from grid", "Delete grid", and a Layer dropdown (item 58).
-39. [M] Drag one tile onto another SAME-SIZE tile (no Shift) to swap them —
+    "Detach from grid", "Delete grid", and a Layer dropdown (item 59).
+40. [M] Drag one tile onto another SAME-SIZE tile (no Shift) to swap them —
     pixels, names, and neighbor presets swap on all layers; undo restores
     both. Shift-drag instead moves (source clears to transparent, its
     name/neighbors move to the target); undo restores both tiles.
-40. [M] Drag a grid-owned tile onto empty space (nothing same-size under
+41. [M] Drag a grid-owned tile onto empty space (nothing same-size under
     the cursor): it snaps back — a single grid cell can't move
     independently. Dragging the grid's own origin-corner handle instead
     moves the whole grid and every one of its tiles together; undo
     restores the prior position.
-41. [M] Click empty canvas space and drag with the tile tool active: creates
+42. [M] Click empty canvas space and drag with the tile tool active: creates
     a new standalone tile there (frame-style create-drag); the panel shows
     W/H fields for it (no "Detach" button, since it isn't grid-owned).
     Dragging a standalone tile to empty space (or a different-size tile)
     repositions it; undo restores its prior position.
-42. [A] Select a grid-owned tile, click "Detach from grid" — it becomes a
+43. [A] Select a grid-owned tile, click "Detach from grid" — it becomes a
     standalone tile (W/H fields appear, resize handles become available);
     undo restores its grid membership.
-43. [A] Selecting a tile in a grid and editing that grid's Cell W/H fields
-    (Tiles panel, item 38) re-lays-out every owned tile from the grid's
+44. [A] Selecting a tile in a grid and editing that grid's Cell W/H fields
+    (Tiles panel, item 39) re-lays-out every owned tile from the grid's
     origin, preserving each cell's name/neighbor preset; each edit is one
     undo step. (Cols/Rows are fixed at grid creation — no in-panel resize
     UI as of the Tiles/Autotiles panel cleanup.)
-44. [A] "Delete grid" (Tiles panel, item 38) removes the grid and every
+45. [A] "Delete grid" (Tiles panel, item 39) removes the grid and every
     tile it owns; if that empties out a terrain set (no tile references it
     anymore), the terrain set is deleted too and its row disappears from
     the Autotiles panel's list — a DIFFERENT, still-empty terrain set
@@ -209,32 +241,32 @@ is a pass condition for the whole run, not just the final step.
 
 ## 9. Tile editor
 
-45. [A] Double-click a tile (or "Edit tile") to open the tile editor;
+46. [A] Double-click a tile (or "Edit tile") to open the tile editor;
     center tile is outlined, neighbor cells render the live composite.
-46. [A] Draw inside the center tile: neighbor cells that mirror it (mode
+47. [A] Draw inside the center tile: neighbor cells that mirror it (mode
     `same`) update live as you draw (drag confinement: strokes cannot
     escape the center tile even if the drag leaves it).
-47. [A] Click a neighbor slot (outside the center tile, no drag) to open
+48. [A] Click a neighbor slot (outside the center tile, no drag) to open
     the slot config dialog; the "Other tile" field is now a dropdown
     listing every tile on the sheet (`"{index}: {name}"`, or `#index` if
     unnamed) — try each mode (`same tile` / `other tile` + selection /
     `empty`), and Flip H/V; OK commits, undo restores the prior preset for
     that slot.
-48. [A] Switch the neighbor radius to 5×5 and back to 3×3; grid resizes
+49. [A] Switch the neighbor radius to 5×5 and back to 3×3; grid resizes
     and recenters, sized from the edited tile's own W/H (not a sheet-wide
     size).
 
 ## 9a. Terrain sets, layers & tags
 
-49. [A] Terrain Sets list (Autotiles panel) starts empty; the "➕ Autotile
+50. [A] Terrain Sets list (Autotiles panel) starts empty; the "➕ Autotile
     set" button — now in the Tiles panel, alongside "Add Grid…" — opens a
     dialog that defaults Tile W/H from the project's tile size setting;
     creating one adds a row to the Autotiles panel's list with its name and
     size.
-50. [A] Clicking a terrain set's row opens its 47-slot editor below,
+51. [A] Clicking a terrain set's row opens its 47-slot editor below,
     grouped in ascending neighbor-count rows; the 16 core slots show a
     distinct (blue, thicker) border.
-50b. [A] Terrain-set editor's view-mode dropdown (no "View " label text —
+51b. [A] Terrain-set editor's view-mode dropdown (no "View " label text —
     just the `<select>`: Staircase / Grid 8×6 / Grid 7×7 / 16-tile only)
     rearranges the 47 slots on screen without changing any slot's
     assignment (cosmetic only); "Grid 8×6"/"Grid 7×7" mirror the real
@@ -248,8 +280,8 @@ is a pass condition for the whole run, not just the final step.
     between two open terrain sets keeps each one's own choice (no leaking
     one set's view into another's). There is no layout-preset import/save
     row in the editor anymore — presets are only applied at terrain-set
-    creation time (Add Terrain Set dialog, item 53).
-50c. [A] "Allow flip"/"Allow rotation" are icon toggle buttons (↔/↻, not
+    creation time (Add Terrain Set dialog, item 54).
+51c. [A] "Allow flip"/"Allow rotation" are icon toggle buttons (↔/↻, not
     checkboxes) — clicking one toggles its pressed state (filled accent
     background, `aria-pressed`) and immediately reclassifies each slot as
     mandatory (solid border) or optional (dashed border) based on symmetry
@@ -262,39 +294,39 @@ is a pass condition for the whole run, not just the final step.
     distinct from the orange duplicate-tile marker — on the tile sheet
     itself, the corresponding tile cell shows a translucent blue-grey wash
     across the whole cell (not just an outline) for the same condition.
-51. [A] Clicking an empty slot opens the tile picker (filtered to tiles
+52. [A] Clicking an empty slot opens the tile picker (filtered to tiles
     matching the terrain set's size); assigning a tile fills that slot;
     "Clear" empties it again.
-51b. [A] Opening the tile picker for an unfilled slot shows, without
+52b. [A] Opening the tile picker for an unfilled slot shows, without
     hovering: the slot's direction description (e.g. "N + E"), a
     Mandatory/Optional label, and a 3×3 diagram shading which neighbor
     cells are filled. The body is a clickable grid of live tile thumbnails
     (not a dropdown); clicking one assigns it immediately and closes the
     dialog. A tile with fully transparent pixels still appears in the grid.
-52. [A] Toggling "Allow flip" / "Allow rotation" changes which otherwise-
+53. [A] Toggling "Allow flip" / "Allow rotation" changes which otherwise-
     empty slots show a derived (dashed-border) state, with a badge/tooltip
     reflecting a real flip or rotation transform (not identity).
-53. [A] Add Terrain Set dialog: picking "Blob-47 (7×7)" or "Blob-47 (8×6)"
+54. [A] Add Terrain Set dialog: picking "Blob-47 (7×7)" or "Blob-47 (8×6)"
     from the Layout dropdown shows a live reference-image preview (with a
     dashed "dup" overlay on non-primary duplicate cells); "(none — add
     tiles manually)" hides the preview. Create with a preset selected both
     fills the matching slots and paints the preset's reference art onto the
     active paint layer, on a matching grid it creates for you.
-55. [A] Deleting a terrain set clears every referencing tile's terrain
+56. [A] Deleting a terrain set clears every referencing tile's terrain
     badge/detail without deleting the tiles themselves.
-56. [A] Tile editor: opening a terrain-set tile shows the "Terrain:
+57. [A] Tile editor: opening a terrain-set tile shows the "Terrain:
     `<name>`" label and a live 8-neighbor preview with no clickable slot
     dialog; opening a non-terrain tile is completely unchanged from
     before this feature.
-57. [A] Layers list: Add/rename/reorder (↑/↓)/Delete all work; deleting a
+58. [A] Layers list: Add/rename/reorder (↑/↓)/Delete all work; deleting a
     layer name clears it from any tile that had it selected.
-57b. [A] The Tile Layers panel (its own sidebar section below Autotiles)
+58b. [A] The Tile Layers panel (its own sidebar section below Autotiles)
     reads "Tile Layers", with an icon-only Add button and hover tooltips on
     its add/up/down/delete controls; it is visually and structurally
     independent from the app's real Layers panel and from the Autotiles
     panel's symmetry row (which no longer has a Layer dropdown — that
-    control moved to the Tiles panel, item 58).
-58. [A] Tiles panel: selecting a standalone tile shows a Layer dropdown
+    control moved to the Tiles panel, item 59).
+59. [A] Tiles panel: selecting a standalone tile shows a Layer dropdown
     bound to that tile's own `layer` (lists the Tile Layers list plus
     "(none)"); selecting a tile that belongs to a terrain set shows the
     SAME dropdown bound to `terrainSet.layer` instead — changing it from
@@ -302,21 +334,21 @@ is a pass condition for the whole run, not just the final step.
     (select a different member tile from the same set and confirm the
     dropdown shows the same, now-changed value). Tags field accepts a
     comma-separated list and round-trips on reselecting the tile.
-59. [A] Tiles JSON export: a sheet with a filled terrain set and layers
+60. [A] Tiles JSON export: a sheet with a filled terrain set and layers
     produces the new `terrainSets`/`layers` top-level keys, and a
     terrain-set tile's exported entry has no `neighbors` key.
-59b. [A] Tiles JSON export: a terrain set with a Layer selected includes a
+60b. [A] Tiles JSON export: a terrain set with a Layer selected includes a
     `layer` key in its `terrainSets[]` entry; omitted when the set has no
     layer selected.
 
 ## 10. Exports
 
-60. [A] Export dialog: "Sheet PNG (flattened)" downloads a PNG (verify a
+61. [A] Export dialog: "Sheet PNG (flattened)" downloads a PNG (verify a
     download/blob was produced — no console error).
-61. [A] "Frames JSON" (enabled only for sprite sheets) downloads
+62. [A] "Frames JSON" (enabled only for sprite sheets) downloads
     `<sheet>.frames.json`; shape matches README's Export shapes section
     (`sheet`, `width`, `height`, `frames[]`, `animations[]`).
-62. [A] "Tiles JSON" (enabled only for tile sheets) downloads
+63. [A] "Tiles JSON" (enabled only for tile sheets) downloads
     `<sheet>.tiles.json`; shape is `{ sheet, count, tiles[] }` — `tiles[]`
     includes tiles with a name, manual neighbors, a terrain-set
     membership, a layer, or tags, each with `index, name, x, y, w, h`. A
@@ -328,32 +360,32 @@ is a pass condition for the whole run, not just the final step.
 
 ## 11. Shortcuts (Task 20)
 
-63. [A] Each tool hotkey (`B E G L U O I M`, plus `F`/`T` in their
+64. [A] Each tool hotkey (`B E G L U O I M`, plus `F`/`T` in their
     respective modes) selects the matching tool; hotkeys are ignored
     while a text input/checkbox/select has focus or a dialog is open.
-64. [A] `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` undo/redo (already covered
+65. [A] `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` undo/redo (already covered
     in section 2).
-65. [A] `Ctrl+S` on a project with no save target yet opens the Save As
+66. [A] `Ctrl+S` on a project with no save target yet opens the Save As
     dialog (same as clicking the Save button); close it via Cancel. (A
     project that already has a save target — packed or unpacked — would
     instead call the native save path directly; that path is [M], see
     section 13.)
-66. [A] `[` / `]` decrement/increment `state.brushSize`, clamped to
+67. [A] `[` / `]` decrement/increment `state.brushSize`, clamped to
     1..8, and the Size number input in the tool options row reflects the
     new value.
-67. [A] `X` swaps `state.primary` and `state.secondary`; both color
+68. [A] `X` swaps `state.primary` and `state.secondary`; both color
     swatches in the Colors panel visibly swap.
-68. [A] `Escape` clears an active marquee selection, or backs out of the
+69. [A] `Escape` clears an active marquee selection, or backs out of the
     frame/tile editor to the sheet view (already covered in sections 2,
     7, 9).
-69. [A] `Delete` removes the selected frame while the frame tool is
+70. [A] `Delete` removes the selected frame while the frame tool is
     active (already covered in section 5, item 24).
-70. [A] Mouse wheel zooms the canvas centered on the cursor; `Space`+drag
+71. [A] Mouse wheel zooms the canvas centered on the cursor; `Space`+drag
     (or middle-mouse drag) pans.
 
 ## 12. Packed save/open round trip [M]
 
-71. [M] Save As → "Packed file (.pixelproj)": pick a location via the
+72. [M] Save As → "Packed file (.pixelproj)": pick a location via the
     native save picker (or, on browsers without File System Access API,
     via the download fallback). Reload the app, Open → "Packed file
     (.pixelproj)", pick the saved file: project round-trips (sheets,
@@ -363,14 +395,14 @@ is a pass condition for the whole run, not just the final step.
 
 ## 13. Unpacked folder round trip [M]
 
-72. [M] Save As → "Unpacked folder": pick a folder via the native
+73. [M] Save As → "Unpacked folder": pick a folder via the native
     directory picker. Reload, Open → "Folder…", pick the same folder:
     project round-trips, and `images/<sheetId>/<layerId>.png` files
     exist on disk. Same exemption as above (native picker).
 
 ## 14. Autosave restore [M]
 
-73. [M] Without `?autotest`, make an edit (so `state.dirty` is true),
+74. [M] Without `?autotest`, make an edit (so `state.dirty` is true),
     wait ~30s (or trigger `io.autosave()` manually) for the autosave
     interval, then reload the tab (not the `?autotest` URL — that flag
     skips the restore prompt by design). A "restore autosaved project?"
@@ -381,32 +413,32 @@ is a pass condition for the whole run, not just the final step.
 
 ## 15. v2: New Project, sheets, strips, zoom, thumbnails
 
-74. [A] File > New: with unsaved changes, `confirmOrAuto` auto-accepts the
+75. [A] File > New: with unsaved changes, `confirmOrAuto` auto-accepts the
     discard-changes prompt; the New Project dialog opens. Enter custom
     sprite sheet, tile sheet, tile size, frame size, and duration values;
     "Create" lands a project whose sheets/settings match exactly what was
     entered (not the defaults).
-75. [A] Dialogs (New Project, New Sheet, Open, Save As, Export)
+76. [A] Dialogs (New Project, New Sheet, Open, Save As, Export)
     render centered in the viewport via native `<dialog>`/`showModal()` —
     no custom positioning logic to break.
-76. [A] Sheet selector dropdown lists sheets for the active tab (Sprite
+77. [A] Sheet selector dropdown lists sheets for the active tab (Sprite
     Sheets vs Tile Sheets); "New Sheet…" dialog creates one (name/size, +
     tile size in tile mode) and it becomes active; undo removes it and
     restores the prior active sheet/layer.
-77. [A] New Project dialog's Frame time field is the shared ms/fps duration
+78. [A] New Project dialog's Frame time field is the shared ms/fps duration
     control (same as the Animation panel); creating a project with fps
     values set round-trips `settings.baseFps`/`baseStep`. Edit menu >
     Project Settings opens the same fields pre-filled from the current
     project, edits apply as one undoable command, and new animations
     created afterward seed their base duration from the updated settings.
-78. [A] Mouse wheel over the canvas steps zoom through the table
+79. [A] Mouse wheel over the canvas steps zoom through the table
     (`0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, ...`); repeated
     scroll-in/scroll-out reaches both 0.25x and 16x without sticking at
     any intermediate level, and the status bar zoom readout matches.
-79. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
+80. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
     checkerboard transparency background scrolls with the content
     (anchored to canvas content, not fixed to the viewport).
-80. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
+81. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
     layer 1 — its thumbnail updates continuously during the stroke (not
     just on mouse-up). Add layer 2 and draw different pixels on it — the
     two thumbnails show distinct content, both live while drawing.
@@ -417,7 +449,7 @@ is a pass condition for the whole run, not just the final step.
 
 ## 16. v3: Import, move tool, rename sheet
 
-81. [A] Import sheet from image: drive the fallback `<input type="file">`
+82. [A] Import sheet from image: drive the fallback `<input type="file">`
     (used when the File System Access API is unavailable; Playwright can
     also intercept it via its file-chooser hook) with a small generated
     PNG of known pixel values. Click "Import…", supply the file: a new
@@ -425,33 +457,33 @@ is a pass condition for the whole run, not just the final step.
     extension, its dimensions match the image, and layer 0's pixels match
     the PNG's. Undo removes the sheet and restores the prior active
     sheet/layer.
-82. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
+83. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
     target region floats (source hole appears, outline + handles shown);
     the layer bitmap is NOT modified beyond the source cut until commit.
     `Enter` commits at the new position; stepwise undo: Ctrl+Z undoes the
     commit, then the drag, then the float itself.
-83. [A] Move tool with a marquee: only the selected region floats; drag,
+84. [A] Move tool with a marquee: only the selected region floats; drag,
     then `Escape` — pixels restored exactly to the original spot.
-84. [A] Transform handles: drag a corner handle (scale, incl. pull-through
+85. [A] Transform handles: drag a corner handle (scale, incl. pull-through
     flip), drag the rotation knob (free rotate); commit renders the
     nearest-neighbor result; each completed drag is one undo step. Scale
     shows W×H pills with Δ (scaled content size); rotate shows an angle
     pill near the knob.
-85. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
+86. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
     each layer; single-layer default otherwise. In the frame editor a
     committed float is clipped to the frame rect.
-86. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
+87. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
     dialog opens pre-filled with the current name. OK with a new name:
     the sheet selector label updates immediately and Export filenames
     (e.g. the flattened PNG download) use the new name; undo restores the
     old name in the selector. OK with an empty/whitespace name: alert
     "Name cannot be empty." and the dialog stays open. Cancel closes
     without changes.
-87. [A] Clipboard: `Ctrl+C` copies the marquee selection, `Ctrl+V` pastes a
+88. [A] Clipboard: `Ctrl+C` copies the marquee selection, `Ctrl+V` pastes a
     floating copy (source intact) that commits on `Enter` or tool switch.
     `Ctrl+X` cuts (one undo step); `Ctrl+Alt+C`/`Ctrl+Alt+X` capture all
     layers. Paste lands at the source position when visible, else centered.
-87a. [A] OS clipboard sync: after `Ctrl+C`/`Ctrl+Alt+C`, `navigator.clipboard
+88a. [A] OS clipboard sync: after `Ctrl+C`/`Ctrl+Alt+C`, `navigator.clipboard
     .read()` has one `image/png` item matching the copied region's size
     (merged/blended pixels for `+Alt`). With the internal clipboard empty
     (fresh reload), writing a PNG to the OS clipboard and dispatching a real
@@ -459,54 +491,54 @@ is a pass condition for the whole run, not just the final step.
     centered in the target rect, that commits normally. With the internal
     clipboard non-empty, `Ctrl+V` still prefers it (source position,
     per-layer reattachment) over the OS clipboard.
-87b. [M] Cross-app clipboard: copy a region in PixelArtist, `Ctrl+V` into
+88b. [M] Cross-app clipboard: copy a region in PixelArtist, `Ctrl+V` into
     Word/Paint/another app — the flattened image pastes correctly. Copy an
     image in Windows Photos/Snipping Tool, switch to PixelArtist with the
     internal clipboard empty, `Ctrl+V` — it lands as a floating selection
     centered on the canvas.
-88. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
+89. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
     first; switching sheets or opening the frame editor also commits.
 
 ## 17. v4: Strip segments
 
-89. [A] With the frame tool, an intact strip's SELECTED segment always
+90. [A] With the frame tool, an intact strip's SELECTED segment always
     shows its chrome (topmost, above label overlays): "+" insert call-outs
     above each frame boundary and "✂" split call-outs below each interior
     boundary; hovering a part highlights it; clicking "+" inserts a blank
     frame there (pixel-carrying tail shift), one undo step. Chrome only
     ever appears for the segment containing `state.selectedFrameId` —
     a non-selected strip shows no chrome until a member of it is clicked.
-90. [A] Clicking "✂" between two frames of a segment adds a break (a
+91. [A] Clicking "✂" between two frames of a segment adds a break (a
     dashed separator appears once the two halves are no longer touching);
     one undo step.
-91. [M] Dragging a whole segment with the frame tool (grab any member, not
+92. [M] Dragging a whole segment with the frame tool (grab any member, not
     a grip) moves every member's rect together, metadata-only — pixels stay
     put; undo restores all member positions in one step. Moving the segment
     WITH its pixels is the move tool's frame-float (item 21b).
-92. [M] Dragging a segment's end near another segment of the SAME
+93. [M] Dragging a segment's end near another segment of the SAME
     animation with matching frame size snaps (green outline) and merges
     the two into one ordered run; undo restores the prior two-segment
     layout.
-93. [M] Dragging a segment's end near a segment of a DIFFERENT animation
+94. [M] Dragging a segment's end near a segment of a DIFFERENT animation
     snaps and transfers it into that animation (including deleting the
     source animation entirely when it becomes empty); undo restores the
     original animation, its frames, and the deleted animation.
-94. [M] Dragging an end-of-segment grip grows (adds blank frames) or
+95. [M] Dragging an end-of-segment grip grows (adds blank frames) or
     shrinks (removes frames; pixels remain on the sheet) that end;
     verify both the left and right ends independently; undo restores the
     prior frame count and any removed frames/pixels.
-95. [A] Selecting a member frame of a segment and pressing `Delete` removes
+96. [A] Selecting a member frame of a segment and pressing `Delete` removes
     it AND closes the gap (rest of the segment shifts to stay contiguous);
     undo restores the frame, its position, and its pixels.
-96. [A] Double-clicking a member frame of a strip (frame tool, two quick
+97. [A] Double-clicking a member frame of a strip (frame tool, two quick
     downs on the same frame) opens the frame editor on that frame; "← Back
     to sheet" returns to the sheet view with the timeline's animation
     picker showing that frame's animation selected.
-97. [A] With a strip animation (`strip: true`) selected in the timeline,
+98. [A] With a strip animation (`strip: true`) selected in the timeline,
     cells have no ✕ remove button and are not draggable (`cell.draggable`
     is `false`); "Add selected frame" is disabled. Editing a cell's
     duration still works and is still one undo step.
-98. [M] Save (packed or unpacked), reload, and open the file: segment
+99. [M] Save (packed or unpacked), reload, and open the file: segment
     breaks (dashed separators / detached halves) and frame order survive
     the round trip exactly. Same native-picker exemption as sections 12-13.
 

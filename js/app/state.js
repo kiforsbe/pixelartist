@@ -1,5 +1,5 @@
 import { CommandStack } from '../core/commands.js';
-import { createProject, createSheet, DEFAULT_SETTINGS, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers, flattenLayers, layerAnimationContext } from '../core/model.js';
+import { createProject, createSheet, DEFAULT_SETTINGS, defaultOnionSettings, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers, flattenLayers, layerAnimationContext } from '../core/model.js';
 
 // Test mode (?autotest): automated browser sessions suppress modal dialogs
 // (beforeunload guard, autosave-restore prompt, confirm() gates auto-accept).
@@ -22,7 +22,13 @@ export const state = {
   selectedTerrainSetId: null, // which terrain set's slot editor is open in the panel
   editingFrameId: null,       // frame editor target
   editingTileId: null,        // tile editor target
-  onion: { enabled: false, back: 1, ahead: 1 },
+  // Saved as part of the project (project.settings.onion) so onion-skin
+  // preferences persist across save/load -- setProject() below re-points
+  // this at the loaded/new project's own settings.onion object, so every
+  // existing state.onion.* read/write throughout the frame editor keeps
+  // working unchanged while actually mutating project data. This initial
+  // value is only ever seen before the first setProject() call.
+  onion: defaultOnionSettings(),
   overlays: { labels: true, sequences: true },
   commands: new CommandStack(),
   floating: null,             // active floating selection (core/floating.js shape) or null
@@ -71,6 +77,11 @@ export function activeLayerScope() {
 export function markDirty() { state.dirty = true; emit('project'); }
 export function setProject(project) {
   state.project = project;
+  // Defensive: a project built by anything other than createProject/
+  // deserializeProject (neither of which should happen, but this keeps
+  // state.onion valid rather than undefined either way).
+  if (!project.settings.onion) project.settings.onion = defaultOnionSettings();
+  state.onion = project.settings.onion;
   const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
   const sheet = project.sheets.find(s => s.kind === kind) ?? null;
   state.activeSheetId = sheet ? sheet.id : null;

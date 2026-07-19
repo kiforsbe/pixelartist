@@ -464,12 +464,23 @@ export function mountTimeline(el) {
 
     cell.append(thumbCanvas, controls);
 
-    cell.addEventListener('click', () => scrubTo(index));
-    cell.addEventListener('dblclick', () => {
-      if (!frame) return;
-      state.editingFrameId = frame.id;
-      state.view = 'frame';
-      emit('view');
+    cell.addEventListener('click', () => {
+      scrubTo(index);
+      // Clicking a cell also makes it the app-wide "current frame" (the
+      // same selection the sprite sheet/Frames panel use), not just the
+      // preview-playhead position -- so e.g. the Frames panel and the
+      // sprite-sheet highlight follow along with a single click. It also
+      // opens the frame editor directly on that frame (previously required
+      // a double-click) -- one click both selects and jumps in.
+      if (frame && state.selectedFrameId !== frame.id) {
+        state.selectedFrameId = frame.id;
+        emit('selection');
+      }
+      if (frame) {
+        state.editingFrameId = frame.id;
+        state.view = 'frame';
+        emit('view');
+      }
     });
 
     cell.addEventListener('dragstart', (e) => {

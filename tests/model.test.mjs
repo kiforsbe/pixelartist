@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PROJECT_VERSION, DEFAULT_SETTINGS, createProject, createSheet, addLayer, removeLayer,
+  PROJECT_VERSION, DEFAULT_SETTINGS, defaultOnionSettings, createProject, createSheet, addLayer, removeLayer,
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
@@ -419,7 +419,7 @@ test('validateProjectJson rejects bad input', () => {
 test('project carries required settings; version 2', () => {
   const p = createProject('s');
   assert.equal(p.version, 2);
-  assert.deepEqual(p.settings, DEFAULT_SETTINGS);
+  assert.deepEqual(p.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
   const p2 = createProject('s2', { ...DEFAULT_SETTINGS, tileW: 8 });
   assert.equal(p2.settings.tileW, 8);
 });
@@ -432,10 +432,10 @@ test('animations carry strip flag; serialize round-trips settings and strip', ()
   assert.equal(an.strip, true);
   const { json, images } = serializeProject(p);
   assert.equal(json.version, 2);
-  assert.deepEqual(json.settings, DEFAULT_SETTINGS);
+  assert.deepEqual(json.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
   const map = new Map(images.map(i => [i.path, i.bitmap]));
   const p2 = deserializeProject(structuredClone(json), map);
-  assert.deepEqual(p2.settings, DEFAULT_SETTINGS);
+  assert.deepEqual(p2.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
   assert.equal(p2.sheets[0].animations[0].strip, true);
 });
 
