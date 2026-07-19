@@ -14,7 +14,7 @@ import { makePixelPatch } from '../core/commands.js';
 import { decodePng } from '../app/pngcodec.js';
 import { registerTool } from './tools.js';
 import {
-  gridCellRect, ownedTiles, relayoutGrid, resizeGridCols, resizeGridRows,
+  gridCellRect, ownedTiles, relayoutGrid,
   moveGrid, removeTileGrid, createTileGrid, detachTile,
 } from '../core/tilegrids.js';
 import { newId } from '../core/palettes.js';
@@ -364,36 +364,6 @@ function commitDeleteGrid(sheet, grid) {
     label: 'delete grid',
     do() { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); sheet.terrainSets = afterSets.slice(); },
     undo() { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); sheet.terrainSets = beforeSets.slice(); },
-  });
-  markDirty();
-}
-
-function commitResizeGridCols(sheet, grid, cols) {
-  if (cols === grid.cols) return;
-  const beforeTiles = sheet.tiles.slice();
-  const beforeCols = grid.cols;
-  resizeGridCols(sheet, grid, cols);
-  const afterTiles = sheet.tiles.slice();
-  const afterCols = grid.cols;
-  state.commands.push({
-    label: 'resize grid cols',
-    do() { grid.cols = afterCols; sheet.tiles = afterTiles.slice(); },
-    undo() { grid.cols = beforeCols; sheet.tiles = beforeTiles.slice(); },
-  });
-  markDirty();
-}
-
-function commitResizeGridRows(sheet, grid, rows) {
-  if (rows === grid.rows) return;
-  const beforeTiles = sheet.tiles.slice();
-  const beforeRows = grid.rows;
-  resizeGridRows(sheet, grid, rows);
-  const afterTiles = sheet.tiles.slice();
-  const afterRows = grid.rows;
-  state.commands.push({
-    label: 'resize grid rows',
-    do() { grid.rows = afterRows; sheet.tiles = afterTiles.slice(); },
-    undo() { grid.rows = beforeRows; sheet.tiles = beforeTiles.slice(); },
   });
   markDirty();
 }

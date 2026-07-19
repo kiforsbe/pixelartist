@@ -367,7 +367,7 @@ export function renameAnimation(sheet, animId, name) {
 // Clears any dangling reference to a just-removed tile: other tiles'
 // manual neighbor slots, and any terrain set's slot map. Called from every
 // place a tile record is actually dropped from sheet.tiles (deleteTile in
-// tilemode.js, grid-shrink in resizeGridCols/resizeGridRows).
+// tilemode.js, grid-shrink in resizeGridAxis).
 export function scrubTileReferences(sheet, removedTileId) {
   for (const tile of sheet.tiles) {
     if (tile.duplicateOf === removedTileId) tile.duplicateOf = undefined;
