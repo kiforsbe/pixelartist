@@ -19,9 +19,9 @@ import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, segmentMemb
 import { createBitmap, copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
 import { drawRectDims, drawChainDims } from './dimlabels.js';
+import { HANDLES_CORNER, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
 
 const HANDLE_SCREEN_PX = 6;
-const HANDLES = ['nw', 'ne', 'sw', 'se'];
 
 // Tool options (snap checkbox + grid size number input), read by the
 // pointer-drag math below and edited by the row built in buildOptionsRow().
@@ -143,19 +143,9 @@ function findSnap(view, sheet, drag) {
   return best;
 }
 
-function oppositeCorner(f, handle) {
-  const map = {
-    nw: { x: f.x + f.w, y: f.y + f.h },
-    ne: { x: f.x, y: f.y + f.h },
-    sw: { x: f.x + f.w, y: f.y },
-    se: { x: f.x, y: f.y },
-  };
-  return map[handle];
-}
-
 function hitHandle(view, frame, sx, sy) {
   if (!frame) return null;
-  for (const h of HANDLES) {
+  for (const h of HANDLES_CORNER) {
     const ix = h[1] === 'w' ? frame.x : frame.x + frame.w;
     const iy = h[0] === 'n' ? frame.y : frame.y + frame.h;
     const p = view.imageToScreen(ix, iy);
@@ -614,7 +604,6 @@ function handleDown(ev, view) {
     drag = {
       kind: 'resize', frame: selected, handle,
       before: { x: selected.x, y: selected.y, w: selected.w, h: selected.h },
-      anchor: oppositeCorner(selected, handle),
       rect: { x: selected.x, y: selected.y, w: selected.w, h: selected.h },
     };
     view.requestRender();
@@ -669,7 +658,9 @@ function handleMove(ev, view) {
     const sheet = activeSheet();
     drag.snap = (drag.anim && sheet && (drag.delta.dx !== 0 || drag.delta.dy !== 0)) ? findSnap(view, sheet, drag) : null;
   } else if (drag.kind === 'resize') {
-    drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, false));
+    drag.rect = snapRect(resizeRectFromHandle(drag.before, drag.handle, ev.x, ev.y, {
+      useCenter: isCenterAnchorModifier(ev), shiftHeld: isProportionalModifier(ev),
+    }));
   } else if (drag.kind === 'stripresize') {
     const sheet = activeSheet();
     const raw = drag.side === 'right'
@@ -751,7 +742,7 @@ const FRAME_HANDLE = '#4f8cff';
 
 function drawHandles(ctx, view, f) {
   ctx.fillStyle = FRAME_HANDLE;
-  for (const h of HANDLES) {
+  for (const h of HANDLES_CORNER) {
     const ix = h[1] === 'w' ? f.x : f.x + f.w;
     const iy = h[0] === 'n' ? f.y : f.y + f.h;
     const p = view.imageToScreen(ix, iy);
