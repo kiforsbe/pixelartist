@@ -1,6 +1,9 @@
 {
   "name": "pixelartist",
   "version": "0.1.0",
+  "description": "Browser-based pixel-art editor for packed sprite sheets and tile sheets. No dependencies, no build step.",
+  "private": true,
   "type": "module",
+  "engines": { "node": ">=18" },
   "scripts": { "test": "node --test tests/*.mjs" }
 }

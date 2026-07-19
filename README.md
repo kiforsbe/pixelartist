@@ -187,4 +187,10 @@ one per sheet:
 
 ## Test
 
+Requires Node 18+ (uses the built-in `node --test` runner, no dependencies):
+
     npm test
+
+## License
+
+No license is granted. All rights reserved.

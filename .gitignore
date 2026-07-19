@@ -1,3 +1,21 @@
 .superpowers/
 .playwright-mcp/
 node_modules/
+test-results/
+playwright-report/
+coverage/
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# OS / editor cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.swp
+*~
