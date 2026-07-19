@@ -53,9 +53,13 @@ export function mountAnimationsPanel(el) {
   const body = document.createElement('div');
   body.className = 'frame-row active';
 
+  const nameLabel = document.createElement('span');
+  nameLabel.textContent = 'Name';
+
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
   nameInput.className = 'frame-name';
+  nameInput.style.flex = '1';
 
   const loopLabel = document.createElement('label');
   loopLabel.className = 'timeline-loop';
@@ -63,6 +67,10 @@ export function mountAnimationsPanel(el) {
   const loopCheckbox = document.createElement('input');
   loopCheckbox.type = 'checkbox';
   loopLabel.append(loopCheckbox, document.createTextNode('Loop'));
+
+  const nameRow = document.createElement('div');
+  nameRow.className = 'row';
+  nameRow.append(nameLabel, nameInput, loopLabel);
 
   let currentAnim = null;
 
@@ -79,7 +87,7 @@ export function mountAnimationsPanel(el) {
     },
   });
 
-  body.append(nameInput, loopLabel, durationControl.el);
+  body.append(nameRow, durationControl.el);
   el.append(hint, body);
 
   nameInput.addEventListener('change', () => {

@@ -129,7 +129,8 @@ function commitNewAnimation(sheet) {
       else if (!sheet.animations.includes(anim)) sheet.animations.splice(Math.min(idx, sheet.animations.length), 0, anim);
       // state.commands is a single global stack shared by every sheet -- only
       // touch selection state while this command's own sheet is still the
-      // one on screen (see frames.js's matching comment on commitNewStrip).
+      // one on screen (see frames.js's matching comment on
+      // commitNewStripFromFrame).
       if (sheet === activeSheet()) state.selectedAnimationId = anim.id;
     },
     undo() {
@@ -353,8 +354,8 @@ export function mountTimeline(el) {
     stopPlaying();
     position = 0; acc = 0;
     // Keep the active layer inside whatever context is now on screen -- see
-    // commitNewStrip's matching comment in frames.js. Only reassign when the
-    // current active layer doesn't already belong to the newly selected
+    // commitNewStripFromFrame's matching comment in frames.js. Only reassign
+    // when the current active layer doesn't already belong to the newly selected
     // context, so a deliberate in-context choice survives switching away and
     // back. contextLayers(sheet, null) (deselecting to "(none)") returns
     // every layer in the sheet, matching how a null selection is already

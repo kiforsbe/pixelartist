@@ -15,7 +15,7 @@
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../app/state.js';
 import { addFrame, removeFrame, addAnimation, animationGroup, acceptAnimation, flattenLayers } from '../core/model.js';
 import { sliceGrid } from '../core/slicing.js';
-import { findFreeRect, buildStripFrames, segmentsOf, segmentOfFrame, segmentMembers, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
+import { segmentsOf, segmentOfFrame, segmentMembers, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { createBitmap, copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
 import { drawRectDims, drawChainDims } from './dimlabels.js';
@@ -587,8 +587,8 @@ function handleDown(ev, view) {
     lastClick = null;
     drag = null;
     state.editingFrameId = clickHit.id;
-    const owner = sheet.animations.find(a => a.frames.some(af => af.frameId === clickHit.id));
-    if (owner) state.selectedAnimationId = owner.id;
+    const owner = sheet.animations.find(a => a.frames.some(af => af.frameId === clickHit.id)) ?? null;
+    state.selectedAnimationId = owner ? owner.id : null;
     state.view = 'frame';
     emit('view');
     emit('selection');
@@ -629,7 +629,16 @@ function handleDown(ev, view) {
   }
   const hit = frameAt(sheet, ev.x, ev.y);
   if (hit) {
-    if (state.selectedFrameId !== hit.id) { state.selectedFrameId = hit.id; emit('selection'); }
+    // Selecting a frame also selects its owning animation (or clears the
+    // animation selection when the frame is standalone), so the timeline
+    // and layers panel never keep a stale animation highlighted.
+    const owner = sheet.animations.find(a => a.frames.some(af => af.frameId === hit.id)) ?? null;
+    const ownerId = owner ? owner.id : null;
+    const frameChanged = state.selectedFrameId !== hit.id;
+    const animChanged = state.selectedAnimationId !== ownerId;
+    if (frameChanged) state.selectedFrameId = hit.id;
+    if (animChanged) state.selectedAnimationId = ownerId;
+    if (frameChanged || animChanged) emit('selection');
     // If `hit` belongs to an intact strip, the drag targets every member of
     // the grabbed SEGMENT together (move-as-unit); otherwise just the single frame.
     const strip = stripOf(sheet, hit.id);
@@ -643,7 +652,11 @@ function handleDown(ev, view) {
     view.requestRender();
     return;
   }
-  if (state.selectedFrameId !== null) { state.selectedFrameId = null; emit('selection'); }
+  if (state.selectedFrameId !== null || state.selectedAnimationId !== null) {
+    state.selectedFrameId = null;
+    state.selectedAnimationId = null;
+    emit('selection');
+  }
   drag = { kind: 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
   view.requestRender();
 }
@@ -1090,6 +1103,10 @@ export function drawStripChrome(ctx, view) {
 
 // ------------------------------------------------------------- tool options row
 
+// Set once by registerFrameTool() (which builds the dialog before the tool
+// palette can render this row); the button just defers to whatever's there.
+let sliceDialogApi = null;
+
 function buildOptionsRow(optionsRow) {
   const row = document.createElement('div');
   row.className = 'tool-option-row';
@@ -1105,7 +1122,13 @@ function buildOptionsRow(optionsRow) {
     sizeInput.value = String(v);
     frameToolOptions.gridSize = v;
   });
-  row.append(snapInput, document.createTextNode('Snap'), sizeInput);
+  const sliceBtn = document.createElement('button');
+  sliceBtn.type = 'button';
+  sliceBtn.className = 'btn-icon-md';
+  sliceBtn.textContent = '▦';
+  sliceBtn.title = 'Slice grid…';
+  sliceBtn.addEventListener('click', () => sliceDialogApi?.open());
+  row.append(snapInput, document.createTextNode('Snap'), sizeInput, sliceBtn);
   optionsRow.appendChild(row);
   return row;
 }
@@ -1113,6 +1136,7 @@ function buildOptionsRow(optionsRow) {
 // ------------------------------------------------------------- public API
 
 export function registerFrameTool() {
+  sliceDialogApi = buildSliceDialog();
   registerTool({ id: 'frametool', icon: '🖼', key: 'f', isAvailable: () => state.mode === 'sprites' }, buildOptionsRow);
 
   window.addEventListener('keydown', (e) => {
@@ -1347,69 +1371,14 @@ function buildSliceDialog() {
   };
 }
 
-// Creates a strip's frames + its intact (strip: true) animation as ONE
-// undoable command, mirroring buildSliceDialog's whole-array-snapshot idiom
-// above: eager-mutate now (addFrame/addAnimation both push into the sheet
-// immediately, matching the codebase's eager-mutate-then-snapshot idiom),
-// snapshot before/after of sheet.frames/sheet.animations plus the new
-// animation's own .frames array, then do()/undo() just swap whole arrays.
-// A new strip starts FLOATING (see addAnimation/acceptAnimation in
-// core/model.js) -- no layer group yet, so there's nothing to add to or
-// remove from sheet.layerTree here. Its frames simply preview whatever's
-// already on the sheet underneath until it's accepted (Enter key or first
-// paint stroke -- see commitAcceptAnimation below and tools.js's hook).
-function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
-  const beforeFrames = sheet.frames.slice();
-  const beforeAnimations = sheet.animations.slice();
-
-  const descriptors = buildStripFrames(name, x, y, frameW, frameH, count);
-  const frames = descriptors.map(d => addFrame(sheet, d));
-  const anim = addAnimation(sheet, name, true, state.project?.settings);
-  anim.frames = frames.map(f => ({ frameId: f.id, duration }));
-
-  const afterFrames = sheet.frames.slice();
-  const afterAnimations = sheet.animations.slice();
-  const afterAnimFrames = anim.frames.map(f => ({ ...f }));
-  const firstFrameId = frames[0].id;
-  const animId = anim.id;
-  const createdIds = new Set(frames.map(f => f.id));
-
-  const cmd = {
-    label: 'new strip',
-    do() {
-      sheet.frames = afterFrames.slice();
-      sheet.animations = afterAnimations.slice();
-      anim.frames = afterAnimFrames.map(f => ({ ...f }));
-      // state.commands is a single global stack shared by every sheet, so a
-      // redo can replay this do() while a DIFFERENT sheet is now active --
-      // only touch the global selection state when this command's own sheet
-      // is still the one on screen, or we'd point selectedAnimationId at an
-      // id from a sheet that isn't showing.
-      if (sheet === activeSheet()) {
-        state.selectedFrameId = firstFrameId;
-        state.selectedAnimationId = animId;
-      }
-    },
-    undo() {
-      sheet.frames = beforeFrames.slice();
-      sheet.animations = beforeAnimations.slice();
-      if (createdIds.has(state.selectedFrameId)) state.selectedFrameId = null;
-      if (state.selectedAnimationId === animId) state.selectedAnimationId = null;
-    },
-  };
-  state.commands.push(cmd);
-  markDirty();
-  emit('selection');
-}
-
 // Dragging a standalone (non-strip) frame's own edge grip (standaloneGripGeometry
 // above) promotes it into a brand-new intact-strip animation: the frame
 // itself becomes member 0 (kept at its own id/position -- never duplicated),
 // renamed to match the new strip, and `count - 1` additional blank frames
 // are appended in the dragged direction, exactly like growing an existing
-// strip via commitResizeSegment's grip. One undoable command, mirroring
-// commitNewStrip's whole-array-snapshot idiom (frames/animations; the
-// frame's own name is snapshotted alongside since it gets renamed too).
+// strip via commitResizeSegment's grip. One undoable command, using the
+// codebase's whole-array-snapshot idiom (frames/animations; the frame's own
+// name is snapshotted alongside since it gets renamed too).
 function commitNewStripFromFrame(sheet, frame, side, count) {
   const extra = count - 1;
   if (extra <= 0) return;
@@ -1512,32 +1481,6 @@ export function commitAcceptAnimation(sheet, anim) {
   emit('selection');
 }
 
-// Wires the static #dlg-newstrip markup (index.html) the same way
-// buildSliceDialog wires its own dynamically-built dialog — one-time
-// listener setup, called once from mountFramesPanel. Returns null if the
-// dialog markup isn't present (defensive; shouldn't happen in the shipped app).
-function wireNewStripDialog() {
-  const dlg = document.getElementById('dlg-newstrip');
-  if (!dlg) return null;
-  const $ = (sel) => dlg.querySelector(sel);
-  $('#strip-cancel').addEventListener('click', () => dlg.close());
-  $('#strip-create').addEventListener('click', () => {
-    const sheet = activeSheet();
-    if (!sheet) { dlg.close(); return; }
-    const intVal = (el, min) => Math.max(min, parseInt(el.value, 10) || min);
-    const name = $('#strip-name').value.trim() || 'strip';
-    const frameW = intVal($('#strip-frame-w'), 1);
-    const frameH = intVal($('#strip-frame-h'), 1);
-    const count = intVal($('#strip-count'), 1);
-    const duration = intVal($('#strip-duration'), 1);
-    const pos = findFreeRect(sheet, count * frameW, frameH);
-    if (!pos) { alert('No free space on the sheet for this strip.'); return; }
-    commitNewStrip(sheet, name, pos.x, pos.y, frameW, frameH, count, duration);
-    dlg.close();
-  });
-  return dlg;
-}
-
 export function mountFramesPanel(el) {
   // #panel-context is shared with tilemode.js's tile panel (mode-exclusive
   // visibility). Each panel gets its own wrapper appended to `el` and toggles
@@ -1554,35 +1497,9 @@ export function mountFramesPanel(el) {
   list.className = 'frame-list';
   wrap.appendChild(list);
 
-  const sliceDialog = buildSliceDialog();
-  const btnSlice = document.createElement('button');
-  btnSlice.type = 'button';
-  btnSlice.className = 'btn-icon-md';
-  btnSlice.textContent = '▦';
-  btnSlice.title = 'Slice grid…';
-  btnSlice.addEventListener('click', () => sliceDialog.open());
-
-  const stripDialog = wireNewStripDialog();
-  const btnNewStrip = document.createElement('button');
-  btnNewStrip.type = 'button';
-  btnNewStrip.className = 'btn-icon-md';
-  btnNewStrip.textContent = '🎞';
-  btnNewStrip.title = 'New strip…';
-  btnNewStrip.addEventListener('click', () => {
-    const sheet = activeSheet();
-    if (!sheet || !stripDialog) return;
-    const settings = state.project?.settings ?? {};
-    const $ = (sel) => stripDialog.querySelector(sel);
-    $('#strip-name').value = `strip_${sheet.animations.length}`;
-    $('#strip-frame-w').value = String(settings.frameW ?? 16);
-    $('#strip-frame-h').value = String(settings.frameH ?? 16);
-    $('#strip-count').value = '4';
-    $('#strip-duration').value = String(settings.durationMs ?? 100);
-    stripDialog.showModal();
-  });
-
-  // Break apart: only visible when the selected frame is a member of an
-  // intact strip; toggled in renderList() below on every re-render.
+  // Break apart: converts the selected strip to loose frame entries; only
+  // relevant (and only ever appended into actionsRow, below) when the
+  // selection is a strip member.
   const btnBreakApart = document.createElement('button');
   btnBreakApart.type = 'button';
   btnBreakApart.className = 'btn-icon-md';
@@ -1595,18 +1512,17 @@ export function mountFramesPanel(el) {
     if (strip) commitBreakApartStrip(strip);
   });
 
-  const btnRow = document.createElement('div');
-  btnRow.className = 'row layer-actions';
-  btnRow.append(btnSlice, btnNewStrip, btnBreakApart);
-  wrap.appendChild(btnRow);
-
-  // Edit + Delete for the SELECTED frame (strip mode deletes just that
-  // member, closing the gap — same as the Delete key).
+  // Edit + Delete (+ Break apart, strip mode only) for the SELECTED frame
+  // (strip mode deletes just that member, closing the gap — same as the
+  // Delete key).
   function actionsRow(sheet, f, inStrip) {
     const actions = document.createElement('div');
     actions.className = 'row';
     const btnEdit = document.createElement('button');
-    btnEdit.type = 'button'; btnEdit.textContent = 'Edit';
+    btnEdit.type = 'button';
+    btnEdit.className = 'btn-icon-md';
+    btnEdit.textContent = '✎';
+    btnEdit.title = 'Edit';
     btnEdit.addEventListener('click', () => {
       state.editingFrameId = f.id;
       state.view = 'frame';
@@ -1614,13 +1530,16 @@ export function mountFramesPanel(el) {
     });
     const btnDelete = document.createElement('button');
     btnDelete.type = 'button';
-    btnDelete.textContent = inStrip ? 'Delete frame' : 'Delete';
+    btnDelete.className = 'btn-icon-md';
+    btnDelete.textContent = '🗑';
+    btnDelete.title = inStrip ? 'Delete frame' : 'Delete';
     btnDelete.addEventListener('click', () => {
       const strip = stripOf(sheet, f.id);
       if (strip) commitRemoveMember(sheet, strip, f.id);
       else deleteFrame(sheet, f.id);
     });
     actions.append(btnEdit, btnDelete);
+    if (inStrip) actions.appendChild(btnBreakApart);
     return actions;
   }
 
@@ -1690,7 +1609,6 @@ export function mountFramesPanel(el) {
     const sheet = activeSheet();
     const frame = sheet?.frames.find(f => f.id === state.selectedFrameId) ?? null;
     const strip = frame ? stripOf(sheet, frame.id) : null;
-    btnBreakApart.hidden = !strip;
     if (!sheet) return;
     if (!frame) {
       const hint = document.createElement('div');

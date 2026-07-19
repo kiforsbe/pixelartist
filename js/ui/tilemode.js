@@ -1924,8 +1924,10 @@ export function mountAutotilesPanel(el) {
   wrap.appendChild(terrainSetEditor);
 
   function render() {
-    if (state.mode !== 'tiles') { wrap.hidden = true; return; }
-    wrap.hidden = false;
+    // Hide the whole .panel container (not just wrap) in sprite mode --
+    // otherwise its empty border+padding chrome still shows in the sidebar.
+    if (state.mode !== 'tiles') { el.hidden = true; return; }
+    el.hidden = false;
     const sheet = activeSheet();
     terrainSetEditor.innerHTML = '';
     if (!sheet) return;
@@ -2017,8 +2019,10 @@ export function mountTileLayersPanel(el, { showVisibility = false, showOpacity =
   wrap.appendChild(btnRow);
 
   function render() {
-    if (state.mode !== 'tiles') { wrap.hidden = true; return; }
-    wrap.hidden = false;
+    // Hide the whole .panel container (not just wrap) in sprite mode --
+    // otherwise its empty border+padding chrome still shows in the sidebar.
+    if (state.mode !== 'tiles') { el.hidden = true; return; }
+    el.hidden = false;
     const sheet = activeSheet();
     list.innerHTML = '';
     if (!sheet) return;

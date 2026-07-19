@@ -3,7 +3,7 @@
 import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
 import { commitDeleteAnimation } from './timeline.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
-import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, moveNode } from '../core/model.js';
+import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, moveNode, animationGroup, layerAnimationContext } from '../core/model.js';
 import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
@@ -392,6 +392,13 @@ export function mountLayersPanel(el) {
   // Selected node can be a layer or a group. Active layer id is authoritative
   // for drawing; selected node id is authoritative for panel operations.
   let selectedNodeId = state.activeLayerId;
+
+  // Tracks the last state.selectedAnimationId this panel itself agreed with
+  // (either because it set it, or because it already resynced to it), so
+  // renderList can tell "the timeline/sprite sheet changed the animation
+  // selection out from under us" (needs a resync) apart from "the user just
+  // clicked a plain layer/group in THIS panel" (must NOT be overwritten).
+  let lastSyncedAnimationId = state.selectedAnimationId;
 
   function targetGroupForInsert() {
     const sheet = activeSheet();
@@ -823,11 +830,28 @@ export function mountLayersPanel(el) {
   list.addEventListener('drop', onListDrop);
 
   // Selecting an animation's group node also selects that animation in the
-  // timeline dock, so the two panels stay in sync.
+  // timeline dock and on the sprite sheet (and selecting a plain group
+  // clears it), so all three stay in sync -- see selectLayerNode below for
+  // the layer-row equivalent.
   function selectGroupNode(group) {
     selectedNodeId = group.id;
     state.activeLayerId = null;
-    if (group.animationId) { state.selectedAnimationId = group.animationId; emit('selection'); }
+    const animId = group.animationId ?? null;
+    if (state.selectedAnimationId !== animId) { state.selectedAnimationId = animId; emit('selection'); }
+    lastSyncedAnimationId = animId;
+  }
+
+  // Selecting a layer also selects the animation that owns its group (or
+  // clears the animation selection for a root/plain-group layer), mirroring
+  // selectGroupNode above.
+  function selectLayerNode(layer) {
+    const sheet = activeSheet();
+    state.activeLayerId = layer.id;
+    selectedNodeId = layer.id;
+    const ctx = sheet ? layerAnimationContext(sheet, layer) : null;
+    const animId = ctx?.anim.id ?? null;
+    if (state.selectedAnimationId !== animId) { state.selectedAnimationId = animId; emit('selection'); }
+    lastSyncedAnimationId = animId;
   }
 
   function renderGroup(group, depth) {
@@ -892,7 +916,7 @@ export function mountLayersPanel(el) {
     row.tabIndex = 0;
     row.addEventListener('dragstart', (e) => onRowDragStart(e, layer));
     row.addEventListener('dragend', onRowDragEnd);
-    row.addEventListener('click', () => { state.activeLayerId = layer.id; selectedNodeId = layer.id; renderList(); });
+    row.addEventListener('click', () => { selectLayerNode(layer); renderList(); });
     row.addEventListener('keydown', (e) => {
       if (layer.id !== state.activeLayerId) return;
       if (e.key === 'ArrowUp') { e.preventDefault(); doMove(layer, 1); }
@@ -925,7 +949,7 @@ export function mountLayersPanel(el) {
     nameEl.addEventListener('dragstart', (e) => e.stopPropagation());
     nameEl.addEventListener('click', (e) => {
       e.stopPropagation();
-      scheduleNameSelect(() => { state.activeLayerId = layer.id; selectedNodeId = layer.id; });
+      scheduleNameSelect(() => selectLayerNode(layer));
     });
     nameEl.addEventListener('dblclick', (e) => {
       e.stopPropagation();
@@ -962,11 +986,29 @@ export function mountLayersPanel(el) {
     else renderLayer(node, depth);
   }
 
+  // If state.selectedAnimationId changed since this panel last agreed with
+  // it, the change came from elsewhere (timeline dropdown, sprite sheet
+  // click) -- follow it by highlighting the matching group (or falling back
+  // to the active layer when it's cleared to "(none)"). A change this panel
+  // made itself is already reflected in selectedNodeId, so this is a no-op
+  // in that case (lastSyncedAnimationId is kept current by selectGroupNode/
+  // selectLayerNode).
+  function syncFromAnimationSelection(sheet) {
+    if (state.selectedAnimationId === lastSyncedAnimationId) return;
+    lastSyncedAnimationId = state.selectedAnimationId;
+    if (state.selectedAnimationId) {
+      const group = animationGroup(sheet, state.selectedAnimationId);
+      if (group) { selectedNodeId = group.id; state.activeLayerId = null; return; }
+    }
+    selectedNodeId = state.activeLayerId;
+  }
+
   function renderList() {
     list.innerHTML = '';
     thumbCanvases.clear();
     const sheet = activeSheet();
     if (!sheet) return;
+    syncFromAnimationSelection(sheet);
     if (selectedNodeId && !findNode(sheet.layerTree, selectedNodeId)) {
       selectedNodeId = state.activeLayerId;
     }

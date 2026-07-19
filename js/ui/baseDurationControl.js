@@ -2,8 +2,8 @@
 // Animation panel (js/ui/animpanel.js) and, in the next task, the New
 // Project and Project Settings dialogs (js/app/main.js). One unit is
 // "primary" (editable) at a time; the other is shown read-only, live-
-// converted, for reference. fps-primary additionally shows a "Step" field
-// ("animate on Ns"). See
+// converted, for reference. fps-primary additionally shows a "step" field
+// (animate on every Nth frame at this fps), inline on the same row as fps. See
 // docs/superpowers/specs/2026-07-19-animation-panel-design.md.
 import { fpsStepToMs, msToFps } from '../core/model.js';
 
@@ -30,30 +30,37 @@ export function buildBaseDurationControl({ getValue, setValue }) {
   msInput.type = 'number'; msInput.min = '1';
   msRow.appendChild(msInput);
 
-  const fpsRow = document.createElement('label');
+  const fpsRow = document.createElement('div');
   fpsRow.className = 'duration-control-row';
-  fpsRow.append(document.createTextNode('fps'));
+
+  const fpsField = document.createElement('label');
+  fpsField.append(document.createTextNode('fps'));
   const fpsInput = document.createElement('input');
   fpsInput.type = 'number'; fpsInput.min = '0.1'; fpsInput.step = '0.1';
-  fpsRow.appendChild(fpsInput);
+  fpsField.appendChild(fpsInput);
 
-  const stepRow = document.createElement('label');
-  stepRow.className = 'duration-control-row';
-  stepRow.append(document.createTextNode('animate on Ns'));
+  const stepField = document.createElement('label');
+  stepField.title = 'Animate on every Nth frame at this fps';
+  stepField.append(document.createTextNode('step'));
   const stepInput = document.createElement('input');
   stepInput.type = 'number'; stepInput.min = '1'; stepInput.step = '1';
-  stepRow.appendChild(stepInput);
+  stepField.appendChild(stepInput);
 
-  wrap.append(toggle, msRow, fpsRow, stepRow);
+  fpsRow.append(fpsField, stepField);
+  wrap.appendChild(toggle);
 
   function isFpsPrimary() { return getValue().baseFps != null; }
 
   function refresh() {
     const v = getValue();
     const fpsPrimary = v.baseFps != null;
+    // Primary (editable) row on top, the read-only reference row below --
+    // .append() on already-attached nodes just reorders them.
+    if (fpsPrimary) wrap.append(toggle, fpsRow, msRow);
+    else wrap.append(toggle, msRow, fpsRow);
     btnMs.classList.toggle('active', !fpsPrimary);
     btnFps.classList.toggle('active', fpsPrimary);
-    stepRow.hidden = !fpsPrimary;
+    stepField.hidden = !fpsPrimary;
 
     msInput.disabled = fpsPrimary;
     fpsInput.disabled = !fpsPrimary;
