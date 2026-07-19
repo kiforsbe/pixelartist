@@ -1644,16 +1644,16 @@ export function mountTilePanel(el) {
   const addGridDialog = buildAddGridDialog();
   const btnAddGrid = document.createElement('button');
   btnAddGrid.type = 'button';
-  btnAddGrid.className = 'btn-icon-md';
-  btnAddGrid.textContent = '➕';
+  btnAddGrid.className = 'btn-sm';
+  btnAddGrid.textContent = '➕ Grid';
   btnAddGrid.title = 'Add grid';
   btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
 
   const addTerrainSetDialog = buildAddTerrainSetDialog();
   const btnAddTerrainSet = document.createElement('button');
   btnAddTerrainSet.type = 'button';
-  btnAddTerrainSet.className = 'btn-icon-md';
-  btnAddTerrainSet.textContent = '➕';
+  btnAddTerrainSet.className = 'btn-sm';
+  btnAddTerrainSet.textContent = '➕ Autotiles';
   btnAddTerrainSet.title = 'Add terrain set';
   btnAddTerrainSet.addEventListener('click', () => { if (activeSheet()) addTerrainSetDialog.open(); });
 
