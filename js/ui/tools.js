@@ -23,7 +23,7 @@ import { flattenSheet, animationGroup, flattenLayers } from '../core/model.js';
 import { segmentAt } from '../core/strips.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat } from './floatsession.js';
 import { commitAcceptAnimation, stripOf } from './frames.js';
-import { resizeRect } from '../core/resizerect.js';
+import { HANDLES_ALL, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 
 export const TOOLS = [
@@ -500,7 +500,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   }
 
   // 8 handle anchor points on the marquee, image-space EDGE coords
-  const SEL_HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  const SEL_HANDLES = HANDLES_ALL;
   function selHandlePoint(sel, h) {
     const x = h.includes('w') ? sel.x : h.includes('e') ? sel.x + sel.w : sel.x + sel.w / 2;
     const y = h.includes('n') ? sel.y : h.includes('s') ? sel.y + sel.h : sel.y + sel.h / 2;
@@ -549,11 +549,14 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       selection = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
     } else if (selStroke.mode === 'resize') {
       // A plain click on a handle must not nudge the rect: the e/s handle
-      // centers sit ON the edge coordinate, which resizeRect reads as an
-      // inclusive pixel (a no-move click would grow the rect by 1) — only
-      // recompute once the pointer has left the pointer-down pixel.
+      // centers sit ON the edge coordinate, which resizeRectFromHandle's
+      // `inclusive: true` reads as an inclusive pixel (a no-move click
+      // would grow the rect by 1) — only recompute once the pointer has
+      // left the pointer-down pixel.
       if (ev.x !== selStroke.anchor.x || ev.y !== selStroke.anchor.y) selStroke.moved = true;
-      if (selStroke.moved) selection = resizeRect(selStroke.orig, selStroke.handle, ev.x, ev.y, target);
+      if (selStroke.moved) selection = resizeRectFromHandle(selStroke.orig, selStroke.handle, ev.x, ev.y, {
+        useCenter: isCenterAnchorModifier(ev), shiftHeld: isProportionalModifier(ev), target, inclusive: true,
+      });
     } else if (selStroke.mode === 'moverect') {
       const dx = ev.x - selStroke.anchor.x, dy = ev.y - selStroke.anchor.y;
       selection = clampRectToTarget(
