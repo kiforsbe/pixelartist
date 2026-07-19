@@ -110,14 +110,26 @@ when the Frames panel shows "no frame selected"):
   reused as-is — no new command needed).
 - **Loop** `<input type="checkbox">`, reusing `commitToggleLoop`'s pattern
   from `timeline.js` (moved here; see Timeline changes below for what stays).
-- **Base Duration**:
-  - Unit toggle: two small buttons/radios, "ms" / "fps".
-  - ms mode: one numeric `<input>`, writes `anim.baseDuration` directly on
-    change (also clears `baseFps`/`baseStep`).
-  - fps mode: two numeric inputs, "FPS" and "Step" (label: "animate on Ns"),
+- **Base Duration**: both units are always visible — you set one, the other
+  updates live as a read-only conversion for reference. A "ms" / "fps"
+  toggle picks which one is currently **primary** (editable); the non-primary
+  field becomes a disabled/read-only `<input>` showing the live-converted
+  value, not a hidden field.
+  - ms primary: the ms `<input>` is editable and writes `anim.baseDuration`
+    directly on change (also clears `baseFps`/`baseStep`, since a raw ms
+    value has no fps/step decomposition). The fps display recomputes as
+    `1000 / baseDuration` (read-only, no Step shown — Step only has meaning
+    once fps is the primary, editable value).
+  - fps primary: "FPS" and "Step" (label: "animate on Ns") are editable;
     each on change recomputes `baseDuration` per the formula above and writes
-    all three fields in one undoable command.
-  - Mode shown on (re)mount: fps if `anim.baseFps` is set, else ms.
+    all three fields (`baseDuration`, `baseFps`, `baseStep`) in one undoable
+    command. The ms display recomputes from the new `baseDuration` and shows
+    read-only alongside it.
+  - Toggling primary itself does not change `baseDuration` — it only flips
+    which field accepts input; the read-only side simply reflects whatever
+    `baseDuration` currently is.
+  - Mode shown on (re)mount: fps primary if `anim.baseFps` is set, else ms
+    primary.
 
 All edits go through `state.commands.push({label, do, undo})` +
 `markDirty()`, matching every other panel's mutation pattern (see
