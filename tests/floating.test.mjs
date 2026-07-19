@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   makeTransform, isIdentity, floatBounds, rasterizeFloat, compositeFloatOnLayer,
+  solveScaleTransform,
 } from '../js/core/floating.js';
 import { createBitmap, setPixel, getPixel } from '../js/core/pixels.js';
 
@@ -105,4 +106,47 @@ test('compositeFloatOnLayer blends raster over a clone; null when no buffer for 
   assert.deepEqual(getPixel(layerBmp, 2, 3), CLEAR);   // original NOT mutated
   assert.equal(compositeFloatOnLayer(layerBmp, f, 'nope'), null);
   assert.equal(compositeFloatOnLayer(layerBmp, null, 'ly1'), null);
+});
+
+// ---- solveScaleTransform ----
+
+function closeTo(actual, expected, eps = 1e-6, msg = '') {
+  assert.ok(Math.abs(actual - expected) < eps, `${msg}: ${actual} !~ ${expected}`);
+}
+
+test('solveScaleTransform: unrotated corner drag, no modifiers, proportional by default', () => {
+  const srcRect = { x: 0, y: 0, w: 20, h: 10 };
+  const t0 = makeTransform();
+  // grabbed 'se' local (20,10); pivot 'nw' local (0,0) -> world (0,0) at identity
+  const r = solveScaleTransform({ srcRect, t0, handle: 'se', useCenter: false, shiftHeld: false, mx: 60, my: 25 });
+  // kx = 60/20 = 3, ky = 25/10 = 2.5 -> dominant 3, both axes locked to 3
+  closeTo(r.sx, 3, 1e-9, 'sx');
+  closeTo(r.sy, 3, 1e-9, 'sy');
+  closeTo(r.tx, 20, 1e-9, 'tx');
+  closeTo(r.ty, 10, 1e-9, 'ty');
+  assert.equal(r.rot, 0);
+});
+
+test('solveScaleTransform: Shift frees the corner drag (independent axes)', () => {
+  const srcRect = { x: 0, y: 0, w: 20, h: 10 };
+  const t0 = makeTransform();
+  const r = solveScaleTransform({ srcRect, t0, handle: 'se', useCenter: false, shiftHeld: true, mx: 60, my: 25 });
+  closeTo(r.sx, 3, 1e-9, 'sx');
+  closeTo(r.sy, 2.5, 1e-9, 'sy');
+});
+
+test('solveScaleTransform: rotated 90°, edge drag along the shape\'s LOCAL axis stays fixed at center', () => {
+  // Square float, rotated 90°, useCenter (Alt) so the pivot is the buffer
+  // center -- world center never moves regardless of rotation, so tx/ty
+  // should come back ~0 while sx captures the LOCAL x-axis scale even
+  // though the drag reads as vertical on screen (since local +x maps to
+  // world +y at a 90° rotation).
+  const srcRect = { x: 0, y: 0, w: 20, h: 20 };
+  const t0 = { ...makeTransform(), rot: Math.PI / 2 };
+  const r = solveScaleTransform({ srcRect, t0, handle: 'e', useCenter: true, shiftHeld: false, mx: 10, my: 40 });
+  closeTo(r.sx, 3, 1e-6, 'sx (local x-axis, driven by the visually-vertical drag)');
+  assert.equal(r.sy, 1, 'sy untouched -- e handle never drives the local y-axis');
+  closeTo(r.tx, 0, 1e-6, 'tx -- center-anchored scale never translates');
+  closeTo(r.ty, 0, 1e-6, 'ty -- center-anchored scale never translates');
+  assert.equal(r.rot, Math.PI / 2, 'rot carried over from t0 unchanged');
 });

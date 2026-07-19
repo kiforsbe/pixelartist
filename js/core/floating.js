@@ -9,6 +9,7 @@
 // repeated transforms never degrade the pixels. The transform scales/rotates
 // about the buffer center, then translates by (tx, ty) from srcRect.
 import { createBitmap, cloneBitmap, blitOver } from './pixels.js';
+import { resolveAnchor, handlePoint, isAspectLocked, dominantMagnitude, HANDLES_CORNER } from './resizeAnchor.js';
 
 // Absorbs float-math noise (cos(PI/2) ≈ 6e-17) so exact-looking transforms
 // (90° rotations, integer scales) rasterize deterministically.
@@ -40,6 +41,62 @@ export function inversePoint(float, x, y) {
   const rx = dx * cos + dy * sin;   // un-rotate
   const ry = -dx * sin + dy * cos;
   return { u: rx / t.sx + cx, v: ry / t.sy + cy };
+}
+
+// Rotation-aware scale solve for the float Move-tool's handle drag. t0 is
+// the transform BEFORE this drag started (an immutable snapshot -- never
+// re-derive from the live/previous-frame transform, so live Alt/Shift
+// toggling recomputes cleanly with no drift). mx, my: the live mouse
+// position, sheet-space, already pixel-centered by the caller (+0.5,
+// matching the convention the rotate-knob code already uses). Returns a
+// full new transform {tx, ty, sx, sy, rot} -- rot is always carried over
+// from t0 unchanged, since a scale drag never rotates.
+export function solveScaleTransform({ srcRect, t0, handle, useCenter, shiftHeld, mx, my }) {
+  const { w, h } = srcRect;
+  const cx = w / 2, cy = h / 2;
+  const localRect = { x: 0, y: 0, w, h };
+  const pivot = resolveAnchor(localRect, handle, useCenter);
+  const grabbed = handlePoint(localRect, handle);
+  const pivotWorld = forwardPoint({ srcRect, transform: t0 }, pivot.x, pivot.y);
+
+  const cos = Math.cos(t0.rot), sin = Math.sin(t0.rot);
+  const dx = mx - pivotWorld.x, dy = my - pivotWorld.y;
+  const px = dx * cos + dy * sin;   // un-rotate into local, unrotated units
+  const py = -dx * sin + dy * cos;
+
+  const hu = grabbed.x - pivot.x, hv = grabbed.y - pivot.y;
+  const clampS = (s) => (s < 0 ? -1 : 1) * Math.max(0.01, Math.abs(s));
+  let sx = t0.sx, sy = t0.sy;
+  if (hu !== 0) sx = clampS(px / hu);
+  if (hv !== 0) sy = clampS(py / hv);
+
+  if (isAspectLocked(handle, shiftHeld)) {
+    if (HANDLES_CORNER.includes(handle)) {
+      const m = dominantMagnitude(sx, sy);
+      sx = clampS(Math.sign(sx || 1) * m);
+      sy = clampS(Math.sign(sy || 1) * m);
+    } else if (hu !== 0) {
+      sy = clampS(Math.sign(sy || 1) * Math.abs(sx));
+    } else if (hv !== 0) {
+      sx = clampS(Math.sign(sx || 1) * Math.abs(sy));
+    }
+  }
+
+  // Solve tx, ty so the pivot's world position is reproduced exactly under
+  // the new (sx, sy): forwardPoint maps the buffer CENTER via translation
+  // alone (rotation/scale only offset from center), so back out what the
+  // center's world position must be, then convert to tx/ty.
+  const offX = pivot.x - cx, offY = pivot.y - cy;
+  const rotX = offX * sx * cos - offY * sy * sin;
+  const rotY = offX * sx * sin + offY * sy * cos;
+  const centerWorldX = pivotWorld.x - rotX;
+  const centerWorldY = pivotWorld.y - rotY;
+
+  return {
+    tx: centerWorldX - srcRect.x - cx,
+    ty: centerWorldY - srcRect.y - cy,
+    sx, sy, rot: t0.rot,
+  };
 }
 
 export function floatBounds(float) {
