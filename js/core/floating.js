@@ -53,7 +53,6 @@ export function inversePoint(float, x, y) {
 // from t0 unchanged, since a scale drag never rotates.
 export function solveScaleTransform({ srcRect, t0, handle, useCenter, shiftHeld, mx, my }) {
   const { w, h } = srcRect;
-  const cx = w / 2, cy = h / 2;
   const localRect = { x: 0, y: 0, w, h };
   const pivot = resolveAnchor(localRect, handle, useCenter);
   const grabbed = handlePoint(localRect, handle);
@@ -83,18 +82,14 @@ export function solveScaleTransform({ srcRect, t0, handle, useCenter, shiftHeld,
   }
 
   // Solve tx, ty so the pivot's world position is reproduced exactly under
-  // the new (sx, sy): forwardPoint maps the buffer CENTER via translation
-  // alone (rotation/scale only offset from center), so back out what the
-  // center's world position must be, then convert to tx/ty.
-  const offX = pivot.x - cx, offY = pivot.y - cy;
-  const rotX = offX * sx * cos - offY * sy * sin;
-  const rotY = offX * sx * sin + offY * sy * cos;
-  const centerWorldX = pivotWorld.x - rotX;
-  const centerWorldY = pivotWorld.y - rotY;
+  // the new (sx, sy): forwardPoint at tx=ty=0 gives where the pivot would
+  // land with the buffer's center pinned to srcRect's own origin, so the
+  // translation that actually reproduces pivotWorld is just the difference.
+  const pivotAtOrigin = forwardPoint({ srcRect, transform: { tx: 0, ty: 0, sx, sy, rot: t0.rot } }, pivot.x, pivot.y);
 
   return {
-    tx: centerWorldX - srcRect.x - cx,
-    ty: centerWorldY - srcRect.y - cy,
+    tx: pivotWorld.x - pivotAtOrigin.x,
+    ty: pivotWorld.y - pivotAtOrigin.y,
     sx, sy, rot: t0.rot,
   };
 }

@@ -150,3 +150,24 @@ test('solveScaleTransform: rotated 90°, edge drag along the shape\'s LOCAL axis
   closeTo(r.ty, 0, 1e-6, 'ty -- center-anchored scale never translates');
   assert.equal(r.rot, Math.PI / 2, 'rot carried over from t0 unchanged');
 });
+
+test('solveScaleTransform: preserves a pre-existing flip through an aspect-locked corner drag', () => {
+  // Float already mirrored on x (sx negative) before this drag starts.
+  // Corner, no Shift = aspect-locked by default (dominant magnitude wins),
+  // and the sign of each axis must survive -- a naive "copy sx onto sy"
+  // would silently un-flip it the moment a locked corner drag touches it.
+  const srcRect = { x: 0, y: 0, w: 20, h: 10 };
+  const t0 = { ...makeTransform(), sx: -1, sy: 1 };
+  // pivot ('nw', local (0,0)) sits at world (20,0) under sx=-1 -- the flip
+  // means the local nw corner is the one that renders on the RIGHT.
+  // Chosen so px/hu = -2 and py/hv = 2 exactly (equal magnitude, opposite
+  // sign), so aspect-lock's dominant-magnitude pass is a no-op and only
+  // the sign-preservation step is actually exercised.
+  const r = solveScaleTransform({ srcRect, t0, handle: 'se', useCenter: false, shiftHeld: false, mx: -20, my: 20 });
+  assert.ok(r.sx < 0, 'sx stays negative -- the flip is not lost');
+  assert.ok(r.sy > 0, 'sy stays positive');
+  closeTo(r.sx, -2, 1e-9, 'sx');
+  closeTo(r.sy, 2, 1e-9, 'sy');
+  closeTo(r.tx, -10, 1e-9, 'tx');
+  closeTo(r.ty, 5, 1e-9, 'ty');
+});
