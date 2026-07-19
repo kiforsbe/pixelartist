@@ -19,6 +19,7 @@ import { mountTileEditor } from '../ui/tileeditor.js';
 import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../ui/floatsession.js';
 import { defineAction, runAction, bindAction } from './actions.js';
 import { mountMenuBar } from '../ui/menubar.js';
+import { markDefaultAction } from '../ui/dialogs.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -55,6 +56,7 @@ const btnExportPng = document.getElementById('export-png');
 const btnExportFrames = document.getElementById('export-frames');
 const btnExportTiles = document.getElementById('export-tiles');
 const btnExportCancel = document.getElementById('export-cancel');
+markDefaultAction(dlgExport, btnExportPng);
 
 const sheetSelect = document.getElementById('sheet-select');
 const btnNewSheet = document.getElementById('btn-new-sheet');
@@ -65,6 +67,7 @@ const nsW = document.getElementById('ns-w');
 const nsH = document.getElementById('ns-h');
 const nsCreate = document.getElementById('ns-create');
 const nsCancel = document.getElementById('ns-cancel');
+markDefaultAction(dlgNewSheet, nsCreate);
 
 const dlgNewProject = document.getElementById('dlg-newproject');
 const npSpriteW = document.getElementById('np-sprite-w');
@@ -84,6 +87,7 @@ const npDurationControl = buildBaseDurationControl({
 npDurationMount.appendChild(npDurationControl.el);
 const npCreate = document.getElementById('np-create');
 const npCancel = document.getElementById('np-cancel');
+markDefaultAction(dlgNewProject, npCreate);
 
 // ---- mode tabs ----
 function switchMode(mode) {
@@ -272,6 +276,7 @@ const dlgRenameSheet = document.getElementById('dlg-renamesheet');
 const rsName = document.getElementById('rs-name');
 const rsOk = document.getElementById('rs-ok');
 const rsCancel = document.getElementById('rs-cancel');
+markDefaultAction(dlgRenameSheet, rsOk);
 defineAction('document.renameSheet', {
   label: 'Rename Sheet',
   run: () => {
@@ -577,7 +582,9 @@ defineAction('view.zoomToFit', { label: 'Zoom to Fit', run: () => activeCanvasVi
 
 // ---- help ----
 const dlgAbout = document.getElementById('dlg-about');
-document.getElementById('about-ok').addEventListener('click', () => dlgAbout.close());
+const aboutOk = document.getElementById('about-ok');
+aboutOk.addEventListener('click', () => dlgAbout.close());
+markDefaultAction(dlgAbout, aboutOk);
 defineAction('help.about', {
   label: 'About PixelArtist',
   run: () => {
@@ -589,7 +596,9 @@ defineAction('help.about', {
 
 const dlgShortcuts = document.getElementById('dlg-shortcuts');
 const shortcutsList = document.getElementById('shortcuts-list');
-document.getElementById('shortcuts-ok').addEventListener('click', () => dlgShortcuts.close());
+const shortcutsOk = document.getElementById('shortcuts-ok');
+shortcutsOk.addEventListener('click', () => dlgShortcuts.close());
+markDefaultAction(dlgShortcuts, shortcutsOk);
 const SHORTCUTS = [
   ['Ctrl+Z', 'Undo'],
   ['Ctrl+Y / Ctrl+Shift+Z', 'Redo'],
@@ -718,6 +727,7 @@ npCreate.addEventListener('click', () => {
 
 // ---- Project Settings ----
 const dlgProjectSettings = document.getElementById('dlg-projectsettings');
+const psName = document.getElementById('ps-name');
 const psSpriteW = document.getElementById('ps-sprite-w');
 const psSpriteH = document.getElementById('ps-sprite-h');
 const psTileSheetW = document.getElementById('ps-tile-sheet-w');
@@ -729,6 +739,7 @@ const psFrameH = document.getElementById('ps-frame-h');
 const psDurationMount = document.getElementById('ps-duration-control');
 const psOk = document.getElementById('ps-ok');
 const psCancel = document.getElementById('ps-cancel');
+markDefaultAction(dlgProjectSettings, psOk);
 
 let psDurationValue = { durationMs: DEFAULT_SETTINGS.durationMs, baseFps: undefined, baseStep: undefined };
 const psDurationControl = buildBaseDurationControl({
@@ -737,29 +748,191 @@ const psDurationControl = buildBaseDurationControl({
 });
 psDurationMount.appendChild(psDurationControl.el);
 
+// Width/height ratio lock for each dimension pair -- locked (default) keeps
+// the pair proportional as either field is edited; the ratio snapshots from
+// whatever's currently in the fields whenever the lock is (re)established,
+// so resnap() lets openProjectSettings() re-anchor it to the freshly loaded
+// project values every time the dialog opens (otherwise editing W after
+// opening would scale H against a stale ratio left over from a previous
+// dialog session or the placeholder markup values).
+function makeDimLock(wInput, hInput, lockBtn) {
+  let locked = true;
+  let ratio = 1; // H per W
+
+  function resnap() {
+    const w = parseFloat(wInput.value), h = parseFloat(hInput.value);
+    if (w > 0 && h > 0) ratio = h / w;
+  }
+  function updateVisual() {
+    lockBtn.classList.toggle('locked', locked);
+    lockBtn.title = locked
+      ? 'Width/height locked to this ratio (click to unlock)'
+      : 'Width/height independent (click to lock)';
+  }
+  lockBtn.addEventListener('click', () => {
+    locked = !locked;
+    if (locked) resnap();
+    updateVisual();
+  });
+  wInput.addEventListener('input', () => {
+    if (!locked) return;
+    const w = parseFloat(wInput.value);
+    if (!Number.isFinite(w) || w <= 0) return;
+    hInput.value = String(Math.max(1, Math.round(w * ratio)));
+  });
+  hInput.addEventListener('input', () => {
+    if (!locked) return;
+    const h = parseFloat(hInput.value);
+    if (!Number.isFinite(h) || h <= 0) return;
+    wInput.value = String(Math.max(1, Math.round(h / ratio)));
+  });
+  resnap();
+  updateVisual();
+  return { resnap };
+}
+const psSpriteLock = makeDimLock(psSpriteW, psSpriteH, document.getElementById('ps-sprite-lock'));
+const psTileSheetLock = makeDimLock(psTileSheetW, psTileSheetH, document.getElementById('ps-tilesheet-lock'));
+const psTileSizeLock = makeDimLock(psTileW, psTileH, document.getElementById('ps-tile-lock'));
+const psFrameLock = makeDimLock(psFrameW, psFrameH, document.getElementById('ps-frame-lock'));
+
+// ---- Project Settings: tabs ----
+// Two pages sharing one OK/Cancel: General (dims/name/duration, an undoable
+// command) and Onion Steps (per-step onion-skin color overrides, moved here
+// from a standalone dialog the frame editor used to own -- see
+// frameeditor.js's btnStepColors). OK commits BOTH pages' current field
+// values regardless of which page is on screen, so flipping tabs before
+// saving never loses an edit made on the other one.
+const psTabGeneral = document.getElementById('ps-tab-general');
+const psTabOnion = document.getElementById('ps-tab-onion');
+const psPageGeneral = document.getElementById('ps-page-general');
+const psPageOnion = document.getElementById('ps-page-onion');
+const psOnionGrid = document.getElementById('ps-onion-grid');
+
+function showProjectSettingsTab(tab) {
+  const isGeneral = tab !== 'onion';
+  psTabGeneral.classList.toggle('active', isGeneral);
+  psTabOnion.classList.toggle('active', !isGeneral);
+  psPageGeneral.hidden = !isGeneral;
+  psPageOnion.hidden = isGeneral;
+}
+psTabGeneral.addEventListener('click', () => showProjectSettingsTab('general'));
+psTabOnion.addEventListener('click', () => showProjectSettingsTab('onion'));
+
+// Dims a step's color swatch while its "Default" checkbox is checked, so
+// it visibly reads as "not in effect" rather than just an unrelated pair of
+// controls next to each other.
+function syncOnionStepActive(defaultCb, colorInput) {
+  colorInput.classList.toggle('onion-steps-color-inactive', defaultCb.checked);
+}
+
+// Builds the 8-row Back/Ahead step-color grid once; returns the per-row
+// field refs used to populate on open and read back on OK. Two header rows
+// (direction, then Default/Color) so it's unambiguous what each checkbox
+// means: checked = "use the toolbar's Back/Ahead color for this step" (the
+// Color swatch beside it is then just a disabled preview of that), unchecked
+// = "use this step's own Color swatch".
+function buildOnionStepsGrid(grid) {
+  const backHeader = document.createElement('span');
+  backHeader.className = 'onion-steps-header'; backHeader.textContent = 'Back';
+  backHeader.style.gridColumn = 'span 2';
+  const aheadHeader = document.createElement('span');
+  aheadHeader.className = 'onion-steps-header'; aheadHeader.textContent = 'Ahead';
+  aheadHeader.style.gridColumn = 'span 2';
+  grid.append(document.createElement('span'), backHeader, aheadHeader);
+
+  const subHeader = () => {
+    const el = document.createElement('span');
+    el.className = 'onion-steps-subheader';
+    return el;
+  };
+  const backDefaultHeader = subHeader(); backDefaultHeader.textContent = 'Default';
+  const backColorHeader = subHeader(); backColorHeader.textContent = 'Color';
+  const aheadDefaultHeader = subHeader(); aheadDefaultHeader.textContent = 'Default';
+  const aheadColorHeader = subHeader(); aheadColorHeader.textContent = 'Color';
+  grid.append(subHeader(), backDefaultHeader, backColorHeader, aheadDefaultHeader, aheadColorHeader);
+
+  const rows = [];
+  for (let k = 1; k <= 8; k++) {
+    const stepLabel = document.createElement('span');
+    stepLabel.className = 'onion-steps-step'; stepLabel.textContent = String(k);
+
+    const backDefault = document.createElement('input');
+    backDefault.type = 'checkbox';
+    backDefault.title = 'Checked: this step uses the Back toolbar color. Unchecked: it uses its own color swatch.';
+    const backColor = document.createElement('input');
+    backColor.type = 'color';
+    backColor.title = "This step's own color (only used while Default is unchecked)";
+    backColor.addEventListener('input', () => { backDefault.checked = false; syncOnionStepActive(backDefault, backColor); });
+    backDefault.addEventListener('change', () => syncOnionStepActive(backDefault, backColor));
+
+    const aheadDefault = document.createElement('input');
+    aheadDefault.type = 'checkbox';
+    aheadDefault.title = 'Checked: this step uses the Ahead toolbar color. Unchecked: it uses its own color swatch.';
+    const aheadColor = document.createElement('input');
+    aheadColor.type = 'color';
+    aheadColor.title = "This step's own color (only used while Default is unchecked)";
+    aheadColor.addEventListener('input', () => { aheadDefault.checked = false; syncOnionStepActive(aheadDefault, aheadColor); });
+    aheadDefault.addEventListener('change', () => syncOnionStepActive(aheadDefault, aheadColor));
+
+    grid.append(stepLabel, backDefault, backColor, aheadDefault, aheadColor);
+    rows.push({ k, backDefault, backColor, aheadDefault, aheadColor });
+  }
+  return rows;
+}
+const onionStepRows = buildOnionStepsGrid(psOnionGrid);
+
+function openProjectSettings(tab) {
+  const project = state.project;
+  if (!project) return;
+  const settings = project.settings;
+  psName.value = project.name;
+  psSpriteW.value = String(settings.spriteSheetW);
+  psSpriteH.value = String(settings.spriteSheetH);
+  psTileSheetW.value = String(settings.tileSheetW);
+  psTileSheetH.value = String(settings.tileSheetH);
+  psTileW.value = String(settings.tileW);
+  psTileH.value = String(settings.tileH);
+  psFrameW.value = String(settings.frameW);
+  psFrameH.value = String(settings.frameH);
+  psSpriteLock.resnap();
+  psTileSheetLock.resnap();
+  psTileSizeLock.resnap();
+  psFrameLock.resnap();
+  psDurationValue = { durationMs: settings.durationMs, baseFps: settings.baseFps, baseStep: settings.baseStep };
+  psDurationControl.refresh();
+  for (const r of onionStepRows) {
+    const backOverride = state.onion.stepColors.back[r.k];
+    r.backDefault.checked = backOverride == null;
+    r.backColor.value = backOverride ?? state.onion.backColor;
+    syncOnionStepActive(r.backDefault, r.backColor);
+    const aheadOverride = state.onion.stepColors.ahead[r.k];
+    r.aheadDefault.checked = aheadOverride == null;
+    r.aheadColor.value = aheadOverride ?? state.onion.aheadColor;
+    syncOnionStepActive(r.aheadDefault, r.aheadColor);
+  }
+  showProjectSettingsTab(tab);
+  dlgProjectSettings.showModal();
+}
+
 defineAction('edit.projectSettings', {
   label: 'Project Settings…',
-  run: () => {
-    const settings = state.project?.settings;
-    if (!settings) return;
-    psSpriteW.value = String(settings.spriteSheetW);
-    psSpriteH.value = String(settings.spriteSheetH);
-    psTileSheetW.value = String(settings.tileSheetW);
-    psTileSheetH.value = String(settings.tileSheetH);
-    psTileW.value = String(settings.tileW);
-    psTileH.value = String(settings.tileH);
-    psFrameW.value = String(settings.frameW);
-    psFrameH.value = String(settings.frameH);
-    psDurationValue = { durationMs: settings.durationMs, baseFps: settings.baseFps, baseStep: settings.baseStep };
-    psDurationControl.refresh();
-    dlgProjectSettings.showModal();
-  },
+  run: () => openProjectSettings('general'),
+  isEnabled: () => !!state.project,
+});
+defineAction('edit.onionStepColors', {
+  label: 'Onion Step Colors…',
+  run: () => openProjectSettings('onion'),
   isEnabled: () => !!state.project,
 });
 psCancel.addEventListener('click', () => dlgProjectSettings.close());
 psOk.addEventListener('click', () => {
   const project = state.project;
   if (!project) { dlgProjectSettings.close(); return; }
+  const name = psName.value.trim();
+  if (!name) {
+    alert('Please enter a project name.');
+    return;
+  }
   const dims = {
     spriteSheetW: sheetDimField(psSpriteW), spriteSheetH: sheetDimField(psSpriteH),
     tileSheetW: sheetDimField(psTileSheetW), tileSheetH: sheetDimField(psTileSheetH),
@@ -770,16 +943,37 @@ psOk.addEventListener('click', () => {
     alert('Please enter valid positive numbers for all fields.');
     return;
   }
-  const before = { ...project.settings };
-  const after = {
-    ...dims, durationMs: psDurationValue.durationMs,
+  const beforeName = project.name;
+  const beforeSettings = { ...project.settings };
+  // Preserve every OTHER settings field (onion, etc.) verbatim -- this dialog
+  // only edits dims/duration/name, so starting from a bare `{...dims, ...}`
+  // object here would silently drop anything it doesn't know about (bit us
+  // once already: onion-skin prefs got wiped on every Project Settings save).
+  // baseFps/baseStep are the one exception: they need to be explicitly
+  // dropped, not carried over, when switching back to plain ms mode, or a
+  // stale fps-mode value would leak back in since the dims spread below
+  // never overwrites them with anything absent.
+  const { baseFps: _droppedBaseFps, baseStep: _droppedBaseStep, ...restSettings } = project.settings;
+  const afterName = name;
+  const afterSettings = {
+    ...restSettings, ...dims, durationMs: psDurationValue.durationMs,
     ...(psDurationValue.baseFps != null ? { baseFps: psDurationValue.baseFps, baseStep: psDurationValue.baseStep } : {}),
   };
   state.commands.push({
     label: 'edit project settings',
-    do() { project.settings = { ...after }; },
-    undo() { project.settings = { ...before }; },
+    do() { project.name = afterName; project.settings = { ...afterSettings }; },
+    undo() { project.name = beforeName; project.settings = { ...beforeSettings }; },
   });
+  // Onion step colors are live-mutated state (never go through the undo
+  // stack, same as every other onion field -- see state.js's state.onion
+  // comment), applied here alongside the undoable dims/name command so one
+  // OK commits everything the dialog showed, on whichever tab it's on.
+  const stepColors = { back: {}, ahead: {} };
+  for (const r of onionStepRows) {
+    if (!r.backDefault.checked) stepColors.back[r.k] = r.backColor.value;
+    if (!r.aheadDefault.checked) stepColors.ahead[r.k] = r.aheadColor.value;
+  }
+  state.onion.stepColors = stepColors;
   markDirty();
   dlgProjectSettings.close();
 });

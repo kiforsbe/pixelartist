@@ -44,6 +44,7 @@ import { bindDrawing } from './tools.js';
 import { flattenSheet } from '../core/model.js';
 import { getPreset, setSlot, resolveNeighborGrid } from '../core/neighbors.js';
 import { terrainNeighborPreviewCells } from '../core/blob47templates.js';
+import { markDefaultAction } from './dialogs.js';
 
 function isTypingTarget(el) {
   if (!el) return false;
@@ -258,7 +259,7 @@ export function mountTileEditor(hostEl) {
     <div class="row"><label>Tile <select id="te-tile-select"></select></label></div>
     <div class="row"><label><input type="checkbox" id="te-fliph"> Flip H</label></div>
     <div class="row"><label><input type="checkbox" id="te-flipv"> Flip V</label></div>
-    <div class="row"><button type="button" id="te-ok">OK</button><button type="button" id="te-cancel">Cancel</button></div>
+    <div class="row dlg-actions"><button type="button" id="te-ok">OK</button><button type="button" id="te-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const teDirSpan = dlg.querySelector('#te-slot-dir');
@@ -308,6 +309,7 @@ export function mountTileEditor(hostEl) {
     markDirty();
   }
 
+  markDefaultAction(dlg, teOk);
   teCancel.addEventListener('click', () => dlg.close());
   teOk.addEventListener('click', () => {
     const t = currentTile();

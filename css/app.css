@@ -44,7 +44,7 @@ body {
 .tool-options-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   color: #8b8d98; margin-bottom: 8px; text-align: left; }
 .tool-options { display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
-.tool-option-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.tool-option-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; flex-wrap: wrap; }
 .tool-option-row input[type="number"] { width: 46px; flex: none; }
 .tool-option-checks { display: flex; flex-direction: column; gap: 4px; }
 #canvas-host { grid-column: 2; grid-row: 1; position: relative; overflow: hidden; background: var(--bg); min-height: 0; }
@@ -69,14 +69,80 @@ button { background: var(--bg3); color: var(--fg); border: 1px solid var(--borde
 button:hover { border-color: var(--accent); }
 button.active { background: var(--accent); color: #fff; }
 button:disabled { opacity: .4; cursor: default; }
+/* Windows-standard default dialog action: highlighted border + Enter
+   triggers it (see js/ui/dialogs.js's markDefaultAction). */
+.btn-default { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); font-weight: 600; }
+.btn-default:hover { border-color: var(--accent); }
 input[type="text"], input[type="number"], select {
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   border-radius: 3px; padding: 3px 6px; width: 100%; }
+/* Reskin the OS-drawn number spinner to match the dark theme: a flat rounded
+   button instead of the stock white square. `-webkit-appearance: none` (and
+   `appearance: textfield` on the parent) can't be used here -- as of current
+   Chromium that removes the spin-button box outright rather than leaving a
+   plain styleable one, so the classic "recolor via mask-image" trick no
+   longer renders anything. `filter: invert()` is the only way left to
+   recolor the native up/down glyphs; it inverts this pseudo-element's whole
+   render (icon + background) as one unit, so the background color below is
+   chosen for how it looks AFTER inversion, not before. Firefox has no
+   pseudo-element hook for the spinner at all, so it keeps its own native
+   look there -- arrow keys/scroll still work regardless. */
+input[type="number"] { padding-right: 2px; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1; cursor: pointer; margin: 0;
+  width: 13px; height: 100%;
+  background: var(--bg3);
+  border-left: 1px solid var(--border);
+  border-radius: 0 3px 3px 0;
+  filter: invert(1) brightness(1.7);
+}
+input[type="number"]:hover::-webkit-inner-spin-button,
+input[type="number"]:hover::-webkit-outer-spin-button {
+  filter: invert(1) brightness(2.2);
+}
 dialog { background: var(--bg2); color: var(--fg); border: 1px solid var(--border);
   border-radius: 6px; padding: 16px; margin: auto; }
 dialog::backdrop { background: rgba(0,0,0,.5); }
 .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+/* Windows-standard dialog button row: right-aligned, affirmative action
+   (OK/Create/...) before Cancel -- applied to every dialog's footer row on
+   top of .row, both static (index.html) and dynamically-built (tilemode.js,
+   tileeditor.js, frames.js, panels.js). */
+.dlg-actions { justify-content: flex-end; margin-top: 10px; }
 .dlg-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 8px; align-items: center; margin-bottom: 10px; }
+/* Project Settings' General page adds a 5th column for the dim-lock button
+   after each W/×/H triplet -- scoped by id so it doesn't affect the other
+   .dlg-grid dialogs (New Project, New Sheet), which don't have one. */
+#ps-page-general { grid-template-columns: auto 1fr auto 1fr auto; }
+.dlg-wide { width: 420px; }
+.dlg-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.dlg-tab { background: transparent; border: none; border-radius: 0; border-bottom: 2px solid transparent;
+  padding: 6px 10px; color: #9a9ca8; }
+.dlg-tab:hover { border-color: transparent; color: var(--fg); }
+.dlg-tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+/* Section headers inside .dlg-grid -- span every column, thin top divider
+   (none on the very first one, so it doesn't float a lone rule under the
+   dialog title). */
+.dlg-section-header { grid-column: 1 / -1; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .08em; color: #8b8d98; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+.dlg-section-header:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+/* Width/height ratio-lock toggle, sitting where a plain "×" separator used
+   to between a W and H field -- locked (default) keeps them proportional;
+   see js/app/main.js's makeDimLock(). */
+.dlg-dim-lock { background: transparent; border: none; padding: 0; width: auto; min-width: 0;
+  font-size: 13px; opacity: .35; filter: grayscale(1); justify-self: center; }
+.dlg-dim-lock:hover { border-color: transparent; opacity: .6; }
+.dlg-dim-lock.locked { opacity: 1; filter: none; }
+
+/* onion step-color grid (Project Settings > Onion Steps) */
+.onion-steps-grid { display: grid; grid-template-columns: auto repeat(4, 1fr); gap: 4px 10px; align-items: center; margin-bottom: 10px; }
+.onion-steps-header { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #8b8d98; text-align: center; }
+.onion-steps-subheader { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: #6f717c; text-align: center; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.onion-steps-step { font-size: 11px; color: #9a9ca8; text-align: right; }
+.onion-steps-grid input[type="checkbox"] { justify-self: center; }
+.onion-steps-grid input[type="color"] { width: 28px; height: 22px; padding: 0; justify-self: center; }
+.onion-steps-color-inactive { opacity: .35; }
 
 /* colors panel */
 #panel-colors { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }

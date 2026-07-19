@@ -8,6 +8,7 @@ import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
 import { defineAction, bindAction } from '../app/actions.js';
+import { markDefaultAction } from './dialogs.js';
 
 function rgbaToHex([r, g, b]) {
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
@@ -283,7 +284,7 @@ export function mountColorPanel(el) {
     <div class="row"><label><input type="checkbox" id="np-indexed"> Indexed</label></div>
     <div class="row"><label>Size preset <select id="np-preset"></select></label></div>
     <div class="row"><label>Custom size <input type="number" id="np-custom" min="1" max="256" value="16"></label></div>
-    <div class="row"><button id="np-create">Create</button><button id="np-cancel">Cancel</button></div>
+    <div class="row dlg-actions"><button id="np-create">Create</button><button id="np-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlgNew);
   const npName = dlgNew.querySelector('#np-name');
@@ -296,6 +297,7 @@ export function mountColorPanel(el) {
   }
   const customOpt = document.createElement('option'); customOpt.value = 'custom'; customOpt.textContent = 'Custom…';
   npPreset.appendChild(customOpt);
+  markDefaultAction(dlgNew, dlgNew.querySelector('#np-create'));
   dlgNew.querySelector('#np-cancel').addEventListener('click', () => dlgNew.close());
   dlgNew.querySelector('#np-create').addEventListener('click', () => {
     if (!state.project) { dlgNew.close(); return; }
@@ -352,9 +354,10 @@ export function mountColorPanel(el) {
     sysList.appendChild(card);
   }
   dlgSys.appendChild(sysList);
-  const sysCloseRow = document.createElement('div'); sysCloseRow.className = 'row';
+  const sysCloseRow = document.createElement('div'); sysCloseRow.className = 'row dlg-actions';
   const sysCloseBtn = document.createElement('button'); sysCloseBtn.textContent = 'Close';
   sysCloseBtn.addEventListener('click', () => dlgSys.close());
+  markDefaultAction(dlgSys, sysCloseBtn);
   sysCloseRow.appendChild(sysCloseBtn);
   dlgSys.appendChild(sysCloseRow);
   document.body.appendChild(dlgSys);

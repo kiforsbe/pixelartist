@@ -18,6 +18,7 @@ import { sliceGrid } from '../core/slicing.js';
 import { segmentsOf, segmentOfFrame, segmentMembers, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../core/strips.js';
 import { createBitmap, copyRegion, fillRegion, blitRegion } from '../core/pixels.js';
 import { registerTool } from './tools.js';
+import { markDefaultAction } from './dialogs.js';
 import { drawRectDims, drawChainDims } from './dimlabels.js';
 import { HANDLES_CORNER, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
 
@@ -1108,12 +1109,20 @@ export function drawStripChrome(ctx, view) {
 let sliceDialogApi = null;
 
 function buildOptionsRow(optionsRow) {
-  const row = document.createElement('div');
-  row.className = 'tool-option-row';
+  // Four controls (Snap checkbox, grid size, slice-grid button) don't fit on
+  // one row in the 112px-wide tool palette -- split into stacked rows,
+  // grouping the snap checkbox with its grid-size field (they're read
+  // together) and giving the slice action its own row.
+  const snapRow = document.createElement('label');
+  snapRow.className = 'tool-option-row';
   const snapInput = document.createElement('input');
   snapInput.type = 'checkbox';
   snapInput.checked = frameToolOptions.snap;
   snapInput.addEventListener('change', () => { frameToolOptions.snap = snapInput.checked; });
+  snapRow.append(document.createTextNode('Snap'), snapInput);
+
+  const sizeRow = document.createElement('div');
+  sizeRow.className = 'tool-option-row';
   const sizeInput = document.createElement('input');
   sizeInput.type = 'number'; sizeInput.min = '1'; sizeInput.value = String(frameToolOptions.gridSize);
   sizeInput.addEventListener('change', () => {
@@ -1122,15 +1131,20 @@ function buildOptionsRow(optionsRow) {
     sizeInput.value = String(v);
     frameToolOptions.gridSize = v;
   });
+  sizeRow.append(document.createTextNode('Grid'), sizeInput);
+
+  const sliceRow = document.createElement('div');
+  sliceRow.className = 'tool-option-row';
   const sliceBtn = document.createElement('button');
   sliceBtn.type = 'button';
   sliceBtn.className = 'btn-icon-md';
   sliceBtn.textContent = '▦';
   sliceBtn.title = 'Slice grid…';
   sliceBtn.addEventListener('click', () => sliceDialogApi?.open());
-  row.append(snapInput, document.createTextNode('Snap'), sizeInput, sliceBtn);
-  optionsRow.appendChild(row);
-  return row;
+  sliceRow.append(document.createTextNode('Slice'), sliceBtn);
+
+  optionsRow.append(snapRow, sizeRow, sliceRow);
+  return [snapRow, sizeRow, sliceRow];
 }
 
 // ------------------------------------------------------------- public API
@@ -1301,7 +1315,7 @@ function buildSliceDialog() {
     <div class="row"><label>Spacing Y <input type="number" id="sg-spacingy" min="0" value="0"></label></div>
     <div class="row"><label>Prefix <input type="text" id="sg-prefix" value="frame"></label></div>
     <div class="row"><label><input type="checkbox" id="sg-replace"> Replace existing frames</label></div>
-    <div class="row"><button type="button" id="sg-create">Create</button><button type="button" id="sg-cancel">Cancel</button></div>
+    <div class="row dlg-actions"><button type="button" id="sg-create">Create</button><button type="button" id="sg-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const $ = (sel) => dlg.querySelector(sel);
@@ -1323,6 +1337,7 @@ function buildSliceDialog() {
     slicePreviewOpts = null;
     sheetViewForPreview?.requestRender();
   });
+  markDefaultAction(dlg, $('#sg-create'));
   $('#sg-cancel').addEventListener('click', () => dlg.close());
   $('#sg-create').addEventListener('click', () => {
     const sheet = activeSheet();

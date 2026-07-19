@@ -188,10 +188,15 @@ is a pass condition for the whole run, not just the final step.
     (Back group: ■ Mask α, □ Outline α; Ahead group: same, independent
     values) — raising Back's Outline α without touching Ahead's changes
     only past ghosts. The Back/Ahead color swatches in the toolbar set each
-    direction's default ghost tint; the ⚙ button opens a dialog listing all
-    8 possible Back steps and 8 Ahead steps, each with its own color and a
-    "default" checkbox (checked = falls back to the toolbar swatch,
-    unchecked = uses that step's own color) — out of the box every step is
+    direction's default ghost tint; the ⚙ button opens Project Settings
+    (Edit menu > Project Settings…) pre-flipped to its "Onion Steps" tab
+    (item 78), a 5-column table (Step # | Back Default | Back Color | Ahead
+    Default | Ahead Color, with "Back"/"Ahead" grouping the two sub-headers
+    beneath them) listing all 8 possible Back steps and 8 Ahead steps, each
+    with its own Default checkbox and Color swatch in SEPARATE columns
+    (checked Default = falls back to the toolbar swatch and dims that row's
+    Color swatch to show it's not in effect; unchecked = uses that step's
+    own Color, shown at full opacity) — out of the box every step is
     pre-seeded with a distinct color from a shared 8-color palette (same
     palette for both directions) so e.g. step 3 back and step 3 ahead are
     both yellow, and neighboring steps never share a color. "Current α"
@@ -455,8 +460,38 @@ is a pass condition for the whole run, not just the final step.
     control (same as the Animation panel); creating a project with fps
     values set round-trips `settings.baseFps`/`baseStep`. Edit menu >
     Project Settings opens the same fields pre-filled from the current
-    project, edits apply as one undoable command, and new animations
-    created afterward seed their base duration from the updated settings.
+    project (plus a Name field, pre-filled from `project.name` -- the only
+    place a project can be renamed; blank name is rejected with an alert
+    and the dialog stays open), edits apply as one undoable command
+    covering both `project.name` and `project.settings`, and new
+    animations created afterward seed their base duration from the
+    updated settings. Saving preserves every OTHER settings field verbatim
+    (check `state.project.settings.onion` survives a Project Settings save
+    unchanged -- it used to get silently wiped, since the dialog rebuilt
+    `project.settings` from scratch instead of merging into it) except
+    `baseFps`/`baseStep`, which are correctly dropped (not left stale) when
+    switching the duration control back from fps to ms mode.
+78a. [A] Every dialog's OK/Create/Close row is right-aligned with the
+    affirmative action before Cancel (Windows-standard layout, `.dlg-actions`
+    on top of `.row`) -- check a couple, e.g. New Sheet and Slice grid. Each
+    dialog also marks one button as its default action (`.btn-default`,
+    a highlighted border): pressing Enter anywhere in the dialog (any text/
+    number field, checkbox, radio, or color input -- not inside another
+    button, textarea, or select, which handle their own Enter) triggers it
+    without needing to click. Verify via a real Enter keypress in e.g. New
+    Sheet's Name field creating the sheet and closing the dialog, not just
+    checking the CSS class.
+78b. [A] Project Settings' General page groups its fields under section
+    headers (Sprite Sheet / Tile Sheet / Frame), each a divider line above
+    it (none above the very first section). Each W/H pair (Sprite sheet,
+    Tile sheet, Tile size, Frame size) has a 🔗 lock button after the `×`
+    separator, locked by default (full color; unlocked = dim/greyed) --
+    while locked, editing either field rescales the other to preserve the
+    ratio that was in effect when the dialog opened (or when the button was
+    last clicked to re-lock); unlocking lets the two fields move
+    independently. Re-opening the dialog re-anchors every lock's ratio to
+    the project's current saved dimensions, not whatever was left over from
+    a previous edit.
 79. [A] Mouse wheel over the canvas steps zoom through the table
     (`0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, ...`); repeated
     scroll-in/scroll-out reaches both 0.25x and 16x without sticking at

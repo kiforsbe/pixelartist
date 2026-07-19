@@ -13,6 +13,7 @@ import { copyRegion, blitRegion, fillRegion, scaleBitmap } from '../core/pixels.
 import { makePixelPatch } from '../core/commands.js';
 import { decodePng } from '../app/pngcodec.js';
 import { registerTool } from './tools.js';
+import { markDefaultAction } from './dialogs.js';
 import {
   gridCellRect, ownedTiles, relayoutGrid,
   moveGrid, removeTileGrid, createTileGrid, detachTile,
@@ -1372,7 +1373,7 @@ function buildAddTerrainSetDialog() {
     <div class="row"><label>Tile H <input type="number" id="ats-tileh" min="1" value="16"></label></div>
     <div class="row"><label>Layout <select id="ats-layout"><option value="">(none -- add tiles manually)</option></select></label></div>
     <div class="row"><canvas id="ats-layout-preview" class="terrain-layout-preview" hidden></canvas></div>
-    <div class="row"><button type="button" id="ats-create">Create</button><button type="button" id="ats-cancel">Cancel</button></div>
+    <div class="row dlg-actions"><button type="button" id="ats-create">Create</button><button type="button" id="ats-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const $ = (sel) => dlg.querySelector(sel);
@@ -1384,6 +1385,7 @@ function buildAddTerrainSetDialog() {
     else { canvas.hidden = true; }
   };
   $('#ats-layout').addEventListener('change', updatePreview);
+  markDefaultAction(dlg, $('#ats-create'));
   $('#ats-cancel').addEventListener('click', () => dlg.close());
   $('#ats-create').addEventListener('click', async () => {
     const sheet = activeSheet();
@@ -1460,7 +1462,7 @@ function buildTilePickerDialog() {
       </div>
     </div>
     <div class="tile-picker-grid" id="tp-grid"></div>
-    <div class="row"><button type="button" id="tp-clear">Clear</button><button type="button" id="tp-cancel">Cancel</button></div>
+    <div class="row dlg-actions"><button type="button" id="tp-clear">Clear</button><button type="button" id="tp-cancel">Cancel</button></div>
   `;
   document.body.appendChild(dlg);
   const $ = (sel) => dlg.querySelector(sel);

@@ -36,6 +36,7 @@ import { bindDrawing } from './tools.js';
 import { commitFloatIfAny } from './floatsession.js';
 import { flattenSheetLayers } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
+import { runAction } from '../app/actions.js';
 
 function isTypingTarget(el) {
   if (!el) return false;
@@ -151,13 +152,14 @@ export function mountFrameEditor(hostEl) {
   aheadLabel.className = 'frame-editor-onion';
   aheadLabel.append(document.createTextNode('Ahead'), aheadInput, aheadColorInput);
 
-  // Opens the per-step (per-distance-k) color override dialog -- see
-  // buildOnionColorsDialog below. Applies to both Back and Ahead steps, so
-  // it sits after both sub-groups rather than inside either one.
+  // Opens the per-step (per-distance-k) color overrides on Project
+  // Settings' Onion Steps page (see the click handler below). Applies to
+  // both Back and Ahead steps, so it sits after both sub-groups rather than
+  // inside either one.
   const btnStepColors = document.createElement('button');
   btnStepColors.type = 'button'; btnStepColors.className = 'btn-icon-md';
   btnStepColors.textContent = '⚙';
-  btnStepColors.title = 'Per-step onion colors…';
+  btnStepColors.title = 'Per-step onion colors… (Project Settings)';
 
   // Everything onion-skin-related lives in one cluster (onionGroup), set off
   // from the navigation controls (back/prev/next) by a divider, and further
@@ -554,82 +556,14 @@ export function mountFrameEditor(hostEl) {
     return hexToRgb(override ?? (dir === 'back' ? state.onion.backColor : state.onion.aheadColor));
   }
 
-  // Built once, lazily wired like frames.js's buildSliceDialog -- a plain
-  // dynamically-built <dialog> appended to body, independent of this
-  // module's own container so it survives frame-editor show/hide.
-  function buildOnionColorsDialog() {
-    const dlg = document.createElement('dialog');
-    dlg.className = 'sys-dialog';
-    const h3 = document.createElement('h3');
-    h3.textContent = 'Onion Skin Colors';
-    dlg.appendChild(h3);
-
-    const hint = document.createElement('p');
-    hint.className = 'about-meta';
-    hint.textContent = 'Per-step color overrides. Leave a step on "default" to use the Back/Ahead color from the toolbar.';
-    dlg.appendChild(hint);
-
-    const list = document.createElement('div');
-    list.className = 'sys-list';
-    dlg.appendChild(list);
-
-    const rows = [];
-    function buildRow(dir, k) {
-      const row = document.createElement('div');
-      row.className = 'row';
-      const label = document.createElement('span');
-      label.textContent = `${dir === 'back' ? 'Back' : 'Ahead'} ${k}`;
-      label.style.minWidth = '64px';
-      const useDefault = document.createElement('input');
-      useDefault.type = 'checkbox';
-      const defaultLabel = document.createElement('label');
-      defaultLabel.append(useDefault, document.createTextNode('default'));
-      const colorInput = document.createElement('input');
-      colorInput.type = 'color';
-      colorInput.addEventListener('input', () => { useDefault.checked = false; });
-      row.append(label, defaultLabel, colorInput);
-      list.appendChild(row);
-      rows.push({ dir, k, useDefault, colorInput });
-    }
-    for (let k = 1; k <= 8; k++) buildRow('back', k);
-    for (let k = 1; k <= 8; k++) buildRow('ahead', k);
-
-    const btnRow = document.createElement('div');
-    btnRow.className = 'row';
-    const btnOk = document.createElement('button');
-    btnOk.type = 'button'; btnOk.className = 'btn-sm'; btnOk.textContent = 'OK';
-    const btnCancel = document.createElement('button');
-    btnCancel.type = 'button'; btnCancel.className = 'btn-sm'; btnCancel.textContent = 'Cancel';
-    btnRow.append(btnOk, btnCancel);
-    dlg.appendChild(btnRow);
-    document.body.appendChild(dlg);
-
-    btnCancel.addEventListener('click', () => dlg.close());
-    btnOk.addEventListener('click', () => {
-      const stepColors = { back: {}, ahead: {} };
-      for (const r of rows) {
-        if (!r.useDefault.checked) stepColors[r.dir][r.k] = r.colorInput.value;
-      }
-      state.onion.stepColors = stepColors;
-      dlg.close();
-      markDirty();
-      view.requestRender();
-    });
-
-    return {
-      open() {
-        for (const r of rows) {
-          const override = state.onion.stepColors[r.dir][r.k];
-          r.useDefault.checked = override == null;
-          r.colorInput.value = override ?? (r.dir === 'back' ? state.onion.backColor : state.onion.aheadColor);
-        }
-        dlg.showModal();
-      },
-    };
-  }
-
-  const onionColorsDialog = buildOnionColorsDialog();
-  btnStepColors.addEventListener('click', () => onionColorsDialog.open());
+  // Per-step overrides now live on the Onion Steps page of the Project
+  // Settings dialog (main.js owns that dialog) rather than a dedicated
+  // dialog here -- state.onion.stepColors is still exactly what gets read
+  // (stepColor() above) and written there; this button just opens Project
+  // Settings pre-flipped to that page. main.js's 'project' listener above
+  // (see refresh()) already re-syncs this toolbar and re-renders the view
+  // whenever markDirty() fires, so no direct callback wiring is needed here.
+  btnStepColors.addEventListener('click', () => runAction('edit.onionStepColors'));
 
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;

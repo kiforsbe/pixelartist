@@ -149,7 +149,7 @@ export function mountToolPalette(el) {
   contiguousInput.type = 'checkbox';
   contiguousInput.checked = toolOptions.contiguous;
   contiguousInput.addEventListener('change', () => { toolOptions.contiguous = contiguousInput.checked; });
-  contiguousRow.append(contiguousInput, document.createTextNode('Contiguous'));
+  contiguousRow.append(document.createTextNode('Contiguous'), contiguousInput);
   optionChecks.appendChild(contiguousRow);
 
   const filledRow = document.createElement('label');
@@ -158,7 +158,7 @@ export function mountToolPalette(el) {
   filledInput.type = 'checkbox';
   filledInput.checked = toolOptions.filled;
   filledInput.addEventListener('change', () => { toolOptions.filled = filledInput.checked; });
-  filledRow.append(filledInput, document.createTextNode('Filled'));
+  filledRow.append(document.createTextNode('Filled'), filledInput);
   optionChecks.appendChild(filledRow);
 
   optionsRow.appendChild(optionChecks);
