@@ -1,4 +1,4 @@
-import { state, on, emit, activeSheet, activeLayer, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
+import { state, on, emit, activeSheet, activeLayer, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty, maybeSnapPixels } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
 import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext, DEFAULT_SETTINGS } from '../core/model.js';
@@ -274,6 +274,7 @@ defineAction('document.importSheet', {
       alert('Image is too large (max 4096×4096).');
       return;
     }
+    bitmap = maybeSnapPixels(bitmap);
     const project = state.project;
     const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
     const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
@@ -787,6 +788,7 @@ const psFrameW = document.getElementById('ps-frame-w');
 const psFrameH = document.getElementById('ps-frame-h');
 const psDurationMount = document.getElementById('ps-duration-control');
 const psSmoothThumbnails = document.getElementById('ps-smooth-thumbnails');
+const psPixelSnapper = document.getElementById('ps-pixel-snapper');
 const psTargetPlatform = document.getElementById('ps-target-platform');
 for (const [id, p] of Object.entries(PLATFORMS)) psTargetPlatform.appendChild(new Option(p.label, id));
 const psExportColorMode = document.getElementById('ps-export-color-mode');
@@ -948,6 +950,7 @@ function openProjectSettings(tab) {
   psFrameW.value = String(settings.frameW);
   psFrameH.value = String(settings.frameH);
   psSmoothThumbnails.checked = settings.smoothThumbnails !== false;
+  psPixelSnapper.checked = settings.pixelSnapperEnabled === true;
   psTargetPlatform.value = settings.targetPlatform ?? 'none';
   psExportColorMode.value = settings.exportColorMode ?? 'strict';
   psSpriteLock.resnap();
@@ -1015,6 +1018,7 @@ psOk.addEventListener('click', () => {
     ...restSettings, ...dims, durationMs: psDurationValue.durationMs,
     ...(psDurationValue.baseFps != null ? { baseFps: psDurationValue.baseFps, baseStep: psDurationValue.baseStep } : {}),
     smoothThumbnails: psSmoothThumbnails.checked,
+    pixelSnapperEnabled: psPixelSnapper.checked,
     targetPlatform: psTargetPlatform.value,
     exportColorMode: psExportColorMode.value,
   };

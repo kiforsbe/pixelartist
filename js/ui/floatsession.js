@@ -4,7 +4,7 @@
 // Pointer GESTURES (drag/scale/rotate) live in tools.js's move tool; every
 // state change funnels through here so stepwise undo and auto-commit stay
 // consistent. This module must never import tools.js (tools.js imports us).
-import { state, on, emit, activeSheet, activeLayer, markDirty, activeLayerScope } from '../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, markDirty, activeLayerScope, maybeSnapPixels } from '../app/state.js';
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../core/pixels.js';
 import { findLayer } from '../core/model.js';
 import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../core/floating.js';
@@ -416,8 +416,9 @@ async function readSystemClipboardBitmap() {
 // There's no "original position" for an externally-sourced image, so it
 // always lands centered in the current view's target rect.
 async function pasteSystemImage() {
-  const bitmap = await readSystemClipboardBitmap();
+  let bitmap = await readSystemClipboardBitmap();
   if (!bitmap) return;
+  bitmap = maybeSnapPixels(bitmap);
   commitFloatIfAny();
   const viewApi = activeView();
   const sheet = activeSheet();

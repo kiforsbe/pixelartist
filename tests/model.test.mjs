@@ -5,9 +5,10 @@ import {
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
-  scrubTileReferences, layerAnimationContext, removeSheet,
+  scrubTileReferences, layerAnimationContext, removeSheet, activePaletteColors,
   effectiveDuration, fpsStepToMs, msToFps,
 } from '../js/core/model.js';
+import { createPalette, setEntry } from '../js/core/palettes.js';
 import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
 
 function proj() {
@@ -424,11 +425,30 @@ test('project carries required settings; version 2', () => {
   assert.equal(p2.settings.tileW, 8);
 });
 
-test('deserializeProject: targetPlatform/exportColorMode fall back to their defaults for files saved before those fields existed', () => {
+test('deserializeProject: targetPlatform/exportColorMode/pixelSnapperEnabled fall back to their defaults for files saved before those fields existed', () => {
   const json = { version: 2, name: 's', settings: { spriteSheetW: 256, spriteSheetH: 256, tileSheetW: 256, tileSheetH: 256, tileW: 16, tileH: 16, frameW: 16, frameH: 16, durationMs: 100 }, sheets: [] };
   const p = deserializeProject(json, new Map());
   assert.equal(p.settings.targetPlatform, 'none');
   assert.equal(p.settings.exportColorMode, 'strict');
+  assert.equal(p.settings.pixelSnapperEnabled, false);
+});
+
+test('activePaletteColors: null when there is no active palette, or the active one isn\'t indexed', () => {
+  const p = createProject('s');
+  assert.equal(activePaletteColors(p), null);
+  p.palettes.push(createPalette({ name: 'gradient', indexed: false }));
+  p.activePaletteId = p.palettes[0].id;
+  assert.equal(activePaletteColors(p), null);
+});
+
+test('activePaletteColors: returns the active indexed palette\'s colors as plain [r,g,b] triples (alpha dropped)', () => {
+  const p = createProject('s');
+  const palette = createPalette({ name: 'ramp', indexed: true, size: 2 });
+  setEntry(palette, 0, [255, 0, 0, 255]);
+  setEntry(palette, 1, [0, 255, 0, 128]);
+  p.palettes.push(palette);
+  p.activePaletteId = palette.id;
+  assert.deepEqual(activePaletteColors(p), [[255, 0, 0], [0, 255, 0]]);
 });
 
 

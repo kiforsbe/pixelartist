@@ -21,6 +21,9 @@ export const DEFAULT_SETTINGS = {
   // regardless of this setting), only which colors those indices may be
   // chosen from. See js/app/main.js's resolveC99Items.
   exportColorMode: 'strict',
+  // See js/core/pixelSnapper.js -- auto-detects and snaps a pasted/
+  // imported image's implicit pixel grid back to its true resolution.
+  pixelSnapperEnabled: false,
 };
 const MAX_DIM = 4096;
 
@@ -81,6 +84,17 @@ export function createGroupNode(name, { animationId = null, open = true } = {}) 
 export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
   return { version: PROJECT_VERSION, name, settings: { onion: defaultOnionSettings(), ...settings },
     sheets: [], palettes: [], activePaletteId: null };
+}
+
+// The project's active indexed palette as plain [r,g,b] triples, or null
+// when there's no active palette or it isn't indexed (e.g. a continuous/
+// gradient palette has no fixed color list to snap to). Used by
+// js/core/pixelSnapper.js callers (paste/import) to default pixel-snapping
+// to the project's current palette.
+export function activePaletteColors(project) {
+  const palette = project.palettes.find(p => p.id === project.activePaletteId);
+  if (!palette?.indexed) return null;
+  return palette.colors.map(c => [c[0], c[1], c[2]]);
 }
 
 // A sheet owns everything about it (layerTree, frames, animations, and for
@@ -596,6 +610,7 @@ export function deserializeProject(json, imagesByPath) {
       onion: defaultOnionSettings(),
       targetPlatform: DEFAULT_SETTINGS.targetPlatform,
       exportColorMode: DEFAULT_SETTINGS.exportColorMode,
+      pixelSnapperEnabled: DEFAULT_SETTINGS.pixelSnapperEnabled,
       ...json.settings,
     },
     activePaletteId: json.activePaletteId ?? null,
