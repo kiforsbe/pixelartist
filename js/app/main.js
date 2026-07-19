@@ -11,6 +11,7 @@ import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } f
 import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
+import { mountPreviewPanel } from '../ui/previewpanel.js';
 import { mountAnimationsPanel } from '../ui/animpanel.js';
 import { buildBaseDurationControl } from '../ui/baseDurationControl.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
@@ -353,7 +354,7 @@ defineAction('document.deleteSheet', {
   run: () => {
     const sheet = activeSheet();
     if (!sheet) return;
-    if (!confirmOrAuto(`Delete sheet "${sheet.name}" and everything in it (layers, frames, animations${sheet.kind === 'tile' ? ', tiles, terrain sets' : ''})?`)) return;
+    if (!confirmOrAuto(`Delete sheet "${sheet.name}" and everything in it (layers, frames, animations${sheet.kind === 'tile' ? ', tiles, autotile sets' : ''})?`)) return;
     commitDeleteSheet(sheet);
   },
   isEnabled: () => !!activeSheet(),
@@ -546,6 +547,10 @@ mountAnimationsPanel(document.getElementById('panel-animation'));
 mountTilePanel(document.getElementById('panel-context'));
 mountAutotilesPanel(document.getElementById('panel-autotiles'));
 mountTileLayersPanel(document.getElementById('panel-tilelayers'));
+// Mounted before mountTimeline() so its own initial render() (below) runs
+// last and wins over previewpanel's mount-time render() -- both fire
+// synchronously in this init sequence, outside the event system.
+mountPreviewPanel(document.getElementById('panel-preview'));
 mountTimeline(document.getElementById('timeline-dock'));
 
 // ---- frame editor (Task 16) ----

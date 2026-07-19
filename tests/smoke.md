@@ -123,11 +123,32 @@ is a pass condition for the whole run, not just the final step.
     frame directly — no double-click needed.
 28. [A] Edit a cell's duration number input; undo restores the prior
     value.
-29. [A] Toggle "Preview Loop"; Play (▶) advances the preview canvas through
+29. [A] Toggle "Preview Loop"; Play (▶) advances the Preview panel's canvas
+    (bottom of the right-hand sidebar, not the timeline dock) through
     frames, wrapping if Preview Loop is on; Pause stops it. First/Last
     transport buttons jump to the ends. Speed selector changes playback
     rate. Preview Loop never touches the animation's export `loop` flag
     (checked via `browser_evaluate`, not visually).
+29b. [A] The Preview panel is general-purpose, not animation-only: with no
+    animation selected, selecting/editing a frame (sprites) or a tile
+    (tile mode) shows it there instead — verify by setting
+    `state.selectedFrameId`/`state.selectedTileId` and checking the
+    panel's canvas updates. Its own `−`/`+`/Fit controls (bottom-right
+    overlay on the canvas) and mouse wheel step zoom through the same
+    table as the main canvas (`js/core/zoom.js`); Fit is the default and
+    snaps to contain the content, `−`/`+`/wheel switch to a manual step
+    and the readout shows the current percentage. Zoom level persists
+    across frame/tile/animation-frame changes (doesn't reset to Fit just
+    because the shown content changed). The canvas is sized to exactly
+    fill the sidebar's width at 1:1 (its `width`/`height` attributes
+    match its rendered CSS size — check via `getBoundingClientRect()`,
+    not just visually, since a mismatch there silently breaks 1:1 zoom
+    accuracy).
+29c. [M] Preview panel: plain click-drag on its canvas pans the content
+    (no Space/middle-click gate, unlike the main canvas) — dragging while
+    zoomed to Fit freezes the current fit zoom into a manual level first
+    so there's room to pan. Panning is a pointer-drag gesture, so this
+    item is manual-only per this repo's Playwright policy.
 
 30. [A] Animation panel (below Frames): shows name/Loop/duration for the
     timeline's selected animation, independent of the Frames panel's own
@@ -273,7 +294,10 @@ is a pass condition for the whole run, not just the final step.
     reference template's row/col layout 1:1 (including its duplicate
     "isolated"/"full surround" cells, which render as two on-screen cells
     bound to the same underlying slot — the first cell in raster order is
-    primary; the others show a `.has-duplicates` outline + `⧉N` badge).
+    primary; the others show a `.has-duplicates` dashed border (replacing
+    the cell's own mandatory/optional border, not an outline outside it --
+    an outline there used to overlap neighboring cells in the tight grid)
+    + `⧉N` badge).
     Creating a terrain set from the "Blob-47 (7×7)" or "Blob-47 (8×6)"
     preset (Add Terrain Set dialog) seeds that set's view dropdown to the
     matching grid mode on first open, not always "Staircase"; switching
@@ -290,10 +314,12 @@ is a pass condition for the whole run, not just the final step.
     background, with a small ↔/↕/↻ icon overlay only when that fill came
     from symmetry (not an explicit assignment). A slot that's optional AND
     explicitly assigned (art placed there even though it's now derivable)
-    additionally shows a muted blue-grey dashed outline + a "✓opt" badge,
-    distinct from the orange duplicate-tile marker — on the tile sheet
-    itself, the corresponding tile cell shows a translucent blue-grey wash
-    across the whole cell (not just an outline) for the same condition.
+    additionally shows a muted blue-grey dashed border (same
+    replaces-the-cell's-own-border treatment as `.has-duplicates` above)
+    + a "✓opt" badge, distinct from the orange duplicate-tile marker — on
+    the tile sheet itself, the corresponding tile cell shows a translucent
+    blue-grey wash across the whole cell (not just a border) for the same
+    condition.
 52. [A] Clicking an empty slot opens the tile picker (filtered to tiles
     matching the terrain set's size); assigning a tile fills that slot;
     "Clear" empties it again.

@@ -1,7 +1,10 @@
 // Animation timeline dock: header (animation picker + New/Rename/Delete/Loop
-// + "Add selected frame" + playback transport + live preview canvas) and a
-// horizontal strip of frame cells (thumbnail + duration + remove, drag to
-// reorder, click to scrub, double-click to open the frame editor).
+// + "Add selected frame" + playback transport) and a horizontal strip of
+// frame cells (thumbnail + duration + remove, drag to reorder, click to
+// scrub/select/open). The live playhead preview itself renders in the
+// right-hand Preview panel (js/ui/previewpanel.js) -- this module still owns
+// all playback/scrub timing (position, rAF loop) and just pushes the current
+// frame's bitmap over via setPreviewBitmap() on every tick.
 //
 // Mirrors frames.js's split: a single mount function builds the DOM once and
 // re-renders on the app-wide events that can change what it shows. Structural
@@ -14,9 +17,9 @@ import { state, on, emit, activeSheet, markDirty, confirmOrAuto, currentContextL
 import { addAnimation, contextLayers, flattenSheetLayers, findParent, renameAnimation, effectiveDuration } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 import { commitBreakApartStrip } from './frames.js';
+import { setPreviewBitmap } from './previewpanel.js';
 
 const THUMB_SIZE = 64;
-const PREVIEW_SIZE = 96;
 const SPEEDS = [0.25, 0.5, 1, 2];
 
 // ------------------------------------------------------------- drawing helpers
@@ -223,19 +226,11 @@ export function mountTimeline(el) {
   const strip = document.createElement('div');
   strip.className = 'timeline-strip';
 
-  // Header + strip stack in a column that takes the remaining width; the
-  // preview lives in its own column so its fixed 96x96 size doesn't force
-  // the header row (buttons/selects) to grow to 96px tall and starve the
-  // strip of vertical space.
   const main = document.createElement('div');
   main.className = 'timeline-main';
   main.append(header, strip);
 
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = PREVIEW_SIZE; previewCanvas.height = PREVIEW_SIZE;
-  previewCanvas.className = 'timeline-preview';
-
-  el.append(main, previewCanvas);
+  el.append(main);
 
   // ---- player state ----
   let playing = false;
@@ -271,16 +266,19 @@ export function mountTimeline(el) {
     lastTs = null;
   }
 
+  // Only touches the Preview panel's canvas while an animation is actually
+  // selected -- with none selected, previewpanel.js's own context render
+  // (frame/tile selection) owns it, and clearing here would just fight that.
   function renderPreview() {
-    const sheet = activeSheet();
     const anim = currentAnim();
-    const ctx = previewCanvas.getContext('2d');
-    if (!sheet || !anim || !anim.frames.length) { ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); return; }
+    if (!anim) return;
+    const sheet = activeSheet();
+    if (!sheet || !anim.frames.length) { setPreviewBitmap(null); return; }
     const entry = anim.frames[Math.max(0, Math.min(position, anim.frames.length - 1))];
     const frame = sheet.frames.find(f => f.id === entry.frameId);
-    if (!frame) { ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height); return; }
+    if (!frame) { setPreviewBitmap(null); return; }
     const region = copyRegion(getFlat(sheet), frame.x, frame.y, frame.w, frame.h);
-    drawFit(previewCanvas, region);
+    setPreviewBitmap(region);
   }
 
   function updatePlayheadHighlight() {
