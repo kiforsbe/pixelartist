@@ -34,12 +34,40 @@ test('buildTiledTsx: only tile sheets are meaningful; wangid encodes N,NE,E,SE,S
   assert.match(xml, /<wangtile tileid="1" wangid="1,1,1,1,1,1,1,1"\/>/);
 });
 
+test('buildTiledTsx: one space per nesting level, matching Tiled\'s own .tsx indentation exactly', () => {
+  // Structure pinned against a real Tiled 1.10.2 export of this project's
+  // own blob47-7x7-reference.png (user-provided ground truth): 0 spaces
+  // for <?xml?>/<tileset>/</tileset>, 1 for <image>/<wangsets>, 2 for
+  // <wangset>, 3 for <wangcolor>/<wangtile>.
+  const project = createProject('demo');
+  const sheet = createSheet(project, { name: 'Ground', width: 16, height: 16, kind: 'tile' });
+  const t = addTile(sheet, 0, 0, 16, 16);
+  const ts = createTerrainSet(sheet, { name: 'Grass', tileW: 16, tileH: 16 });
+  assignSlot(sheet, ts, 0, t);
+
+  const xml = buildTiledTsx(sheet);
+  assert.equal(xml, [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<tileset version="1.10" tiledversion="1.10.2" name="Ground" tilewidth="16" tileheight="16" tilecount="1" columns="1">',
+    ' <image source="Ground.png" width="16" height="16"/>',
+    ' <wangsets>',
+    '  <wangset name="Grass" type="mixed" tile="-1">',
+    '   <wangcolor name="Grass" color="#ff0000" tile="-1" probability="1"/>',
+    '   <wangtile tileid="0" wangid="0,0,0,0,0,0,0,0"/>',
+    '  </wangset>',
+    ' </wangsets>',
+    '</tileset>',
+    '',
+  ].join('\n'));
+});
+
 test('buildTiledTsx: unassigned/unresolvable blob slots produce no wangtile', () => {
   const project = createProject('demo');
   const sheet = createSheet(project, { name: 'Empty', width: 16, height: 16, kind: 'tile' });
   createTerrainSet(sheet, { name: 'Water', tileW: 16, tileH: 16 });
   const xml = buildTiledTsx(sheet);
-  assert.match(xml, /<wangset name="Water"[^>]*><wangcolor[^/]*\/><\/wangset>/);
+  assert.match(xml, /<wangset name="Water"[^>]*>\n\s*<wangcolor[^/]*\/>\n\s*<\/wangset>/);
+  assert.doesNotMatch(xml, /<wangtile/);
 });
 
 test('buildTiledTsx: tileid comes from raster (x,y) position, not sheet.tiles insertion order', () => {

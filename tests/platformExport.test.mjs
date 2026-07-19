@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGbaBinary, buildNesChr } from '../js/app/platformExport.js';
+import { buildGbaBinary, buildNesChr, checkGbaCompatibility, checkNesCompatibility } from '../js/app/platformExport.js';
+
+function item(name, w, h) { return { name, w, h, indices: new Uint8Array(w * h) }; }
 
 test('buildGbaBinary: palette packs to 2-byte little-endian BGR555, black/white checkpoints', () => {
   const { pal } = buildGbaBinary({
@@ -51,4 +53,42 @@ test('buildNesChr: multiple items concatenate back-to-back, matching a real CHR-
   assert.deepEqual([...chr.slice(0, 16)], Array(16).fill(0)); // tile a: index 0 everywhere -> all-zero bytes
   assert.deepEqual([...chr.slice(16, 24)], Array(8).fill(0xff)); // tile b plane0: bit1 of index3 set everywhere
   assert.deepEqual([...chr.slice(24, 32)], Array(8).fill(0xff)); // tile b plane1
+});
+
+test('checkGbaCompatibility: clean, in-budget content has no errors or warnings', () => {
+  const { errors, warnings } = checkGbaCompatibility({ sourceColorCount: 12, items: [item('a', 16, 16)] });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(warnings, []);
+});
+
+test('checkGbaCompatibility: flags non-8-multiple dimensions as a blocking error', () => {
+  const { errors } = checkGbaCompatibility({ sourceColorCount: 4, items: [item('a', 8, 8), item('bad', 5, 8)] });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /bad.*5x8/);
+});
+
+test('checkGbaCompatibility: warns when source colors exceed the 16-color palette bank', () => {
+  const { warnings } = checkGbaCompatibility({ sourceColorCount: 20, items: [item('a', 8, 8)] });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /20 colors/);
+  assert.match(warnings[0], /at most 16/);
+});
+
+test('checkGbaCompatibility: warns when tile count exceeds the 1024-tile OBJ VRAM budget', () => {
+  const { warnings } = checkGbaCompatibility({ sourceColorCount: 4, items: [item('big', 8 * 1025, 8)] }); // 1025 tiles > 1024
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /exceeds the GBA's 1024-tile/);
+});
+
+test('checkNesCompatibility: warns when source colors exceed the 4-color (3+transparent) tile palette', () => {
+  const { warnings } = checkNesCompatibility({ sourceColorCount: 6, items: [item('a', 8, 8)] });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /6 colors/);
+  assert.match(warnings[0], /at most 4/);
+});
+
+test('checkNesCompatibility: warns when tile count exceeds the 256-tile pattern table', () => {
+  const { warnings } = checkNesCompatibility({ sourceColorCount: 4, items: [item('big', 8 * 300, 8)] });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /exceeds one 256-tile/);
 });

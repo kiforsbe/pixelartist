@@ -46,3 +46,50 @@ export function buildNesChr({ items }) {
   for (const chunk of tileChunks) { out.set(chunk, o); o += chunk.length; }
   return out;
 }
+
+// ---------------------------------------------------------------- hardware
+// compatibility checks
+//
+// Pure, DOM-free: returns { errors, warnings } (both string arrays) rather
+// than throwing/alerting itself, so the caller (main.js) decides how to
+// surface them (confirm-before-export, batch summary, etc). `errors` block
+// the export outright (the content is structurally impossible to pack);
+// `warnings` describe lossy-but-possible conversions the user should know
+// about before trusting the output.
+function itemTileIssues(items) {
+  const badItems = items.filter(it => it.w % 8 !== 0 || it.h % 8 !== 0);
+  const tileCount = items.reduce((n, it) => n + Math.ceil(it.w / 8) * Math.ceil(it.h / 8), 0);
+  return { badItems, tileCount };
+}
+
+// GBA: 4bpp tiles are always 8x8; one palette bank holds 16 colors; OBJ
+// (sprite) tile VRAM is a fixed 32KB = 1024 tiles across both sprite
+// charblocks in bitmap-free display modes (Tonc's "Regular sprites"
+// chapter -- see design doc's platform-export section for the source).
+export function checkGbaCompatibility({ sourceColorCount, items }) {
+  const errors = [], warnings = [];
+  const { badItems, tileCount } = itemTileIssues(items);
+  if (badItems.length)
+    errors.push(`${badItems.length} item(s) (e.g. "${badItems[0].name}", ${badItems[0].w}x${badItems[0].h}) aren't multiples of 8x8 -- GBA tiles are always built from 8x8 blocks.`);
+  if (sourceColorCount > MAX_COLORS.gba4)
+    warnings.push(`Artwork uses ${sourceColorCount} colors; a GBA 4bpp palette bank holds at most ${MAX_COLORS.gba4}. Colors were reduced to the nearest match -- some detail may be lost.`);
+  if (tileCount > 1024)
+    warnings.push(`${tileCount} 8x8 tiles exceeds the GBA's 1024-tile object VRAM budget (32KB across both sprite charblocks, in bitmap-free display modes) -- you may need to split this across multiple loads.`);
+  return { errors, warnings };
+}
+
+// NES: 2bpp CHR tiles are always 8x8; a tile's palette holds 3 colors plus
+// transparency; one CHR-ROM pattern table is a fixed 4KB = 256 tiles (two
+// tables per 8KB bank = 512 tiles total) -- see NESdev's PPU pattern
+// tables page (design doc has the citation).
+export function checkNesCompatibility({ sourceColorCount, items }) {
+  const errors = [], warnings = [];
+  const { badItems, tileCount } = itemTileIssues(items);
+  if (badItems.length)
+    errors.push(`${badItems.length} item(s) (e.g. "${badItems[0].name}", ${badItems[0].w}x${badItems[0].h}) aren't multiples of 8x8 -- NES tiles are always built from 8x8 blocks.`);
+  if (sourceColorCount > MAX_COLORS.nes2)
+    warnings.push(`Artwork uses ${sourceColorCount} colors; an NES tile's palette holds at most ${MAX_COLORS.nes2} (3 colors + transparency). Colors were reduced to the nearest match -- some detail may be lost.`);
+  if (tileCount > 256)
+    warnings.push(`${tileCount} 8x8 tiles exceeds one 256-tile CHR-ROM pattern table (4KB) -- you'll need the second pattern table or CHR bank switching to fit it all.`);
+  return { errors, warnings };
+}

@@ -6,10 +6,10 @@ import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../co
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { buildTiledTsx } from './tiledExport.js';
 import { buildC99 } from './c99Export.js';
-import { buildGbaBinary, buildNesChr } from './platformExport.js';
+import { buildGbaBinary, buildNesChr, checkGbaCompatibility, checkNesCompatibility } from './platformExport.js';
 import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from './animationExport.js';
 import { encodeGif } from '../core/gif.js';
-import { buildPalette, quantizeBitmap } from '../core/quantize.js';
+import { buildPalette, quantizeBitmap, colorFrequency } from '../core/quantize.js';
 import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
 import { copyRegion } from '../core/pixels.js';
@@ -1129,9 +1129,27 @@ function resolveC99Items(sheet, target) {
   const bitmaps = rects.map(r => copyRegion(flat, r.x, r.y, r.w, r.h));
   const maxColors = target === 'generic8' ? 256 : target === 'gba4' ? 16 : 4;
   const sourcePalette = state.project.palettes.find(p => p.id === state.project.activePaletteId);
+  const sourceColorCount = sourcePalette?.indexed ? sourcePalette.colors.length : colorFrequency(bitmaps).length;
   const palette = buildPalette(bitmaps, maxColors, sourcePalette).map(c => [c[0], c[1], c[2]]);
   const items = rects.map((r, i) => ({ name: r.name || `item_${i}`, w: r.w, h: r.h, indices: quantizeBitmap(bitmaps[i], palette) }));
-  return { palette, items };
+  return { palette, items, sourceColorCount };
+}
+// Runs the platform's hardware-compatibility check and surfaces any issues
+// before exporting: blocking errors (content structurally impossible to
+// pack, e.g. non-8x8-multiple dimensions) abort via alert; advisory
+// warnings (lossy color reduction, over tile budget) go through
+// confirmOrAuto so the user can proceed or cancel with full knowledge of
+// what changed -- never a silent, unexplained conversion.
+function confirmPlatformExport(platformLabel, check, sourceColorCount, items) {
+  const { errors, warnings } = check({ sourceColorCount, items });
+  if (errors.length) {
+    alert(`${platformLabel} export blocked:\n\n${errors.join('\n')}`);
+    return false;
+  }
+  if (warnings.length) {
+    return confirmOrAuto(`${platformLabel} export has ${warnings.length} issue(s):\n\n${warnings.join('\n\n')}\n\nExport anyway?`);
+  }
+  return true;
 }
 function exportGenericC99() {
   commitFloatIfAny();
@@ -1151,7 +1169,8 @@ function exportGbaNative() {
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
   try {
-    const { palette, items } = resolveC99Items(sheet, 'gba4');
+    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'gba4');
+    if (!confirmPlatformExport('Game Boy Advance', checkGbaCompatibility, sourceColorCount, items)) return;
     const { pal, tiles } = buildGbaBinary({ palette, items });
     io.downloadBlob(new Blob([pal]), `${sheet.name}.pal.bin`);
     io.downloadBlob(new Blob([tiles]), `${sheet.name}.tiles.bin`);
@@ -1164,7 +1183,8 @@ function exportNesNative() {
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
   try {
-    const { items } = resolveC99Items(sheet, 'nes2');
+    const { items, sourceColorCount } = resolveC99Items(sheet, 'nes2');
+    if (!confirmPlatformExport('NES', checkNesCompatibility, sourceColorCount, items)) return;
     const chr = buildNesChr({ items });
     io.downloadBlob(new Blob([chr]), `${sheet.name}.chr`);
   } catch (e) {
@@ -1205,7 +1225,13 @@ const SHEET_FORMATS = {
   ],
 };
 
-async function buildSheetExportEntries(sheet, format) {
+// `warnings`, if given, collects "<sheet> (<format>): <issue>" strings for
+// gba/nes lossy-conversion/tile-budget issues instead of confirming them
+// one sheet at a time mid-batch -- the caller (epExport) shows one combined
+// confirmation after the whole batch is built, before anything downloads.
+// Blocking errors (content structurally impossible to pack) still throw,
+// same as the single-sheet Document > Export Sheet path.
+async function buildSheetExportEntries(sheet, format, warnings = null) {
   const flat = flattenSheet(sheet);
   if (format === 'json') {
     const isSprite = sheet.kind === 'sprite';
@@ -1236,7 +1262,10 @@ async function buildSheetExportEntries(sheet, format) {
     ];
   }
   if (format === 'gba') {
-    const { palette, items } = resolveC99Items(sheet, 'gba4');
+    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'gba4');
+    const { errors, warnings: w } = checkGbaCompatibility({ sourceColorCount, items });
+    if (errors.length) throw new Error(`${sheet.name} (Game Boy Advance): ${errors.join(' ')}`);
+    warnings?.push(...w.map(msg => `${sheet.name} (Game Boy Advance): ${msg}`));
     const { pal, tiles } = buildGbaBinary({ palette, items });
     return [
       { path: `${sheet.name}.pal.bin`, data: pal },
@@ -1244,7 +1273,10 @@ async function buildSheetExportEntries(sheet, format) {
     ];
   }
   if (format === 'nes') {
-    const { items } = resolveC99Items(sheet, 'nes2');
+    const { items, sourceColorCount } = resolveC99Items(sheet, 'nes2');
+    const { errors, warnings: w } = checkNesCompatibility({ sourceColorCount, items });
+    if (errors.length) throw new Error(`${sheet.name} (NES): ${errors.join(' ')}`);
+    warnings?.push(...w.map(msg => `${sheet.name} (NES): ${msg}`));
     return [{ path: `${sheet.name}.chr`, data: buildNesChr({ items }) }];
   }
   throw new Error(`unknown export format "${format}"`);
@@ -1278,7 +1310,16 @@ epExport.addEventListener('click', async () => {
   const selections = state.project.sheets
     .filter(s => document.getElementById(`ep-sheet-${s.id}`).checked)
     .map(s => ({ sheetId: s.id, format: document.getElementById(`ep-format-${s.id}`).value }));
-  const entries = await collectProjectExportEntries(state.project, selections, buildSheetExportEntries);
+  const warnings = [];
+  let entries;
+  try {
+    entries = await collectProjectExportEntries(state.project, selections,
+      (sheet, format) => buildSheetExportEntries(sheet, format, warnings));
+  } catch (e) {
+    alert(`Export blocked: ${e.message}`);
+    return;
+  }
+  if (warnings.length && !confirmOrAuto(`Export has ${warnings.length} issue(s):\n\n${warnings.join('\n\n')}\n\nExport anyway?`)) return;
   const dest = document.querySelector('input[name="ep-dest"]:checked').value;
   if (dest === 'folder') await io.saveEntriesToFolder(entries);
   else io.downloadBlob(new Blob([await zipWrite(entries)]), `${state.project.name}-export.zip`);

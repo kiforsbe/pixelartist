@@ -34,28 +34,35 @@ export function buildTiledTsx(sheet) {
   const tileIdByTileId = new Map(sheet.tiles.map(t =>
     [t.id, Math.round(t.y / gridH) * cols + Math.round(t.x / gridW)]));
 
-  const wangsets = (sheet.terrainSets ?? []).map(ts => {
-    const wangtiles = [];
-    for (let blobIndex = 0; blobIndex < blobIndexToMask.length; blobIndex++) {
-      const resolved = resolveTerrainSlot(ts, blobIndex);
-      if (!resolved) continue;
-      const tileIndex = tileIdByTileId.get(resolved.tileId);
-      if (tileIndex == null) continue;
-      const mask = blobIndexToMask[blobIndex];
-      const wangid = WANG_BITS.map(bit => (mask & bit) ? 1 : 0).join(',');
-      wangtiles.push(`<wangtile tileid="${tileIndex}" wangid="${wangid}"/>`);
+  // One space per nesting level -- matches Tiled's own .tsx save format
+  // exactly (verified against a real Tiled 1.10.2 export of this project's
+  // own blob47-7x7-reference.png), not an invented style.
+  const indent = depth => ' '.repeat(depth);
+  const lines = ['<?xml version="1.0" encoding="UTF-8"?>'];
+  lines.push(`<tileset version="1.10" tiledversion="1.10.2" name="${escapeXml(sheet.name)}" ` +
+    `tilewidth="${gridW}" tileheight="${gridH}" tilecount="${cols * rows}" columns="${cols}">`);
+  lines.push(`${indent(1)}<image source="${escapeXml(sheet.name)}.png" width="${sheet.width}" height="${sheet.height}"/>`);
+
+  const terrainSets = sheet.terrainSets ?? [];
+  if (terrainSets.length) {
+    lines.push(`${indent(1)}<wangsets>`);
+    for (const ts of terrainSets) {
+      lines.push(`${indent(2)}<wangset name="${escapeXml(ts.name)}" type="mixed" tile="-1">`);
+      lines.push(`${indent(3)}<wangcolor name="${escapeXml(ts.name)}" color="#ff0000" tile="-1" probability="1"/>`);
+      for (let blobIndex = 0; blobIndex < blobIndexToMask.length; blobIndex++) {
+        const resolved = resolveTerrainSlot(ts, blobIndex);
+        if (!resolved) continue;
+        const tileIndex = tileIdByTileId.get(resolved.tileId);
+        if (tileIndex == null) continue;
+        const mask = blobIndexToMask[blobIndex];
+        const wangid = WANG_BITS.map(bit => (mask & bit) ? 1 : 0).join(',');
+        lines.push(`${indent(3)}<wangtile tileid="${tileIndex}" wangid="${wangid}"/>`);
+      }
+      lines.push(`${indent(2)}</wangset>`);
     }
-    return `<wangset name="${escapeXml(ts.name)}" type="mixed" tile="-1">` +
-      `<wangcolor name="${escapeXml(ts.name)}" color="#ff0000" tile="-1" probability="1"/>` +
-      wangtiles.join('') + `</wangset>`;
-  });
+    lines.push(`${indent(1)}</wangsets>`);
+  }
 
-  const wangsetsXml = wangsets.length ? `<wangsets>${wangsets.join('')}</wangsets>` : '';
-
-  return `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<tileset version="1.10" tiledversion="1.10.2" name="${escapeXml(sheet.name)}" ` +
-    `tilewidth="${gridW}" tileheight="${gridH}" tilecount="${cols * rows}" columns="${cols}">` +
-    `<image source="${escapeXml(sheet.name)}.png" width="${sheet.width}" height="${sheet.height}"/>` +
-    wangsetsXml +
-    `</tileset>\n`;
+  lines.push('</tileset>', '');
+  return lines.join('\n');
 }
