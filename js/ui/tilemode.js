@@ -20,6 +20,7 @@ import {
 } from '../core/tilegrids.js';
 import { newId } from '../core/palettes.js';
 import { scrubTileReferences, flattenSheet } from '../core/model.js';
+import { HANDLES_CORNER, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
 import {
   createTerrainSet, removeTerrainSet, assignSlot, clearSlot,
   detachFromTerrainSetIfMismatched, applyLayoutPreset, saveLayoutPreset, groupCellsByBlobIndex,
@@ -108,25 +109,14 @@ function rectBetween(ax, ay, bx, by, inclusive) {
   return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
 }
 
-const HANDLES = ['nw', 'ne', 'sw', 'se'];
 const HANDLE_SCREEN_PX = 6;
 const GRID_HANDLE_SCREEN_PX = 6;
-
-function oppositeCorner(t, handle) {
-  const map = {
-    nw: { x: t.x + t.w, y: t.y + t.h },
-    ne: { x: t.x, y: t.y + t.h },
-    sw: { x: t.x + t.w, y: t.y },
-    se: { x: t.x, y: t.y },
-  };
-  return map[handle];
-}
 
 // Resize handles only ever apply to a STANDALONE (gridId == null) selected
 // tile — a grid-owned tile's size is controlled by its grid's cellW/cellH.
 function hitHandle(view, tile, sx, sy) {
   if (!tile || tile.gridId != null) return null;
-  for (const h of HANDLES) {
+  for (const h of HANDLES_CORNER) {
     const ix = h[1] === 'w' ? tile.x : tile.x + tile.w;
     const iy = h[0] === 'n' ? tile.y : tile.y + tile.h;
     const p = view.imageToScreen(ix, iy);
@@ -931,7 +921,6 @@ function handleDown(ev, view) {
     drag = {
       kind: 'resize', tile: selected, handle,
       before: { x: selected.x, y: selected.y, w: selected.w, h: selected.h },
-      anchor: oppositeCorner(selected, handle),
       rect: { x: selected.x, y: selected.y, w: selected.w, h: selected.h },
     };
     view.requestRender();
@@ -983,7 +972,9 @@ function handleMove(ev, view) {
   if (drag.kind === 'create') {
     drag.rect = rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, true);
   } else if (drag.kind === 'resize') {
-    drag.rect = rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, false);
+    drag.rect = resizeRectFromHandle(drag.before, drag.handle, ev.x, ev.y, {
+      useCenter: isCenterAnchorModifier(ev), shiftHeld: isProportionalModifier(ev),
+    });
   } else if (drag.kind === 'gridmove') {
     const sheet = activeSheet();
     const bounds = gridBounds(drag.grid);
@@ -1111,7 +1102,7 @@ const TILE_HANDLE = '#4f8cff';
 function drawTileHandles(ctx, view, tile) {
   ctx.save();
   ctx.fillStyle = TILE_HANDLE;
-  for (const h of HANDLES) {
+  for (const h of HANDLES_CORNER) {
     const ix = h[1] === 'w' ? tile.x : tile.x + tile.w;
     const iy = h[0] === 'n' ? tile.y : tile.y + tile.h;
     const p = view.imageToScreen(ix, iy);
