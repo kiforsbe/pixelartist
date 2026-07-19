@@ -48,20 +48,39 @@ Editing ms directly writes `baseDuration` and clears `baseFps`/`baseStep`
 (back to plain-ms mode; the panel shows the ms field on next mount).
 
 Per-frame animation entries (`anim.frames[i]`, shape `{frameId, duration}`)
-change `duration` to nullable:
+gain a second nullable field, `step`, and the meaning of both fields now
+depends on the animation's current primary unit (`anim.baseFps` set = fps
+primary, unset = ms primary — same flag the panel uses):
 
-- `null` → inherit `anim.baseDuration`.
-- a number → explicit per-frame override, exactly as today.
+```js
+{ frameId, duration, step }
+// duration: ms override for this frame. Only read/editable when the
+//           animation is ms-primary.
+// step:     frame-count override for this frame ("hold for N ticks at
+//           anim.baseFps"), overriding anim.baseStep just for this entry.
+//           Only read/editable when the animation is fps-primary.
+```
+
+Both fields are independent and **non-destructive**: switching the
+animation's primary unit does not clear whichever field goes dormant — it
+just stops being read or shown as editable until the animation is switched
+back. This means a per-frame override set under fps-primary is preserved (but
+inert) if the animation is later switched to ms-primary, and vice versa.
+
+`null`/unset on the field that's currently active → inherit from the base
+(`anim.baseDuration` under ms-primary, `anim.baseStep` under fps-primary).
 
 `addFrame`'s "add selected frame to animation" path (`frames.js`, the
 `{ frameId, duration: 100 }` push noted in prior sessions) changes its default
-to `duration: null` — new frames inherit by default. **Existing saved frames
-keep whatever explicit number they already have** — no migration, so old
-projects render identically after loading; only newly-added frames start out
-inherited.
+to `{ frameId, duration: null, step: null }` — new frames inherit by default
+regardless of which primary unit the animation is currently using. **Existing
+saved frames keep whatever explicit `duration` number they already have** —
+no migration, so old projects render identically after loading (they're all
+implicitly ms-primary, since `baseFps` is new and starts unset); only
+newly-added frames start out inherited.
 
-`serializeProject`/`deserializeProject` need no change beyond what nullable
-`duration` already implies (plain JSON round-trips `null` fine); add
+`serializeProject`/`deserializeProject` need no change beyond what the
+nullable fields already imply (plain JSON round-trips `null` fine); add
 `baseDuration: a.baseDuration ?? 100` (and pass through `baseFps`/`baseStep`
 if present) to both the serialize map and the deserialize defaulting map,
 mirroring how `breaks`/`layerGroupId` are handled on those same lines.
@@ -71,20 +90,25 @@ mirroring how `breaks`/`layerGroupId` are handled on those same lines.
 ```js
 // js/core/model.js
 export function effectiveDuration(anim, entry) {
+  if (anim.baseFps) {
+    const step = entry.step ?? anim.baseStep ?? 1;
+    return Math.round(1000 / anim.baseFps * step);
+  }
   return entry.duration ?? anim.baseDuration ?? 100;
 }
 ```
 
 Used by:
 - `js/ui/timeline.js`'s playback tick loop (`while (entry && acc >= entry.duration)` →
-  `effectiveDuration(anim, entry)`) and the per-cell duration `<input>`'s
-  displayed value (still writes an explicit override on `change`, exactly like
-  today — no "reset to inherit" UI in this iteration; YAGNI, can be added
+  `effectiveDuration(anim, entry)`) and the per-cell control's displayed
+  value (see Timeline changes below for the ms-vs-frames input switch — no
+  "reset to inherit" UI in this iteration either way; YAGNI, can be added
   later if wanted).
 - `js/app/exports.js`'s `buildFramesJson` — `duration: af.duration` becomes
   `duration: effectiveDuration(a, af)`, so exported JSON always carries a
-  real number regardless of inheritance (consumers of the export shouldn't
-  need to know about the panel's UI-only concept).
+  real ms number regardless of inheritance or which primary unit was used to
+  produce it (consumers of the export shouldn't need to know about the
+  panel's UI-only fps/step concept).
 
 ## New Animation panel (`js/ui/animpanel.js`)
 
@@ -169,11 +193,21 @@ new panel instead of plain rename).
   session-only, resets to on every reload, per earlier decision). The
   playback tick loop's `if (anim.loop) { ... }` (wrap-to-start-or-stop logic)
   changes to `if (previewLoop) { ... }`.
-- Per-cell duration `<input>` in the strip: value becomes
-  `effectiveDuration(anim, entry)` instead of `entry.duration` (only matters
-  for newly-added, still-inherited frames — old explicit-duration frames are
-  unaffected since `entry.duration ?? ...` short-circuits on the existing
-  number).
+- Per-cell control in the strip now depends on the animation's primary unit
+  (`anim.baseFps` set or not), checked once per render pass, not per cell:
+  - **ms-primary**: unchanged from today — a numeric ms `<input>`, writes
+    `entry.duration` on change. Displayed value is `effectiveDuration(anim,
+    entry)` (only matters for newly-added, still-inherited frames — old
+    explicit-duration frames are unaffected since `entry.duration ?? ...`
+    short-circuits on the existing number).
+  - **fps-primary**: the ms input is replaced by a numeric **Frames**
+    `<input>` (integer, min 1), writing `entry.step` on change — this is the
+    per-frame override of `anim.baseStep` the user asked for ("how many
+    frames that frame shall take"). Displayed value is `entry.step ??
+    anim.baseStep ?? 1`. A small read-only caption next to it shows the
+    computed ms (`effectiveDuration(anim, entry)`), same primary/editable +
+    secondary/read-only pairing as the panel's own ms/fps display — ms is
+    never directly editable per-frame while fps-primary is active.
 
 ## Error handling / edge cases
 
@@ -183,21 +217,30 @@ new panel instead of plain rename).
 - `baseFps`/`baseStep` round-trip is lossy by design if the user only ever
   used ms mode (fields simply stay unset) — no attempt to reverse-derive
   fps/step from an arbitrary ms value.
-- Switching a frame's duration input back to exactly the inherited value
-  still counts as an explicit override (no auto-detection that "this number
-  happens to match the base") — matches the "inherit until edited" answer:
-  editing always sets an explicit value; there's no "clear override" control
-  in this iteration.
+- Switching a frame's duration/frames input back to exactly the inherited
+  value still counts as an explicit override (no auto-detection that "this
+  number happens to match the base") — matches the "inherit until edited"
+  answer: editing always sets an explicit value; there's no "clear override"
+  control in this iteration.
+- Switching the animation's primary unit (ms ↔ fps) instantly changes what
+  every timeline cell in that animation shows and accepts (ms input ↔ Frames
+  input) — this is a display/edit-mode switch only, not a data migration;
+  per-frame `duration` and `step` overrides already set are left exactly as
+  they are (see "non-destructive" note above) and simply resume being
+  read/editable if the animation is switched back.
 
 ## Testing
 
-- Unit tests in `tests/model.test.mjs` for `effectiveDuration`: null entry
-  falls back to `baseDuration`; explicit entry wins; missing `baseDuration`
-  falls back to `100`.
-- Unit test for the fps/step → ms formula (e.g. 24fps + step 2 → ~83ms;
-  24fps + step 1 → ~42ms) — lives with the Animation panel's own module test
-  if one is added, otherwise alongside `effectiveDuration` in
-  `tests/model.test.mjs` if the formula itself moves into `model.js`.
+- Unit tests in `tests/model.test.mjs` for `effectiveDuration`:
+  - ms-primary (`baseFps` unset): null `duration` falls back to
+    `baseDuration`; explicit `duration` wins; missing `baseDuration` falls
+    back to `100`.
+  - fps-primary (`baseFps` set): null `step` falls back to `baseStep` (e.g.
+    24fps + baseStep 2 → ~83ms); explicit per-entry `step` overrides
+    `baseStep` (e.g. 24fps + entry `step` 1 → ~42ms even though `baseStep` is
+    2); missing `baseStep` falls back to `1`.
+  - Dormant-field case: an entry with both `duration` and `step` set only
+    honors the one matching the animation's current primary unit.
 - `tests/exports.test.mjs`: extend `buildFramesJson`'s existing test with an
   animation that mixes inherited and overridden entries, asserting real
   numbers for both (no `null` ever reaches the JSON).
@@ -206,8 +249,11 @@ new panel instead of plain rename).
   updates → toggle Loop in panel, confirm it does NOT affect timeline
   playback wrap behavior (Preview Loop stays independent) → toggle Preview
   Loop in timeline, confirm it does NOT touch `anim.loop` (check via
-  `browser_evaluate`, not visually) → set Base Duration via fps+step, add a
-  new frame to the animation, confirm its timeline duration cell shows the
-  computed ms value → override that frame's duration directly, change the
-  base again, confirm the overridden frame does NOT change while other
-  inherited frames do. Update `tests/smoke.md` with only these new items.
+  `browser_evaluate`, not visually) → set Base Duration via fps+step, confirm
+  the timeline cells switch from an ms input to a Frames input → add a new
+  frame to the animation, confirm its cell shows the base step count and the
+  computed ms caption → override that frame's Frames count directly, change
+  the base step again, confirm the overridden frame does NOT change while
+  other inherited frames do → switch primary back to ms, confirm cells switch
+  back to ms inputs showing `effectiveDuration`. Update `tests/smoke.md` with
+  only these new items.
