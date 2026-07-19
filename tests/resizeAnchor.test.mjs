@@ -160,3 +160,10 @@ test('edge drag + Alt anchors that axis at center, other axis untouched', () => 
     { x: -10, y: 10, w: 60, h: 10 },
   );
 });
+
+test('target clamp respects inclusive: false, reaching the true edge coordinate', () => {
+  // edge-coordinate convention (frames.js/tilemode.js style): px CAN equal
+  // target.x + target.w exactly, since it's not a pixel index.
+  const r = resizeRectFromHandle(ORIG, 'e', 32, 8, { target: TARGET, inclusive: false });
+  assert.deepEqual(r, { x: 8, y: 8, w: 24, h: 8 });
+});

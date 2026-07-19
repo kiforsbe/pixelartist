@@ -82,8 +82,10 @@ export function dominantMagnitude(a, b) {
 export function resizeRectFromHandle(orig, handle, px, py, opts = {}) {
   const { useCenter = false, shiftHeld = false, target = null, inclusive = false } = opts;
   if (target) {
-    px = Math.max(target.x, Math.min(target.x + target.w - 1, px));
-    py = Math.max(target.y, Math.min(target.y + target.h - 1, py));
+    const maxX = inclusive ? target.x + target.w - 1 : target.x + target.w;
+    const maxY = inclusive ? target.y + target.h - 1 : target.y + target.h;
+    px = Math.max(target.x, Math.min(maxX, px));
+    py = Math.max(target.y, Math.min(maxY, py));
   }
   let ex = px, ey = py;
   if (inclusive) {
@@ -120,8 +122,8 @@ export function resizeRectFromHandle(orig, handle, px, py, opts = {}) {
   // past the anchor.
   const dirFor = (a, t, lowChar) => (t > a ? 1 : t < a ? -1 : (handle.includes(lowChar) ? -1 : 1));
   const rangeFor = (a, t, size, driven, lowChar) => {
-    if (!driven) return [a - size / 2, a + size / 2]; // secondary axis: symmetric around anchor
-    if (useCenter) return [a - size / 2, a + size / 2];
+    // Secondary (non-driven) axis, or Alt/center-anchored: symmetric around the anchor.
+    if (!driven || useCenter) return [a - size / 2, a + size / 2];
     const dir = dirFor(a, t, lowChar);
     return dir > 0 ? [a, a + size] : [a - size, a];
   };
