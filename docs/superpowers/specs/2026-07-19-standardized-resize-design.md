@@ -113,32 +113,43 @@ export const HANDLES_ALL;    // ['nw','n','ne','e','se','s','sw','w']
 export function isCenterAnchorModifier(ev);
 export function isProportionalModifier(ev);
 
+// Resolves the corner-vs-edge Shift flip once, in one place, so neither
+// resizeRectFromHandle nor the float-scale code has to restate the rule
+// (see Modifier semantics table: corner defaults locked, Shift frees it;
+// edge defaults free, Shift locks it). shiftHeld is the raw modifier state
+// (isProportionalModifier(ev)) -- callers never pre-resolve this themselves.
+export function isAspectLocked(handle, shiftHeld) {
+  return HANDLES_CORNER.includes(handle) ? !shiftHeld : shiftHeld;
+}
+
+// The larger-magnitude of two candidate scale ratios, sign discarded --
+// the shared "which axis is dominant" rule behind proportional-lock corner
+// resizing (see Proportional-lock algorithm below). Used both inside
+// resizeRectFromHandle (kx/ky, always >= 0) and by the float-scale code
+// (candidate sx/sy, which the float caller re-signs per axis afterward,
+// since a float's scale factor can be negative -- a flip).
+export function dominantMagnitude(a, b) {
+  return Math.max(Math.abs(a), Math.abs(b));
+}
+
 // The point that stays fixed during the drag: opposite corner/edge
-// midpoint by default, or rect's center when useCenter is true.
+// midpoint by default, or rect's center when useCenter is true. Also
+// reused for the float-scale case's LOCAL (u,v) pivot, by calling this
+// with a zero-origin rect {x:0, y:0, w, h} -- a local buffer's own 0..w /
+// 0..h space is exactly a rect's coordinate space with its origin at
+// (0,0), so no separate function is needed for that case.
 export function resolveAnchor(rect, handle, useCenter);
 
 // orig: the rect BEFORE this drag started (immutable snapshot).
 // px, py: current raw pointer position, image-space.
 // opts: { useCenter, shiftHeld, target } — target is an optional {x,y,w,h}
 // to clamp the pointer into first (mirrors resizerect.js's existing
-// clamp-to-layer-bounds behavior).
-//
-// shiftHeld is the RAW modifier state (isProportionalModifier(ev)), not a
-// pre-resolved "is this proportional" boolean -- whether Shift LOCKS or
-// UNLOCKS the aspect ratio depends on the handle type (see Modifier
-// semantics table: corner defaults to locked, Shift frees it; edge
-// defaults to free, Shift locks it), so that flip is resolved once, inside
-// this function, via `const locked = HANDLES_CORNER.includes(handle) ? !shiftHeld : shiftHeld`.
-// Callers always pass the raw key state through unchanged.
+// clamp-to-layer-bounds behavior). Internally: resolveAnchor for the pivot,
+// isAspectLocked for the Shift flip, dominantMagnitude for the corner
+// proportional-lock math.
 //
 // Returns the new {x,y,w,h}.
 export function resizeRectFromHandle(orig, handle, px, py, opts);
-
-// Local (u,v) buffer-space pivot for the float-scale case — same concept
-// as resolveAnchor but in a 0..w / 0..h local coordinate space rather than
-// sheet-global, since the float's own math (forwardPoint/inversePoint)
-// works in that space.
-export function localAnchorPoint(w, h, handle, useCenter);
 ```
 
 This module replaces:
@@ -148,10 +159,14 @@ This module replaces:
   `resize` drag branch.
 - tilemode.js's local `oppositeCorner` + its `resize` drag branch.
 
-The float scale can't reuse `resizeRectFromHandle` directly (it solves an
-affine transform in rotated space, not an axis-aligned rect), but reuses
-`localAnchorPoint` and the same modifier predicates; its own rotation-aware
-solve is described below.
+The float scale can't reuse `resizeRectFromHandle` directly end-to-end (it
+solves an affine transform in rotated space, not an axis-aligned rect), but
+reuses every piece of it that isn't inherently rect-specific: `resolveAnchor`
+(called with a zero-origin rect for the local pivot), `isAspectLocked`,
+`dominantMagnitude`, and the same modifier predicates. Only the final
+"turn a pivot + target point into new numbers" step — steps 5 and 7 in the
+math below — is genuinely float-specific, because it has to solve for
+`sx`/`sy`/`tx`/`ty` in rotated space instead of directly writing `x/y/w/h`.
 
 ## Per-system integration
 
@@ -179,9 +194,10 @@ center `c = (w/2, h/2)`, and `t0` = the transform snapshotted at drag-start:
 Every move event, recompute fresh from `t0` (never from the previous
 frame's live transform — avoids drift):
 
-1. `pivotUV = localAnchorPoint(w, h, handle, isCenterAnchorModifier(ev))` —
-   center `c` if Alt held, else the opposite corner/edge from the grabbed
-   handle.
+1. `pivotUV = resolveAnchor({ x: 0, y: 0, w, h }, handle, isCenterAnchorModifier(ev))`
+   — center `c` if Alt held, else the opposite corner/edge from the grabbed
+   handle. (Same function the rect case uses; a zero-origin rect's own
+   coordinate space is exactly the local u/v buffer space.)
 2. `pivotWorld = forwardPoint({srcRect, transform: t0}, pivotUV.u, pivotUV.v)`
    — this point must stay visually fixed on screen for the rest of the drag.
 3. Un-rotate the live mouse position around `pivotWorld` using `t0.rot`,
@@ -193,12 +209,12 @@ frame's live transform — avoids drift):
 5. `sx = px / handleOffset.u`, `sy = py / handleOffset.v` (skip an axis
    whose offset is 0 — dragging an edge handle only ever drives one axis
    here).
-6. Resolve `locked = HANDLES_CORNER.includes(handle) ? !isProportionalModifier(ev) : isProportionalModifier(ev)`
-   — same flip as the rect case (corner defaults locked, Shift frees it;
-   edge defaults free, Shift locks it). If `locked`: corner handle →
-   `sx = sy` = whichever of `|sx|, |sy|` is larger (sign preserved per axis,
-   matching the rect case's larger-axis rule below); edge handle → copy the
-   driven axis's factor onto the other axis.
+6. `if (isAspectLocked(handle, isProportionalModifier(ev)))`: corner handle
+   → `const m = dominantMagnitude(sx, sy); sx = Math.sign(sx) * m; sy = Math.sign(sy) * m;`
+   (same shared helper the rect case's corner proportional-lock uses below,
+   just re-signed per axis afterward since a float's scale can be negative
+   — a flip — unlike the rect case's always-nonnegative `kx`/`ky`); edge
+   handle → copy the driven axis's factor onto the other axis.
 7. Solve `tx, ty` so that `(sx, sy, t0.rot)` reproduces `pivotWorld` at
    `pivotUV` exactly: since `forwardPoint` maps the buffer center via
    translation alone (rotation/scale only affect the offset from center),
@@ -216,13 +232,14 @@ inline in `tools.js`'s drag handler.
 ## Proportional-lock algorithm (corner handles, both rect and float cases)
 
 Given the anchor point and the raw (unconstrained) target point, compute
-per-axis ratios `kx = |px - anchor.x| / origW`, `ky = |py - anchor.y| / origH`
-(rect case; the float case's `sx`/`sy` from step 5 above serve as the
-equivalent per-axis ratios), then use `k = max(kx, ky)` for both axes —
-whichever axis moved further (proportionally) drives the size, ensuring
-the shape reaches at least as far as the cursor on its dominant axis. This
-is the same rule the two reference apps' corner-drag proportional scaling
-produces in practice.
+per-axis ratios `kx = |px - anchor.x| / origW`, `ky = |py - anchor.y| / origH`,
+then `k = dominantMagnitude(kx, ky)` for both axes — whichever axis moved
+further (proportionally) drives the size, ensuring the shape reaches at
+least as far as the cursor on its dominant axis. This is the same shared
+helper (and the same rule) the float case's step 6 above uses; the rect
+case never needs the re-signing step since `kx`/`ky` are already
+non-negative distances. This is the same rule the two reference apps'
+corner-drag proportional scaling produces in practice.
 
 ## Rendering
 
@@ -233,11 +250,14 @@ feeding into them change.
 
 ## Testing
 
-- `resizeAnchor.js`'s `resolveAnchor`/`resizeRectFromHandle` are pure
-  geometry → full `node --test` coverage: each handle × each modifier
-  combination × a couple of aspect ratios, plus the `target`-clamp behavior
-  carried over from `resizerect.js`'s existing tests (that test file's
-  cases move over rather than getting dropped).
+- `resizeAnchor.js`'s `resolveAnchor`, `isAspectLocked`, `dominantMagnitude`,
+  and `resizeRectFromHandle` are pure geometry → full `node --test` coverage:
+  each handle × each modifier combination × a couple of aspect ratios, plus
+  the `target`-clamp behavior carried over from `resizerect.js`'s existing
+  tests (that test file's cases move over rather than getting dropped).
+  `isAspectLocked`/`dominantMagnitude` get their own small direct test
+  cases too, since the float-scale code depends on them independently of
+  `resizeRectFromHandle`.
 - The float-scale rotation math (step-by-step function above) is pure and
   node-testable: same per-handle × per-modifier matrix, plus at least one
   case with `t0.rot !== 0` to confirm the pivot stays fixed under rotation.
