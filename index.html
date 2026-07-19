@@ -43,13 +43,40 @@
 </main>
 <footer id="status-bar"><span id="status-pos"></span><span id="status-zoom"></span><span id="status-tool"></span></footer>
 <dialog id="dlg-export">
-  <h3>Export</h3>
+  <h3>Export Sheet</h3>
   <div class="row">
     <button id="export-png" class="btn-sm">Sheet PNG (flattened)</button>
     <button id="export-frames" class="btn-sm" disabled>Frames JSON</button>
     <button id="export-tiles" class="btn-sm" disabled>Tiles JSON</button>
+    <button id="export-tsx" class="btn-sm" disabled>Tiled TSX</button>
+    <button id="export-anim" class="btn-sm" disabled>Animation Export…</button>
+    <button id="export-c99" class="btn-sm">C99 Header…</button>
   </div>
   <div class="row dlg-actions"><button id="export-cancel" class="btn-sm">Cancel</button></div>
+</dialog>
+<dialog id="dlg-export-anim">
+  <h3>Animation Export</h3>
+  <div class="dlg-grid">
+    <span>Animation</span><select id="ea-animation" style="grid-column: 2 / span 3"></select>
+  </div>
+  <div class="row">
+    <button id="ea-gif" class="btn-sm">GIF</button>
+    <button id="ea-spritesheet" class="btn-sm">Spritesheet (PNG+JSON)</button>
+    <button id="ea-sequence" class="btn-sm">Image Sequence</button>
+  </div>
+  <div class="row dlg-actions"><button id="ea-cancel" class="btn-sm">Cancel</button></div>
+</dialog>
+<dialog id="dlg-export-c99">
+  <h3>C99 Header Export</h3>
+  <div class="dlg-grid">
+    <span>Target</span>
+    <select id="ec-target" style="grid-column: 2 / span 3">
+      <option value="generic8">Generic 8bpp indexed</option>
+      <option value="gba4">Game Boy Advance (4bpp packed)</option>
+      <option value="nes2">NES (2bpp planar CHR)</option>
+    </select>
+  </div>
+  <div class="row dlg-actions"><button id="ec-export" class="btn-sm">Export</button><button id="ec-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-newproject">
   <h3>New Project</h3>
