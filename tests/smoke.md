@@ -603,6 +603,21 @@ is a pass condition for the whole run, not just the final step.
     breaks (dashed separators / detached halves) and frame order survive
     the round trip exactly. Same native-picker exemption as sections 12-13.
 
+## 18. v6: thumbnail smoothing, timeline dock resize
+
+100. [A] Project Settings > General > Display has a "Smooth thumbnails"
+     checkbox, checked by default. With a sprite sheet much larger than a
+     frame, layer thumbnails (Layers panel) and timeline strip thumbnails
+     shrink cleanly (no dropped-pixel aliasing); unchecking it and saving
+     switches both back to blocky nearest-neighbor. Upscaled thumbnails
+     (sprite smaller than the thumbnail box) stay crisp nearest-neighbor
+     either way.
+101. [M] Drag the thin handle at the top edge of the timeline dock: the
+     panel's height follows the cursor (up = taller, down = shorter,
+     clamped to a sane range) and the frame thumbnails resize with it —
+     taller panel, bigger/sharper thumbnails. Reload the page: the chosen
+     height persists (stored in `localStorage`, not the project file).
+
 ## Pass criteria
 
 - All **[A]** items complete with no unexpected state and zero console

@@ -255,6 +255,9 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 #timeline-dock { grid-column: 2; grid-row: 2; height: 140px; background: var(--bg2); border-top: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden; }
 #timeline-dock[hidden] { display: none; }
+.timeline-resize-handle { flex: none; height: 5px; margin-top: -1px; cursor: ns-resize;
+  touch-action: none; background: transparent; }
+.timeline-resize-handle:hover, .timeline-resize-handle.dragging { background: var(--accent); }
 .timeline-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .timeline-header { display: flex; align-items: center; gap: 6px; padding: 4px 8px;
   border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }

@@ -19,7 +19,19 @@ import { copyRegion } from '../core/pixels.js';
 import { commitBreakApartStrip } from './frames.js';
 import { setPreviewBitmap } from './previewpanel.js';
 
-const THUMB_SIZE = 64;
+// Thumbnail size tracks the dock's height (see the resize handle in
+// mountTimeline) so a taller panel actually redraws sharper thumbnails
+// instead of just CSS-stretching a fixed 64px bitmap.
+let THUMB_SIZE = 64;
+const THUMB_MIN = 32, THUMB_MAX = 200;
+// Vertical space every cell spends on things that AREN'T the thumbnail --
+// strip padding + cell padding/gap + the duration/step control row --
+// subtracted from the strip's available height to size the thumbnail.
+// Approximate (not measured live) since the controls row's own height
+// depends on THUMB_SIZE only through the cell's width, not its height.
+const THUMB_CHROME = 44;
+const DOCK_MIN = 100, DOCK_MAX = 400;
+const DOCK_HEIGHT_KEY = 'pixelartist.timelineDockHeight';
 const SPEEDS = [0.25, 0.5, 1, 2];
 
 // ------------------------------------------------------------- drawing helpers
@@ -236,7 +248,51 @@ export function mountTimeline(el) {
   main.className = 'timeline-main';
   main.append(header, strip);
 
-  el.append(main);
+  // ---- dock resize (height only -- width already spans the fixed gap
+  // between the tool palette and side panels) ----
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'timeline-resize-handle';
+  resizeHandle.title = 'Drag to resize the timeline panel';
+
+  const savedHeight = parseInt(localStorage.getItem(DOCK_HEIGHT_KEY), 10);
+  if (Number.isFinite(savedHeight)) {
+    el.style.height = Math.max(DOCK_MIN, Math.min(DOCK_MAX, savedHeight)) + 'px';
+  }
+
+  let dragStartY = 0, dragStartH = 0, dragging = false, resizeRaf = null;
+  resizeHandle.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    dragStartY = e.clientY;
+    dragStartH = el.getBoundingClientRect().height;
+    resizeHandle.classList.add('dragging');
+    resizeHandle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizeHandle.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const next = Math.max(DOCK_MIN, Math.min(DOCK_MAX, dragStartH + (dragStartY - e.clientY)));
+    el.style.height = next + 'px';
+    if (resizeRaf != null) return;
+    resizeRaf = requestAnimationFrame(() => { resizeRaf = null; render(); });
+  });
+  function endResizeDrag() {
+    if (!dragging) return;
+    dragging = false;
+    resizeHandle.classList.remove('dragging');
+    localStorage.setItem(DOCK_HEIGHT_KEY, el.getBoundingClientRect().height.toFixed(0));
+  }
+  resizeHandle.addEventListener('pointerup', endResizeDrag);
+  resizeHandle.addEventListener('pointercancel', endResizeDrag);
+
+  el.append(resizeHandle, main);
+
+  // Derives THUMB_SIZE from however much vertical room the strip actually
+  // has right now -- called at the top of every render() so both the
+  // dock-resize drag and ordinary content changes keep it current.
+  function updateThumbSize() {
+    const available = strip.clientHeight - THUMB_CHROME;
+    THUMB_SIZE = Math.max(THUMB_MIN, Math.min(THUMB_MAX, Math.round(available)));
+  }
 
   // ---- player state ----
   let playing = false;
@@ -419,9 +475,12 @@ export function mountTimeline(el) {
     const cell = document.createElement('div');
     cell.className = 'timeline-cell';
     cell.draggable = !anim.strip;
+    cell.style.width = THUMB_SIZE + 'px';
 
     const thumbCanvas = document.createElement('canvas');
     thumbCanvas.width = THUMB_SIZE; thumbCanvas.height = THUMB_SIZE;
+    thumbCanvas.style.width = THUMB_SIZE + 'px';
+    thumbCanvas.style.height = THUMB_SIZE + 'px';
     thumbCanvas.className = 'timeline-thumb';
     const frame = sheet.frames.find(f => f.id === entry.frameId);
     if (frame) drawFit(thumbCanvas, copyRegion(getFlat(sheet), frame.x, frame.y, frame.w, frame.h));
@@ -542,6 +601,7 @@ export function mountTimeline(el) {
   function render() {
     if (state.mode !== 'sprites') { el.hidden = true; stopPlaying(); return; }
     el.hidden = false;
+    updateThumbSize();
     invalidateFlat();
     const sheet = activeSheet();
     renderAnimSelect(sheet);
