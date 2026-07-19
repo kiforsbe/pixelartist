@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS = {
   frameW: 16, frameH: 16,
   durationMs: 100,
   smoothThumbnails: true,
+  targetPlatform: 'none', // see js/core/platforms.js -- drives live edit-time compatibility warnings
 };
 const MAX_DIM = 4096;
 
@@ -579,10 +580,10 @@ export function deserializeProject(json, imagesByPath) {
   if (!v.ok) throw new Error(v.error);
   return {
     version: json.version, name: json.name,
-    // onion falls back to a fresh default for files saved before this field
-    // existed -- deserializeProject only ever runs on a freshly-parsed json,
-    // so this is never aliased to another live project.
-    settings: { onion: defaultOnionSettings(), ...json.settings },
+    // onion/targetPlatform fall back to their defaults for files saved
+    // before those fields existed -- deserializeProject only ever runs on a
+    // freshly-parsed json, so this is never aliased to another live project.
+    settings: { onion: defaultOnionSettings(), targetPlatform: DEFAULT_SETTINGS.targetPlatform, ...json.settings },
     activePaletteId: json.activePaletteId ?? null,
     palettes: json.palettes ?? [],
     sheets: json.sheets.map(s => {

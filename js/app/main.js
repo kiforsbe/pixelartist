@@ -13,6 +13,7 @@ import {
 import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from './animationExport.js';
 import { encodeGif } from '../core/gif.js';
 import { buildPalette, quantizeBitmap, colorFrequency } from '../core/quantize.js';
+import { PLATFORMS, checkItemAgainstPlatform } from '../core/platforms.js';
 import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
 import { copyRegion } from '../core/pixels.js';
@@ -60,6 +61,7 @@ function positiveIntField(el) {
 const tabSprites = document.getElementById('tab-sprites');
 const tabTiles = document.getElementById('tab-tiles');
 const statusTool = document.getElementById('status-tool');
+const statusPlatform = document.getElementById('status-platform');
 const statusPos = document.getElementById('status-pos');
 const statusZoom = document.getElementById('status-zoom');
 const canvasHost = document.getElementById('canvas-host');
@@ -446,6 +448,36 @@ function updateStatusTool() { statusTool.textContent = `Tool: ${state.tool}`; }
 on('tool', updateStatusTool);
 updateStatusTool();
 
+// Live per-item compatibility check against project.settings.targetPlatform
+// (js/core/platforms.js) -- only while a specific frame/tile is open in its
+// own editor (state.view 'frame'/'tile'), since that's the one item whose
+// pixels/size are meaningful to check in isolation. Recomputed on every
+// pixel/history/selection/project/view change; cheap enough at this app's
+// sheet sizes to just redo the flatten+color-scan rather than cache it.
+function updateStatusPlatform() {
+  const project = state.project;
+  const sheet = activeSheet();
+  const platformId = project?.settings?.targetPlatform ?? 'none';
+  const rect = platformId === 'none' || !sheet ? null
+    : state.view === 'frame' ? sheet.frames?.find(f => f.id === state.editingFrameId)
+    : state.view === 'tile' ? sheet.tiles?.find(t => t.id === state.editingTileId)
+    : null;
+  if (!rect) { statusPlatform.textContent = ''; statusPlatform.title = ''; return; }
+
+  const bitmap = copyRegion(flattenSheet(sheet), rect.x, rect.y, rect.w, rect.h);
+  const warnings = checkItemAgainstPlatform(platformId, { colors: colorFrequency([bitmap]), w: rect.w, h: rect.h });
+  const label = PLATFORMS[platformId].label;
+  statusPlatform.textContent = warnings.length ? `${label} ⚠ ${warnings.length}` : `${label} ✓`;
+  statusPlatform.title = warnings.join('\n');
+  statusPlatform.classList.toggle('status-platform-warn', warnings.length > 0);
+}
+on('pixels', updateStatusPlatform);
+on('history', updateStatusPlatform);
+on('selection', updateStatusPlatform);
+on('project', updateStatusPlatform);
+on('view', updateStatusPlatform);
+updateStatusPlatform();
+
 // ---- canvas view ----
 const canvasView = new CanvasView(canvasHost);
 canvasView.onStatus = ({ x, y, zoom }) => {
@@ -753,6 +785,8 @@ const psFrameW = document.getElementById('ps-frame-w');
 const psFrameH = document.getElementById('ps-frame-h');
 const psDurationMount = document.getElementById('ps-duration-control');
 const psSmoothThumbnails = document.getElementById('ps-smooth-thumbnails');
+const psTargetPlatform = document.getElementById('ps-target-platform');
+for (const [id, p] of Object.entries(PLATFORMS)) psTargetPlatform.appendChild(new Option(p.label, id));
 const psOk = document.getElementById('ps-ok');
 const psCancel = document.getElementById('ps-cancel');
 markDefaultAction(dlgProjectSettings, psOk);
@@ -911,6 +945,7 @@ function openProjectSettings(tab) {
   psFrameW.value = String(settings.frameW);
   psFrameH.value = String(settings.frameH);
   psSmoothThumbnails.checked = settings.smoothThumbnails !== false;
+  psTargetPlatform.value = settings.targetPlatform ?? 'none';
   psSpriteLock.resnap();
   psTileSheetLock.resnap();
   psTileSizeLock.resnap();
@@ -976,6 +1011,7 @@ psOk.addEventListener('click', () => {
     ...restSettings, ...dims, durationMs: psDurationValue.durationMs,
     ...(psDurationValue.baseFps != null ? { baseFps: psDurationValue.baseFps, baseStep: psDurationValue.baseStep } : {}),
     smoothThumbnails: psSmoothThumbnails.checked,
+    targetPlatform: psTargetPlatform.value,
   };
   state.commands.push({
     label: 'edit project settings',

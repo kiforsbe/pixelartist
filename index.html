@@ -41,7 +41,7 @@
   </aside>
   <div id="timeline-dock"></div>
 </main>
-<footer id="status-bar"><span id="status-pos"></span><span id="status-zoom"></span><span id="status-tool"></span></footer>
+<footer id="status-bar"><span id="status-pos"></span><span id="status-zoom"></span><span id="status-tool"></span><span id="status-platform"></span></footer>
 <dialog id="dlg-export-project" class="dlg-wide">
   <h3>Export Project</h3>
   <div id="ep-sheets"></div>
@@ -97,6 +97,10 @@
     <span class="dlg-section-header">Display</span>
     <span>Smooth thumbnails</span>
     <input id="ps-smooth-thumbnails" type="checkbox" style="grid-column: 2; justify-self: start;">
+
+    <span class="dlg-section-header">Compatibility</span>
+    <span>Target platform</span>
+    <select id="ps-target-platform" style="grid-column: 2 / span 3"></select>
   </div>
   <div id="ps-page-onion" hidden>
     <p class="about-meta">Per-step color overrides for onion-skin ghosts in the frame editor. Leave a step on "default" to use that direction's toolbar color.</p>
