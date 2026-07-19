@@ -381,14 +381,20 @@ is a pass condition for the whole run, not just the final step.
     Each of create/reorder/break-apart is one undo step. An intact strip
     selected with the frame tool shows a per-member width chain plus
     overall width.
-77. [A] Mouse wheel over the canvas steps zoom through the table
+77. [A] New Project dialog's Frame time field is the shared ms/fps duration
+    control (same as the Animation panel); creating a project with fps
+    values set round-trips `settings.baseFps`/`baseStep`. Edit menu >
+    Project Settings opens the same fields pre-filled from the current
+    project, edits apply as one undoable command, and new animations
+    created afterward seed their base duration from the updated settings.
+78. [A] Mouse wheel over the canvas steps zoom through the table
     (`0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, ...`); repeated
     scroll-in/scroll-out reaches both 0.25x and 16x without sticking at
     any intermediate level, and the status bar zoom readout matches.
-78. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
+79. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
     checkerboard transparency background scrolls with the content
     (anchored to canvas content, not fixed to the viewport).
-79. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
+80. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
     layer 1 — its thumbnail updates continuously during the stroke (not
     just on mouse-up). Add layer 2 and draw different pixels on it — the
     two thumbnails show distinct content, both live while drawing.
@@ -399,7 +405,7 @@ is a pass condition for the whole run, not just the final step.
 
 ## 16. v3: Import, move tool, rename sheet
 
-80. [A] Import sheet from image: drive the fallback `<input type="file">`
+81. [A] Import sheet from image: drive the fallback `<input type="file">`
     (used when the File System Access API is unavailable; Playwright can
     also intercept it via its file-chooser hook) with a small generated
     PNG of known pixel values. Click "Import…", supply the file: a new
@@ -407,33 +413,33 @@ is a pass condition for the whole run, not just the final step.
     extension, its dimensions match the image, and layer 0's pixels match
     the PNG's. Undo removes the sheet and restores the prior active
     sheet/layer.
-81. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
+82. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
     target region floats (source hole appears, outline + handles shown);
     the layer bitmap is NOT modified beyond the source cut until commit.
     `Enter` commits at the new position; stepwise undo: Ctrl+Z undoes the
     commit, then the drag, then the float itself.
-82. [A] Move tool with a marquee: only the selected region floats; drag,
+83. [A] Move tool with a marquee: only the selected region floats; drag,
     then `Escape` — pixels restored exactly to the original spot.
-83. [A] Transform handles: drag a corner handle (scale, incl. pull-through
+84. [A] Transform handles: drag a corner handle (scale, incl. pull-through
     flip), drag the rotation knob (free rotate); commit renders the
     nearest-neighbor result; each completed drag is one undo step. Scale
     shows W×H pills with Δ (scaled content size); rotate shows an angle
     pill near the knob.
-84. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
+85. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
     each layer; single-layer default otherwise. In the frame editor a
     committed float is clipped to the frame rect.
-85. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
+86. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
     dialog opens pre-filled with the current name. OK with a new name:
     the sheet selector label updates immediately and Export filenames
     (e.g. the flattened PNG download) use the new name; undo restores the
     old name in the selector. OK with an empty/whitespace name: alert
     "Name cannot be empty." and the dialog stays open. Cancel closes
     without changes.
-86. [A] Clipboard: `Ctrl+C` copies the marquee selection, `Ctrl+V` pastes a
+87. [A] Clipboard: `Ctrl+C` copies the marquee selection, `Ctrl+V` pastes a
     floating copy (source intact) that commits on `Enter` or tool switch.
     `Ctrl+X` cuts (one undo step); `Ctrl+Alt+C`/`Ctrl+Alt+X` capture all
     layers. Paste lands at the source position when visible, else centered.
-86a. [A] OS clipboard sync: after `Ctrl+C`/`Ctrl+Alt+C`, `navigator.clipboard
+87a. [A] OS clipboard sync: after `Ctrl+C`/`Ctrl+Alt+C`, `navigator.clipboard
     .read()` has one `image/png` item matching the copied region's size
     (merged/blended pixels for `+Alt`). With the internal clipboard empty
     (fresh reload), writing a PNG to the OS clipboard and dispatching a real
@@ -441,54 +447,54 @@ is a pass condition for the whole run, not just the final step.
     centered in the target rect, that commits normally. With the internal
     clipboard non-empty, `Ctrl+V` still prefers it (source position,
     per-layer reattachment) over the OS clipboard.
-86b. [M] Cross-app clipboard: copy a region in PixelArtist, `Ctrl+V` into
+87b. [M] Cross-app clipboard: copy a region in PixelArtist, `Ctrl+V` into
     Word/Paint/another app — the flattened image pastes correctly. Copy an
     image in Windows Photos/Snipping Tool, switch to PixelArtist with the
     internal clipboard empty, `Ctrl+V` — it lands as a floating selection
     centered on the canvas.
-87. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
+88. [A] Auto-commit: with a float pending, pressing `B` (pencil) commits it
     first; switching sheets or opening the frame editor also commits.
 
 ## 17. v4: Strip segments
 
-88. [A] With the frame tool, an intact strip's SELECTED segment always
+89. [A] With the frame tool, an intact strip's SELECTED segment always
     shows its chrome (topmost, above label overlays): "+" insert call-outs
     above each frame boundary and "✂" split call-outs below each interior
     boundary; hovering a part highlights it; clicking "+" inserts a blank
     frame there (pixel-carrying tail shift), one undo step. Chrome only
     ever appears for the segment containing `state.selectedFrameId` —
     a non-selected strip shows no chrome until a member of it is clicked.
-89. [A] Clicking "✂" between two frames of a segment adds a break (a
+90. [A] Clicking "✂" between two frames of a segment adds a break (a
     dashed separator appears once the two halves are no longer touching);
     one undo step.
-90. [M] Dragging a whole segment with the frame tool (grab any member, not
+91. [M] Dragging a whole segment with the frame tool (grab any member, not
     a grip) moves every member's rect together, metadata-only — pixels stay
     put; undo restores all member positions in one step. Moving the segment
     WITH its pixels is the move tool's frame-float (item 21b).
-91. [M] Dragging a segment's end near another segment of the SAME
+92. [M] Dragging a segment's end near another segment of the SAME
     animation with matching frame size snaps (green outline) and merges
     the two into one ordered run; undo restores the prior two-segment
     layout.
-92. [M] Dragging a segment's end near a segment of a DIFFERENT animation
+93. [M] Dragging a segment's end near a segment of a DIFFERENT animation
     snaps and transfers it into that animation (including deleting the
     source animation entirely when it becomes empty); undo restores the
     original animation, its frames, and the deleted animation.
-93. [M] Dragging an end-of-segment grip grows (adds blank frames) or
+94. [M] Dragging an end-of-segment grip grows (adds blank frames) or
     shrinks (removes frames; pixels remain on the sheet) that end;
     verify both the left and right ends independently; undo restores the
     prior frame count and any removed frames/pixels.
-94. [A] Selecting a member frame of a segment and pressing `Delete` removes
+95. [A] Selecting a member frame of a segment and pressing `Delete` removes
     it AND closes the gap (rest of the segment shifts to stay contiguous);
     undo restores the frame, its position, and its pixels.
-95. [A] Double-clicking a member frame of a strip (frame tool, two quick
+96. [A] Double-clicking a member frame of a strip (frame tool, two quick
     downs on the same frame) opens the frame editor on that frame; "← Back
     to sheet" returns to the sheet view with the timeline's animation
     picker showing that frame's animation selected.
-96. [A] With a strip animation (`strip: true`) selected in the timeline,
+97. [A] With a strip animation (`strip: true`) selected in the timeline,
     cells have no ✕ remove button and are not draggable (`cell.draggable`
     is `false`); "Add selected frame" is disabled. Editing a cell's
     duration still works and is still one undo step.
-97. [M] Save (packed or unpacked), reload, and open the file: segment
+98. [M] Save (packed or unpacked), reload, and open the file: segment
     breaks (dashed separators / detached halves) and frame order survive
     the round trip exactly. Same native-picker exemption as sections 12-13.
 

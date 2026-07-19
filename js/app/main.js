@@ -1,7 +1,7 @@
 import { state, on, emit, activeSheet, activeLayer, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
-import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext } from '../core/model.js';
+import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext, DEFAULT_SETTINGS } from '../core/model.js';
 import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../core/strips.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { CanvasView } from '../ui/canvasview.js';
@@ -12,6 +12,7 @@ import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mo
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
 import { mountAnimationsPanel } from '../ui/animpanel.js';
+import { buildBaseDurationControl } from '../ui/baseDurationControl.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
 import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../ui/floatsession.js';
@@ -28,6 +29,16 @@ function isTypingTarget(el) {
   if (!el) return false;
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
   return !!(el.closest && el.closest('dialog[open]'));
+}
+
+// Shared field coercion for the New Project / Project Settings dialogs.
+function sheetDimField(el) {
+  const v = parseInt(el.value, 10);
+  return (Number.isNaN(v) || v < 1) ? null : Math.min(4096, v);
+}
+function positiveIntField(el) {
+  const v = parseInt(el.value, 10);
+  return (Number.isNaN(v) || v < 1) ? null : v;
 }
 
 // ---- element refs ----
@@ -63,7 +74,13 @@ const npTileW = document.getElementById('np-tile-w');
 const npTileH = document.getElementById('np-tile-h');
 const npFrameW = document.getElementById('np-frame-w');
 const npFrameH = document.getElementById('np-frame-h');
-const npDuration = document.getElementById('np-duration');
+const npDurationMount = document.getElementById('np-duration-control');
+let npDurationValue = { durationMs: DEFAULT_SETTINGS.durationMs, baseFps: undefined, baseStep: undefined };
+const npDurationControl = buildBaseDurationControl({
+  getValue: () => npDurationValue,
+  setValue: (v) => { npDurationValue = v; },
+});
+npDurationMount.appendChild(npDurationControl.el);
 const npCreate = document.getElementById('np-create');
 const npCancel = document.getElementById('np-cancel');
 
@@ -621,7 +638,8 @@ const MENUS = [
   ] },
   { label: 'Edit', items: [
     { action: 'edit.undo' }, { action: 'edit.redo' }, { separator: true },
-    { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' },
+    { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' }, { separator: true },
+    { action: 'edit.projectSettings' },
   ] },
   { label: 'View', items: [
     { action: 'view.toggleLabels' }, { action: 'view.toggleSequences' }, { separator: true },
@@ -661,40 +679,104 @@ defineAction('file.new', {
   label: 'New',
   run: () => {
     if (state.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
+    npDurationValue = { durationMs: DEFAULT_SETTINGS.durationMs, baseFps: undefined, baseStep: undefined };
+    npDurationControl.refresh();
     dlgNewProject.showModal();
   },
 });
 npCancel.addEventListener('click', () => dlgNewProject.close());
 npCreate.addEventListener('click', () => {
   // Sheet dims (sprite/tile sheet W/H) are clamped to the 1..4096 range;
-  // everything else (tile size, frame size, duration) just needs to be a
-  // positive integer. Any NaN or sub-1 value aborts with an alert rather
-  // than silently coercing, so e.g. a blank or 0 sprite width is rejected.
-  const sheetDim = (el) => {
-    const v = parseInt(el.value, 10);
-    return (Number.isNaN(v) || v < 1) ? null : Math.min(4096, v);
+  // everything else (tile size, frame size) just needs to be a positive
+  // integer. Any NaN or sub-1 value aborts with an alert rather than
+  // silently coercing, so e.g. a blank or 0 sprite width is rejected.
+  // Frame time comes from npDurationControl, which always self-coerces to a
+  // valid positive value -- it never needs this validation pass.
+  const dims = {
+    spriteSheetW: sheetDimField(npSpriteW), spriteSheetH: sheetDimField(npSpriteH),
+    tileSheetW: sheetDimField(npTileSheetW), tileSheetH: sheetDimField(npTileSheetH),
+    tileW: positiveIntField(npTileW), tileH: positiveIntField(npTileH),
+    frameW: positiveIntField(npFrameW), frameH: positiveIntField(npFrameH),
   };
-  const positiveInt = (el) => {
-    const v = parseInt(el.value, 10);
-    return (Number.isNaN(v) || v < 1) ? null : v;
-  };
-  const spriteSheetW = sheetDim(npSpriteW);
-  const spriteSheetH = sheetDim(npSpriteH);
-  const tileSheetW = sheetDim(npTileSheetW);
-  const tileSheetH = sheetDim(npTileSheetH);
-  const tileW = positiveInt(npTileW);
-  const tileH = positiveInt(npTileH);
-  const frameW = positiveInt(npFrameW);
-  const frameH = positiveInt(npFrameH);
-  const durationMs = positiveInt(npDuration);
-  const settings = { spriteSheetW, spriteSheetH, tileSheetW, tileSheetH, tileW, tileH, frameW, frameH, durationMs };
-  if (Object.values(settings).some(v => v == null)) {
+  if (Object.values(dims).some(v => v == null)) {
     alert('Please enter valid positive numbers for all fields.');
     return;
   }
+  const settings = {
+    ...dims, durationMs: npDurationValue.durationMs,
+    ...(npDurationValue.baseFps != null ? { baseFps: npDurationValue.baseFps, baseStep: npDurationValue.baseStep } : {}),
+  };
   state.fileHandle = null; state.dirHandle = null; state.saveMode = null;
   setProject(newDefaultProject(settings));
   dlgNewProject.close();
+});
+
+// ---- Project Settings ----
+const dlgProjectSettings = document.getElementById('dlg-projectsettings');
+const psSpriteW = document.getElementById('ps-sprite-w');
+const psSpriteH = document.getElementById('ps-sprite-h');
+const psTileSheetW = document.getElementById('ps-tile-sheet-w');
+const psTileSheetH = document.getElementById('ps-tile-sheet-h');
+const psTileW = document.getElementById('ps-tile-w');
+const psTileH = document.getElementById('ps-tile-h');
+const psFrameW = document.getElementById('ps-frame-w');
+const psFrameH = document.getElementById('ps-frame-h');
+const psDurationMount = document.getElementById('ps-duration-control');
+const psOk = document.getElementById('ps-ok');
+const psCancel = document.getElementById('ps-cancel');
+
+let psDurationValue = { durationMs: DEFAULT_SETTINGS.durationMs, baseFps: undefined, baseStep: undefined };
+const psDurationControl = buildBaseDurationControl({
+  getValue: () => psDurationValue,
+  setValue: (v) => { psDurationValue = v; },
+});
+psDurationMount.appendChild(psDurationControl.el);
+
+defineAction('edit.projectSettings', {
+  label: 'Project Settings…',
+  run: () => {
+    const settings = state.project?.settings;
+    if (!settings) return;
+    psSpriteW.value = String(settings.spriteSheetW);
+    psSpriteH.value = String(settings.spriteSheetH);
+    psTileSheetW.value = String(settings.tileSheetW);
+    psTileSheetH.value = String(settings.tileSheetH);
+    psTileW.value = String(settings.tileW);
+    psTileH.value = String(settings.tileH);
+    psFrameW.value = String(settings.frameW);
+    psFrameH.value = String(settings.frameH);
+    psDurationValue = { durationMs: settings.durationMs, baseFps: settings.baseFps, baseStep: settings.baseStep };
+    psDurationControl.refresh();
+    dlgProjectSettings.showModal();
+  },
+  isEnabled: () => !!state.project,
+});
+psCancel.addEventListener('click', () => dlgProjectSettings.close());
+psOk.addEventListener('click', () => {
+  const project = state.project;
+  if (!project) { dlgProjectSettings.close(); return; }
+  const dims = {
+    spriteSheetW: sheetDimField(psSpriteW), spriteSheetH: sheetDimField(psSpriteH),
+    tileSheetW: sheetDimField(psTileSheetW), tileSheetH: sheetDimField(psTileSheetH),
+    tileW: positiveIntField(psTileW), tileH: positiveIntField(psTileH),
+    frameW: positiveIntField(psFrameW), frameH: positiveIntField(psFrameH),
+  };
+  if (Object.values(dims).some(v => v == null)) {
+    alert('Please enter valid positive numbers for all fields.');
+    return;
+  }
+  const before = { ...project.settings };
+  const after = {
+    ...dims, durationMs: psDurationValue.durationMs,
+    ...(psDurationValue.baseFps != null ? { baseFps: psDurationValue.baseFps, baseStep: psDurationValue.baseStep } : {}),
+  };
+  state.commands.push({
+    label: 'edit project settings',
+    do() { project.settings = { ...after }; },
+    undo() { project.settings = { ...before }; },
+  });
+  markDirty();
+  dlgProjectSettings.close();
 });
 
 // ---- file: Open ----

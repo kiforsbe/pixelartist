@@ -61,10 +61,24 @@
     <span>×</span><input id="np-tile-h" type="number" min="1" max="256" value="16">
     <span>Frame size</span><input id="np-frame-w" type="number" min="1" max="1024" value="16">
     <span>×</span><input id="np-frame-h" type="number" min="1" max="1024" value="16">
-    <span>Frame time</span><input id="np-duration" type="number" min="1" value="100">
-    <span>ms</span><span></span>
+    <span>Frame time</span><div id="np-duration-control" style="grid-column: 2 / span 3"></div>
   </div>
   <div class="row"><button id="np-create" class="btn-sm">Create</button><button id="np-cancel" class="btn-sm">Cancel</button></div>
+</dialog>
+<dialog id="dlg-projectsettings">
+  <h3>Project Settings</h3>
+  <div class="dlg-grid">
+    <span>Sprite sheet</span><input id="ps-sprite-w" type="number" min="1" max="4096" value="256">
+    <span>×</span><input id="ps-sprite-h" type="number" min="1" max="4096" value="256">
+    <span>Tile sheet</span><input id="ps-tile-sheet-w" type="number" min="1" max="4096" value="256">
+    <span>×</span><input id="ps-tile-sheet-h" type="number" min="1" max="4096" value="256">
+    <span>Tile size</span><input id="ps-tile-w" type="number" min="1" max="256" value="16">
+    <span>×</span><input id="ps-tile-h" type="number" min="1" max="256" value="16">
+    <span>Frame size</span><input id="ps-frame-w" type="number" min="1" max="1024" value="16">
+    <span>×</span><input id="ps-frame-h" type="number" min="1" max="1024" value="16">
+    <span>Frame time</span><div id="ps-duration-control" style="grid-column: 2 / span 3"></div>
+  </div>
+  <div class="row"><button id="ps-ok" class="btn-sm">OK</button><button id="ps-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-newsheet">
   <h3>New Sheet</h3>
