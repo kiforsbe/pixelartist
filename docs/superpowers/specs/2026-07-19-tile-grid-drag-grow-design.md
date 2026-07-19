@@ -48,17 +48,37 @@ move" below).
 
 ## Removed
 
-- `buildAddGridDialog`, `drawAddGridPreview`, `addGridPreviewOpts`,
-  `commitAddGrid` (js/ui/tilemode.js) — the whole modal-dialog grid-creation
-  path.
+- `buildAddGridDialog`, `drawAddGridPreview`, `addGridPreviewOpts`
+  (js/ui/tilemode.js) — the modal-dialog grid-creation UI. Both are
+  dynamically-constructed `<dialog>` elements (`document.createElement`),
+  not markup in index.html, so nothing there needs touching.
 - The "➕ Grid" button in the Tiles panel (js/ui/tilemode.js's
-  `mountTilePanel`) — only "➕ Autotiles" remains there. Grid creation is
-  now purely: drag a tile on the canvas, then drag its edge grip.
-- `createTileGrid`'s `{ x, y, cellW, cellH, cols, rows, spacingX, spacingY }`
-  dialog-driven call site goes away, but the function itself
-  (`core/tilegrids.js`) stays — `growTileIntoGrid` (new, below) calls it
-  with `cols: 1, rows: 1` to promote a standalone tile into a grid, then
-  grows it.
+  `mountTilePanel`) — only "➕ Autotiles" remains there. Standalone-tile
+  grid creation is now purely: drag a tile on the canvas, then drag its
+  edge grip.
+
+**NOT removed** (corrected after re-reading the actual call sites —
+`commitAddGrid` and `createTileGrid` are load-bearing outside the dialog
+being removed):
+- `commitAddGrid` (js/ui/tilemode.js) and `createTileGrid`
+  (js/core/tilegrids.js) stay. `buildAddTerrainSetDialog`'s create handler
+  also calls `commitAddGrid` directly (`{ x: 0, y: 0, cellW: tileW, cellH:
+  tileH, cols: preset.cols, rows: preset.rows }`) to build the grid that
+  holds a blob47 layout preset's artwork (8×6/7×7 templates) — this is the
+  terrain-set flow the "Out of scope" section already excludes, and must
+  keep working unchanged. Only `buildAddGridDialog`'s OWN call to
+  `commitAddGrid` (the manual entry point) goes away with the dialog.
+  `growTileIntoGrid` (new, below) does NOT call `createTileGrid` — that
+  function always builds brand-new cell tiles via its internal
+  `makeCellTile`, which would create a second, blank tile object
+  duplicating the original standalone tile's rect instead of reusing it.
+  `growTileIntoGrid` constructs the `{ id: newId('tg'), x: tile.x, y:
+  tile.y, cellW: tile.w, cellH: tile.h, cols: 1, rows: 1, spacingX: 0,
+  spacingY: 0 }` grid record itself, pushes it to `sheet.tileGrids`,
+  mutates the existing tile in place (`gridId`/`gridCol: 0`/`gridRow: 0`
+  — its `x/y/w/h` already match the grid's sole cell, untouched), and
+  only THEN calls `resizeGridAxis` to grow to the requested count — which
+  is what actually creates any additional NEW cell tiles.
 
 ## Data model — `core/tilegrids.js`
 
@@ -89,12 +109,18 @@ export function resizeGridAxis(sheet, grid, axis, side, count)
 
 // Promotes a standalone tile into a brand-new 1x1 grid using the tile's own
 // w/h as cellW/cellH and its x/y as the grid origin (spacingX/Y: 0 — no
-// dialog to set spacing anymore, drag-created grids are always flush), then
-// immediately grows it via resizeGridAxis(axis, side, count). The ORIGINAL
-// tile object is reused as the (0,0) cell (mutated in place: gridId/gridCol/
-// gridRow set), matching commitNewStripFromFrame's "origin frame becomes a
-// real member" pattern in frames.js — its id, name, neighbors, terrainSetId
-// etc. all survive the promotion.
+// dialog to set spacing anymore, drag-created grids are always flush) --
+// see "Removed" above for exactly how (does NOT call createTileGrid) --
+// then immediately grows it via resizeGridAxis(axis, side, count). The
+// ORIGINAL tile object is reused (mutated in place: gridId/gridCol/gridRow
+// set), matching commitNewStripFromFrame's "origin frame becomes a real
+// member" pattern in frames.js -- its id, name, neighbors, terrainSetId
+// etc. all survive the promotion. Its FINAL gridCol/gridRow depends on
+// side, per resizeGridAxis's own renumbering rule above: index 0 for
+// side: 'end' growth (new cells append after it), or the highest index
+// for side: 'start' growth (it gets renumbered up as new cells fill in
+// below/left of it) -- it never silently jumps position on screen either
+// way, only its (col, row) address within the grid changes.
 // Returns { grid, added, removed } (removed is always [] here).
 export function growTileIntoGrid(sheet, tile, axis, side, count)
 
