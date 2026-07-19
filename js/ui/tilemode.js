@@ -1142,20 +1142,31 @@ function drawGridDims(ctx, view, grid, opts = {}) {
   const shifted = (dx || dy) ? { ...grid, x: grid.x + dx, y: grid.y + dy } : grid;
   const alpha = opts.quiet ? 0.7 : 1;
   const last = gridCellRect(shifted, grid.cols - 1, grid.rows - 1);
-  const bottomRow = Array.from({ length: grid.cols }, (_, col) => gridCellRect(shifted, col, grid.rows - 1));
-  const rightCol = Array.from({ length: grid.rows }, (_, row) => gridCellRect(shifted, grid.cols - 1, row));
-  drawChainDims(ctx, view, {
-    axis: 'h', edge: last.y + last.h,
-    spans: bottomRow.map(r => ({ from: r.x, to: r.x + r.w, text: `${r.w}` })),
-    alpha,
-  });
-  drawChainDims(ctx, view, {
-    axis: 'v', edge: last.x + last.w,
-    spans: rightCol.map(r => ({ from: r.y, to: r.y + r.h, text: `${r.h}` })),
-    alpha,
-  });
+  // A single column's/row's per-cell width/height IS the overall width/
+  // height -- drawing both would show the same number twice. Only draw the
+  // per-cell chain (and push the overall dim out to level 1, out of its way)
+  // when there's more than one cell to break down.
+  if (grid.cols > 1) {
+    const bottomRow = Array.from({ length: grid.cols }, (_, col) => gridCellRect(shifted, col, grid.rows - 1));
+    drawChainDims(ctx, view, {
+      axis: 'h', edge: last.y + last.h,
+      spans: bottomRow.map(r => ({ from: r.x, to: r.x + r.w, text: `${r.w}` })),
+      alpha,
+    });
+  }
+  if (grid.rows > 1) {
+    const rightCol = Array.from({ length: grid.rows }, (_, row) => gridCellRect(shifted, grid.cols - 1, row));
+    drawChainDims(ctx, view, {
+      axis: 'v', edge: last.x + last.w,
+      spans: rightCol.map(r => ({ from: r.y, to: r.y + r.h, text: `${r.h}` })),
+      alpha,
+    });
+  }
   const overall = { x: shifted.x, y: shifted.y, w: last.x + last.w - shifted.x, h: last.y + last.h - shifted.y };
-  drawRectDims(ctx, view, overall, { quiet: opts.quiet, dx: opts.dx, dy: opts.dy, dw: opts.dw, dh: opts.dh, wLevel: 1, hLevel: 1 });
+  drawRectDims(ctx, view, overall, {
+    quiet: opts.quiet, dx: opts.dx, dy: opts.dy, dw: opts.dw, dh: opts.dh,
+    wLevel: grid.cols > 1 ? 1 : 0, hLevel: grid.rows > 1 ? 1 : 0,
+  });
 }
 
 function drawTileToolGhost(ctx, view) {
