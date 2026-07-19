@@ -118,7 +118,7 @@ function commitNewAnimation(sheet) {
   const cmd = {
     label: 'new animation',
     do() {
-      if (!anim) { anim = addAnimation(sheet, name); idx = sheet.animations.indexOf(anim); }
+      if (!anim) { anim = addAnimation(sheet, name, false, state.project?.settings); idx = sheet.animations.indexOf(anim); }
       else if (!sheet.animations.includes(anim)) sheet.animations.splice(Math.min(idx, sheet.animations.length), 0, anim);
       // state.commands is a single global stack shared by every sheet -- only
       // touch selection state while this command's own sheet is still the

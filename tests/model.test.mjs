@@ -6,6 +6,7 @@ import {
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
   scrubTileReferences, layerAnimationContext, removeSheet,
+  effectiveDuration, fpsStepToMs, msToFps,
 } from '../js/core/model.js';
 import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
 
@@ -509,5 +510,65 @@ test('flattenSheetLayers respects context and visibility', () => {
   setPixel(top.bitmap, 1, 1, [255, 0, 0, 255]);
   const flat = flattenSheetLayers(layers, s.width, s.height);
   assert.deepEqual(getPixel(flat, 1, 1), [255, 0, 0, 255]);
+});
+
+test('effectiveDuration: ms-primary falls back through duration -> baseDuration -> 100', () => {
+  const anim = { baseDuration: 80 };
+  assert.equal(effectiveDuration(anim, { duration: null }), 80);
+  assert.equal(effectiveDuration(anim, { duration: 40 }), 40);
+  assert.equal(effectiveDuration({}, { duration: null }), 100);
+});
+
+test('effectiveDuration: fps-primary falls back through step -> baseStep -> 1, computed via baseFps', () => {
+  const anim = { baseFps: 24, baseStep: 2 };
+  assert.equal(effectiveDuration(anim, { step: null }), 83); // round(1000/24*2)
+  assert.equal(effectiveDuration(anim, { step: 1 }), 42); // round(1000/24*1)
+  assert.equal(effectiveDuration({ baseFps: 24 }, { step: null }), 42); // baseStep missing -> 1
+});
+
+test('effectiveDuration: dormant field is ignored -- only the field matching the current primary unit is honored', () => {
+  const fpsAnim = { baseFps: 24, baseStep: 1 };
+  assert.equal(effectiveDuration(fpsAnim, { duration: 5, step: null }), 42, 'fps-primary: duration override is dormant');
+  const msAnim = { baseDuration: 50 };
+  assert.equal(effectiveDuration(msAnim, { duration: null, step: 99 }), 50, 'ms-primary: step override is dormant');
+});
+
+test('fpsStepToMs computes rounded ms; msToFps is its exact inverse for whole-ms cases', () => {
+  assert.equal(fpsStepToMs(24, 2), 83); // 1000/24*2 = 83.33.. -> 83
+  assert.equal(fpsStepToMs(10, 1), 100);
+  assert.equal(msToFps(1000), 1);
+  assert.equal(msToFps(250), 4);
+});
+
+test('addAnimation seeds base duration from an optional defaults argument, falling back to ms-100', () => {
+  const { s } = (() => { const p = createProject('t'); return { s: createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' }) }; })();
+  const a1 = addAnimation(s, 'walk');
+  assert.equal(a1.baseDuration, 100);
+  assert.equal(a1.baseFps, undefined);
+  assert.equal(a1.baseStep, undefined);
+
+  const a2 = addAnimation(s, 'run', false, { durationMs: 80 });
+  assert.equal(a2.baseDuration, 80);
+
+  const a3 = addAnimation(s, 'jump', false, { durationMs: 83, baseFps: 24, baseStep: 2 });
+  assert.equal(a3.baseDuration, 83);
+  assert.equal(a3.baseFps, 24);
+  assert.equal(a3.baseStep, 2);
+});
+
+test('serializeProject/deserializeProject round-trip anim base-duration fields and settings.baseFps/baseStep via the existing spreads -- no explicit per-field code needed', () => {
+  const p = createProject('t');
+  const s = createSheet(p, { name: 'S', width: 16, height: 16, kind: 'sprite' });
+  addAnimation(s, 'walk', false, { durationMs: 83, baseFps: 24, baseStep: 2 });
+  p.settings.baseFps = 12;
+  p.settings.baseStep = 3;
+  const { json, images } = serializeProject(p);
+  assert.equal(json.sheets[0].animations[0].baseDuration, 83);
+  assert.equal(json.sheets[0].animations[0].baseFps, 24);
+  assert.equal(json.settings.baseFps, 12);
+  const p2 = deserializeProject(json, new Map(images.map(i => [i.path, i.bitmap])));
+  assert.equal(p2.sheets[0].animations[0].baseDuration, 83);
+  assert.equal(p2.sheets[0].animations[0].baseStep, 2);
+  assert.equal(p2.settings.baseFps, 12);
 });
 

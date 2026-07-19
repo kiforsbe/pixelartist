@@ -1376,7 +1376,7 @@ function commitNewStrip(sheet, name, x, y, frameW, frameH, count, duration) {
 
   const descriptors = buildStripFrames(name, x, y, frameW, frameH, count);
   const frames = descriptors.map(d => addFrame(sheet, d));
-  const anim = addAnimation(sheet, name, true);
+  const anim = addAnimation(sheet, name, true, state.project?.settings);
   anim.frames = frames.map(f => ({ frameId: f.id, duration }));
 
   const afterFrames = sheet.frames.slice();
@@ -1434,7 +1434,7 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
   const beforeFrameName = frame.name;
   const beforeSelectedAnimationId = state.selectedAnimationId;
 
-  const anim = addAnimation(sheet, name, true);
+  const anim = addAnimation(sheet, name, true, state.project?.settings);
   frame.name = `${name}_0`;
   const entries = [{ frameId: frame.id, duration }];
   for (let j = 0; j < extra; j++) {

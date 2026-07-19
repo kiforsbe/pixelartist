@@ -324,10 +324,44 @@ export function removeFrame(sheet, frameId) {
 // called -- explicitly (Enter key, frames.js) or automatically (first
 // paint stroke, tools.js). This lets a strip be freely repositioned/resized
 // to align with existing imported artwork before committing to a layer.
-export function addAnimation(sheet, name, strip = false) {
-  const anim = { id: newId('an'), name, loop: true, strip, breaks: [], frames: [], layerGroupId: null };
+// `defaults` seeds the new animation's base-duration fields from the
+// project's own default (project.settings, see the Animation-panel design
+// doc) instead of a hardcoded value -- callers that create a user-visible
+// animation should pass `state.project?.settings`; omitting it (e.g. direct
+// unit-test calls) falls back to ms-100/unset, same as before this field existed.
+export function addAnimation(sheet, name, strip = false, defaults = {}) {
+  const anim = {
+    id: newId('an'), name, loop: true, strip, breaks: [], frames: [], layerGroupId: null,
+    baseDuration: defaults.durationMs ?? 100,
+    baseFps: defaults.baseFps,
+    baseStep: defaults.baseStep,
+  };
   sheet.animations.push(anim);
   return anim;
+}
+
+// fps/step -> ms conversion for the "animate on Ns" base-duration model (see
+// the Animation-panel design doc). Pure math, shared by js/ui/baseDurationControl.js
+// and anything else that needs to seed/redisplay a base duration from fps+step.
+export function fpsStepToMs(fps, step) {
+  return Math.round(1000 / fps * step);
+}
+export function msToFps(ms) {
+  return 1000 / ms;
+}
+
+// Resolves a per-frame animation entry's actual playback/export duration
+// (ms), honoring the "inherit until edited" model: an entry's own field is
+// read only when it matches the animation's current primary unit
+// (anim.baseFps set = fps-primary, reads entry.step; unset = ms-primary,
+// reads entry.duration) -- the OTHER field on the entry, if any, is dormant
+// and ignored, not deleted (see the design doc's non-destructive note).
+export function effectiveDuration(anim, entry) {
+  if (anim.baseFps) {
+    const step = entry.step ?? anim.baseStep ?? 1;
+    return fpsStepToMs(anim.baseFps, step);
+  }
+  return entry.duration ?? anim.baseDuration ?? 100;
 }
 
 // Promotes a floating animation into a committed one: freezes whatever's
