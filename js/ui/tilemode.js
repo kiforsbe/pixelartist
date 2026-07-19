@@ -145,6 +145,15 @@ function hitGridHandle(view, sheet, sx, sy) {
   return null;
 }
 
+// Outer bounding box of everything a grid owns, in sheet-space.
+function gridBounds(grid) {
+  return {
+    x: grid.x, y: grid.y,
+    w: grid.cols * (grid.cellW + grid.spacingX) - grid.spacingX,
+    h: grid.rows * (grid.cellH + grid.spacingY) - grid.spacingY,
+  };
+}
+
 // ------------------------------------------------------------- commands
 
 // Deep-clone a neighbors preset value, guarded for undefined.
@@ -858,8 +867,10 @@ function handleMove(ev, view) {
   } else if (drag.kind === 'resize') {
     drag.rect = rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, false);
   } else if (drag.kind === 'gridmove') {
-    drag.dx = ev.x - drag.anchor.x;
-    drag.dy = ev.y - drag.anchor.y;
+    const sheet = activeSheet();
+    const bounds = gridBounds(drag.grid);
+    drag.dx = sheet ? Math.max(-bounds.x, Math.min(sheet.width - (bounds.x + bounds.w), ev.x - drag.anchor.x)) : ev.x - drag.anchor.x;
+    drag.dy = sheet ? Math.max(-bounds.y, Math.min(sheet.height - (bounds.y + bounds.h), ev.y - drag.anchor.y)) : ev.y - drag.anchor.y;
   } else if (drag.kind === 'tiledrag') {
     drag.to = { x: ev.x, y: ev.y };
     drag.shift = ev.shiftKey;
@@ -901,7 +912,14 @@ function handleUp(ev, view) {
       emit('selection');
       return;
     }
-    if (from.gridId != null) return; // grid-owned, no same-size target: snaps back
+    if (from.gridId != null) {
+      const grid = sheet.tileGrids.find(g => g.id === from.gridId);
+      const bounds = gridBounds(grid);
+      const dx = Math.max(-bounds.x, Math.min(sheet.width - (bounds.x + bounds.w), ev.x - d.anchor.x));
+      const dy = Math.max(-bounds.y, Math.min(sheet.height - (bounds.y + bounds.h), ev.y - d.anchor.y));
+      if (dx !== 0 || dy !== 0) commitMoveGrid(sheet, grid, dx, dy);
+      return;
+    }
     const dx = Math.max(-from.x, Math.min(sheet.width - (from.x + from.w), ev.x - d.anchor.x));
     const dy = Math.max(-from.y, Math.min(sheet.height - (from.y + from.h), ev.y - d.anchor.y));
     if (dx !== 0 || dy !== 0) commitMoveStandaloneTile(from, dx, dy);
@@ -998,6 +1016,11 @@ function drawTileToolGhost(ctx, view) {
     } else if (drag.from.gridId == null) {
       const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
       strokeGhostRect(ctx, view, { x: drag.from.x + dx, y: drag.from.y + dy, w: drag.from.w, h: drag.from.h });
+    } else {
+      const grid = sheet.tileGrids.find(g => g.id === drag.from.gridId);
+      const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
+      for (const t of ownedTiles(sheet, grid.id))
+        strokeGhostRect(ctx, view, { x: t.x + dx, y: t.y + dy, w: t.w, h: t.h });
     }
   }
   ctx.restore();
@@ -1008,13 +1031,19 @@ function drawTileToolGhost(ctx, view) {
     drawRectDims(ctx, view, drag.rect, { dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h });
   } else if (drag.kind === 'gridmove') {
     drawGridDims(ctx, view, drag.grid, { dx: drag.dx, dy: drag.dy });
-  } else if (drag.kind === 'tiledrag' && drag.to && drag.from.gridId == null) {
+  } else if (drag.kind === 'tiledrag' && drag.to) {
     const target = tileAt(sheet, drag.to.x, drag.to.y);
     const swapCandidate = target && target !== drag.from && target.w === drag.from.w && target.h === drag.from.h;
-    if (!swapCandidate) {
+    if (swapCandidate) {
+      // no label for a swap — matches today's behavior
+    } else if (drag.from.gridId == null) {
       const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
       const r = { x: drag.from.x + dx, y: drag.from.y + dy, w: drag.from.w, h: drag.from.h };
       drawRectDims(ctx, view, r, { dx, dy });
+    } else {
+      const grid = sheet.tileGrids.find(g => g.id === drag.from.gridId);
+      const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
+      drawGridDims(ctx, view, grid, { dx, dy });
     }
   }
 }
