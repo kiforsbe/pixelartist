@@ -6,6 +6,7 @@ import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../co
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { buildTiledTsx } from './tiledExport.js';
 import { buildC99 } from './c99Export.js';
+import { buildGbaBinary, buildNesChr } from './platformExport.js';
 import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from './animationExport.js';
 import { encodeGif } from '../core/gif.js';
 import { buildPalette, quantizeBitmap } from '../core/quantize.js';
@@ -60,27 +61,6 @@ const statusPos = document.getElementById('status-pos');
 const statusZoom = document.getElementById('status-zoom');
 const canvasHost = document.getElementById('canvas-host');
 
-const dlgExport = document.getElementById('dlg-export');
-const btnExportPng = document.getElementById('export-png');
-const btnExportFrames = document.getElementById('export-frames');
-const btnExportTiles = document.getElementById('export-tiles');
-const btnExportCancel = document.getElementById('export-cancel');
-markDefaultAction(dlgExport, btnExportPng);
-const btnExportTsx = document.getElementById('export-tsx');
-const btnExportAnim = document.getElementById('export-anim');
-const btnExportC99 = document.getElementById('export-c99');
-const dlgExportAnim = document.getElementById('dlg-export-anim');
-const eaAnimation = document.getElementById('ea-animation');
-const eaGif = document.getElementById('ea-gif');
-const eaSpritesheet = document.getElementById('ea-spritesheet');
-const eaSequence = document.getElementById('ea-sequence');
-const eaCancel = document.getElementById('ea-cancel');
-markDefaultAction(dlgExportAnim, eaGif);
-const dlgExportC99 = document.getElementById('dlg-export-c99');
-const ecTarget = document.getElementById('ec-target');
-const ecExport = document.getElementById('ec-export');
-const ecCancel = document.getElementById('ec-cancel');
-markDefaultAction(dlgExportC99, ecExport);
 const dlgExportProject = document.getElementById('dlg-export-project');
 const epSheets = document.getElementById('ep-sheets');
 const epDestFolderRow = document.getElementById('ep-dest-folder-row');
@@ -676,7 +656,7 @@ const MENUS = [
   { label: 'Document', items: [
     { action: 'document.newSheet' }, { action: 'document.importSheet' }, { separator: true },
     { action: 'document.renameSheet' }, { action: 'document.deleteSheet' }, { separator: true },
-    { action: 'document.exportSheet' },
+    { action: 'document.exportSheet' }, { action: 'document.exportAnimation' },
   ] },
   { label: 'Layer', items: [
     { action: 'layer.add' }, { action: 'layer.addGroup' }, { separator: true },
@@ -1066,108 +1046,83 @@ async function doSaveAs() {
 defineAction('file.saveAs', { label: 'Save As…', run: doSaveAs, isEnabled: () => !!state.project });
 
 // ---- export ----
-function updateExportButtons() {
-  const sheet = activeSheet();
-  const isSprite = sheet?.kind === 'sprite';
-  const isTile = sheet?.kind === 'tile';
-  btnExportFrames.disabled = !isSprite;
-  btnExportFrames.title = isSprite ? '' : 'Only available for sprite sheets';
-  btnExportTiles.disabled = !isTile;
-  btnExportTiles.title = isTile ? '' : 'Only available for tile sheets';
-  btnExportTsx.disabled = !isTile;
-  btnExportTsx.title = isTile ? '' : 'Only available for tile sheets';
-  btnExportAnim.disabled = !isSprite || !sheet?.animations.length;
-  btnExportAnim.title = !isSprite ? 'Only available for sprite sheets'
-    : sheet.animations.length ? '' : 'No animations on this sheet';
-}
-defineAction('document.exportSheet', {
-  label: 'Export Sheet…',
-  run: () => { updateExportButtons(); dlgExport.showModal(); },
-  isEnabled: () => !!state.project,
-});
-btnExportCancel.addEventListener('click', () => dlgExport.close());
-btnExportPng.addEventListener('click', async () => {
-  dlgExport.close();
+// Every export operation is a registered action (js/app/actions.js), never
+// an ad hoc closure inline in a menu structure -- Document > Export Sheet
+// and Document > Export Selected Animation are themselves actions whose
+// `submenu` is a fixed list of child action ids. Items that don't apply to
+// the current sheet kind (or, for the animation exports, when nothing is
+// selected) are disabled via isEnabled(), never hidden via isAvailable() --
+// menu items stay visible so their existence is discoverable, just inactive.
+async function exportSheetPng() {
   commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
   const bitmap = flattenSheet(sheet);
   const blob = await io.exportPngBlob(bitmap);
   io.downloadBlob(blob, `${state.project.name}-${sheet.name}.png`);
-});
-btnExportFrames.addEventListener('click', () => {
-  dlgExport.close();
+}
+function exportFramesJson() {
   commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || sheet.kind !== 'sprite') return;
   const json = buildFramesJson(sheet);
   const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
   io.downloadBlob(blob, `${sheet.name}.frames.json`);
-});
-btnExportTiles.addEventListener('click', () => {
-  dlgExport.close();
+}
+function exportTilesJson() {
   commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || sheet.kind !== 'tile') return;
   const json = buildTilesJson(sheet);
   const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
   io.downloadBlob(blob, `${sheet.name}.tiles.json`);
-});
-
-btnExportTsx.addEventListener('click', () => {
-  dlgExport.close();
+}
+function exportTiledTsxFile() {
   commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || sheet.kind !== 'tile') return;
   const xml = buildTiledTsx(sheet);
   io.downloadBlob(new Blob([xml], { type: 'application/xml' }), `${sheet.name}.tsx`);
-});
-
-btnExportAnim.addEventListener('click', () => {
-  const sheet = activeSheet();
-  if (!sheet) return;
-  eaAnimation.innerHTML = '<option value="">All animations</option>' +
-    sheet.animations.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
-  dlgExport.close();
-  dlgExportAnim.showModal();
-});
-eaCancel.addEventListener('click', () => dlgExportAnim.close());
-
-function chosenAnimations() {
-  return selectAnimations(activeSheet(), eaAnimation.value || null);
 }
-eaGif.addEventListener('click', () => {
-  dlgExportAnim.close();
+
+async function exportAnimationsAs(sheet, animId, format) {
   commitFloatIfAny();
-  const sheet = activeSheet();
-  for (const anim of chosenAnimations()) {
-    const bytes = encodeGif(buildAnimationGifFrames(sheet, anim), { loop: anim.loop });
-    io.downloadBlob(new Blob([bytes], { type: 'image/gif' }), `${sheet.name}-${anim.name}.gif`);
+  for (const anim of selectAnimations(sheet, animId)) {
+    if (format === 'gif') {
+      const bytes = encodeGif(buildAnimationGifFrames(sheet, anim), { loop: anim.loop });
+      io.downloadBlob(new Blob([bytes], { type: 'image/gif' }), `${sheet.name}-${anim.name}.gif`);
+    } else if (format === 'spritesheet') {
+      const { bitmap, json } = buildAnimationSpritesheet(sheet, anim);
+      io.downloadBlob(new Blob([await encodePng(bitmap)], { type: 'image/png' }), `${sheet.name}-${anim.name}.png`);
+      io.downloadBlob(new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' }), `${sheet.name}-${anim.name}.json`);
+    } else if (format === 'sequence') {
+      const entries = [];
+      for (const f of buildAnimationImageSequence(sheet, anim)) entries.push({ path: `${f.name}.png`, data: await encodePng(f.bitmap) });
+      io.downloadBlob(new Blob([await zipWrite(entries)]), `${sheet.name}-${anim.name}-sequence.zip`);
+    }
   }
-});
-eaSpritesheet.addEventListener('click', async () => {
-  dlgExportAnim.close();
-  commitFloatIfAny();
+}
+// Operates on state.selectedAnimationId (the animation currently selected
+// in the Animation panel/timeline) -- not a picker, so these three formats
+// are static, registered once like every other export action here.
+function runOnSelectedAnimation(format) {
   const sheet = activeSheet();
-  for (const anim of chosenAnimations()) {
-    const { bitmap, json } = buildAnimationSpritesheet(sheet, anim);
-    io.downloadBlob(new Blob([await encodePng(bitmap)], { type: 'image/png' }), `${sheet.name}-${anim.name}.png`);
-    io.downloadBlob(new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' }), `${sheet.name}-${anim.name}.json`);
-  }
-});
-eaSequence.addEventListener('click', async () => {
-  dlgExportAnim.close();
-  commitFloatIfAny();
-  const sheet = activeSheet();
-  for (const anim of chosenAnimations()) {
-    const entries = [];
-    for (const f of buildAnimationImageSequence(sheet, anim)) entries.push({ path: `${f.name}.png`, data: await encodePng(f.bitmap) });
-    io.downloadBlob(new Blob([await zipWrite(entries)]), `${sheet.name}-${anim.name}-sequence.zip`);
-  }
+  const anim = sheet?.animations.find(a => a.id === state.selectedAnimationId);
+  if (sheet && anim) exportAnimationsAs(sheet, anim.id, format);
+}
+defineAction('document.exportAnimation.gif', { label: 'GIF', run: () => runOnSelectedAnimation('gif') });
+defineAction('document.exportAnimation.spritesheet', { label: 'Spritesheet (PNG+JSON)', run: () => runOnSelectedAnimation('spritesheet') });
+defineAction('document.exportAnimation.sequence', { label: 'Image Sequence', run: () => runOnSelectedAnimation('sequence') });
+defineAction('document.exportAnimation', {
+  label: 'Export Selected Animation',
+  submenu: [
+    { action: 'document.exportAnimation.gif' },
+    { action: 'document.exportAnimation.spritesheet' },
+    { action: 'document.exportAnimation.sequence' },
+  ],
+  isEnabled: () => activeSheet()?.kind === 'sprite' && !!state.selectedAnimationId,
 });
 
-btnExportC99.addEventListener('click', () => { dlgExport.close(); dlgExportC99.showModal(); });
-ecCancel.addEventListener('click', () => dlgExportC99.close());
 function resolveC99Items(sheet, target) {
   const flat = flattenSheet(sheet);
   const rects = sheet.kind === 'sprite' ? sheet.frames : sheet.tiles;
@@ -1178,30 +1133,75 @@ function resolveC99Items(sheet, target) {
   const items = rects.map((r, i) => ({ name: r.name || `item_${i}`, w: r.w, h: r.h, indices: quantizeBitmap(bitmaps[i], palette) }));
   return { palette, items };
 }
-ecExport.addEventListener('click', () => {
-  dlgExportC99.close();
+function exportGenericC99() {
   commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
-  const target = ecTarget.value;
   try {
-    const { palette, items } = resolveC99Items(sheet, target);
-    const { h, c } = buildC99({ projectName: sheet.name, target, palette, items });
+    const { palette, items } = resolveC99Items(sheet, 'generic8');
+    const { h, c } = buildC99({ projectName: sheet.name, target: 'generic8', palette, items });
     io.downloadBlob(new Blob([h], { type: 'text/plain' }), `${sheet.name}.h`);
     io.downloadBlob(new Blob([c], { type: 'text/plain' }), `${sheet.name}.c`);
   } catch (e) {
-    alert(`C99 export failed: ${e.message}`);
+    alert(`C header export failed: ${e.message}`);
   }
+}
+function exportGbaNative() {
+  commitFloatIfAny();
+  const sheet = activeSheet();
+  if (!sheet || !state.project) return;
+  try {
+    const { palette, items } = resolveC99Items(sheet, 'gba4');
+    const { pal, tiles } = buildGbaBinary({ palette, items });
+    io.downloadBlob(new Blob([pal]), `${sheet.name}.pal.bin`);
+    io.downloadBlob(new Blob([tiles]), `${sheet.name}.tiles.bin`);
+  } catch (e) {
+    alert(`Game Boy Advance export failed: ${e.message}`);
+  }
+}
+function exportNesNative() {
+  commitFloatIfAny();
+  const sheet = activeSheet();
+  if (!sheet || !state.project) return;
+  try {
+    const { items } = resolveC99Items(sheet, 'nes2');
+    const chr = buildNesChr({ items });
+    io.downloadBlob(new Blob([chr]), `${sheet.name}.chr`);
+  } catch (e) {
+    alert(`NES export failed: ${e.message}`);
+  }
+}
+
+defineAction('document.exportSheet.png', { label: 'Sheet PNG (flattened)', run: exportSheetPng });
+defineAction('document.exportSheet.frames', { label: 'Frames JSON', run: exportFramesJson, isEnabled: () => activeSheet()?.kind === 'sprite' });
+defineAction('document.exportSheet.tiles', { label: 'Tiles JSON', run: exportTilesJson, isEnabled: () => activeSheet()?.kind === 'tile' });
+defineAction('document.exportSheet.tsx', { label: 'Tiled TSX', run: exportTiledTsxFile, isEnabled: () => activeSheet()?.kind === 'tile' });
+defineAction('document.exportSheet.gba', { label: 'Game Boy Advance', run: exportGbaNative });
+defineAction('document.exportSheet.nes', { label: 'NES', run: exportNesNative });
+defineAction('document.exportSheet.c99', { label: 'Generic C Header', run: exportGenericC99 });
+defineAction('document.exportSheet', {
+  label: 'Export Sheet',
+  submenu: [
+    { action: 'document.exportSheet.png' },
+    { action: 'document.exportSheet.frames' },
+    { action: 'document.exportSheet.tiles' },
+    { action: 'document.exportSheet.tsx' },
+    { separator: true },
+    { action: 'document.exportSheet.gba' },
+    { action: 'document.exportSheet.nes' },
+    { action: 'document.exportSheet.c99' },
+  ],
+  isEnabled: () => !!state.project,
 });
 
 const SHEET_FORMATS = {
   sprite: [
     ['json', 'JSON + PNG'], ['gif', 'Animations (GIF, all)'],
-    ['c99-generic8', 'C99 (generic 8bpp)'], ['c99-gba4', 'C99 (GBA 4bpp)'], ['c99-nes2', 'C99 (NES 2bpp)'],
+    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['c99', 'Generic C Header'],
   ],
   tile: [
     ['json', 'JSON + PNG'], ['tsx', 'Tiled TSX'],
-    ['c99-generic8', 'C99 (generic 8bpp)'], ['c99-gba4', 'C99 (GBA 4bpp)'], ['c99-nes2', 'C99 (NES 2bpp)'],
+    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['c99', 'Generic C Header'],
   ],
 };
 
@@ -1227,14 +1227,25 @@ async function buildSheetExportEntries(sheet, format) {
       data: encodeGif(buildAnimationGifFrames(sheet, anim), { loop: anim.loop }),
     }));
   }
-  if (format.startsWith('c99-')) {
-    const target = format.slice(4);
-    const { palette, items } = resolveC99Items(sheet, target);
-    const { h, c } = buildC99({ projectName: sheet.name, target, palette, items });
+  if (format === 'c99') {
+    const { palette, items } = resolveC99Items(sheet, 'generic8');
+    const { h, c } = buildC99({ projectName: sheet.name, target: 'generic8', palette, items });
     return [
       { path: `${sheet.name}.h`, data: new TextEncoder().encode(h) },
       { path: `${sheet.name}.c`, data: new TextEncoder().encode(c) },
     ];
+  }
+  if (format === 'gba') {
+    const { palette, items } = resolveC99Items(sheet, 'gba4');
+    const { pal, tiles } = buildGbaBinary({ palette, items });
+    return [
+      { path: `${sheet.name}.pal.bin`, data: pal },
+      { path: `${sheet.name}.tiles.bin`, data: tiles },
+    ];
+  }
+  if (format === 'nes') {
+    const { items } = resolveC99Items(sheet, 'nes2');
+    return [{ path: `${sheet.name}.chr`, data: buildNesChr({ items }) }];
   }
   throw new Error(`unknown export format "${format}"`);
 }

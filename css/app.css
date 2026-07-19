@@ -323,6 +323,11 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .menubar-dropdown-shortcut { font-size: 11px; color: #9a9ca8; }
 .menubar-dropdown-item:hover:not(:disabled) .menubar-dropdown-shortcut { color: #dbe6ff; }
 .menubar-separator { height: 1px; background: var(--border); margin: 3px 2px; }
+.menubar-submenu-wrap { position: relative; }
+.menubar-has-submenu.open { background: var(--accent); color: #fff; }
+.menubar-submenu-arrow { font-size: 10px; opacity: .6; }
+.menubar-has-submenu:hover:not(:disabled) .menubar-submenu-arrow { opacity: 1; }
+.menubar-dropdown.menubar-submenu { top: -5px; left: 100%; }
 
 /* help dialogs */
 .shortcut-row { display: flex; gap: 12px; padding: 3px 0; font-size: 12px; }

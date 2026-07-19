@@ -1,7 +1,7 @@
 // Packs already-quantized palette-index arrays into C99 source for retro
 // targets. Palette/quantization is the caller's job (js/core/quantize.js) --
 // this module is pure byte-packing.
-const MAX_COLORS = { generic8: 256, gba4: 16, nes2: 4 };
+export const MAX_COLORS = { generic8: 256, gba4: 16, nes2: 4 };
 
 function packTiles(w, h, indices, tileBytes, packTile) {
   if (w % 8 !== 0 || h % 8 !== 0)
@@ -45,7 +45,9 @@ function packNes2Tile(tile) {
   return bytes;
 }
 
-function packItem(item, target) {
+// Shared by js/app/platformExport.js, which packs the same GBA4/NES2 byte
+// layouts into raw native binary files instead of C source.
+export function packItem(item, target) {
   if (target === 'generic8') return item.indices;
   if (target === 'gba4') return packTiles(item.w, item.h, item.indices, 32, packGba4Tile);
   if (target === 'nes2') return packTiles(item.w, item.h, item.indices, 16, packNes2Tile);
