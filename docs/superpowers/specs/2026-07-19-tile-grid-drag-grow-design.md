@@ -56,6 +56,12 @@ move" below).
   `mountTilePanel`) — only "➕ Autotiles" remains there. Standalone-tile
   grid creation is now purely: drag a tile on the canvas, then drag its
   edge grip.
+- `resizeGridCols`/`resizeGridRows` (js/core/tilegrids.js) and their dead
+  UI wrappers `commitResizeGridCols`/`commitResizeGridRows`
+  (js/ui/tilemode.js) — replaced by `resizeGridAxis` (below), a strict
+  superset. `tests/tilegrids.test.mjs`'s existing tests for the two old
+  functions are renamed to call `resizeGridAxis(..., 'end', ...)` instead
+  (same behavior, same assertions).
 
 **NOT removed** (corrected after re-reading the actual call sites —
 `commitAddGrid` and `createTileGrid` are load-bearing outside the dialog
@@ -85,14 +91,28 @@ being removed):
 No changes to the `tileGrids`/`tiles` shapes from the Phase A tile-placement
 spec (2026-07-17). New/generalized functions:
 
+**Replaces** `resizeGridCols`/`resizeGridRows` (removed, not kept alongside
+this) — those two are real, unit-tested, working functions (not dead
+code themselves), just never called by any UI yet; it's the UI-layer
+wrappers around them (`commitResizeGridCols`/`commitResizeGridRows` in
+tilemode.js) that are dead code today (defined, never invoked). Since
+`resizeGridAxis`'s `side: 'end'` behavior is a strict superset of what
+they do, leaving both APIs alive would just be two ways to do the same
+thing — `tests/tilegrids.test.mjs`'s existing `resizeGridCols`/
+`resizeGridRows` tests get renamed to call `resizeGridAxis(s, grid,
+'cols'|'rows', 'end', n)` (same assertions), and new tests are added for
+`side: 'start'`. `tilemode.js`'s dead `commitResizeGridCols`/
+`commitResizeGridRows` are removed too, replaced by the `gridresize`
+commit logic below (which is the thing that actually gets wired to a UI
+gesture, at long last).
+
 ```js
-// Generalizes the existing (currently dead-code) resizeGridCols/resizeGridRows.
 // axis: 'cols' | 'rows'. side: 'start' | 'end' — 'start' is left (cols) or
 // top (rows); 'end' is right (cols) or bottom (rows). `count` is the new
-// total cols/rows (same contract as the old functions: pass the target
-// count, not a delta). Growing/shrinking on 'end' is exactly today's
-// resizeGridCols/resizeGridRows (append/truncate high-index cells) — this
-// generalization ADDS the 'start' case.
+// total cols/rows (same contract as the functions this replaces: pass the
+// target count, not a delta). Growing/shrinking on 'end' is exactly what
+// resizeGridCols/resizeGridRows did (append/truncate high-index cells) —
+// this generalization ADDS the 'start' case.
 //
 // 'start' growth: shift grid.x (cols) or grid.y (rows) so existing cells'
 // on-screen position is UNCHANGED (see "Why no pixel-shifting" below), then
