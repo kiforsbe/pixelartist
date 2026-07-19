@@ -4,6 +4,8 @@ Browser-based pixel-art editor for packed sprite sheets and tile sheets.
 Frames + animations (timeline, onion skin), tiles with live neighbor preview,
 layers, indexed/system palettes. No dependencies, no build step.
 
+![Frame editor with layers, frames, and animation timeline](assets/screenshots/frame-editor.png)
+
 ## Run
 
 ES modules require a static server (file:// will not work):
