@@ -61,9 +61,7 @@ function pickFileFallback(accept) {
   });
 }
 
-export async function saveUnpacked(project, dirHandle = null) {
-  if (!dirHandle) dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-  const entries = await buildEntries(project, encodePng);
+async function writeEntriesToDir(dirHandle, entries) {
   for (const { path, data } of entries) {
     const parts = path.split('/');
     let dir = dirHandle;
@@ -72,6 +70,18 @@ export async function saveUnpacked(project, dirHandle = null) {
     const w = await fh.createWritable();
     await w.write(data); await w.close();
   }
+}
+
+export async function saveUnpacked(project, dirHandle = null) {
+  if (!dirHandle) dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  const entries = await buildEntries(project, encodePng);
+  await writeEntriesToDir(dirHandle, entries);
+  return dirHandle;
+}
+
+export async function saveEntriesToFolder(entries, dirHandle = null) {
+  if (!dirHandle) dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  await writeEntriesToDir(dirHandle, entries);
   return dirHandle;
 }
 

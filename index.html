@@ -78,6 +78,15 @@
   </div>
   <div class="row dlg-actions"><button id="ec-export" class="btn-sm">Export</button><button id="ec-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
+<dialog id="dlg-export-project" class="dlg-wide">
+  <h3>Export Project</h3>
+  <div id="ep-sheets"></div>
+  <div class="row">
+    <label><input type="radio" name="ep-dest" id="ep-dest-zip" value="zip" checked> Download ZIP</label>
+    <label id="ep-dest-folder-row" hidden><input type="radio" name="ep-dest" id="ep-dest-folder" value="folder"> Save to folder</label>
+  </div>
+  <div class="row dlg-actions"><button id="ep-export" class="btn-sm">Export</button><button id="ep-cancel" class="btn-sm">Cancel</button></div>
+</dialog>
 <dialog id="dlg-newproject">
   <h3>New Project</h3>
   <div class="dlg-grid">

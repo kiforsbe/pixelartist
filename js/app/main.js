@@ -12,6 +12,7 @@ import { buildPalette, quantizeBitmap } from '../core/quantize.js';
 import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
 import { copyRegion } from '../core/pixels.js';
+import { collectProjectExportEntries } from './projectExport.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
@@ -80,6 +81,13 @@ const ecTarget = document.getElementById('ec-target');
 const ecExport = document.getElementById('ec-export');
 const ecCancel = document.getElementById('ec-cancel');
 markDefaultAction(dlgExportC99, ecExport);
+const dlgExportProject = document.getElementById('dlg-export-project');
+const epSheets = document.getElementById('ep-sheets');
+const epDestFolderRow = document.getElementById('ep-dest-folder-row');
+const epExport = document.getElementById('ep-export');
+const epCancel = document.getElementById('ep-cancel');
+markDefaultAction(dlgExportProject, epExport);
+epCancel.addEventListener('click', () => dlgExportProject.close());
 
 const sheetSelect = document.getElementById('sheet-select');
 const btnNewSheet = document.getElementById('btn-new-sheet');
@@ -662,7 +670,8 @@ defineAction('help.shortcuts', {
 const MENUS = [
   { label: 'File', items: [
     { action: 'file.new' }, { action: 'file.open' }, { separator: true },
-    { action: 'file.save' }, { action: 'file.saveAs' },
+    { action: 'file.save' }, { action: 'file.saveAs' }, { separator: true },
+    { action: 'file.export' },
   ] },
   { label: 'Document', items: [
     { action: 'document.newSheet' }, { action: 'document.importSheet' }, { separator: true },
@@ -1183,6 +1192,85 @@ ecExport.addEventListener('click', () => {
   } catch (e) {
     alert(`C99 export failed: ${e.message}`);
   }
+});
+
+const SHEET_FORMATS = {
+  sprite: [
+    ['json', 'JSON + PNG'], ['gif', 'Animations (GIF, all)'],
+    ['c99-generic8', 'C99 (generic 8bpp)'], ['c99-gba4', 'C99 (GBA 4bpp)'], ['c99-nes2', 'C99 (NES 2bpp)'],
+  ],
+  tile: [
+    ['json', 'JSON + PNG'], ['tsx', 'Tiled TSX'],
+    ['c99-generic8', 'C99 (generic 8bpp)'], ['c99-gba4', 'C99 (GBA 4bpp)'], ['c99-nes2', 'C99 (NES 2bpp)'],
+  ],
+};
+
+async function buildSheetExportEntries(sheet, format) {
+  const flat = flattenSheet(sheet);
+  if (format === 'json') {
+    const isSprite = sheet.kind === 'sprite';
+    const json = isSprite ? buildFramesJson(sheet) : buildTilesJson(sheet);
+    return [
+      { path: `${sheet.name}.png`, data: await encodePng(flat) },
+      { path: `${sheet.name}.${isSprite ? 'frames' : 'tiles'}.json`, data: new TextEncoder().encode(JSON.stringify(json, null, 2)) },
+    ];
+  }
+  if (format === 'tsx') {
+    return [
+      { path: `${sheet.name}.png`, data: await encodePng(flat) },
+      { path: `${sheet.name}.tsx`, data: new TextEncoder().encode(buildTiledTsx(sheet)) },
+    ];
+  }
+  if (format === 'gif') {
+    return sheet.animations.map(anim => ({
+      path: `${anim.name}.gif`,
+      data: encodeGif(buildAnimationGifFrames(sheet, anim), { loop: anim.loop }),
+    }));
+  }
+  if (format.startsWith('c99-')) {
+    const target = format.slice(4);
+    const { palette, items } = resolveC99Items(sheet, target);
+    const { h, c } = buildC99({ projectName: sheet.name, target, palette, items });
+    return [
+      { path: `${sheet.name}.h`, data: new TextEncoder().encode(h) },
+      { path: `${sheet.name}.c`, data: new TextEncoder().encode(c) },
+    ];
+  }
+  throw new Error(`unknown export format "${format}"`);
+}
+
+defineAction('file.export', {
+  label: 'Export Project…',
+  run: () => {
+    if (!state.project) return;
+    epSheets.innerHTML = '';
+    for (const sheet of state.project.sheets) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: true, id: `ep-sheet-${sheet.id}` });
+      const label = Object.assign(document.createElement('label'), { htmlFor: cb.id, textContent: sheet.name, style: 'flex:1' });
+      const select = document.createElement('select');
+      select.id = `ep-format-${sheet.id}`;
+      for (const [value, text] of SHEET_FORMATS[sheet.kind]) select.appendChild(new Option(text, value));
+      row.append(cb, label, select);
+      epSheets.appendChild(row);
+    }
+    epDestFolderRow.hidden = !io.supportsFS();
+    dlgExportProject.showModal();
+  },
+  isEnabled: () => !!state.project,
+});
+
+epExport.addEventListener('click', async () => {
+  dlgExportProject.close();
+  commitFloatIfAny();
+  const selections = state.project.sheets
+    .filter(s => document.getElementById(`ep-sheet-${s.id}`).checked)
+    .map(s => ({ sheetId: s.id, format: document.getElementById(`ep-format-${s.id}`).value }));
+  const entries = await collectProjectExportEntries(state.project, selections, buildSheetExportEntries);
+  const dest = document.querySelector('input[name="ep-dest"]:checked').value;
+  if (dest === 'folder') await io.saveEntriesToFolder(entries);
+  else io.downloadBlob(new Blob([await zipWrite(entries)]), `${state.project.name}-export.zip`);
 });
 
 // ---- beforeunload guard ----
