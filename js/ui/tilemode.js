@@ -16,6 +16,7 @@ import { registerTool } from './tools.js';
 import {
   gridCellRect, ownedTiles, relayoutGrid,
   moveGrid, removeTileGrid, createTileGrid, detachTile,
+  resizeGridAxis, growTileIntoGrid, collapseGridToTile,
 } from '../core/tilegrids.js';
 import { newId } from '../core/palettes.js';
 import { scrubTileReferences, flattenSheet } from '../core/model.js';
@@ -152,6 +153,55 @@ function gridBounds(grid) {
     w: grid.cols * (grid.cellW + grid.spacingX) - grid.spacingX,
     h: grid.rows * (grid.cellH + grid.spacingY) - grid.spacingY,
   };
+}
+
+// 4 edge-strip hit zones (screen space) around `bounds` (sheet-space
+// {x,y,w,h}) -- either a standalone tile's own rect, or a grid's outer
+// bounding box. Mirrors frames.js's standaloneGripGeometry/
+// chromeGeometry grips, generalized from 2 sides (left/right) to 4.
+// Each strip is inset by a fixed number of screen pixels at both ends
+// (matching HANDLE_SCREEN_PX/GRID_HANDLE_SCREEN_PX's existing 6px corner-
+// handle size) rather than spanning the full edge -- keeps the 4 grips
+// visually/hit-testably distinct near the corners instead of meeting flush.
+const GRIP_INSET_PX = 6;
+
+function tileGripGeometry(view, bounds) {
+  const p0 = view.imageToScreen(bounds.x, bounds.y);
+  const p1 = view.imageToScreen(bounds.x + bounds.w, bounds.y + bounds.h);
+  const gripH = Math.max(0, (p1.y - p0.y) - 2 * GRIP_INSET_PX);
+  const gripW = Math.max(0, (p1.x - p0.x) - 2 * GRIP_INSET_PX);
+  return [
+    { axis: 'cols', side: 'start', x: p0.x - 3, y: p0.y + GRIP_INSET_PX, w: 6, h: gripH },
+    { axis: 'cols', side: 'end', x: p1.x - 3, y: p0.y + GRIP_INSET_PX, w: 6, h: gripH },
+    { axis: 'rows', side: 'start', x: p0.x + GRIP_INSET_PX, y: p0.y - 3, w: gripW, h: 6 },
+    { axis: 'rows', side: 'end', x: p0.x + GRIP_INSET_PX, y: p1.y - 3, w: gripW, h: 6 },
+  ];
+}
+
+function hitTileGrip(grips, sx, sy) {
+  for (const g of grips)
+    if (sx >= g.x - 2 && sx <= g.x + g.w + 2 && sy >= g.y - 2 && sy <= g.y + g.h + 2)
+      return { axis: g.axis, side: g.side };
+  return null;
+}
+
+// A synthetic grid-shaped object representing the LIVE state of an
+// in-progress gridresize drag, for rendering only -- never touches real
+// sheet data. Works uniformly whether d.grid is set (existing grid being
+// resized) or null (a standalone tile being dragged into a brand-new
+// grid): cellW/cellH/spacing fall back to the dragged tile's own size
+// with no spacing when there's no real grid yet.
+function ghostGridFor(d) {
+  const cellW = d.grid ? d.grid.cellW : (d.axis === 'rows' ? d.tile.w : d.step);
+  const cellH = d.grid ? d.grid.cellH : (d.axis === 'cols' ? d.tile.h : d.step);
+  const spacingX = d.grid ? d.grid.spacingX : 0;
+  const spacingY = d.grid ? d.grid.spacingY : 0;
+  const cols = d.axis === 'cols' ? d.count : (d.grid ? d.grid.cols : 1);
+  const rows = d.axis === 'rows' ? d.count : (d.grid ? d.grid.rows : 1);
+  let x = d.bbox.x, y = d.bbox.y;
+  if (d.axis === 'cols' && d.side === 'start') x = d.bbox.x + d.bbox.w - (cols * (cellW + spacingX) - spacingX);
+  if (d.axis === 'rows' && d.side === 'start') y = d.bbox.y + d.bbox.h - (rows * (cellH + spacingY) - spacingY);
+  return { x, y, cellW, cellH, cols, rows, spacingX, spacingY };
 }
 
 // ------------------------------------------------------------- commands
@@ -334,6 +384,56 @@ function commitMoveGrid(sheet, grid, dx, dy) {
     undo() { grid.x = before.x; grid.y = before.y; relayoutGrid(sheet, grid); },
   });
   markDirty();
+}
+
+function commitGrowTileIntoGrid(sheet, tile, axis, side, count) {
+  const beforeGrids = sheet.tileGrids.slice();
+  const beforeTiles = sheet.tiles.slice();
+  const { grid } = growTileIntoGrid(sheet, tile, axis, side, count);
+  const afterGrids = sheet.tileGrids.slice();
+  const afterTiles = sheet.tiles.slice();
+  const tileId = tile.id;
+  state.commands.push({
+    label: 'grow tile into grid',
+    do() {
+      sheet.tileGrids = afterGrids.slice();
+      sheet.tiles = afterTiles.slice();
+      state.selectedTileId = tileId;
+    },
+    undo() {
+      sheet.tileGrids = beforeGrids.slice();
+      sheet.tiles = beforeTiles.slice();
+      state.selectedTileId = tileId;
+    },
+  });
+  markDirty();
+  emit('selection');
+}
+
+function commitResizeGridAxis(sheet, grid, axis, side, count) {
+  const beforeGrids = sheet.tileGrids.slice();
+  const beforeTiles = sheet.tiles.slice();
+  resizeGridAxis(sheet, grid, axis, side, count);
+  let survivorId = null;
+  if (grid.cols === 1 && grid.rows === 1) {
+    survivorId = collapseGridToTile(sheet, grid).id;
+  }
+  const afterGrids = sheet.tileGrids.slice();
+  const afterTiles = sheet.tiles.slice();
+  state.commands.push({
+    label: 'resize grid',
+    do() {
+      sheet.tileGrids = afterGrids.slice();
+      sheet.tiles = afterTiles.slice();
+      if (survivorId) state.selectedTileId = survivorId;
+    },
+    undo() {
+      sheet.tileGrids = beforeGrids.slice();
+      sheet.tiles = beforeTiles.slice();
+    },
+  });
+  markDirty();
+  if (survivorId) emit('selection');
 }
 
 function openTileEditor(tileId) {
@@ -838,6 +938,24 @@ function handleDown(ev, view) {
     return;
   }
 
+  if (selected) {
+    const grid = selected.gridId != null ? sheet.tileGrids.find(g => g.id === selected.gridId) : null;
+    const bounds = grid ? gridBounds(grid) : { x: selected.x, y: selected.y, w: selected.w, h: selected.h };
+    const gripHit = hitTileGrip(tileGripGeometry(view, bounds), ev.sx, ev.sy);
+    if (gripHit) {
+      const step = gripHit.axis === 'cols'
+        ? (grid ? grid.cellW + grid.spacingX : selected.w)
+        : (grid ? grid.cellH + grid.spacingY : selected.h);
+      const count0 = grid ? (gripHit.axis === 'cols' ? grid.cols : grid.rows) : 1;
+      drag = {
+        kind: 'gridresize', axis: gripHit.axis, side: gripHit.side,
+        grid, tile: selected, step, bbox: bounds, count0, count: count0,
+      };
+      view.requestRender();
+      return;
+    }
+  }
+
   const hit = tileAt(sheet, ev.x, ev.y);
   const now = performance.now();
   if (hit && lastClick && lastClick.tileId === hit.id && now - lastClick.time < DBLCLICK_MS) {
@@ -874,6 +992,24 @@ function handleMove(ev, view) {
   } else if (drag.kind === 'tiledrag') {
     drag.to = { x: ev.x, y: ev.y };
     drag.shift = ev.shiftKey;
+  } else if (drag.kind === 'gridresize') {
+    const raw = drag.side === 'end'
+      ? (drag.axis === 'cols' ? ev.x - (drag.bbox.x + drag.bbox.w) : ev.y - (drag.bbox.y + drag.bbox.h))
+      : (drag.axis === 'cols' ? drag.bbox.x - ev.x : drag.bbox.y - ev.y);
+    let count = drag.count0 + Math.round(raw / drag.step);
+    count = Math.max(1, count);
+    const sheet = activeSheet();
+    if (sheet) {
+      const maxCount = drag.axis === 'cols'
+        ? (drag.side === 'end'
+            ? Math.floor((sheet.width - drag.bbox.x) / drag.step)
+            : Math.floor((drag.bbox.x + drag.bbox.w) / drag.step))
+        : (drag.side === 'end'
+            ? Math.floor((sheet.height - drag.bbox.y) / drag.step)
+            : Math.floor((drag.bbox.y + drag.bbox.h) / drag.step));
+      count = Math.min(count, Math.max(1, maxCount));
+    }
+    drag.count = count;
   }
   view.requestRender();
 }
@@ -925,6 +1061,12 @@ function handleUp(ev, view) {
     if (dx !== 0 || dy !== 0) commitMoveStandaloneTile(from, dx, dy);
     return;
   }
+  if (d.kind === 'gridresize') {
+    if (d.count === d.count0) return;
+    if (d.grid) commitResizeGridAxis(sheet, d.grid, d.axis, d.side, d.count);
+    else commitGrowTileIntoGrid(sheet, d.tile, d.axis, d.side, d.count);
+    return;
+  }
 }
 
 // ------------------------------------------------------------- overlay
@@ -963,6 +1105,17 @@ function drawTileHandles(ctx, view, tile) {
   ctx.restore();
 }
 
+// Visible edge-grip squares -- mirrors frames.js's drawGrips look (filled
+// blue rects), no hover-highlight tracking (out of scope for this pass;
+// frames.js's hover state is a bigger refactor than this feature needs).
+function drawTileGrips(ctx, grips) {
+  ctx.save();
+  ctx.fillStyle = TILE_HANDLE;
+  ctx.globalAlpha = 0.7;
+  for (const g of grips) ctx.fillRect(g.x, g.y, g.w, g.h);
+  ctx.restore();
+}
+
 // Grid dimension chrome — mirrors frames.js's drawStripDims for a strip:
 // level-0 chains for column widths (bottom edge) and row heights (right
 // edge), level-1 overall bbox dims — same bottom/right edges as the default
@@ -987,7 +1140,7 @@ function drawGridDims(ctx, view, grid, opts = {}) {
     alpha,
   });
   const overall = { x: shifted.x, y: shifted.y, w: last.x + last.w - shifted.x, h: last.y + last.h - shifted.y };
-  drawRectDims(ctx, view, overall, { quiet: opts.quiet, dx: opts.dx, dy: opts.dy, wLevel: 1, hLevel: 1 });
+  drawRectDims(ctx, view, overall, { quiet: opts.quiet, dx: opts.dx, dy: opts.dy, dw: opts.dw, dh: opts.dh, wLevel: 1, hLevel: 1 });
 }
 
 function drawTileToolGhost(ctx, view) {
@@ -1022,6 +1175,8 @@ function drawTileToolGhost(ctx, view) {
       for (const t of ownedTiles(sheet, grid.id))
         strokeGhostRect(ctx, view, { x: t.x + dx, y: t.y + dy, w: t.w, h: t.h });
     }
+  } else if (drag.kind === 'gridresize') {
+    strokeGhostRect(ctx, view, gridBounds(ghostGridFor(drag)));
   }
   ctx.restore();
 
@@ -1045,6 +1200,11 @@ function drawTileToolGhost(ctx, view) {
       const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
       drawGridDims(ctx, view, grid, { dx, dy });
     }
+  } else if (drag.kind === 'gridresize') {
+    drawGridDims(ctx, view, ghostGridFor(drag), {
+      dw: drag.axis === 'cols' ? (drag.count - drag.count0) * drag.step : 0,
+      dh: drag.axis === 'rows' ? (drag.count - drag.count0) * drag.step : 0,
+    });
   }
 }
 
@@ -1063,16 +1223,18 @@ export function drawTileChrome(ctx, view) {
   if (!tile) return;
   if (tile.gridId != null) {
     const grid = sheet.tileGrids.find(g => g.id === tile.gridId);
-    if (grid) drawGridDims(ctx, view, grid, { quiet: true });
+    if (grid) {
+      drawGridDims(ctx, view, grid, { quiet: true });
+      drawTileGrips(ctx, tileGripGeometry(view, gridBounds(grid)));
+    }
   } else {
     drawRectDims(ctx, view, tile, { quiet: true });
     drawTileHandles(ctx, view, tile);
+    drawTileGrips(ctx, tileGripGeometry(view, { x: tile.x, y: tile.y, w: tile.w, h: tile.h }));
   }
 }
 
 // ------------------------------------------------------------- public API
-
-let tileToolView = null; // set by bindTileTool; read by Task 7's Add Grid dialog preview
 
 export function registerTileTool() {
   registerTool({ id: 'tiletool', icon: '🔲', key: 't', isAvailable: () => state.mode === 'tiles' });
@@ -1099,7 +1261,6 @@ export function registerTileTool() {
 }
 
 export function bindTileTool(view) {
-  tileToolView = view;
   const prevPointer = view.onPointer;
   view.onPointer = (ev) => {
     if (state.mode === 'tiles' && state.tool === 'tiletool') {
