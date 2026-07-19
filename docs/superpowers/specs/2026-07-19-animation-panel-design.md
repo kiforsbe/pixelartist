@@ -27,6 +27,11 @@ timeline also keeps its rename (✎) button as a second way to rename — both i
 and the panel's name field write the same `anim.name` and stay in sync via the
 existing render-on-emit pattern.
 
+The same ms/fps/step model extends to the **project-level** default duration
+(`project.settings.durationMs`, already used as a fallback in several places)
+so it can be set in the New Project dialog and edited afterward from a new
+Project Settings dialog, reachable from a new Edit-menu entry.
+
 ## Data model (`js/core/model.js`)
 
 Two additions to the animation object, both optional / backward compatible
@@ -34,10 +39,14 @@ Two additions to the animation object, both optional / backward compatible
 `docs/superpowers/specs/2026-07-17-strip-segments-design.md`):
 
 ```js
-anim.baseDuration      // ms, number, default 100 (matches today's hardcoded frame default)
+anim.baseDuration      // ms, number
 anim.baseFps           // number | undefined — only set once fps-mode is used
 anim.baseStep          // number | undefined — "animate on Ns"; only set alongside baseFps
 ```
+
+Seeded at creation time from the project's own default (see "Project-level
+default duration" below) rather than a hardcoded value — `addAnimation`
+falls back to `100`/unset only when no project defaults are available.
 
 `baseDuration` is the single canonical value everything (playback, export,
 inherited-frame display) reads. `baseFps`/`baseStep` exist purely so the panel
@@ -209,6 +218,123 @@ new panel instead of plain rename).
     secondary/read-only pairing as the panel's own ms/fps display — ms is
     never directly editable per-frame while fps-primary is active.
 
+## Project-level default duration (New Project dialog, Project Settings dialog, Edit menu)
+
+Today `project.settings.durationMs` (`DEFAULT_SETTINGS.durationMs`,
+`js/core/model.js:8-14`) is already a project-wide default, read as a
+fallback in several `frames.js` call sites (`commitInsertFrame`,
+`commitResizeSegment`, `commitNewStripFromFrame`, the New Strip dialog's
+prefill) whenever a brand-new frame entry needs a duration and there's no
+neighbor to copy from. It's set once, at project-creation time, via the New
+Project dialog's plain "Frame time (ms)" field, with no UI to change it
+afterward.
+
+This extends that setting to the same primary-unit ms/fps/step model as the
+Animation panel, and adds a way to edit it (and the rest of
+`project.settings`) after project creation.
+
+### Data model (`js/core/model.js`)
+
+`settings` gains two optional fields, mirroring `anim.baseFps`/`anim.baseStep`
+(same semantics, same "only set once fps-mode is used" rule):
+
+```js
+settings.baseFps    // number | undefined
+settings.baseStep   // number | undefined
+```
+
+`settings.durationMs` remains the canonical ms value and keeps its existing
+name (not renamed to `baseDuration`) since it's already referenced by that
+name at the call sites listed above — renaming it is out of scope here.
+`DEFAULT_SETTINGS` is unchanged (`durationMs: 100`, no `baseFps`/`baseStep`
+keys — absent means ms-primary, same convention as the animation level).
+
+`addAnimation(sheet, name, strip = false, defaults = {})` gains an optional
+4th parameter (still a pure function, no `state`/DOM coupling): the new
+animation's `baseDuration`/`baseFps`/`baseStep` are seeded from
+`defaults.durationMs ?? 100`, `defaults.baseFps`, `defaults.baseStep` instead
+of a hardcoded value. Every UI call site that creates a new animation
+(`frames.js`'s "New strip…" dialog handler, `commitNewStripFromFrame`, any
+other `addAnimation(...)` call) passes `state.project?.settings` as that 4th
+argument, so new animations start out matching the project's current default
+instead of always ms-100. Calling `addAnimation` with no 4th argument (e.g.
+existing tests) keeps today's ms-100 behavior.
+
+### Shared control (`js/ui/baseDurationControl.js`)
+
+The ms/fps+step primary-unit control described in the Animation panel section
+above (toggle, primary editable field, read-only converted secondary field,
+fps-mode Step field) is needed in **three** places: the Animation panel, the
+New Project dialog, and the new Project Settings dialog. To avoid three
+copies of the same toggle/conversion logic, it's extracted into one small
+reusable builder:
+
+```js
+// js/ui/baseDurationControl.js
+export function buildBaseDurationControl({ getValue, setValue }) {
+  // getValue() -> { durationMs, baseFps, baseStep }
+  // setValue({ durationMs, baseFps, baseStep }) -> called on every commit
+  // returns { el, refresh() } -- el is the DOM fragment to mount, refresh()
+  // re-syncs displayed values after an external change (undo/redo, dialog
+  // reopen).
+}
+```
+
+The Animation panel wires `getValue`/`setValue` to the selected animation's
+fields, going through `state.commands.push(...)` + `markDirty()` exactly as
+already specified above. The two dialogs wire it to a plain local object held
+until the dialog's Create/OK button commits it — no undo command mid-edit,
+only on final commit, matching how the rest of each dialog's fields already
+behave.
+
+### New Project dialog (`index.html` `#dlg-newproject`, `js/app/main.js`)
+
+The existing row:
+```html
+<span>Frame time</span><input id="np-duration" type="number" min="1" value="100">
+<span>ms</span><span></span>
+```
+is replaced by a mount point (`<div id="np-duration-control" class="dlg-grid-span"></div>`)
+that `main.js` fills via `buildBaseDurationControl(...)` at dialog-open time
+(`file.new`'s handler, right before `dlgNewProject.showModal()`), seeded from
+`DEFAULT_SETTINGS` (there's no existing project to seed from at this point —
+same as today's hardcoded `value="100"`).
+
+`npCreate`'s handler reads the control's current value instead of
+`positiveInt(npDuration)`, and includes `baseFps`/`baseStep` in the `settings`
+object literal only when set (fps-primary was used).
+
+### Project Settings dialog (new `dlg-projectsettings`, `index.html` + `js/app/main.js`)
+
+New dialog, same `dlg-grid` layout as `dlg-newproject` (Sprite sheet W/H, Tile
+sheet W/H, Tile size W/H, Frame size W/H, Frame time control), except it
+edits the **current** project's `settings` in place rather than creating a
+new project:
+
+- Opened via a new Edit-menu action, `edit.projectSettings` (label "Project
+  Settings…"), appended to `MENUS`'s `Edit` entry in `main.js`:
+  ```js
+  { label: 'Edit', items: [
+    { action: 'edit.undo' }, { action: 'edit.redo' }, { separator: true },
+    { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' }, { separator: true },
+    { action: 'edit.projectSettings' },
+  ] },
+  ```
+- `defineAction('edit.projectSettings', { label: 'Project Settings…', run() {
+  ...prefill every field from state.project.settings...; dlgProjectSettings.showModal(); } })`,
+  following the same prefill-then-`showModal()` pattern `btnNewStrip`'s click
+  handler already uses (`js/ui/frames.js:1583-1594`).
+- Sheet-dimension fields (Sprite sheet / Tile sheet / Tile size / Frame size)
+  edit the **defaults used for future new sheets/frames only** — the same
+  role they already play in `DEFAULT_SETTINGS` — not a retroactive resize of
+  existing sheets; changing those fields never touches any existing sheet's
+  `width`/`height`. This matches current behavior (`DEFAULT_SETTINGS` is
+  already only consulted at creation time) and is called out here so the
+  dialog's copy doesn't imply otherwise.
+- OK commits one undoable command snapshotting the whole `settings` object
+  (before/after), matching the project's existing command idiom; Cancel
+  discards all edits made in the dialog.
+
 ## Error handling / edge cases
 
 - No animation selected: panel shows the same "no selection" hint style as
@@ -257,3 +383,13 @@ new panel instead of plain rename).
   other inherited frames do → switch primary back to ms, confirm cells switch
   back to ms inputs showing `effectiveDuration`. Update `tests/smoke.md` with
   only these new items.
+- Unit test: `addAnimation` with a `defaults` argument seeds
+  `baseDuration`/`baseFps`/`baseStep` from it; called with no 4th argument (or
+  an empty object) falls back to ms-100/unset, so existing direct callers and
+  tests are unaffected.
+- Playwright smoke (addendum): Edit menu → Project Settings → switch Frame
+  time to fps-primary → OK → create a new animation, confirm its Animation
+  panel's duration control opens already fps-primary, matching the project
+  default (not ms-100) → separately, open the New Project dialog, confirm the
+  same ms/fps control is present, create a project with fps-primary set,
+  save/reload, confirm `settings.baseFps`/`baseStep` round-trip.
