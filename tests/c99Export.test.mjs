@@ -59,6 +59,49 @@ test('buildC99 snes4: bitplanes 0+1 interleaved per row, then 2+3 interleaved pe
   assert.match(c, new RegExp(`demo_tile0\\[32\\] = \\{${expected}\\}`));
 });
 
+test('buildC99 gb2: row-interleaved 2bpp, matching nes2\'s bit values but byte-order per row', () => {
+  // same row pattern (0,1,2,3 repeated) as the nes2 test -> per row lo=0x55,
+  // hi=0x33 (same bit math as NES), but gb2 interleaves lo/hi per row
+  // instead of blocking all lo's then all hi's (see design doc's Game Boy
+  // section for the bit-by-bit derivation).
+  const row = [0, 1, 2, 3, 0, 1, 2, 3];
+  const indices = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) indices.set(row, y * 8);
+  const { c } = buildC99({
+    projectName: 'demo', target: 'gb2',
+    palette: [[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3]],
+    items: [{ name: 'tile0', w: 8, h: 8, indices }],
+  });
+  const expected = Array.from({ length: 8 }, () => ['0x55', '0x33']).flat().join(',');
+  assert.match(c, new RegExp(`demo_tile0\\[16\\] = \\{${expected}\\}`));
+});
+
+test('buildC99 c64mc: 1 byte/row, 4 double-wide pixel-pairs sampled from even columns', () => {
+  // row = [0,0,1,1,2,2,3,3] -> paired columns already agree (no loss), even
+  // columns give indices 0,1,2,3 -> byte = 0<<6|1<<4|2<<2|3 = 0x1b
+  const row = [0, 0, 1, 1, 2, 2, 3, 3];
+  const indices = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) indices.set(row, y * 8);
+  const { c } = buildC99({
+    projectName: 'demo', target: 'c64mc',
+    palette: [[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3]],
+    items: [{ name: 'tile0', w: 8, h: 8, indices }],
+  });
+  assert.match(c, new RegExp(`demo_tile0\\[8\\] = \\{${Array(8).fill('0x1b').join(',')}\\}`));
+});
+
+test('buildC99 c64mc: odd column is dropped when a pair disagrees (only the even column\'s index is sampled)', () => {
+  const row = [3, 0, 0, 0, 0, 0, 0, 0]; // pair0 = (idx0=3, idx1=0) -> even col wins, byte = 3<<6 = 0xc0
+  const indices = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) indices.set(row, y * 8);
+  const { c } = buildC99({
+    projectName: 'demo', target: 'c64mc',
+    palette: [[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3]],
+    items: [{ name: 'tile0', w: 8, h: 8, indices }],
+  });
+  assert.match(c, new RegExp(`demo_tile0\\[8\\] = \\{${Array(8).fill('0xc0').join(',')}\\}`));
+});
+
 test('buildC99: gba4/nes2 reject dimensions not a multiple of 8', () => {
   const items = [{ name: 't', w: 5, h: 8, indices: new Uint8Array(40) }];
   assert.throws(() => buildC99({ projectName: 'd', target: 'gba4', palette: [[0, 0, 0]], items }),

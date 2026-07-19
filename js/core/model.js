@@ -13,6 +13,14 @@ export const DEFAULT_SETTINGS = {
   durationMs: 100,
   smoothThumbnails: true,
   targetPlatform: 'none', // see js/core/platforms.js -- drives live edit-time compatibility warnings
+  // 'strict': export quantization is capped at the target's real per-
+  // sprite/tile hardware limit (e.g. NES 4, GBA 16). 'total': capped at
+  // the platform's whole system palette instead (e.g. NES's ~56-color
+  // master palette) -- the per-tile/sprite INDEX COUNT hardware limit is
+  // never relaxed (native binary exporters still hard-cap at MAX_COLORS
+  // regardless of this setting), only which colors those indices may be
+  // chosen from. See js/app/main.js's resolveC99Items.
+  exportColorMode: 'strict',
 };
 const MAX_DIM = 4096;
 
@@ -580,10 +588,16 @@ export function deserializeProject(json, imagesByPath) {
   if (!v.ok) throw new Error(v.error);
   return {
     version: json.version, name: json.name,
-    // onion/targetPlatform fall back to their defaults for files saved
-    // before those fields existed -- deserializeProject only ever runs on a
-    // freshly-parsed json, so this is never aliased to another live project.
-    settings: { onion: defaultOnionSettings(), targetPlatform: DEFAULT_SETTINGS.targetPlatform, ...json.settings },
+    // onion/targetPlatform/exportColorMode fall back to their defaults for
+    // files saved before those fields existed -- deserializeProject only
+    // ever runs on a freshly-parsed json, so this is never aliased to
+    // another live project.
+    settings: {
+      onion: defaultOnionSettings(),
+      targetPlatform: DEFAULT_SETTINGS.targetPlatform,
+      exportColorMode: DEFAULT_SETTINGS.exportColorMode,
+      ...json.settings,
+    },
     activePaletteId: json.activePaletteId ?? null,
     palettes: json.palettes ?? [],
     sheets: json.sheets.map(s => {

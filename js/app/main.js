@@ -5,15 +5,16 @@ import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationCont
 import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../core/strips.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { buildTiledTsx } from './tiledExport.js';
-import { buildC99 } from './c99Export.js';
+import { buildC99, MAX_COLORS } from './c99Export.js';
 import {
-  buildGbaBinary, buildNesChr, buildSnesBinary,
+  buildGbaBinary, buildNesChr, buildSnesBinary, buildGbBinary, buildGbcBinary, buildC64Binary,
   checkGbaCompatibility, checkNesCompatibility, checkSnesCompatibility,
+  checkGbCompatibility, checkGbcCompatibility, checkC64Compatibility,
 } from './platformExport.js';
 import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from './animationExport.js';
 import { encodeGif } from '../core/gif.js';
 import { buildPalette, quantizeBitmap, colorFrequency } from '../core/quantize.js';
-import { PLATFORMS, checkItemAgainstPlatform } from '../core/platforms.js';
+import { PLATFORMS, checkItemAgainstPlatform, NES_PALETTE, C64_PALETTE, GB_PALETTE, snapPaletteToHardware } from '../core/platforms.js';
 import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
 import { copyRegion } from '../core/pixels.js';
@@ -465,7 +466,8 @@ function updateStatusPlatform() {
   if (!rect) { statusPlatform.textContent = ''; statusPlatform.title = ''; return; }
 
   const bitmap = copyRegion(flattenSheet(sheet), rect.x, rect.y, rect.w, rect.h);
-  const warnings = checkItemAgainstPlatform(platformId, { colors: colorFrequency([bitmap]), w: rect.w, h: rect.h });
+  const kind = state.view === 'tile' ? 'tile' : 'sprite';
+  const warnings = checkItemAgainstPlatform(platformId, { colors: colorFrequency([bitmap]), w: rect.w, h: rect.h, kind });
   const label = PLATFORMS[platformId].label;
   statusPlatform.textContent = warnings.length ? `${label} ⚠ ${warnings.length}` : `${label} ✓`;
   statusPlatform.title = warnings.join('\n');
@@ -787,6 +789,7 @@ const psDurationMount = document.getElementById('ps-duration-control');
 const psSmoothThumbnails = document.getElementById('ps-smooth-thumbnails');
 const psTargetPlatform = document.getElementById('ps-target-platform');
 for (const [id, p] of Object.entries(PLATFORMS)) psTargetPlatform.appendChild(new Option(p.label, id));
+const psExportColorMode = document.getElementById('ps-export-color-mode');
 const psOk = document.getElementById('ps-ok');
 const psCancel = document.getElementById('ps-cancel');
 markDefaultAction(dlgProjectSettings, psOk);
@@ -946,6 +949,7 @@ function openProjectSettings(tab) {
   psFrameH.value = String(settings.frameH);
   psSmoothThumbnails.checked = settings.smoothThumbnails !== false;
   psTargetPlatform.value = settings.targetPlatform ?? 'none';
+  psExportColorMode.value = settings.exportColorMode ?? 'strict';
   psSpriteLock.resnap();
   psTileSheetLock.resnap();
   psTileSizeLock.resnap();
@@ -1012,6 +1016,7 @@ psOk.addEventListener('click', () => {
     ...(psDurationValue.baseFps != null ? { baseFps: psDurationValue.baseFps, baseStep: psDurationValue.baseStep } : {}),
     smoothThumbnails: psSmoothThumbnails.checked,
     targetPlatform: psTargetPlatform.value,
+    exportColorMode: psExportColorMode.value,
   };
   state.commands.push({
     label: 'edit project settings',
@@ -1162,16 +1167,42 @@ defineAction('document.exportAnimation', {
   isEnabled: () => activeSheet()?.kind === 'sprite' && !!state.selectedAnimationId,
 });
 
+// project.settings.exportColorMode === 'total': cap export quantization at
+// a platform's whole system palette instead of one sprite/tile's hardware
+// budget (MAX_COLORS). The per-item INDEX COUNT limit itself is never
+// relaxed -- native binary exporters (buildNesChr etc.) still hard-cap at
+// MAX_COLORS regardless of this setting -- only which colors those indices
+// may be drawn from. 'total' is a no-op wherever the two already match
+// (gb2, generic8).
+const SYSTEM_TOTAL_COLORS = {
+  generic8: MAX_COLORS.generic8,
+  gba4: 256, // 16 OBJ palette banks x 16 colors -- GBA's total simultaneous sprite palette memory (Tonc/GBATEK)
+  nes2: NES_PALETTE.length, // the PPU's entire fixed master palette, not just one tile's 4-color budget
+  snes4: 256, // CGRAM total across all 8 OBJ palette slots (SNESdev PPU registers page)
+  gb2: GB_PALETTE.length, // DMG only ever has these 4 shades -- identical to the per-tile cap
+  gbc2: 32, // 8 OBJ palette banks x 4 colors -- GBC's total simultaneous sprite palette memory
+  c64mc: C64_PALETTE.length, // VIC-II's entire fixed master palette, not just one cell's 4-color budget
+};
+// Targets whose hardware has a genuinely fixed, non-programmable color set
+// (mirrors js/core/platforms.js's PLATFORMS[x].palette) -- their exported
+// palette gets snapped to real hardware colors regardless of
+// exportColorMode, so "Generic C Header" output for these targets never
+// contains a color the real chip couldn't produce.
+const HARDWARE_PALETTE_BY_TARGET = { nes2: NES_PALETTE, c64mc: C64_PALETTE, gb2: GB_PALETTE };
+
 function resolveC99Items(sheet, target) {
   const flat = flattenSheet(sheet);
   const rects = sheet.kind === 'sprite' ? sheet.frames : sheet.tiles;
   const bitmaps = rects.map(r => copyRegion(flat, r.x, r.y, r.w, r.h));
-  const maxColors = target === 'generic8' ? 256 : target === 'gba4' ? 16 : 4;
+  const colorMode = state.project.settings.exportColorMode ?? 'strict';
+  const maxColors = colorMode === 'total' ? SYSTEM_TOTAL_COLORS[target] : MAX_COLORS[target];
   const sourcePalette = state.project.palettes.find(p => p.id === state.project.activePaletteId);
   const sourceColorCount = sourcePalette?.indexed ? sourcePalette.colors.length : colorFrequency(bitmaps).length;
-  const palette = buildPalette(bitmaps, maxColors, sourcePalette).map(c => [c[0], c[1], c[2]]);
+  let palette = buildPalette(bitmaps, maxColors, sourcePalette).map(c => [c[0], c[1], c[2]]);
+  const hwPalette = HARDWARE_PALETTE_BY_TARGET[target];
+  if (hwPalette) palette = snapPaletteToHardware(palette, hwPalette);
   const items = rects.map((r, i) => ({ name: r.name || `item_${i}`, w: r.w, h: r.h, indices: quantizeBitmap(bitmaps[i], palette) }));
-  return { palette, items, sourceColorCount };
+  return { palette, items, sourceColorCount, paletteBudget: maxColors };
 }
 // Runs the platform's hardware-compatibility check and surfaces any issues
 // before exporting: blocking errors (content structurally impossible to
@@ -1179,8 +1210,8 @@ function resolveC99Items(sheet, target) {
 // warnings (lossy color reduction, over tile budget) go through
 // confirmOrAuto so the user can proceed or cancel with full knowledge of
 // what changed -- never a silent, unexplained conversion.
-function confirmPlatformExport(platformLabel, check, sourceColorCount, items) {
-  const { errors, warnings } = check({ sourceColorCount, items });
+function confirmPlatformExport(platformLabel, check, sourceColorCount, items, paletteBudget) {
+  const { errors, warnings } = check({ sourceColorCount, items, paletteBudget });
   if (errors.length) {
     alert(`${platformLabel} export blocked:\n\n${errors.join('\n')}`);
     return false;
@@ -1208,8 +1239,8 @@ function exportGbaNative() {
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
   try {
-    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'gba4');
-    if (!confirmPlatformExport('Game Boy Advance', checkGbaCompatibility, sourceColorCount, items)) return;
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gba4');
+    if (!confirmPlatformExport('Game Boy Advance', checkGbaCompatibility, sourceColorCount, items, paletteBudget)) return;
     const { pal, tiles } = buildGbaBinary({ palette, items });
     io.downloadBlob(new Blob([pal]), `${sheet.name}.pal.bin`);
     io.downloadBlob(new Blob([tiles]), `${sheet.name}.tiles.bin`);
@@ -1222,8 +1253,8 @@ function exportNesNative() {
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
   try {
-    const { items, sourceColorCount } = resolveC99Items(sheet, 'nes2');
-    if (!confirmPlatformExport('NES', checkNesCompatibility, sourceColorCount, items)) return;
+    const { items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'nes2');
+    if (!confirmPlatformExport('NES', checkNesCompatibility, sourceColorCount, items, paletteBudget)) return;
     const chr = buildNesChr({ items });
     io.downloadBlob(new Blob([chr]), `${sheet.name}.chr`);
   } catch (e) {
@@ -1235,13 +1266,56 @@ function exportSnesNative() {
   const sheet = activeSheet();
   if (!sheet || !state.project) return;
   try {
-    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'snes4');
-    if (!confirmPlatformExport('SNES', checkSnesCompatibility, sourceColorCount, items)) return;
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'snes4');
+    if (!confirmPlatformExport('SNES', checkSnesCompatibility, sourceColorCount, items, paletteBudget)) return;
     const { pal, tiles } = buildSnesBinary({ palette, items });
     io.downloadBlob(new Blob([pal]), `${sheet.name}.pal.bin`);
     io.downloadBlob(new Blob([tiles]), `${sheet.name}.tiles.bin`);
   } catch (e) {
     alert(`SNES export failed: ${e.message}`);
+  }
+}
+function exportGbNative() {
+  commitFloatIfAny();
+  const sheet = activeSheet();
+  if (!sheet || !state.project) return;
+  try {
+    const { items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gb2');
+    if (!confirmPlatformExport('Game Boy', checkGbCompatibility, sourceColorCount, items, paletteBudget)) return;
+    const tiles = buildGbBinary({ items });
+    io.downloadBlob(new Blob([tiles]), `${sheet.name}.gb.bin`);
+  } catch (e) {
+    alert(`Game Boy export failed: ${e.message}`);
+  }
+}
+function exportGbcNative() {
+  commitFloatIfAny();
+  const sheet = activeSheet();
+  if (!sheet || !state.project) return;
+  try {
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gbc2');
+    if (!confirmPlatformExport('Game Boy Color', checkGbcCompatibility, sourceColorCount, items, paletteBudget)) return;
+    const { pal, tiles } = buildGbcBinary({ palette, items });
+    io.downloadBlob(new Blob([pal]), `${sheet.name}.pal.bin`);
+    io.downloadBlob(new Blob([tiles]), `${sheet.name}.tiles.bin`);
+  } catch (e) {
+    alert(`Game Boy Color export failed: ${e.message}`);
+  }
+}
+function exportC64Native() {
+  commitFloatIfAny();
+  const sheet = activeSheet();
+  if (!sheet || !state.project) return;
+  try {
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'c64mc');
+    if (!confirmPlatformExport('Commodore 64', checkC64Compatibility, sourceColorCount, items, paletteBudget)) return;
+    const { background, screenRam, colorRam, bitmap } = buildC64Binary({ palette, items });
+    io.downloadBlob(new Blob([bitmap]), `${sheet.name}.bitmap.bin`);
+    io.downloadBlob(new Blob([screenRam]), `${sheet.name}.screen.bin`);
+    io.downloadBlob(new Blob([colorRam]), `${sheet.name}.color.bin`);
+    io.downloadBlob(new Blob([new Uint8Array([background])]), `${sheet.name}.bg.bin`);
+  } catch (e) {
+    alert(`Commodore 64 export failed: ${e.message}`);
   }
 }
 
@@ -1252,6 +1326,9 @@ defineAction('document.exportSheet.tsx', { label: 'Tiled TSX', run: exportTiledT
 defineAction('document.exportSheet.gba', { label: 'Game Boy Advance', run: exportGbaNative });
 defineAction('document.exportSheet.nes', { label: 'NES', run: exportNesNative });
 defineAction('document.exportSheet.snes', { label: 'SNES', run: exportSnesNative });
+defineAction('document.exportSheet.gb', { label: 'Game Boy', run: exportGbNative });
+defineAction('document.exportSheet.gbc', { label: 'Game Boy Color', run: exportGbcNative });
+defineAction('document.exportSheet.c64', { label: 'Commodore 64', run: exportC64Native });
 defineAction('document.exportSheet.c99', { label: 'Generic C Header', run: exportGenericC99 });
 defineAction('document.exportSheet', {
   label: 'Export Sheet',
@@ -1264,6 +1341,9 @@ defineAction('document.exportSheet', {
     { action: 'document.exportSheet.gba' },
     { action: 'document.exportSheet.nes' },
     { action: 'document.exportSheet.snes' },
+    { action: 'document.exportSheet.gb' },
+    { action: 'document.exportSheet.gbc' },
+    { action: 'document.exportSheet.c64' },
     { action: 'document.exportSheet.c99' },
   ],
   isEnabled: () => !!state.project,
@@ -1272,11 +1352,15 @@ defineAction('document.exportSheet', {
 const SHEET_FORMATS = {
   sprite: [
     ['json', 'JSON + PNG'], ['gif', 'Animations (GIF, all)'],
-    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['snes', 'SNES'], ['c99', 'Generic C Header'],
+    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['snes', 'SNES'],
+    ['gb', 'Game Boy'], ['gbc', 'Game Boy Color'], ['c64', 'Commodore 64'],
+    ['c99', 'Generic C Header'],
   ],
   tile: [
     ['json', 'JSON + PNG'], ['tsx', 'Tiled TSX'],
-    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['snes', 'SNES'], ['c99', 'Generic C Header'],
+    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['snes', 'SNES'],
+    ['gb', 'Game Boy'], ['gbc', 'Game Boy Color'], ['c64', 'Commodore 64'],
+    ['c99', 'Generic C Header'],
   ],
 };
 
@@ -1317,8 +1401,8 @@ async function buildSheetExportEntries(sheet, format, warnings = null) {
     ];
   }
   if (format === 'gba') {
-    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'gba4');
-    const { errors, warnings: w } = checkGbaCompatibility({ sourceColorCount, items });
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gba4');
+    const { errors, warnings: w } = checkGbaCompatibility({ sourceColorCount, items, paletteBudget });
     if (errors.length) throw new Error(`${sheet.name} (Game Boy Advance): ${errors.join(' ')}`);
     warnings?.push(...w.map(msg => `${sheet.name} (Game Boy Advance): ${msg}`));
     const { pal, tiles } = buildGbaBinary({ palette, items });
@@ -1328,21 +1412,52 @@ async function buildSheetExportEntries(sheet, format, warnings = null) {
     ];
   }
   if (format === 'nes') {
-    const { items, sourceColorCount } = resolveC99Items(sheet, 'nes2');
-    const { errors, warnings: w } = checkNesCompatibility({ sourceColorCount, items });
+    const { items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'nes2');
+    const { errors, warnings: w } = checkNesCompatibility({ sourceColorCount, items, paletteBudget });
     if (errors.length) throw new Error(`${sheet.name} (NES): ${errors.join(' ')}`);
     warnings?.push(...w.map(msg => `${sheet.name} (NES): ${msg}`));
     return [{ path: `${sheet.name}.chr`, data: buildNesChr({ items }) }];
   }
   if (format === 'snes') {
-    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'snes4');
-    const { errors, warnings: w } = checkSnesCompatibility({ sourceColorCount, items });
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'snes4');
+    const { errors, warnings: w } = checkSnesCompatibility({ sourceColorCount, items, paletteBudget });
     if (errors.length) throw new Error(`${sheet.name} (SNES): ${errors.join(' ')}`);
     warnings?.push(...w.map(msg => `${sheet.name} (SNES): ${msg}`));
     const { pal, tiles } = buildSnesBinary({ palette, items });
     return [
       { path: `${sheet.name}.pal.bin`, data: pal },
       { path: `${sheet.name}.tiles.bin`, data: tiles },
+    ];
+  }
+  if (format === 'gb') {
+    const { items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gb2');
+    const { errors, warnings: w } = checkGbCompatibility({ sourceColorCount, items, paletteBudget });
+    if (errors.length) throw new Error(`${sheet.name} (Game Boy): ${errors.join(' ')}`);
+    warnings?.push(...w.map(msg => `${sheet.name} (Game Boy): ${msg}`));
+    return [{ path: `${sheet.name}.gb.bin`, data: buildGbBinary({ items }) }];
+  }
+  if (format === 'gbc') {
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gbc2');
+    const { errors, warnings: w } = checkGbcCompatibility({ sourceColorCount, items, paletteBudget });
+    if (errors.length) throw new Error(`${sheet.name} (Game Boy Color): ${errors.join(' ')}`);
+    warnings?.push(...w.map(msg => `${sheet.name} (Game Boy Color): ${msg}`));
+    const { pal, tiles } = buildGbcBinary({ palette, items });
+    return [
+      { path: `${sheet.name}.pal.bin`, data: pal },
+      { path: `${sheet.name}.tiles.bin`, data: tiles },
+    ];
+  }
+  if (format === 'c64') {
+    const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'c64mc');
+    const { errors, warnings: w } = checkC64Compatibility({ sourceColorCount, items, paletteBudget });
+    if (errors.length) throw new Error(`${sheet.name} (Commodore 64): ${errors.join(' ')}`);
+    warnings?.push(...w.map(msg => `${sheet.name} (Commodore 64): ${msg}`));
+    const { background, screenRam, colorRam, bitmap } = buildC64Binary({ palette, items });
+    return [
+      { path: `${sheet.name}.bitmap.bin`, data: bitmap },
+      { path: `${sheet.name}.screen.bin`, data: screenRam },
+      { path: `${sheet.name}.color.bin`, data: colorRam },
+      { path: `${sheet.name}.bg.bin`, data: new Uint8Array([background]) },
     ];
   }
   throw new Error(`unknown export format "${format}"`);

@@ -1,7 +1,7 @@
 // Packs already-quantized palette-index arrays into C99 source for retro
 // targets. Palette/quantization is the caller's job (js/core/quantize.js) --
 // this module is pure byte-packing.
-export const MAX_COLORS = { generic8: 256, gba4: 16, nes2: 4, snes4: 16 };
+export const MAX_COLORS = { generic8: 256, gba4: 16, nes2: 4, snes4: 16, gb2: 4, gbc2: 4, c64mc: 4 };
 
 function packTiles(w, h, indices, tileBytes, packTile) {
   if (w % 8 !== 0 || h % 8 !== 0)
@@ -70,13 +70,57 @@ function packSnes4Tile(tile) {
   return bytes;
 }
 
-// Shared by js/app/platformExport.js, which packs the same GBA4/NES2/SNES4
-// byte layouts into raw native binary files instead of C source.
+// 16 bytes/tile, row-interleaved: byte0 = plane0 (bit0) of row0, byte1 =
+// plane1 (bit1) of row0, byte2 = plane0 of row1, ... MSB = leftmost pixel
+// (Pan Docs "Tile Data" -- same bit-per-pixel layout as NES's 2bpp, but
+// interleaved per row rather than in two 8-byte blocks; genuinely
+// different byte order despite both being "2bpp, 16 bytes/tile"). Game
+// Boy Color uses this identical tile format -- only the palette encoding
+// differs (see packPaletteBgr555 in js/app/platformExport.js), so both
+// 'gb2' and 'gbc2' targets share this packer.
+function packGb2Tile(tile) {
+  const bytes = new Uint8Array(16);
+  for (let row = 0; row < 8; row++) {
+    let lo = 0, hi = 0;
+    for (let x = 0; x < 8; x++) {
+      const v = tile[row * 8 + x] & 3;
+      lo |= (v & 1) << (7 - x);
+      hi |= ((v >> 1) & 1) << (7 - x);
+    }
+    bytes[row * 2] = lo;
+    bytes[row * 2 + 1] = hi;
+  }
+  return bytes;
+}
+
+// 8 bytes/tile, 1 byte/row: VIC-II multicolor bitmap mode pairs up
+// columns into double-wide pixels (each cell is 4 double-wide pixels
+// across 8 screen pixels), so only every other source column is sampled;
+// the odd column's color is dropped (C64-Wiki "Sprite" / Dustlayer VIC-II
+// bitmap-mode docs). 2 bits/pixel-pair, MSB = leftmost pair.
+function packC64McTile(tile) {
+  const bytes = new Uint8Array(8);
+  for (let row = 0; row < 8; row++) {
+    let byte = 0;
+    for (let pair = 0; pair < 4; pair++) {
+      const v = tile[row * 8 + pair * 2] & 3;
+      byte |= v << ((3 - pair) * 2);
+    }
+    bytes[row] = byte;
+  }
+  return bytes;
+}
+
+// Shared by js/app/platformExport.js, which packs the same GBA4/NES2/
+// SNES4/GB2/GBC2/C64MC byte layouts into raw native binary files instead
+// of C source.
 export function packItem(item, target) {
   if (target === 'generic8') return item.indices;
   if (target === 'gba4') return packTiles(item.w, item.h, item.indices, 32, packGba4Tile);
   if (target === 'nes2') return packTiles(item.w, item.h, item.indices, 16, packNes2Tile);
   if (target === 'snes4') return packTiles(item.w, item.h, item.indices, 32, packSnes4Tile);
+  if (target === 'gb2' || target === 'gbc2') return packTiles(item.w, item.h, item.indices, 16, packGb2Tile);
+  if (target === 'c64mc') return packTiles(item.w, item.h, item.indices, 8, packC64McTile);
   throw new Error(`unknown C99 export target "${target}"`);
 }
 

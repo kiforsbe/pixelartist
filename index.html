@@ -101,6 +101,11 @@
     <span class="dlg-section-header">Compatibility</span>
     <span>Target platform</span>
     <select id="ps-target-platform" style="grid-column: 2 / span 3"></select>
+    <span>Export colors</span>
+    <select id="ps-export-color-mode" style="grid-column: 2 / span 3">
+      <option value="strict">Restrict to hardware limit per sprite/tile</option>
+      <option value="total">Use full system palette (still capped per sprite/tile)</option>
+    </select>
   </div>
   <div id="ps-page-onion" hidden>
     <p class="about-meta">Per-step color overrides for onion-skin ghosts in the frame editor. Leave a step on "default" to use that direction's toolbar color.</p>

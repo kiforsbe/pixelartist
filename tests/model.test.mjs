@@ -424,6 +424,13 @@ test('project carries required settings; version 2', () => {
   assert.equal(p2.settings.tileW, 8);
 });
 
+test('deserializeProject: targetPlatform/exportColorMode fall back to their defaults for files saved before those fields existed', () => {
+  const json = { version: 2, name: 's', settings: { spriteSheetW: 256, spriteSheetH: 256, tileSheetW: 256, tileSheetH: 256, tileW: 16, tileH: 16, frameW: 16, frameH: 16, durationMs: 100 }, sheets: [] };
+  const p = deserializeProject(json, new Map());
+  assert.equal(p.settings.targetPlatform, 'none');
+  assert.equal(p.settings.exportColorMode, 'strict');
+});
+
 
 test('animations carry strip flag; serialize round-trips settings and strip', () => {
   const p = createProject('a');
