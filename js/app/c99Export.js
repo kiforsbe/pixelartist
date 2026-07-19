@@ -1,7 +1,7 @@
 // Packs already-quantized palette-index arrays into C99 source for retro
 // targets. Palette/quantization is the caller's job (js/core/quantize.js) --
 // this module is pure byte-packing.
-export const MAX_COLORS = { generic8: 256, gba4: 16, nes2: 4 };
+export const MAX_COLORS = { generic8: 256, gba4: 16, nes2: 4, snes4: 16 };
 
 function packTiles(w, h, indices, tileBytes, packTile) {
   if (w % 8 !== 0 || h % 8 !== 0)
@@ -45,12 +45,38 @@ function packNes2Tile(tile) {
   return bytes;
 }
 
-// Shared by js/app/platformExport.js, which packs the same GBA4/NES2 byte
-// layouts into raw native binary files instead of C source.
+// 32 bytes/tile: bitplanes 0+1 interleaved row-by-row (16 bytes: row0
+// plane0, row0 plane1, row1 plane0, row1 plane1, ...), then bitplanes 2+3
+// interleaved row-by-row the same way (next 16 bytes). MSB = leftmost
+// pixel. This is a genuinely different byte layout from GBA's packed-
+// nibble 4bpp despite both being "4bpp, 32 bytes/tile" (SNESdev/SnesLab
+// convention).
+function packSnes4Tile(tile) {
+  const bytes = new Uint8Array(32);
+  for (let row = 0; row < 8; row++) {
+    let bp0 = 0, bp1 = 0, bp2 = 0, bp3 = 0;
+    for (let x = 0; x < 8; x++) {
+      const v = tile[row * 8 + x] & 0x0f;
+      bp0 |= (v & 1) << (7 - x);
+      bp1 |= ((v >> 1) & 1) << (7 - x);
+      bp2 |= ((v >> 2) & 1) << (7 - x);
+      bp3 |= ((v >> 3) & 1) << (7 - x);
+    }
+    bytes[row * 2] = bp0;
+    bytes[row * 2 + 1] = bp1;
+    bytes[16 + row * 2] = bp2;
+    bytes[16 + row * 2 + 1] = bp3;
+  }
+  return bytes;
+}
+
+// Shared by js/app/platformExport.js, which packs the same GBA4/NES2/SNES4
+// byte layouts into raw native binary files instead of C source.
 export function packItem(item, target) {
   if (target === 'generic8') return item.indices;
   if (target === 'gba4') return packTiles(item.w, item.h, item.indices, 32, packGba4Tile);
   if (target === 'nes2') return packTiles(item.w, item.h, item.indices, 16, packNes2Tile);
+  if (target === 'snes4') return packTiles(item.w, item.h, item.indices, 32, packSnes4Tile);
   throw new Error(`unknown C99 export target "${target}"`);
 }
 

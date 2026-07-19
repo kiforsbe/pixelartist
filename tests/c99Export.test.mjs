@@ -41,6 +41,24 @@ test('buildC99 nes2: 8x8 tile packs to 16 bytes, two 8-byte bitplanes', () => {
   assert.match(c, new RegExp(`demo_tile0\\[16\\] = \\{${expected}\\}`));
 });
 
+test('buildC99 snes4: bitplanes 0+1 interleaved per row, then 2+3 interleaved per row', () => {
+  // every row: pixels 8..15 (low 3 bits cycle 0-7, bit3 always set) ->
+  // bp0=0x55, bp1=0x33, bp2=0x0f, bp3=0xff for every row (hand-derived,
+  // see design doc's SNES section)
+  const row = [8, 9, 10, 11, 12, 13, 14, 15];
+  const indices = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) indices.set(row, y * 8);
+  const { c } = buildC99({
+    projectName: 'demo', target: 'snes4',
+    palette: Array.from({ length: 16 }, () => [0, 0, 0]),
+    items: [{ name: 'tile0', w: 8, h: 8, indices }],
+  });
+  const bp01 = Array.from({ length: 8 }, () => ['0x55', '0x33']).flat();
+  const bp23 = Array.from({ length: 8 }, () => ['0x0f', '0xff']).flat();
+  const expected = [...bp01, ...bp23].join(',');
+  assert.match(c, new RegExp(`demo_tile0\\[32\\] = \\{${expected}\\}`));
+});
+
 test('buildC99: gba4/nes2 reject dimensions not a multiple of 8', () => {
   const items = [{ name: 't', w: 5, h: 8, indices: new Uint8Array(40) }];
   assert.throws(() => buildC99({ projectName: 'd', target: 'gba4', palette: [[0, 0, 0]], items }),

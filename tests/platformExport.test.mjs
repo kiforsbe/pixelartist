@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGbaBinary, buildNesChr, checkGbaCompatibility, checkNesCompatibility } from '../js/app/platformExport.js';
+import {
+  buildGbaBinary, buildNesChr, buildSnesBinary,
+  checkGbaCompatibility, checkNesCompatibility, checkSnesCompatibility,
+} from '../js/app/platformExport.js';
 
 function item(name, w, h) { return { name, w, h, indices: new Uint8Array(w * h) }; }
 
@@ -55,6 +58,33 @@ test('buildNesChr: multiple items concatenate back-to-back, matching a real CHR-
   assert.deepEqual([...chr.slice(24, 32)], Array(8).fill(0xff)); // tile b plane1
 });
 
+test('buildSnesBinary: palette uses the same BGR555 encoding as GBA (black/white checkpoints)', () => {
+  const { pal } = buildSnesBinary({
+    palette: [[0, 0, 0], [255, 255, 255]],
+    items: [],
+  });
+  assert.deepEqual([...pal.slice(0, 2)], [0x00, 0x00]);
+  assert.deepEqual([...pal.slice(2, 4)], [0xff, 0x7f]);
+});
+
+test('buildSnesBinary: tile data matches c99Export\'s snes4 interleaved-bitplane packing', () => {
+  const row = [8, 9, 10, 11, 12, 13, 14, 15];
+  const indices = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) indices.set(row, y * 8);
+  const { tiles } = buildSnesBinary({
+    palette: Array.from({ length: 16 }, () => [0, 0, 0]),
+    items: [{ name: 'tile0', w: 8, h: 8, indices }],
+  });
+  assert.equal(tiles.length, 32);
+  assert.deepEqual([...tiles.slice(0, 16)], Array.from({ length: 8 }, () => [0x55, 0x33]).flat());
+  assert.deepEqual([...tiles.slice(16, 32)], Array.from({ length: 8 }, () => [0x0f, 0xff]).flat());
+});
+
+test('buildSnesBinary: rejects a palette larger than 16 colors', () => {
+  const palette = Array.from({ length: 17 }, () => [0, 0, 0]);
+  assert.throws(() => buildSnesBinary({ palette, items: [] }), /at most 16 colors/);
+});
+
 test('checkGbaCompatibility: clean, in-budget content has no errors or warnings', () => {
   const { errors, warnings } = checkGbaCompatibility({ sourceColorCount: 12, items: [item('a', 16, 16)] });
   assert.deepEqual(errors, []);
@@ -91,4 +121,29 @@ test('checkNesCompatibility: warns when tile count exceeds the 256-tile pattern 
   const { warnings } = checkNesCompatibility({ sourceColorCount: 4, items: [item('big', 8 * 300, 8)] });
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /exceeds one 256-tile/);
+});
+
+test('checkSnesCompatibility: clean, in-budget content has no errors or warnings', () => {
+  const { errors, warnings } = checkSnesCompatibility({ sourceColorCount: 12, items: [item('a', 16, 16)] });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(warnings, []);
+});
+
+test('checkSnesCompatibility: flags non-8-multiple dimensions as a blocking error', () => {
+  const { errors } = checkSnesCompatibility({ sourceColorCount: 4, items: [item('bad', 5, 8)] });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /bad.*5x8/);
+});
+
+test('checkSnesCompatibility: warns when source colors exceed the 16-color CGRAM palette', () => {
+  const { warnings } = checkSnesCompatibility({ sourceColorCount: 20, items: [item('a', 8, 8)] });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /20 colors/);
+  assert.match(warnings[0], /at most 16/);
+});
+
+test('checkSnesCompatibility: warns when tile count exceeds the 1024-tile VRAM budget', () => {
+  const { warnings } = checkSnesCompatibility({ sourceColorCount: 4, items: [item('big', 8 * 1025, 8)] });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /exceeds one 4bpp background layer's 1024-tile/);
 });

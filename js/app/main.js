@@ -6,7 +6,10 @@ import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../co
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { buildTiledTsx } from './tiledExport.js';
 import { buildC99 } from './c99Export.js';
-import { buildGbaBinary, buildNesChr, checkGbaCompatibility, checkNesCompatibility } from './platformExport.js';
+import {
+  buildGbaBinary, buildNesChr, buildSnesBinary,
+  checkGbaCompatibility, checkNesCompatibility, checkSnesCompatibility,
+} from './platformExport.js';
 import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from './animationExport.js';
 import { encodeGif } from '../core/gif.js';
 import { buildPalette, quantizeBitmap, colorFrequency } from '../core/quantize.js';
@@ -1191,6 +1194,20 @@ function exportNesNative() {
     alert(`NES export failed: ${e.message}`);
   }
 }
+function exportSnesNative() {
+  commitFloatIfAny();
+  const sheet = activeSheet();
+  if (!sheet || !state.project) return;
+  try {
+    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'snes4');
+    if (!confirmPlatformExport('SNES', checkSnesCompatibility, sourceColorCount, items)) return;
+    const { pal, tiles } = buildSnesBinary({ palette, items });
+    io.downloadBlob(new Blob([pal]), `${sheet.name}.pal.bin`);
+    io.downloadBlob(new Blob([tiles]), `${sheet.name}.tiles.bin`);
+  } catch (e) {
+    alert(`SNES export failed: ${e.message}`);
+  }
+}
 
 defineAction('document.exportSheet.png', { label: 'Sheet PNG (flattened)', run: exportSheetPng });
 defineAction('document.exportSheet.frames', { label: 'Frames JSON', run: exportFramesJson, isEnabled: () => activeSheet()?.kind === 'sprite' });
@@ -1198,6 +1215,7 @@ defineAction('document.exportSheet.tiles', { label: 'Tiles JSON', run: exportTil
 defineAction('document.exportSheet.tsx', { label: 'Tiled TSX', run: exportTiledTsxFile, isEnabled: () => activeSheet()?.kind === 'tile' });
 defineAction('document.exportSheet.gba', { label: 'Game Boy Advance', run: exportGbaNative });
 defineAction('document.exportSheet.nes', { label: 'NES', run: exportNesNative });
+defineAction('document.exportSheet.snes', { label: 'SNES', run: exportSnesNative });
 defineAction('document.exportSheet.c99', { label: 'Generic C Header', run: exportGenericC99 });
 defineAction('document.exportSheet', {
   label: 'Export Sheet',
@@ -1209,6 +1227,7 @@ defineAction('document.exportSheet', {
     { separator: true },
     { action: 'document.exportSheet.gba' },
     { action: 'document.exportSheet.nes' },
+    { action: 'document.exportSheet.snes' },
     { action: 'document.exportSheet.c99' },
   ],
   isEnabled: () => !!state.project,
@@ -1217,20 +1236,20 @@ defineAction('document.exportSheet', {
 const SHEET_FORMATS = {
   sprite: [
     ['json', 'JSON + PNG'], ['gif', 'Animations (GIF, all)'],
-    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['c99', 'Generic C Header'],
+    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['snes', 'SNES'], ['c99', 'Generic C Header'],
   ],
   tile: [
     ['json', 'JSON + PNG'], ['tsx', 'Tiled TSX'],
-    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['c99', 'Generic C Header'],
+    ['gba', 'Game Boy Advance'], ['nes', 'NES'], ['snes', 'SNES'], ['c99', 'Generic C Header'],
   ],
 };
 
 // `warnings`, if given, collects "<sheet> (<format>): <issue>" strings for
-// gba/nes lossy-conversion/tile-budget issues instead of confirming them
-// one sheet at a time mid-batch -- the caller (epExport) shows one combined
-// confirmation after the whole batch is built, before anything downloads.
-// Blocking errors (content structurally impossible to pack) still throw,
-// same as the single-sheet Document > Export Sheet path.
+// gba/nes/snes lossy-conversion/tile-budget issues instead of confirming
+// them one sheet at a time mid-batch -- the caller (epExport) shows one
+// combined confirmation after the whole batch is built, before anything
+// downloads. Blocking errors (content structurally impossible to pack)
+// still throw, same as the single-sheet Document > Export Sheet path.
 async function buildSheetExportEntries(sheet, format, warnings = null) {
   const flat = flattenSheet(sheet);
   if (format === 'json') {
@@ -1278,6 +1297,17 @@ async function buildSheetExportEntries(sheet, format, warnings = null) {
     if (errors.length) throw new Error(`${sheet.name} (NES): ${errors.join(' ')}`);
     warnings?.push(...w.map(msg => `${sheet.name} (NES): ${msg}`));
     return [{ path: `${sheet.name}.chr`, data: buildNesChr({ items }) }];
+  }
+  if (format === 'snes') {
+    const { palette, items, sourceColorCount } = resolveC99Items(sheet, 'snes4');
+    const { errors, warnings: w } = checkSnesCompatibility({ sourceColorCount, items });
+    if (errors.length) throw new Error(`${sheet.name} (SNES): ${errors.join(' ')}`);
+    warnings?.push(...w.map(msg => `${sheet.name} (SNES): ${msg}`));
+    const { pal, tiles } = buildSnesBinary({ palette, items });
+    return [
+      { path: `${sheet.name}.pal.bin`, data: pal },
+      { path: `${sheet.name}.tiles.bin`, data: tiles },
+    ];
   }
   throw new Error(`unknown export format "${format}"`);
 }
