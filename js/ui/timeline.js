@@ -44,11 +44,14 @@ function getScratchCanvas(width, height) {
   return scratchCanvas;
 }
 
-// Draws `bmp` into `canvas` nearest-neighbor, scaled to fit (contain) and
-// centered. Used for both 64px strip thumbnails and the 96px preview.
+// Draws `bmp` into `canvas`, scaled to fit (contain) and centered. Used for
+// both 64px strip thumbnails and the 96px preview. Shrinking a large sprite
+// down to a tiny thumbnail with nearest-neighbor drops most of its pixels
+// and aliases badly; smoothing (project setting, on by default) only kicks
+// in for that shrink case -- an upscaled thumbnail stays crisp
+// nearest-neighbor or the pixel art would turn to mush.
 function drawFit(canvas, bmp) {
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!bmp || bmp.width === 0 || bmp.height === 0) return;
   const tmp = getScratchCanvas(bmp.width, bmp.height);
@@ -58,6 +61,9 @@ function drawFit(canvas, bmp) {
   const dh = Math.max(1, Math.round(bmp.height * scale));
   const dx = Math.floor((canvas.width - dw) / 2);
   const dy = Math.floor((canvas.height - dh) / 2);
+  const smooth = scale < 1 && state.project?.settings?.smoothThumbnails !== false;
+  ctx.imageSmoothingEnabled = smooth;
+  if (smooth) ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(tmp, 0, 0, bmp.width, bmp.height, dx, dy, dw, dh);
 }
 

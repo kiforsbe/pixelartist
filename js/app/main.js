@@ -737,6 +737,7 @@ const psTileH = document.getElementById('ps-tile-h');
 const psFrameW = document.getElementById('ps-frame-w');
 const psFrameH = document.getElementById('ps-frame-h');
 const psDurationMount = document.getElementById('ps-duration-control');
+const psSmoothThumbnails = document.getElementById('ps-smooth-thumbnails');
 const psOk = document.getElementById('ps-ok');
 const psCancel = document.getElementById('ps-cancel');
 markDefaultAction(dlgProjectSettings, psOk);
@@ -894,6 +895,7 @@ function openProjectSettings(tab) {
   psTileH.value = String(settings.tileH);
   psFrameW.value = String(settings.frameW);
   psFrameH.value = String(settings.frameH);
+  psSmoothThumbnails.checked = settings.smoothThumbnails !== false;
   psSpriteLock.resnap();
   psTileSheetLock.resnap();
   psTileSizeLock.resnap();
@@ -958,6 +960,7 @@ psOk.addEventListener('click', () => {
   const afterSettings = {
     ...restSettings, ...dims, durationMs: psDurationValue.durationMs,
     ...(psDurationValue.baseFps != null ? { baseFps: psDurationValue.baseFps, baseStep: psDurationValue.baseStep } : {}),
+    smoothThumbnails: psSmoothThumbnails.checked,
   };
   state.commands.push({
     label: 'edit project settings',

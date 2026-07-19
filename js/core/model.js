@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   tileW: 16, tileH: 16,
   frameW: 16, frameH: 16,
   durationMs: 100,
+  smoothThumbnails: true,
 };
 const MAX_DIM = 4096;
 
