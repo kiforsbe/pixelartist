@@ -1040,20 +1040,20 @@ function handleUp(ev, view) {
   }
   if (d.kind === 'tiledrag') {
     const from = d.from;
-    const target = tileAt(sheet, ev.x, ev.y);
-    if (target && target !== from && target.w === from.w && target.h === from.h) {
-      if (d.shift) commitMoveTile(sheet, from, target);
-      else commitSwapTile(sheet, from, target);
-      state.selectedTileId = target.id;
-      emit('selection');
-      return;
-    }
     if (from.gridId != null) {
       const grid = sheet.tileGrids.find(g => g.id === from.gridId);
       const bounds = gridBounds(grid);
       const dx = Math.max(-bounds.x, Math.min(sheet.width - (bounds.x + bounds.w), ev.x - d.anchor.x));
       const dy = Math.max(-bounds.y, Math.min(sheet.height - (bounds.y + bounds.h), ev.y - d.anchor.y));
       if (dx !== 0 || dy !== 0) commitMoveGrid(sheet, grid, dx, dy);
+      return;
+    }
+    const target = tileAt(sheet, ev.x, ev.y);
+    if (target && target !== from && target.w === from.w && target.h === from.h) {
+      if (d.shift) commitMoveTile(sheet, from, target);
+      else commitSwapTile(sheet, from, target);
+      state.selectedTileId = target.id;
+      emit('selection');
       return;
     }
     const dx = Math.max(-from.x, Math.min(sheet.width - (from.x + from.w), ev.x - d.anchor.x));
@@ -1161,19 +1161,21 @@ function drawTileToolGhost(ctx, view) {
     for (const t of ownedTiles(sheet, drag.grid.id))
       strokeGhostRect(ctx, view, { x: t.x + drag.dx, y: t.y + drag.dy, w: t.w, h: t.h });
   } else if (drag.kind === 'tiledrag' && drag.to) {
-    const target = tileAt(sheet, drag.to.x, drag.to.y);
-    const swapCandidate = target && target !== drag.from && target.w === drag.from.w && target.h === drag.from.h;
-    if (swapCandidate) {
-      ctx.strokeStyle = drag.shift ? TILE_GHOST_MOVE : TILE_GHOST;
-      strokeGhostRect(ctx, view, target);
-    } else if (drag.from.gridId == null) {
-      const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
-      strokeGhostRect(ctx, view, { x: drag.from.x + dx, y: drag.from.y + dy, w: drag.from.w, h: drag.from.h });
-    } else {
+    if (drag.from.gridId != null) {
       const grid = sheet.tileGrids.find(g => g.id === drag.from.gridId);
       const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
       for (const t of ownedTiles(sheet, grid.id))
         strokeGhostRect(ctx, view, { x: t.x + dx, y: t.y + dy, w: t.w, h: t.h });
+    } else {
+      const target = tileAt(sheet, drag.to.x, drag.to.y);
+      const swapCandidate = target && target !== drag.from && target.w === drag.from.w && target.h === drag.from.h;
+      if (swapCandidate) {
+        ctx.strokeStyle = drag.shift ? TILE_GHOST_MOVE : TILE_GHOST;
+        strokeGhostRect(ctx, view, target);
+      } else {
+        const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
+        strokeGhostRect(ctx, view, { x: drag.from.x + dx, y: drag.from.y + dy, w: drag.from.w, h: drag.from.h });
+      }
     }
   } else if (drag.kind === 'gridresize') {
     strokeGhostRect(ctx, view, gridBounds(ghostGridFor(drag)));
@@ -1187,18 +1189,20 @@ function drawTileToolGhost(ctx, view) {
   } else if (drag.kind === 'gridmove') {
     drawGridDims(ctx, view, drag.grid, { dx: drag.dx, dy: drag.dy });
   } else if (drag.kind === 'tiledrag' && drag.to) {
-    const target = tileAt(sheet, drag.to.x, drag.to.y);
-    const swapCandidate = target && target !== drag.from && target.w === drag.from.w && target.h === drag.from.h;
-    if (swapCandidate) {
-      // no label for a swap — matches today's behavior
-    } else if (drag.from.gridId == null) {
-      const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
-      const r = { x: drag.from.x + dx, y: drag.from.y + dy, w: drag.from.w, h: drag.from.h };
-      drawRectDims(ctx, view, r, { dx, dy });
-    } else {
+    if (drag.from.gridId != null) {
       const grid = sheet.tileGrids.find(g => g.id === drag.from.gridId);
       const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
       drawGridDims(ctx, view, grid, { dx, dy });
+    } else {
+      const target = tileAt(sheet, drag.to.x, drag.to.y);
+      const swapCandidate = target && target !== drag.from && target.w === drag.from.w && target.h === drag.from.h;
+      if (swapCandidate) {
+        // no label for a swap — matches today's behavior
+      } else {
+        const dx = drag.to.x - drag.anchor.x, dy = drag.to.y - drag.anchor.y;
+        const r = { x: drag.from.x + dx, y: drag.from.y + dy, w: drag.from.w, h: drag.from.h };
+        drawRectDims(ctx, view, r, { dx, dy });
+      }
     }
   } else if (drag.kind === 'gridresize') {
     drawGridDims(ctx, view, ghostGridFor(drag), {
