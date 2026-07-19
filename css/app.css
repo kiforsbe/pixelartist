@@ -246,3 +246,10 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 /* tight-gap cluster for related icon buttons, used where a larger container
    gap (e.g. #top-bar) would otherwise space them apart like unrelated items */
 .btn-group { display: flex; gap: 4px; align-items: center; }
+
+.duration-control { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.duration-control-toggle { display: flex; gap: 4px; }
+.duration-control-toggle button { flex: 1; }
+.duration-control-row { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #9a9ca8; }
+.duration-control-row input { width: 60px; }
+.duration-control-row input:disabled { opacity: .6; }

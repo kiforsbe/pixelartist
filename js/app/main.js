@@ -11,6 +11,7 @@ import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } f
 import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
+import { mountAnimationsPanel } from '../ui/animpanel.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
 import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../ui/floatsession.js';
@@ -524,6 +525,7 @@ initFloatSession();
 mountColorPanel(document.getElementById('panel-colors'));
 mountLayersPanel(document.getElementById('panel-layers'));
 mountFramesPanel(document.getElementById('panel-context'));
+mountAnimationsPanel(document.getElementById('panel-animation'));
 mountTilePanel(document.getElementById('panel-context'));
 mountAutotilesPanel(document.getElementById('panel-autotiles'));
 mountTileLayersPanel(document.getElementById('panel-tilelayers'));
