@@ -991,13 +991,21 @@ export function mountLayersPanel(el) {
     queueMicrotask(() => { thumbRedrawQueued = false; redrawThumbs(); });
   }
 
-  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
+  // sheet.layerTree (bitmap layers: visibility, opacity, groups) is shared
+  // by sprite and tile sheets alike -- see activeLayer()/flattenSheet() in
+  // state.js/model.js, which never branch on sheet.kind. It's unrelated to
+  // sheet.layers (tilemode.js's flat named-tag array for categorizing
+  // tiles, mounted separately as the "Tile Layers" panel). Groups only ever
+  // gain an animationId via frames.js's commitAcceptAnimation, which is
+  // gated to sprite mode, so these actions can never create or touch an
+  // animation-owned group on a tile sheet -- no isAvailable gating needed.
+  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet() });
   bindAction(btnAddLayer, 'layer.add');
-  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
+  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet() });
   bindAction(btnAddGroup, 'layer.addGroup');
-  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
+  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet() });
   bindAction(btnDelete, 'layer.delete');
-  defineAction('layer.mergeDown', { label: 'Merge Down', run: doMergeDown, isEnabled: () => !!activeSheet(), isAvailable: () => state.mode === 'sprites' });
+  defineAction('layer.mergeDown', { label: 'Merge Down', run: doMergeDown, isEnabled: () => !!activeSheet() });
   bindAction(btnMerge, 'layer.mergeDown');
 
   on('project', renderList);
