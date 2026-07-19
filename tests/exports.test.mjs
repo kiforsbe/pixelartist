@@ -13,8 +13,9 @@ test('buildFramesJson: shape, indices, and animation frames-by-name', () => {
   const f1 = addFrame(sheet, { name: 'idle_1', x: 16, y: 0, w: 16, h: 16 });
   const anim = addAnimation(sheet, 'idle');
   anim.loop = true;
-  anim.frames.push({ frameId: f0.id, duration: 100 });
-  anim.frames.push({ frameId: f1.id, duration: 120 });
+  anim.baseDuration = 100;
+  anim.frames.push({ frameId: f0.id, duration: null }); // inherited
+  anim.frames.push({ frameId: f1.id, duration: 120 });  // overridden
 
   const json = buildFramesJson(sheet);
   assert.equal(json.sheet, 'Hero.png');
@@ -32,6 +33,22 @@ test('buildFramesJson: shape, indices, and animation frames-by-name', () => {
         { frame: 'idle_1', duration: 120 },
       ],
     },
+  ]);
+});
+
+test('buildFramesJson: fps-primary animation exports computed ms, honoring a per-frame step override', () => {
+  const project = createProject('demo');
+  const sheet = createSheet(project, { name: 'Hero', width: 32, height: 16, kind: 'sprite' });
+  const f0 = addFrame(sheet, { name: 'run_0', x: 0, y: 0, w: 16, h: 16 });
+  const f1 = addFrame(sheet, { name: 'run_1', x: 16, y: 0, w: 16, h: 16 });
+  const anim = addAnimation(sheet, 'run', false, { durationMs: 42, baseFps: 24, baseStep: 1 });
+  anim.frames.push({ frameId: f0.id, duration: null, step: null }); // inherits baseStep 1 -> 42ms
+  anim.frames.push({ frameId: f1.id, duration: null, step: 3 });    // overrides to 3 ticks -> 125ms
+
+  const json = buildFramesJson(sheet);
+  assert.deepEqual(json.animations[0].frames, [
+    { frame: 'run_0', duration: 42 },
+    { frame: 'run_1', duration: 125 },
   ]);
 });
 

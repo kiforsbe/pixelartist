@@ -3,6 +3,7 @@
 // main.js wraps the result in a Blob and hands it to io.downloadBlob.
 import { getPreset, NEIGHBOR_DIRS } from '../core/neighbors.js';
 import { blobIndexToMask, resolveTerrainSlot } from '../core/blob47.js';
+import { effectiveDuration } from '../core/model.js';
 
 // { sheet, width, height,
 //   frames: [{ name, index, x, y, w, h, pivotX, pivotY }],
@@ -22,7 +23,7 @@ export function buildFramesJson(sheet) {
       loop: a.loop,
       frames: a.frames.map(af => ({
         frame: nameById.get(af.frameId) ?? null,
-        duration: af.duration,
+        duration: effectiveDuration(a, af),
       })),
     })),
   };
