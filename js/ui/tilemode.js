@@ -977,8 +977,6 @@ function drawTileToolGhost(ctx, view) {
   const sheet = activeSheet();
   if (!sheet) return;
 
-  if (addGridPreviewOpts) drawAddGridPreview(ctx, view);
-
   if (state.tool === 'tiletool') drawGridHandles(ctx, view, sheet);
 
   if (!drag) return;
@@ -1092,77 +1090,6 @@ export function bindTileTool(view) {
 
   on('project', () => { if (drag) { drag = null; lastClick = null; view.requestRender(); } });
   on('tool', () => { if (state.tool !== 'tiletool' && drag) { drag = null; view.requestRender(); } });
-}
-
-// ------------------------------------------------------------- add-grid dialog
-
-let addGridPreviewOpts = null; // dialog's current field values while open, else null
-
-function drawAddGridPreview(ctx, view) {
-  const { cellW, cellH, cols, rows, spacingX, spacingY } = addGridPreviewOpts;
-  if (cellW < 1 || cellH < 1 || cols < 1 || rows < 1) return;
-  ctx.save();
-  ctx.strokeStyle = '#fff';
-  ctx.setLineDash([4, 4]);
-  ctx.lineWidth = 1;
-  const previewGrid = { x: 0, y: 0, cellW, cellH, spacingX, spacingY };
-  for (let row = 0; row < rows; row++)
-    for (let col = 0; col < cols; col++) {
-      const r = gridCellRect(previewGrid, col, row);
-      strokeGhostRect(ctx, view, r);
-    }
-  ctx.restore();
-}
-
-function buildAddGridDialog() {
-  const dlg = document.createElement('dialog');
-  dlg.innerHTML = `
-    <h3>Add grid</h3>
-    <div class="row"><label>Cell W <input type="number" id="ag-cellw" min="1" value="16"></label></div>
-    <div class="row"><label>Cell H <input type="number" id="ag-cellh" min="1" value="16"></label></div>
-    <div class="row"><label>Cols <input type="number" id="ag-cols" min="1" value="4"></label></div>
-    <div class="row"><label>Rows <input type="number" id="ag-rows" min="1" value="4"></label></div>
-    <div class="row"><label>Spacing X <input type="number" id="ag-spacingx" min="0" value="0"></label></div>
-    <div class="row"><label>Spacing Y <input type="number" id="ag-spacingy" min="0" value="0"></label></div>
-    <div class="row"><button type="button" id="ag-create">Create</button><button type="button" id="ag-cancel">Cancel</button></div>
-  `;
-  document.body.appendChild(dlg);
-  const $ = (sel) => dlg.querySelector(sel);
-  const readPreview = () => {
-    const intVal = (el, min) => Math.max(min, parseInt(el.value, 10) || min);
-    return {
-      cellW: intVal($('#ag-cellw'), 1), cellH: intVal($('#ag-cellh'), 1),
-      cols: intVal($('#ag-cols'), 1), rows: intVal($('#ag-rows'), 1),
-      spacingX: intVal($('#ag-spacingx'), 0), spacingY: intVal($('#ag-spacingy'), 0),
-    };
-  };
-  for (const id of ['#ag-cellw', '#ag-cellh', '#ag-cols', '#ag-rows', '#ag-spacingx', '#ag-spacingy'])
-    $(id).addEventListener('input', () => {
-      if (!addGridPreviewOpts) return;
-      addGridPreviewOpts = readPreview();
-      tileToolView?.requestRender();
-    });
-  dlg.addEventListener('close', () => {
-    addGridPreviewOpts = null;
-    tileToolView?.requestRender();
-  });
-  $('#ag-cancel').addEventListener('click', () => dlg.close());
-  $('#ag-create').addEventListener('click', () => {
-    const sheet = activeSheet();
-    if (!sheet) { dlg.close(); return; }
-    commitAddGrid(sheet, { x: 0, y: 0, ...readPreview() });
-    dlg.close();
-  });
-  return {
-    open() {
-      const settings = state.project?.settings ?? {};
-      $('#ag-cellw').value = String(settings.tileW ?? 16);
-      $('#ag-cellh').value = String(settings.tileH ?? 16);
-      addGridPreviewOpts = readPreview();
-      dlg.showModal();
-      tileToolView?.requestRender();
-    },
-  };
 }
 
 // ------------------------------------------------------------- terrain sets
@@ -1611,14 +1538,6 @@ export function mountTilePanel(el) {
   selRow.className = 'frame-row tile-selected';
   wrap.appendChild(selRow);
 
-  const addGridDialog = buildAddGridDialog();
-  const btnAddGrid = document.createElement('button');
-  btnAddGrid.type = 'button';
-  btnAddGrid.className = 'btn-sm';
-  btnAddGrid.textContent = '➕ Grid';
-  btnAddGrid.title = 'Add grid';
-  btnAddGrid.addEventListener('click', () => { if (activeSheet()) addGridDialog.open(); });
-
   const addTerrainSetDialog = buildAddTerrainSetDialog();
   const btnAddTerrainSet = document.createElement('button');
   btnAddTerrainSet.type = 'button';
@@ -1629,7 +1548,7 @@ export function mountTilePanel(el) {
 
   const btnRow = document.createElement('div');
   btnRow.className = 'row layer-actions';
-  btnRow.append(btnAddGrid, btnAddTerrainSet);
+  btnRow.append(btnAddTerrainSet);
   wrap.appendChild(btnRow);
 
   function render() {
