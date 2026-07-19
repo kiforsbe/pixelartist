@@ -17,7 +17,7 @@ import {
   copyRegion, blitRegion, getPixel,
 } from '../core/pixels.js';
 import { makePixelPatch } from '../core/commands.js';
-import { forwardPoint, inversePoint, floatBounds } from '../core/floating.js';
+import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '../core/floating.js';
 import { nearestColor } from '../core/palettes.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../core/model.js';
 import { segmentAt } from '../core/strips.js';
@@ -590,12 +590,15 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     return view.imageToScreen(p.x, p.y);
   }
 
-  // 4 corners + 4 edge midpoints in buffer space
+  // 4 corners + 4 edge midpoints in buffer space, named so handleMoveDown
+  // can identify which one was grabbed (needed by solveScaleTransform).
   function handleAnchors(float) {
     const { w, h } = float.srcRect;
     return [
-      { u: 0, v: 0 }, { u: w, v: 0 }, { u: w, v: h }, { u: 0, v: h },
-      { u: w / 2, v: 0 }, { u: w, v: h / 2 }, { u: w / 2, v: h }, { u: 0, v: h / 2 },
+      { handle: 'nw', u: 0, v: 0 }, { handle: 'ne', u: w, v: 0 },
+      { handle: 'se', u: w, v: h }, { handle: 'sw', u: 0, v: h },
+      { handle: 'n', u: w / 2, v: 0 }, { handle: 'e', u: w, v: h / 2 },
+      { handle: 's', u: w / 2, v: h }, { handle: 'w', u: 0, v: h / 2 },
     ];
   }
 
@@ -629,7 +632,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       if (!float.frameIds) for (const a of handleAnchors(float)) {
         const p = toScreen(forwardPoint(float, a.u, a.v));
         if (Math.abs(ev.sx - p.x) <= HANDLE_PX + 2 && Math.abs(ev.sy - p.y) <= HANDLE_PX + 2) {
-          moveStroke = { kind: 'scale', t0: { ...float.transform }, anchor: a };
+          moveStroke = { kind: 'scale', t0: { ...float.transform }, handle: a.handle };
           return;
         }
       }
@@ -690,19 +693,12 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     } else if (moveStroke.kind === 'rotate') {
       const c = moveStroke.center;
       float.transform.rot = t0.rot + (Math.atan2(ev.y + 0.5 - c.y, ev.x + 0.5 - c.x) - moveStroke.angle0);
-    } else { // scale, about the (fixed) float center, in the un-rotated frame
-      const { srcRect } = float;
-      const cx = srcRect.w / 2, cy = srcRect.h / 2;
-      const cSheet = { x: srcRect.x + t0.tx + cx, y: srcRect.y + t0.ty + cy };
-      const cos = Math.cos(t0.rot), sin = Math.sin(t0.rot);
-      const dx = ev.x + 0.5 - cSheet.x, dy = ev.y + 0.5 - cSheet.y;
-      const px = dx * cos + dy * sin;
-      const py = -dx * sin + dy * cos;
-      const hu = moveStroke.anchor.u - cx, hv = moveStroke.anchor.v - cy;
-      const clampS = (s) => (s < 0 ? -1 : 1) * Math.max(0.01, Math.abs(s));
-      float.transform = { ...t0 };
-      if (hu !== 0) float.transform.sx = clampS(px / hu);
-      if (hv !== 0) float.transform.sy = clampS(py / hv);
+    } else { // scale
+      float.transform = solveScaleTransform({
+        srcRect: float.srcRect, t0, handle: moveStroke.handle,
+        useCenter: isCenterAnchorModifier(ev), shiftHeld: isProportionalModifier(ev),
+        mx: ev.x + 0.5, my: ev.y + 0.5,
+      });
     }
     emit('pixels');
   }
