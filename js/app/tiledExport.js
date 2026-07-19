@@ -15,7 +15,6 @@ function escapeXml(s) {
 }
 
 export function buildTiledTsx(sheet) {
-  const indexById = new Map(sheet.tiles.map((t, i) => [t.id, i]));
   // Tiled requires one uniform tile grid per .tsx file; a sheet with mixed
   // per-tile sizes (this app allows that -- see exports.js's buildTilesJson
   // comment) can't be fully represented. Falls back to the first terrain
@@ -23,13 +22,24 @@ export function buildTiledTsx(sheet) {
   const gridW = sheet.terrainSets?.[0]?.tileW ?? sheet.tiles[0]?.w ?? sheet.width;
   const gridH = sheet.terrainSets?.[0]?.tileH ?? sheet.tiles[0]?.h ?? sheet.height;
   const cols = Math.floor(sheet.width / gridW);
+  const rows = Math.floor(sheet.height / gridH);
+
+  // Tiled infers each tileid purely from raster position (row*columns+col)
+  // on the tileset image -- NOT from insertion order in sheet.tiles, which
+  // can diverge from raster position: resizeGridAxis's 'start'-side growth
+  // (js/core/tilegrids.js) always appends new cells to the END of
+  // sheet.tiles regardless of where they land on the grid, and multiple
+  // tileGrids/standalone tiles can coexist on one sheet in creation order.
+  // Derive tileid from each tile's own (x,y) instead of its array index.
+  const tileIdByTileId = new Map(sheet.tiles.map(t =>
+    [t.id, Math.round(t.y / gridH) * cols + Math.round(t.x / gridW)]));
 
   const wangsets = (sheet.terrainSets ?? []).map(ts => {
     const wangtiles = [];
     for (let blobIndex = 0; blobIndex < blobIndexToMask.length; blobIndex++) {
       const resolved = resolveTerrainSlot(ts, blobIndex);
       if (!resolved) continue;
-      const tileIndex = indexById.get(resolved.tileId);
+      const tileIndex = tileIdByTileId.get(resolved.tileId);
       if (tileIndex == null) continue;
       const mask = blobIndexToMask[blobIndex];
       const wangid = WANG_BITS.map(bit => (mask & bit) ? 1 : 0).join(',');
@@ -44,7 +54,7 @@ export function buildTiledTsx(sheet) {
 
   return `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<tileset version="1.10" tiledversion="1.10.2" name="${escapeXml(sheet.name)}" ` +
-    `tilewidth="${gridW}" tileheight="${gridH}" tilecount="${sheet.tiles.length}" columns="${cols}">` +
+    `tilewidth="${gridW}" tileheight="${gridH}" tilecount="${cols * rows}" columns="${cols}">` +
     `<image source="${escapeXml(sheet.name)}.png" width="${sheet.width}" height="${sheet.height}"/>` +
     wangsetsXml +
     `</tileset>\n`;
