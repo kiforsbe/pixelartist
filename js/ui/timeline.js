@@ -11,7 +11,7 @@
 // for its own animation-affecting edits (slice grid / delete frame).
 
 import { state, on, emit, activeSheet, markDirty, confirmOrAuto, currentContextLayers } from '../app/state.js';
-import { addAnimation, contextLayers, flattenSheetLayers, findParent, renameAnimation } from '../core/model.js';
+import { addAnimation, contextLayers, flattenSheetLayers, findParent, renameAnimation, effectiveDuration } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 import { commitBreakApartStrip } from './frames.js';
 
@@ -76,7 +76,7 @@ function commitFramesChange(anim, label, beforeFrames, afterFrames) {
 
 function addFrameToAnimation(anim, frameId) {
   const before = anim.frames.map(f => ({ ...f }));
-  const after = [...before, { frameId, duration: 100 }];
+  const after = [...before, { frameId, duration: null, step: null }];
   commitFramesChange(anim, 'add frame to animation', before, after);
 }
 
@@ -99,6 +99,13 @@ function changeDuration(anim, index, newDuration) {
   if (before[index].duration === newDuration) return;
   const after = before.map((f, i) => (i === index ? { ...f, duration: newDuration } : f));
   commitFramesChange(anim, 'edit frame duration', before, after);
+}
+
+function changeStep(anim, index, newStep) {
+  const before = anim.frames.map(f => ({ ...f }));
+  if (before[index].step === newStep) return;
+  const after = before.map((f, i) => (i === index ? { ...f, step: newStep } : f));
+  commitFramesChange(anim, 'edit frame step', before, after);
 }
 
 // New/delete animation follow frames.js's commitCreate/deleteFrame pattern:
@@ -174,17 +181,6 @@ function commitRenameAnimation(sheet, anim, name) {
   markDirty();
 }
 
-function commitToggleLoop(anim, loop) {
-  const before = anim.loop;
-  if (before === loop) return;
-  state.commands.push({
-    label: 'toggle animation loop',
-    do() { anim.loop = loop; },
-    undo() { anim.loop = before; },
-  });
-  markDirty();
-}
-
 // ------------------------------------------------------------- public API
 
 export function mountTimeline(el) {
@@ -198,9 +194,11 @@ export function mountTimeline(el) {
   const btnNewAnim = document.createElement('button'); btnNewAnim.type = 'button'; btnNewAnim.className = 'btn-icon-sm'; btnNewAnim.textContent = '➕'; btnNewAnim.title = 'New animation';
   const btnRenameAnim = document.createElement('button'); btnRenameAnim.type = 'button'; btnRenameAnim.className = 'btn-icon-sm'; btnRenameAnim.textContent = '✎'; btnRenameAnim.title = 'Rename animation';
   const btnDeleteAnim = document.createElement('button'); btnDeleteAnim.type = 'button'; btnDeleteAnim.className = 'btn-icon-sm'; btnDeleteAnim.textContent = '🗑'; btnDeleteAnim.title = 'Delete animation';
-  const loopCheckbox = document.createElement('input'); loopCheckbox.type = 'checkbox';
-  const loopLabel = document.createElement('label'); loopLabel.className = 'timeline-loop';
-  loopLabel.append(loopCheckbox, document.createTextNode('Loop'));
+  const previewLoopCheckbox = document.createElement('input');
+  previewLoopCheckbox.type = 'checkbox'; previewLoopCheckbox.checked = true;
+  const previewLoopLabel = document.createElement('label'); previewLoopLabel.className = 'timeline-loop';
+  previewLoopLabel.title = "Loops the preview playback only -- doesn't affect the exported animation's Loop flag (set that in the Animation panel).";
+  previewLoopLabel.append(previewLoopCheckbox, document.createTextNode('Preview Loop'));
   const btnAddFrame = document.createElement('button'); btnAddFrame.type = 'button'; btnAddFrame.textContent = 'Add selected frame';
   // Visible only when the selected animation is an intact strip (strip === true).
   const btnBreakApart = document.createElement('button'); btnBreakApart.type = 'button'; btnBreakApart.className = 'btn-icon-sm'; btnBreakApart.textContent = '✂'; btnBreakApart.title = 'Break apart';
@@ -217,7 +215,7 @@ export function mountTimeline(el) {
   }
 
   header.append(
-    animSelect, btnNewAnim, btnRenameAnim, btnDeleteAnim, loopLabel, btnAddFrame, btnBreakApart,
+    animSelect, btnNewAnim, btnRenameAnim, btnDeleteAnim, previewLoopLabel, btnAddFrame, btnBreakApart,
     btnFirst, btnPlay, btnLast, speedSelect,
   );
 
@@ -244,6 +242,7 @@ export function mountTimeline(el) {
   let lastTs = null;
   let acc = 0;
   let position = 0; // index into currentAnim().frames
+  let previewLoop = true; // session-only UI state -- never read from/written to anim or state
 
   // Cached flatten of the active sheet; invalidated at the top of every full
   // render() (triggered by project/history/view/selection) and reused by the
@@ -313,11 +312,11 @@ export function mountTimeline(el) {
     const speed = parseFloat(speedSelect.value) || 1;
     acc += dt * speed;
     let entry = anim.frames[position];
-    while (entry && acc >= entry.duration) {
-      acc -= entry.duration;
+    while (entry && acc >= effectiveDuration(anim, entry)) {
+      acc -= effectiveDuration(anim, entry);
       position += 1;
       if (position >= anim.frames.length) {
-        if (anim.loop) {
+        if (previewLoop) {
           position = 0;
         } else {
           position = anim.frames.length - 1;
@@ -394,10 +393,8 @@ export function mountTimeline(el) {
     commitDeleteAnimation(sheet, anim.id);
   });
 
-  loopCheckbox.addEventListener('change', () => {
-    const anim = currentAnim();
-    if (!anim) return;
-    commitToggleLoop(anim, loopCheckbox.checked);
+  previewLoopCheckbox.addEventListener('change', () => {
+    previewLoop = previewLoopCheckbox.checked;
   });
 
   btnAddFrame.addEventListener('click', () => {
@@ -424,24 +421,44 @@ export function mountTimeline(el) {
     const frame = sheet.frames.find(f => f.id === entry.frameId);
     if (frame) drawFit(thumbCanvas, copyRegion(getFlat(sheet), frame.x, frame.y, frame.w, frame.h));
 
-    const durationInput = document.createElement('input');
-    durationInput.type = 'number'; durationInput.min = '1';
-    durationInput.value = String(entry.duration);
-    durationInput.addEventListener('click', (e) => e.stopPropagation());
-    durationInput.addEventListener('change', () => {
-      let v = parseInt(durationInput.value, 10);
-      if (!Number.isFinite(v) || v < 1) v = 1;
-      durationInput.value = String(v);
-      changeDuration(anim, index, v);
-    });
+    const controls = document.createElement('div');
+    controls.className = 'timeline-cell-controls';
+
+    if (anim.baseFps != null) {
+      // fps-primary: per-frame override is a whole-frame "Frames" (step)
+      // count, never a raw ms value -- see the Animation-panel design doc.
+      const stepInput = document.createElement('input');
+      stepInput.type = 'number'; stepInput.min = '1';
+      stepInput.title = "Frames to hold (overrides the animation's base step)";
+      stepInput.value = String(entry.step ?? anim.baseStep ?? 1);
+      stepInput.addEventListener('click', (e) => e.stopPropagation());
+      stepInput.addEventListener('change', () => {
+        let v = parseInt(stepInput.value, 10);
+        if (!Number.isFinite(v) || v < 1) v = 1;
+        stepInput.value = String(v);
+        changeStep(anim, index, v);
+      });
+      const msCaption = document.createElement('span');
+      msCaption.className = 'timeline-cell-ms-caption';
+      msCaption.textContent = `${effectiveDuration(anim, entry)}ms`;
+      controls.append(stepInput, msCaption);
+    } else {
+      const durationInput = document.createElement('input');
+      durationInput.type = 'number'; durationInput.min = '1';
+      durationInput.value = String(effectiveDuration(anim, entry));
+      durationInput.addEventListener('click', (e) => e.stopPropagation());
+      durationInput.addEventListener('change', () => {
+        let v = parseInt(durationInput.value, 10);
+        if (!Number.isFinite(v) || v < 1) v = 1;
+        durationInput.value = String(v);
+        changeDuration(anim, index, v);
+      });
+      controls.append(durationInput);
+    }
 
     const btnRemove = document.createElement('button');
     btnRemove.type = 'button'; btnRemove.textContent = '✕'; btnRemove.className = 'timeline-remove';
     btnRemove.addEventListener('click', (e) => { e.stopPropagation(); removeFrameEntry(anim, index); });
-
-    const controls = document.createElement('div');
-    controls.className = 'timeline-cell-controls';
-    controls.append(durationInput);
     if (!anim.strip) controls.append(btnRemove);
 
     cell.append(thumbCanvas, controls);
@@ -514,8 +531,6 @@ export function mountTimeline(el) {
     renderAnimSelect(sheet);
     const anim = currentAnim();
 
-    loopCheckbox.checked = !!anim?.loop;
-    loopCheckbox.disabled = !anim;
     btnRenameAnim.disabled = !anim;
     btnDeleteAnim.disabled = !anim;
     btnAddFrame.disabled = !anim || !state.selectedFrameId || !!anim.strip;

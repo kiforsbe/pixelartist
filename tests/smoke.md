@@ -112,9 +112,11 @@ is a pass condition for the whole run, not just the final step.
     order.
 27. [A] Edit a cell's duration number input; undo restores the prior
     value.
-28. [A] Toggle "Loop"; Play (▶) advances the preview canvas through
-    frames, wrapping if looped; Pause stops it. First/Last transport
-    buttons jump to the ends. Speed selector changes playback rate.
+28. [A] Toggle "Preview Loop"; Play (▶) advances the preview canvas through
+    frames, wrapping if Preview Loop is on; Pause stops it. First/Last
+    transport buttons jump to the ends. Speed selector changes playback
+    rate. Preview Loop never touches the animation's export `loop` flag
+    (checked via `browser_evaluate`, not visually).
 
 ## 7. Frame editor
 

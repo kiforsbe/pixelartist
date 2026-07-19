@@ -171,6 +171,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }
 .timeline-header select { width: auto; }
 .timeline-loop { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+.timeline-cell-ms-caption { font-size: 9px; color: #9a9ca8; }
 .timeline-preview { image-rendering: pixelated; background: var(--bg); border: 1px solid var(--border);
   flex: none; align-self: center; margin: 0 10px; }
 .timeline-strip { flex: 1; display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto;
