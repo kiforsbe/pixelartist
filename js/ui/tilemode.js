@@ -163,7 +163,7 @@ function gridBounds(grid) {
 // (matching HANDLE_SCREEN_PX/GRID_HANDLE_SCREEN_PX's existing 6px corner-
 // handle size) rather than spanning the full edge -- keeps the 4 grips
 // visually/hit-testably distinct near the corners instead of meeting flush.
-const GRIP_INSET_PX = 6;
+const GRIP_INSET_PX = 12;
 
 function tileGripGeometry(view, bounds) {
   const p0 = view.imageToScreen(bounds.x, bounds.y);
@@ -1077,6 +1077,21 @@ function strokeGhostRect(ctx, view, rect) {
   ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, p1.x - p0.x - 1, p1.y - p0.y - 1);
 }
 
+// Solid outline around the whole selected tile/grid bounds -- the
+// previously-missing piece that made selection hard to spot at a glance
+// (dim quiet-mode labels + small corner/edge grips alone don't read as
+// "this is selected" the way a full border does). Uses a distinct color
+// from the blue handles/grips so the selected tile itself pops rather than
+// blending into the rest of the chrome.
+const SELECTION_OUTLINE = '#ffe066';
+function drawTileSelectionOutline(ctx, view, bounds) {
+  ctx.save();
+  ctx.strokeStyle = SELECTION_OUTLINE;
+  ctx.lineWidth = 2;
+  strokeGhostRect(ctx, view, bounds);
+  ctx.restore();
+}
+
 function drawGridHandles(ctx, view, sheet) {
   ctx.save();
   ctx.fillStyle = '#4f8cff';
@@ -1228,10 +1243,16 @@ export function drawTileChrome(ctx, view) {
   if (tile.gridId != null) {
     const grid = sheet.tileGrids.find(g => g.id === tile.gridId);
     if (grid) {
+      const bounds = gridBounds(grid);
+      // Outline the selected CELL, not the whole grid -- the grid's overall
+      // dims/grips (below) already show the aggregate bounds; without this,
+      // there'd be no way to see which cell within the grid is selected.
+      drawTileSelectionOutline(ctx, view, tile);
       drawGridDims(ctx, view, grid, { quiet: true });
-      drawTileGrips(ctx, tileGripGeometry(view, gridBounds(grid)));
+      drawTileGrips(ctx, tileGripGeometry(view, bounds));
     }
   } else {
+    drawTileSelectionOutline(ctx, view, tile);
     drawRectDims(ctx, view, tile, { quiet: true });
     drawTileHandles(ctx, view, tile);
     drawTileGrips(ctx, tileGripGeometry(view, { x: tile.x, y: tile.y, w: tile.w, h: tile.h }));
