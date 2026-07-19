@@ -24,7 +24,11 @@ edge grip** (left/right/top/bottom) to grow it into a grid one row/column at
 a time in that direction. An existing grid gets the same 4 edge grips on
 its outer boundary. **A grid that shrinks down to exactly 1×1 collapses
 back into a standalone tile** — grid-ness is a derived fact of cell count,
-not a separate mode the user has to manage.
+not a separate mode the user has to manage. **Dragging any of a grid's own
+tiles (its body, not an edge grip) moves the whole grid** — mirrors how
+dragging any frame that belongs to an intact strip moves the whole strip in
+sprite mode, and fixes what's currently a dead end (see "Grid body-drag to
+move" below).
 
 ## Out of scope
 
@@ -36,9 +40,11 @@ not a separate mode the user has to manage.
   (`buildAddTerrainSetDialog`, kept as-is) and are not affected.
 - Any change to how standalone tiles are freely corner-resized (arbitrary
   w/h, unrelated to any cell grid) — unchanged.
-- Any change to the existing grid-move interaction (drag the small origin
-  handle to reposition a whole grid) — unchanged, coexists with the new
-  edge grips.
+- The existing small origin-handle grid-move mechanism itself
+  (`hitGridHandle`/`drawGridHandles`, the `gridmove` drag kind) is
+  unchanged and stays as an additional, more precise way to grab a grid —
+  it coexists with the new body-drag-to-move (below), which is an
+  addition, not a replacement.
 
 ## Removed
 
@@ -160,7 +166,10 @@ corner-handle-before-grip):
    (via its owning grid's outer bounds), only when that tile is currently
    selected (mirrors `chromeGeometry`'s "chrome only targets the selected
    segment" rule).
-4. Existing tile-at hit-test / create-drag fallback — unchanged.
+4. Existing tile-at hit-test (`tiledrag`) — **behavior changes on release**,
+   see "Grid body-drag to move" below. The down-handling itself (start a
+   `tiledrag` drag on whatever tile is under the pointer) is unchanged;
+   only `handleUp`'s "no swap target" branch changes for grid-owned tiles.
 
 ### New drag kind: `gridresize`
 
@@ -209,6 +218,61 @@ before/after snapshot arrays):
   shrink either, so this preserves that existing behavior rather than
   introducing new pruning scope).
 
+### Grid body-drag to move
+
+Today, `handleUp`'s `tiledrag` branch has:
+
+```js
+if (from.gridId != null) return; // grid-owned, no same-size target: snaps back
+```
+
+— dragging a grid tile's body and releasing anywhere that isn't a
+same-size swap target is currently a **dead end**: the ghost preview draws
+during the drag (ghost logic already checks `drag.from.gridId == null`
+before drawing a move-preview, so a grid tile's ghost is already
+correctly suppressed today) but nothing happens on release. This is
+replaced with: when `from.gridId != null` and there's no swap target,
+move the tile's OWNING GRID by the drag delta — same computation
+`commitMoveGrid` already takes (`dx`, `dy`), but clamped to the sheet
+bounds using the grid's full outer bounding box (not just the single
+dragged tile's rect), fixing `commitMoveGrid`'s current total absence of
+bounds clamping (the existing origin-handle `gridmove` path has the same
+gap — both paths call the same `commitMoveGrid`, so this one fix covers
+both):
+
+```js
+if (from.gridId != null) {
+  const grid = sheet.tileGrids.find(g => g.id === from.gridId);
+  const bounds = gridBounds(grid); // {x, y, w, h} — new small helper, or inline
+  const dx = Math.max(-bounds.x, Math.min(sheet.width - (bounds.x + bounds.w), ev.x - d.anchor.x));
+  const dy = Math.max(-bounds.y, Math.min(sheet.height - (bounds.y + bounds.h), ev.y - d.anchor.y));
+  if (dx !== 0 || dy !== 0) commitMoveGrid(sheet, grid, dx, dy);
+  return;
+}
+```
+
+The swap-onto-same-size-target branch above this (unchanged) still takes
+priority — dropping a grid tile onto another same-size tile (grid-owned
+or standalone) swaps them exactly as today; only the "no target" fallback
+changes from a no-op to a whole-grid move. The tile that was dragged stays
+selected (`state.selectedTileId` is untouched by this branch, matching
+today).
+
+**Ghost preview while dragging** must be added too, not just the commit —
+today's overlay code only draws a ghost for the swap case or for a
+standalone tile's free move; a grid tile's in-progress drag currently
+renders nothing at all (`else if (drag.from.gridId == null)` gates the
+only other ghost branch). The drag stays `tiledrag` throughout (swap vs.
+whole-grid-move can't be decided until release, since it depends on
+whether a same-size tile happens to be under the pointer at that moment —
+same ambiguity the existing swap-ghost check already resolves live, every
+`handleMove`). Extend the overlay's `tiledrag` branch: when not a swap
+candidate and `drag.from.gridId != null`, draw every tile owned by that
+grid shifted by the live `(dx, dy)` — reuses the exact ghost-drawing loop
+`gridmove` already has (`for (const t of ownedTiles(...)) strokeGhostRect(...)`)
+— plus the grid's dimension label via `drawGridDims(ctx, view, grid, {
+dx, dy })`, same as `gridmove`'s non-quiet render today.
+
 ### Rendering
 
 - **Ghost during drag**: a dashed outline of the live bbox at the current
@@ -231,5 +295,10 @@ before/after snapshot arrays):
   name/neighbors as the (0,0) or (N-1,0) etc. cell depending on side;
   `collapseGridToTile` removing the tileGrids entry and detaching the
   surviving tile with its rect unchanged.
-- Manual/live browser verification (per project convention — no simulated
-  drags in Playwright): user verifies the drag interaction manually.
+- Grid body-drag-to-move and the edge-grip grow/shrink drags are pointer
+  interactions with no pure-logic seam to unit test (the bounds-clamping
+  math is inline in `handleUp`/`handleMove`, matching how the existing
+  standalone-tile move clamp is also inline, not factored into `core/`) —
+  per this project's existing convention of never simulating pointer
+  drags in Playwright, these are verified manually by the user, not
+  automated.
