@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { colorFrequency, buildPalette, quantizeBitmap } from '../js/core/quantize.js';
+import { colorFrequency, buildPalette, quantizeBitmap, medianCutPalette } from '../js/core/quantize.js';
 
 function bmp(width, height, pixels) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -34,4 +34,34 @@ test('quantizeBitmap: each pixel maps to its nearest palette index', () => {
   const b = bmp(2, 1, [[250, 5, 5, 255], [5, 5, 250, 255]]);
   const palette = [[255, 0, 0, 255], [0, 0, 255, 255]];
   assert.deepEqual([...quantizeBitmap(b, palette)], [0, 1]);
+});
+
+test('medianCutPalette: fewer distinct colors than maxColors returns them all unchanged', () => {
+  const b = bmp(3, 1, [[10, 20, 30, 255], [10, 20, 30, 255], [40, 50, 60, 255]]);
+  assert.deepEqual(medianCutPalette([b], 5), [[10, 20, 30], [40, 50, 60]]);
+});
+
+test('medianCutPalette: fully-transparent pixels excluded from the histogram', () => {
+  const b = bmp(3, 1, [[255, 0, 0, 255], [0, 0, 0, 0], [0, 255, 0, 255]]);
+  assert.deepEqual(medianCutPalette([b], 5), [[255, 0, 0], [0, 255, 0]]);
+});
+
+test('medianCutPalette: two color clusters reduced to 2 produce one average per cluster', () => {
+  const pixels = [
+    ...Array(5).fill([255, 0, 0, 255]),
+    ...Array(5).fill([245, 5, 5, 255]),
+    ...Array(5).fill([0, 0, 255, 255]),
+    ...Array(5).fill([5, 5, 245, 255]),
+  ];
+  const b = bmp(20, 1, pixels);
+  assert.deepEqual(medianCutPalette([b], 2), [[3, 3, 250], [250, 3, 3]]);
+});
+
+test('medianCutPalette: a lopsided outlier color still gets its own palette entry', () => {
+  const pixels = [
+    [250, 0, 0, 255], [252, 0, 0, 255], [254, 0, 0, 255], [255, 0, 0, 255], [248, 0, 0, 255],
+    [0, 0, 255, 255],
+  ];
+  const b = bmp(6, 1, pixels);
+  assert.deepEqual(medianCutPalette([b], 3), [[249, 0, 0], [0, 0, 255], [254, 0, 0]]);
 });
