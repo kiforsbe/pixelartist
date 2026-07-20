@@ -16,6 +16,15 @@ let floatCtx = null;     // { viewKind, targetRect } frozen at float creation (f
 let clipboard = null;    // { srcRect, layers: [{layerId, buffer}], allLayers }
 
 export function registerFloatView(viewKind, api) { views.set(viewKind, api); }
+
+// Selection-or-target region for the CURRENT view, same rule createFloat
+// uses (selection clamped to target, or the whole target when there's no
+// selection) -- null when there's no active view/sheet or the target is
+// empty. Read-only: unlike createFloat, never touches state.floating.
+export function currentEditRegion() {
+  const viewApi = activeView();
+  return viewApi ? resolveRegion(viewApi, false, null) : null;
+}
 function activeView() { return views.get(state.view) ?? null; }
 function sheetById(id) { return state.project?.sheets.find(s => s.id === id) ?? null; }
 function layerIn(sheet, layerId) { return findLayer(sheet.layerTree, layerId); }
