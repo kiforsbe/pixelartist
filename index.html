@@ -204,7 +204,12 @@
 </dialog>
 <dialog id="dlg-quantize">
   <h3>Quantize to Palette</h3>
-  <div class="row"><label>Palette <select id="qz-palette"></select></label></div>
+  <div class="row">
+    <label><input type="radio" name="qz-mode" id="qz-mode-palette" checked> Palette</label>
+    <label><input type="radio" name="qz-mode" id="qz-mode-count"> Number of colors</label>
+  </div>
+  <div class="row" id="qz-palette-row"><label>Palette <select id="qz-palette"></select></label></div>
+  <div class="row" id="qz-count-row" hidden><label>Colors <input type="number" id="qz-count" min="1" max="256" value="16"></label></div>
   <div class="row"><label><input type="checkbox" id="qz-alllayers"> All layers</label></div>
   <div class="row dlg-actions"><button id="qz-ok" class="btn-sm">OK</button><button id="qz-cancel" class="btn-sm">Cancel</button></div>
 </dialog>

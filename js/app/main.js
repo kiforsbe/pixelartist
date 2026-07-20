@@ -14,7 +14,7 @@ import {
 } from './platformExport.js';
 import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from './animationExport.js';
 import { encodeGif } from '../core/gif.js';
-import { buildPalette, quantizeBitmap, colorFrequency } from '../core/quantize.js';
+import { buildPalette, quantizeBitmap, colorFrequency, medianCutPalette } from '../core/quantize.js';
 import { PLATFORMS, checkItemAgainstPlatform, NES_PALETTE, C64_PALETTE, GB_PALETTE, snapPaletteToHardware } from '../core/platforms.js';
 import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
@@ -424,7 +424,7 @@ function bitmapsEqual(a, b) {
   return true;
 }
 
-function quantizeToPalette(colors, allLayers) {
+function quantizeToPalette(mode, param, allLayers) {
   commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet) return;
@@ -432,9 +432,15 @@ function quantizeToPalette(colors, allLayers) {
   if (!rr) return;
   const { region } = rr;
   const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+  if (!layers.length) return;
+  const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
+  const colors = mode === 'count'
+    ? medianCutPalette(befores, param).map(c => [c[0], c[1], c[2], 255])
+    : param;
+  if (!colors.length) return;
   const palette = { colors };
-  const patches = layers.map(l => {
-    const before = copyRegion(l.bitmap, region.x, region.y, region.w, region.h);
+  const patches = layers.map((l, i) => {
+    const before = befores[i];
     const after = cloneBitmap(before);
     quantizeBitmapToPalette(after, palette);
     return { layer: l, before, after };
@@ -449,11 +455,24 @@ function quantizeToPalette(colors, allLayers) {
 }
 
 const dlgQuantize = document.getElementById('dlg-quantize');
+const qzModePalette = document.getElementById('qz-mode-palette');
+const qzModeCount = document.getElementById('qz-mode-count');
+const qzPaletteRow = document.getElementById('qz-palette-row');
+const qzCountRow = document.getElementById('qz-count-row');
 const qzPalette = document.getElementById('qz-palette');
+const qzCount = document.getElementById('qz-count');
 const qzAllLayers = document.getElementById('qz-alllayers');
 const qzOk = document.getElementById('qz-ok');
 const qzCancel = document.getElementById('qz-cancel');
 markDefaultAction(dlgQuantize, qzOk);
+
+function updateQuantizeModeUI() {
+  const isCount = qzModeCount.checked;
+  qzPaletteRow.hidden = isCount;
+  qzCountRow.hidden = !isCount;
+}
+qzModePalette.addEventListener('change', updateQuantizeModeUI);
+qzModeCount.addEventListener('change', updateQuantizeModeUI);
 
 function refreshQuantizePaletteOptions() {
   qzPalette.innerHTML = '';
@@ -500,6 +519,8 @@ defineAction('edit.filters.quantizeToPalette', {
   label: 'Quantize to Palette…',
   run: () => {
     refreshQuantizePaletteOptions();
+    qzModePalette.checked = true;
+    updateQuantizeModeUI();
     qzAllLayers.checked = false;
     dlgQuantize.showModal();
   },
@@ -507,10 +528,16 @@ defineAction('edit.filters.quantizeToPalette', {
 });
 qzCancel.addEventListener('click', () => dlgQuantize.close());
 qzOk.addEventListener('click', () => {
-  const pal = resolveQuantizePalette(qzPalette.value);
-  dlgQuantize.close();
-  if (!pal || !pal.colors.length) return;
-  quantizeToPalette(pal.colors, qzAllLayers.checked);
+  if (qzModeCount.checked) {
+    const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
+    dlgQuantize.close();
+    quantizeToPalette('count', n, qzAllLayers.checked);
+  } else {
+    const pal = resolveQuantizePalette(qzPalette.value);
+    dlgQuantize.close();
+    if (!pal || !pal.colors.length) return;
+    quantizeToPalette('palette', pal.colors, qzAllLayers.checked);
+  }
 });
 
 // ---- shortcuts: brush size [ / ], swap colors X (Ctrl/Alt-free, gated) ----
