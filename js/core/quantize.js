@@ -52,15 +52,21 @@ export function quantizeBitmap(bmp, palette) {
 
 // Counts pixels by exact (r,g,b) across all bitmaps, skipping alpha === 0
 // (mirrors colorFrequency's transparency rule, but keys on RGB only --
-// alpha never enters median-cut, see the note above medianCutPalette).
-function rgbHistogram(bitmaps) {
+// alpha otherwise never enters median-cut, see the note above
+// medianCutPalette). When `preferOpaque` is set, each pixel contributes
+// alpha/255 instead of a flat 1, so semi-transparent (anti-aliased edge)
+// pixels influence the palette proportionally less than fully-opaque ones
+// -- never zero, so a region with no fully-opaque pixels still works.
+function rgbHistogram(bitmaps, preferOpaque = false) {
   const counts = new Map();
   for (const bmp of bitmaps) {
     const d = bmp.data;
     for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] === 0) continue;
+      const a = d[i + 3];
+      if (a === 0) continue;
       const key = `${d[i]},${d[i + 1]},${d[i + 2]}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const weight = preferOpaque ? a / 255 : 1;
+      counts.set(key, (counts.get(key) ?? 0) + weight);
     }
   }
   return [...counts.entries()].map(([key, count]) => {
@@ -131,8 +137,8 @@ function averageColor(box) {
 // only the source pixel's, so it would only add noise). Returns up to
 // maxColors [r,g,b] triples, fewer if there are fewer distinct RGB values
 // than maxColors in the input.
-export function medianCutPalette(bitmaps, maxColors) {
-  const hist = rgbHistogram(bitmaps);
+export function medianCutPalette(bitmaps, maxColors, preferOpaque = false) {
+  const hist = rgbHistogram(bitmaps, preferOpaque);
   if (hist.length <= maxColors) return hist.map(c => [c.r, c.g, c.b]);
   let boxes = [hist];
   while (boxes.length < maxColors) {

@@ -65,3 +65,15 @@ test('medianCutPalette: a lopsided outlier color still gets its own palette entr
   const b = bmp(6, 1, pixels);
   assert.deepEqual(medianCutPalette([b], 3), [[249, 0, 0], [0, 0, 255], [254, 0, 0]]);
 });
+
+test('medianCutPalette: without preferOpaque, equal pixel counts average evenly regardless of alpha', () => {
+  const pixels = [...Array(5).fill([255, 0, 0, 255]), ...Array(5).fill([0, 0, 255, 128])];
+  const b = bmp(10, 1, pixels);
+  assert.deepEqual(medianCutPalette([b], 1), [[128, 0, 128]]);
+});
+
+test('medianCutPalette: preferOpaque weights each pixel by alpha/255, skewing toward the opaque color', () => {
+  const pixels = [...Array(5).fill([255, 0, 0, 255]), ...Array(5).fill([0, 0, 255, 128])];
+  const b = bmp(10, 1, pixels);
+  assert.deepEqual(medianCutPalette([b], 1, true), [[170, 0, 85]]);
+});
