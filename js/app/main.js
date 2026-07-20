@@ -424,7 +424,7 @@ function bitmapsEqual(a, b) {
   return true;
 }
 
-function quantizeToPalette(mode, param, allLayers) {
+function quantizeToPalette(mode, param, allLayers, preferOpaque = false) {
   commitFloatIfAny();
   const sheet = activeSheet();
   if (!sheet) return;
@@ -435,7 +435,7 @@ function quantizeToPalette(mode, param, allLayers) {
   if (!layers.length) return;
   const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
   const colors = mode === 'count'
-    ? medianCutPalette(befores, param).map(c => [c[0], c[1], c[2], 255])
+    ? medianCutPalette(befores, param, preferOpaque).map(c => [c[0], c[1], c[2], 255])
     : param;
   if (!colors.length) return;
   const palette = { colors };
@@ -459,8 +459,10 @@ const qzModePalette = document.getElementById('qz-mode-palette');
 const qzModeCount = document.getElementById('qz-mode-count');
 const qzPaletteRow = document.getElementById('qz-palette-row');
 const qzCountRow = document.getElementById('qz-count-row');
+const qzPreferOpaqueRow = document.getElementById('qz-prefer-opaque-row');
 const qzPalette = document.getElementById('qz-palette');
 const qzCount = document.getElementById('qz-count');
+const qzPreferOpaque = document.getElementById('qz-prefer-opaque');
 const qzAllLayers = document.getElementById('qz-alllayers');
 const qzOk = document.getElementById('qz-ok');
 const qzCancel = document.getElementById('qz-cancel');
@@ -470,6 +472,7 @@ function updateQuantizeModeUI() {
   const isCount = qzModeCount.checked;
   qzPaletteRow.hidden = isCount;
   qzCountRow.hidden = !isCount;
+  qzPreferOpaqueRow.hidden = !isCount;
 }
 qzModePalette.addEventListener('change', updateQuantizeModeUI);
 qzModeCount.addEventListener('change', updateQuantizeModeUI);
@@ -522,6 +525,7 @@ defineAction('edit.filters.quantizeToPalette', {
     qzModePalette.checked = true;
     updateQuantizeModeUI();
     qzAllLayers.checked = false;
+    qzPreferOpaque.checked = false;
     dlgQuantize.showModal();
   },
   isEnabled: () => !!activeLayer(),
@@ -531,7 +535,7 @@ qzOk.addEventListener('click', () => {
   if (qzModeCount.checked) {
     const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
     dlgQuantize.close();
-    quantizeToPalette('count', n, qzAllLayers.checked);
+    quantizeToPalette('count', n, qzAllLayers.checked, qzPreferOpaque.checked);
   } else {
     const pal = resolveQuantizePalette(qzPalette.value);
     dlgQuantize.close();
