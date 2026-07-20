@@ -92,9 +92,10 @@ export function mountTileEditor(hostEl) {
   const radiusLabel = document.createElement('label');
   radiusLabel.className = 'tile-editor-radius';
   const radiusSelect = document.createElement('select');
+  const opt1 = document.createElement('option'); opt1.value = '0'; opt1.textContent = '1×1 (off)';
   const opt3 = document.createElement('option'); opt3.value = '1'; opt3.textContent = '3×3';
   const opt5 = document.createElement('option'); opt5.value = '2'; opt5.textContent = '5×5';
-  radiusSelect.append(opt3, opt5);
+  radiusSelect.append(opt1, opt3, opt5);
   radiusLabel.append(document.createTextNode('Neighbors '), radiusSelect);
 
   strip.append(btnBack, nameLabel, terrainLabel, radiusLabel);
@@ -106,7 +107,7 @@ export function mountTileEditor(hostEl) {
 
   const view = new CanvasView(canvasHostDiv);
 
-  let radius = 1; // 1 = 3x3, 2 = 5x5
+  let radius = 1; // 0 = 1x1 (off), 1 = 3x3, 2 = 5x5
 
   function currentTile() {
     const sheet = activeSheet();
@@ -391,7 +392,8 @@ export function mountTileEditor(hostEl) {
   }
 
   radiusSelect.addEventListener('change', () => {
-    radius = parseInt(radiusSelect.value, 10) === 2 ? 2 : 1;
+    const v = parseInt(radiusSelect.value, 10);
+    radius = (v === 0 || v === 2) ? v : 1;
     loadContent();
     view.requestRender();
   });
