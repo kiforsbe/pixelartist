@@ -1,8 +1,12 @@
 # PixelArtist
 
 Browser-based pixel-art editor for packed sprite sheets and tile sheets.
-Frames + animations (timeline, onion skin), tiles with live neighbor preview,
-layers, indexed/system palettes. No dependencies, no build step.
+Frames + animations (timeline, onion skin, export loop), tiles with live
+neighbor preview (3×3/5×5, or 1×1 to turn it off) and drag-to-grow grids,
+layers, indexed/system palettes, pixel-snapping PNG import, and
+platform-targeted export (GBA, NES, SNES, Game Boy, Game Boy Color,
+Commodore 64, generic C header, GIF, Tiled TSX). No dependencies, no
+build step.
 
 ![Frame editor with layers, frames, and animation timeline](assets/screenshots/frame-editor.png)
 
@@ -14,6 +18,29 @@ ES modules require a static server (file:// will not work):
 
 Open http://localhost:8080 in Chrome/Edge (full file-system support) or any
 modern browser (packed .pixelproj download/upload fallback).
+
+## Menu bar
+
+File, Document, Layer, Edit, View, and Help menus sit above the sheet
+selector. Every menu item, toolbar button, and keyboard shortcut is a view
+over the same action registry, so they never drift out of sync with each
+other.
+
+- **File** — New, Open, Save, Save As…, Export Project… (whole project as
+  one ZIP or, in Chrome/Edge, straight into a chosen folder — per-sheet
+  format selectable)
+- **Document** — New Sheet, Import Sheet from Image, Rename Sheet, Delete
+  Sheet, Export Sheet (submenu, active sheet), Export Selected Animation
+  (submenu, sprite sheets only)
+- **Layer** — Add Layer, Add Group, Delete Layer, Merge Down
+- **Edit** — Undo, Redo, Cut, Copy, Paste, Project Settings…
+- **View** — Show Labels, Show Sequences, Zoom In, Zoom Out, Actual Size
+  (100%), Zoom to Fit
+- **Help** — Keyboard Shortcuts, About PixelArtist
+
+The top bar still carries its own New/Import/Rename/Delete sheet icon
+buttons (wired to the same Document actions) alongside the Sprite Sheets /
+Tile Sheets mode tabs.
 
 ## Shortcuts
 
@@ -58,6 +85,19 @@ tool switch).
 | Mouse wheel | Zoom in/out, centered on the cursor. Stepped table (not continuous multiply): `0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64` — wheel always moves one table entry at a time, so it never sticks between two adjacent levels. |
 | `Space` + drag, or middle-mouse drag | Pan (the transparency checkerboard scrolls with the content, it isn't fixed to the viewport) |
 
+**Resize & scale modifiers**
+
+Frame/tile resize, the selection marquee, and floating-selection scale all
+route through the same resize logic:
+
+- `Alt` (held at drag start) resizes from the center instead of the
+  opposite corner/edge.
+- `Shift` toggles aspect lock. Frame and tile resize only expose corner
+  handles, which default to *locked* aspect — so `Shift` there means
+  *free* (independent W/H). The marquee and floating-selection scale also
+  expose edge handles (N/S/E/W), which default to *free* aspect — so
+  `Shift` on an edge handle means *locked* instead.
+
 ## Floating selections
 
 The move tool never edits pixels directly. Dragging cuts the selection (or
@@ -73,18 +113,59 @@ While a float is pending, CAD-style dimension lines (arrowed, with value pills) 
 (with Δ during a scale drag) and the rotation angle in degrees during a
 rotate; the same labels appear on marquee drags and frame create/resize/move.
 
-## Sheets: Import & Rename
+## Sheets: Import, Rename & Delete
 
 The sheet selector row in the top bar has, besides "+" (New Sheet…):
 
 - **Import…** — creates a new sheet from a PNG image file. The sheet takes
   the file's name (minus extension) and exact pixel dimensions (max
   4096×4096), with the image on its only layer; it lands in the active tab
-  (sprite vs tile sheet) and becomes active. One undo step removes it.
+  (sprite vs tile sheet) and becomes active. One undo step removes it. If
+  Pixel Snapper is enabled (see below), the image is snapped before it's
+  placed on the layer.
 - **✎ (Rename sheet)** — renames the active sheet via a dialog pre-filled
   with the current name. The name feeds the sheet selector and every
   export filename (`<name>.png`, `<name>.frames.json`, `<name>.tiles.json`).
   Empty names are rejected with an alert; renaming is a single undo step.
+- **🗑 (Delete sheet)** — removes the active sheet and everything on it
+  (layers, frames, animations and, for tile sheets, tiles/terrain sets)
+  after a confirm prompt. Also reachable from the Document menu.
+
+## Tile grids
+
+A tile grid (a run of same-size tiles arranged in a rectangle) is created
+and resized purely by dragging — there's no "Add Grid" dialog. Selecting a
+standalone tile or an existing grid shows 4 short grip strips, one near
+the middle of each edge:
+
+- Dragging a grip **outward** on a standalone tile turns it into a new
+  grid and grows it by however many whole tile-widths/heights the drag
+  covers; dragging outward on an existing grid grows that same axis.
+- Dragging a grip **inward** shrinks that axis; shrinking a grid down to
+  1×1 collapses it back into a single standalone tile.
+- Dragging a grid tile's body (not a grip) always moves the whole grid,
+  clamped to the sheet bounds — it never swaps or moves an individual
+  tile's content.
+
+## Pixel snapping
+
+Pixel Snapper is a one-shot, import-time conversion, not a live filter: it
+runs automatically on Document > Import Sheet from Image and on pasting an
+image from the OS clipboard, snapping a hand-drawn or photo-resolution
+image down to one pixel per detected cell (k-means color quantization,
+then per-axis grid detection and an elastic-walker snap). Configure it in
+Project Settings > Import:
+
+- **Pixel snapper** — enable/disable checkbox
+- **Palette** — snap into a specific project palette, "(none — full RGB)",
+  or the active palette
+- **Colors (k)** — quantization budget (default 256)
+- **Pixel size** — leave blank to auto-detect the cell size, or force an
+  exact size
+- **Advanced** (collapsible) — 9 tuning fields (max iterations, peak
+  threshold/distance, search window ratio/minimum, strength threshold, min
+  cuts per axis, fallback segments, max step ratio), each individually
+  resettable to its default
 
 ## New Project
 
@@ -96,6 +177,37 @@ width/height, and default animation frame duration. These become the
 defaults offered by "New Sheet…" and "New strip…" afterward; each field
 must be a positive integer or the dialog rejects the input with an alert
 instead of silently coercing it.
+
+New Project only sets these; everything else (target platform, pixel
+snapper, onion colors, smooth thumbnails) takes its default and is changed
+afterward via Edit > Project Settings…, tabbed into General / Import /
+Onion Steps.
+
+## Animation panel, onion skin & preview
+
+Below the Frames panel, the **Animation panel** edits the selected
+animation: a Name field, a Loop checkbox (whether the *exported* animation
+loops — independent of the timeline's own playback-only loop toggle), and
+the shared ms/fps base-duration control (toggle between an "ms/frame"
+field and an "fps" + "step" pair, e.g. "animate on every 2nd frame at
+30fps").
+
+The timeline dock has a drag handle to resize its height (100–400px,
+persisted per browser); thumbnail size scales with it. Clicking a cell
+scrubs the playhead, selects that frame app-wide, and opens the Frame
+Editor on it in one click.
+
+**Onion skin** controls live in the Frame Editor's own toolbar: an enable
+checkbox, an opacity slider for the current frame, independent Mask and
+Outline toggles, and a Back/Ahead group each with a frame-count (0–8), a
+color swatch, and separate mask-/outline-opacity sliders. A ⚙ button opens
+Project Settings > Onion Steps for per-distance (1–8 frames back/ahead)
+color overrides.
+
+A separate **Preview panel** below the Animation panel mirrors the frame
+or tile currently being edited (or the timeline's live playhead frame
+while an animation is selected), with its own zoom bar, mouse-wheel zoom,
+and drag-to-pan.
 
 ## File format
 
@@ -162,10 +274,39 @@ the timeline. Once a strip is intact, its timeline cells can't be
 individually removed, reordered, or padded out with an arbitrary frame
 (that's what "Break apart" is for) — but durations remain editable per cell.
 
+## Export
+
+**Document > Export Sheet** exports the active sheet as one of: Sheet PNG
+(flattened), Frames JSON (sprite sheets), Tiles JSON (tile sheets), Tiled
+TSX (tile sheets — terrain-set autotiling data for the Tiled map editor),
+or a native binary target: Game Boy Advance, NES, SNES, Game Boy, Game Boy
+Color, Commodore 64, or a generic C header.
+
+**Document > Export Selected Animation** (sprite sheets, when an animation
+is selected) exports GIF, Spritesheet (PNG + JSON), or Image Sequence
+(zipped PNG frames).
+
+**File > Export Project…** exports every sheet in the project at once:
+pick a format per sheet, then a destination — a single ZIP download, or
+(Chrome/Edge only) write straight into a chosen folder.
+
+### Target-platform compatibility
+
+Project Settings > General > Compatibility sets a **Target platform**
+(None, Generic, Game Boy Advance, NES, SNES, Commodore 64, Game Boy, Game
+Boy Color, Retro 8/16/32-bit) and an **Export colors** mode (restrict
+per-sprite/tile to the hardware limit, or use the full system palette
+still capped per sprite/tile). With a platform set, the status bar shows a
+live ✓/⚠ compatibility indicator — hover for details, e.g. "Uses 6 colors;
+NES allows at most 4 per sprite/tile." — while a frame or tile is open in
+its own editor. Exporting to a native binary target re-checks
+compatibility and asks for confirmation if there are warnings, or blocks
+outright on hard errors.
+
 ### Export shapes
 
-The Export dialog also produces two engine-consumable JSON formats,
-one per sheet:
+Frames JSON and Tiles JSON are the two engine-consumable JSON formats also
+reachable via Export Sheet, one per sheet:
 
 **Frames JSON** (sprite sheets only) — `<sheetname>.frames.json`:
 
