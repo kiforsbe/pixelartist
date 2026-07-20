@@ -1,5 +1,5 @@
 import { CommandStack } from '../core/commands.js';
-import { createProject, createSheet, DEFAULT_SETTINGS, defaultOnionSettings, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers, flattenLayers, layerAnimationContext, activePaletteColors } from '../core/model.js';
+import { createProject, createSheet, DEFAULT_SETTINGS, defaultOnionSettings, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers, flattenLayers, layerAnimationContext, resolvePixelSnapperPalette } from '../core/model.js';
 import { snapPixels } from '../core/pixelSnapper.js';
 
 // Test mode (?autotest): automated browser sessions suppress modal dialogs
@@ -76,14 +76,21 @@ export function activeLayerScope() {
   return ctx ? flattenLayers(ctx.group) : sheetLayers(sheet);
 }
 // Runs a pasted/imported bitmap through the pixel snapper (js/core/
-// pixelSnapper.js) when project.settings.pixelSnapperEnabled is on,
-// defaulting to the project's active indexed palette; a no-op pass-through
-// otherwise. Shared by document.importSheet (js/app/main.js) and
-// pasteSystemImage (js/ui/floatsession.js) -- the two entry points for
-// externally-sourced image content.
+// pixelSnapper.js) when project.settings.pixelSnapperEnabled is on, using
+// the project's pixelSnapper* settings (palette target, quantization
+// budget, pixel-size override -- see js/core/model.js's DEFAULT_SETTINGS
+// and resolvePixelSnapperPalette); a no-op pass-through otherwise. Shared
+// by document.importSheet (js/app/main.js) and pasteSystemImage (js/ui/
+// floatsession.js) -- the two entry points for externally-sourced image
+// content.
 export function maybeSnapPixels(bitmap) {
-  if (!state.project?.settings.pixelSnapperEnabled) return bitmap;
-  return snapPixels(bitmap, { palette: activePaletteColors(state.project) }).bitmap;
+  const settings = state.project?.settings;
+  if (!settings?.pixelSnapperEnabled) return bitmap;
+  return snapPixels(bitmap, {
+    palette: resolvePixelSnapperPalette(state.project),
+    kColors: settings.pixelSnapperKColors,
+    pixelSizeOverride: settings.pixelSnapperPixelSizeOverride,
+  }).bitmap;
 }
 export function markDirty() { state.dirty = true; emit('project'); }
 export function setProject(project) {

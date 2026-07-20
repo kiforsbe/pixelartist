@@ -2,6 +2,7 @@ import { state, on, emit, activeSheet, activeLayer, setProject, newDefaultProjec
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
 import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext, DEFAULT_SETTINGS } from '../core/model.js';
+import { MAX_PALETTE_COLORS } from '../core/pixelSnapper.js';
 import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../core/strips.js';
 import { buildFramesJson, buildTilesJson } from './exports.js';
 import { buildTiledTsx } from './tiledExport.js';
@@ -789,6 +790,9 @@ const psFrameH = document.getElementById('ps-frame-h');
 const psDurationMount = document.getElementById('ps-duration-control');
 const psSmoothThumbnails = document.getElementById('ps-smooth-thumbnails');
 const psPixelSnapper = document.getElementById('ps-pixel-snapper');
+const psPixelSnapperPalette = document.getElementById('ps-pixel-snapper-palette');
+const psPixelSnapperKColors = document.getElementById('ps-pixel-snapper-kcolors');
+const psPixelSnapperPixelSize = document.getElementById('ps-pixel-snapper-pixelsize');
 const psTargetPlatform = document.getElementById('ps-target-platform');
 for (const [id, p] of Object.entries(PLATFORMS)) psTargetPlatform.appendChild(new Option(p.label, id));
 const psExportColorMode = document.getElementById('ps-export-color-mode');
@@ -858,19 +862,23 @@ const psFrameLock = makeDimLock(psFrameW, psFrameH, document.getElementById('ps-
 // values regardless of which page is on screen, so flipping tabs before
 // saving never loses an edit made on the other one.
 const psTabGeneral = document.getElementById('ps-tab-general');
+const psTabImport = document.getElementById('ps-tab-import');
 const psTabOnion = document.getElementById('ps-tab-onion');
 const psPageGeneral = document.getElementById('ps-page-general');
+const psPageImport = document.getElementById('ps-page-import');
 const psPageOnion = document.getElementById('ps-page-onion');
 const psOnionGrid = document.getElementById('ps-onion-grid');
 
 function showProjectSettingsTab(tab) {
-  const isGeneral = tab !== 'onion';
-  psTabGeneral.classList.toggle('active', isGeneral);
-  psTabOnion.classList.toggle('active', !isGeneral);
-  psPageGeneral.hidden = !isGeneral;
-  psPageOnion.hidden = isGeneral;
+  psTabGeneral.classList.toggle('active', tab === 'general');
+  psTabImport.classList.toggle('active', tab === 'import');
+  psTabOnion.classList.toggle('active', tab === 'onion');
+  psPageGeneral.hidden = tab !== 'general';
+  psPageImport.hidden = tab !== 'import';
+  psPageOnion.hidden = tab !== 'onion';
 }
 psTabGeneral.addEventListener('click', () => showProjectSettingsTab('general'));
+psTabImport.addEventListener('click', () => showProjectSettingsTab('import'));
 psTabOnion.addEventListener('click', () => showProjectSettingsTab('onion'));
 
 // Dims a step's color swatch while its "Default" checkbox is checked, so
@@ -951,6 +959,13 @@ function openProjectSettings(tab) {
   psFrameH.value = String(settings.frameH);
   psSmoothThumbnails.checked = settings.smoothThumbnails !== false;
   psPixelSnapper.checked = settings.pixelSnapperEnabled === true;
+  psPixelSnapperPalette.innerHTML = '';
+  psPixelSnapperPalette.appendChild(new Option('(active palette)', ''));
+  psPixelSnapperPalette.appendChild(new Option('(none — full RGB)', 'none'));
+  for (const p of project.palettes) psPixelSnapperPalette.appendChild(new Option(p.name, p.id));
+  psPixelSnapperPalette.value = settings.pixelSnapperPaletteId ?? '';
+  psPixelSnapperKColors.value = String(settings.pixelSnapperKColors ?? MAX_PALETTE_COLORS);
+  psPixelSnapperPixelSize.value = settings.pixelSnapperPixelSizeOverride != null ? String(settings.pixelSnapperPixelSizeOverride) : '';
   psTargetPlatform.value = settings.targetPlatform ?? 'none';
   psExportColorMode.value = settings.exportColorMode ?? 'strict';
   psSpriteLock.resnap();
@@ -1019,6 +1034,9 @@ psOk.addEventListener('click', () => {
     ...(psDurationValue.baseFps != null ? { baseFps: psDurationValue.baseFps, baseStep: psDurationValue.baseStep } : {}),
     smoothThumbnails: psSmoothThumbnails.checked,
     pixelSnapperEnabled: psPixelSnapper.checked,
+    pixelSnapperPaletteId: psPixelSnapperPalette.value,
+    pixelSnapperKColors: Math.max(1, Math.min(256, parseInt(psPixelSnapperKColors.value, 10) || MAX_PALETTE_COLORS)),
+    pixelSnapperPixelSizeOverride: psPixelSnapperPixelSize.value.trim() === '' ? null : Math.max(1, parseInt(psPixelSnapperPixelSize.value, 10) || 1),
     targetPlatform: psTargetPlatform.value,
     exportColorMode: psExportColorMode.value,
   };

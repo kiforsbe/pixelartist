@@ -76,7 +76,7 @@ test('estimateStepSize: evenly-spaced clean peaks -> median spacing', () => {
   assert.equal(estimateStepSize(profile, cfg), 5);
 });
 
-test('estimateStepSize: only strict local maxima count as peaks -- a flat-equal run has none, an isolated bump does', () => {
+test('estimateStepSize: an isolated single-point bump is still detected as a peak (width-1 plateau)', () => {
   const profile = new Array(25).fill(0);
   profile[5] = 1; profile[6] = 10; profile[7] = 1; profile[20] = 10;
   assert.equal(estimateStepSize(profile, cfg), 14);
@@ -89,6 +89,26 @@ test('estimateStepSize: an all-zero profile has no signal at all -> null', () =>
 test('estimateStepSize: fewer than 2 peaks -> null', () => {
   const profile = new Array(10).fill(0);
   profile[5] = 10;
+  assert.equal(estimateStepSize(profile, cfg), null);
+});
+
+test('estimateStepSize: a tied 2-wide plateau (exact gradient tie straddling a sharp, noise-free edge) still counts as one peak', () => {
+  // this is the [-1,0,1] kernel's response to a perfectly clean nearest-
+  // neighbor-scaled step edge -- both samples adjacent to the edge get the
+  // EXACT same gradient magnitude, so a strict single-point ">" peak test
+  // would find nothing here at all (see pixelSnapper.js's estimateStepSize
+  // comment). Mirrors the real colProj shape from an 8px-per-block, 4-block
+  // clean upscale.
+  const profile = new Array(32).fill(0);
+  for (const [i, v] of [[7, 100], [8, 100], [16, 90], [17, 90], [25, 80], [26, 80]]) profile[i] = v;
+  // plateau midpoints: floor((7+8)/2)=7, floor((16+17)/2)=16, floor((25+26)/2)=25
+  assert.equal(estimateStepSize(profile, cfg), 9); // diffs [9, 9] -> median 9
+});
+
+test('estimateStepSize: a plateau touching the profile\'s last index (no real neighbor beyond it) is not a peak', () => {
+  const profile = new Array(10).fill(0);
+  profile[8] = 10; profile[9] = 10; // plateau runs all the way to the last index -- nothing beyond it to compare
+  profile[3] = 10; // an otherwise-valid isolated peak, but still only 1 usable peak total
   assert.equal(estimateStepSize(profile, cfg), null);
 });
 
@@ -230,4 +250,26 @@ test('snapPixels: without a palette, output stays within the k-means-quantized c
   const img = bmp(10, 10, () => [77, 88, 99, 255]);
   const result = snapPixels(img, { kColors: 4 });
   assert.ok(result.bitmap.width > 0 && result.bitmap.height > 0);
+});
+
+test('snapPixels: a perfectly clean (no anti-aliasing) nearest-neighbor-scaled pixel-art image snaps back close to its true resolution', () => {
+  // regression test: exact-tied gradient plateaus at every sharp edge used
+  // to make estimateStepSize find zero peaks (see its comment), so this
+  // -- arguably the most common real input for a pixel-art app -- used to
+  // fall all the way back to step=1 (no snapping at all).
+  const trueColors = [
+    [230, 20, 20], [20, 200, 20], [20, 20, 230], [230, 200, 20],
+    [200, 20, 200], [20, 200, 200], [120, 60, 200], [200, 120, 60],
+    [40, 40, 40], [220, 220, 220], [255, 128, 0], [0, 128, 255],
+    [128, 0, 255], [255, 0, 128], [0, 255, 128], [128, 255, 0],
+  ];
+  const scale = 8, srcSize = 4;
+  const img = bmp(srcSize * scale, srcSize * scale, (x, y) => {
+    const cx = Math.floor(x / scale), cy = Math.floor(y / scale);
+    return [...trueColors[cy * 4 + cx], 255];
+  });
+  const result = snapPixels(img);
+  // true size is 4x4 -- assert it lands close, not still ~32x32
+  assert.ok(result.outputWidth <= 6, `expected a small output width, got ${result.outputWidth}`);
+  assert.ok(result.outputHeight <= 6, `expected a small output height, got ${result.outputHeight}`);
 });

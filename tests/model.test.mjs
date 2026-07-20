@@ -5,7 +5,7 @@ import {
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
-  scrubTileReferences, layerAnimationContext, removeSheet, activePaletteColors,
+  scrubTileReferences, layerAnimationContext, removeSheet, activePaletteColors, resolvePixelSnapperPalette,
   effectiveDuration, fpsStepToMs, msToFps,
 } from '../js/core/model.js';
 import { createPalette, setEntry } from '../js/core/palettes.js';
@@ -425,18 +425,21 @@ test('project carries required settings; version 2', () => {
   assert.equal(p2.settings.tileW, 8);
 });
 
-test('deserializeProject: targetPlatform/exportColorMode/pixelSnapperEnabled fall back to their defaults for files saved before those fields existed', () => {
+test('deserializeProject: targetPlatform/exportColorMode/pixelSnapper* fall back to their defaults for files saved before those fields existed', () => {
   const json = { version: 2, name: 's', settings: { spriteSheetW: 256, spriteSheetH: 256, tileSheetW: 256, tileSheetH: 256, tileW: 16, tileH: 16, frameW: 16, frameH: 16, durationMs: 100 }, sheets: [] };
   const p = deserializeProject(json, new Map());
   assert.equal(p.settings.targetPlatform, 'none');
   assert.equal(p.settings.exportColorMode, 'strict');
   assert.equal(p.settings.pixelSnapperEnabled, false);
+  assert.equal(p.settings.pixelSnapperKColors, DEFAULT_SETTINGS.pixelSnapperKColors);
+  assert.equal(p.settings.pixelSnapperPixelSizeOverride, null);
+  assert.equal(p.settings.pixelSnapperPaletteId, '');
 });
 
-test('activePaletteColors: null when there is no active palette, or the active one isn\'t indexed', () => {
+test('activePaletteColors: null when there is no active palette, or the active one has no colors yet', () => {
   const p = createProject('s');
   assert.equal(activePaletteColors(p), null);
-  p.palettes.push(createPalette({ name: 'gradient', indexed: false }));
+  p.palettes.push(createPalette({ name: 'empty swatches', indexed: false }));
   p.activePaletteId = p.palettes[0].id;
   assert.equal(activePaletteColors(p), null);
 });
@@ -449,6 +452,47 @@ test('activePaletteColors: returns the active indexed palette\'s colors as plain
   p.palettes.push(palette);
   p.activePaletteId = palette.id;
   assert.deepEqual(activePaletteColors(p), [[255, 0, 0], [0, 255, 0]]);
+});
+
+test('activePaletteColors: also works for non-indexed (free-form swatch) palettes -- the default "New Palette" shape', () => {
+  const p = createProject('s');
+  const palette = createPalette({ name: 'my swatches', indexed: false });
+  palette.colors.push([10, 20, 30, 255], [40, 50, 60, 255]);
+  p.palettes.push(palette);
+  p.activePaletteId = palette.id;
+  assert.deepEqual(activePaletteColors(p), [[10, 20, 30], [40, 50, 60]]);
+});
+
+test('resolvePixelSnapperPalette: "" (default) tracks the project\'s active palette', () => {
+  const p = createProject('s');
+  const palette = createPalette({ name: 'ramp', indexed: true, size: 1 });
+  setEntry(palette, 0, [1, 2, 3, 255]);
+  p.palettes.push(palette);
+  p.activePaletteId = palette.id;
+  p.settings.pixelSnapperPaletteId = '';
+  assert.deepEqual(resolvePixelSnapperPalette(p), [[1, 2, 3]]);
+});
+
+test('resolvePixelSnapperPalette: "none" forces no target palette, even with an active palette set', () => {
+  const p = createProject('s');
+  const palette = createPalette({ name: 'ramp', indexed: true, size: 1 });
+  setEntry(palette, 0, [1, 2, 3, 255]);
+  p.palettes.push(palette);
+  p.activePaletteId = palette.id;
+  p.settings.pixelSnapperPaletteId = 'none';
+  assert.equal(resolvePixelSnapperPalette(p), null);
+});
+
+test('resolvePixelSnapperPalette: a specific palette id picks that palette, independent of which one is active', () => {
+  const p = createProject('s');
+  const active = createPalette({ name: 'active', indexed: true, size: 1 });
+  setEntry(active, 0, [9, 9, 9, 255]);
+  const other = createPalette({ name: 'other', indexed: true, size: 1 });
+  setEntry(other, 0, [7, 7, 7, 255]);
+  p.palettes.push(active, other);
+  p.activePaletteId = active.id;
+  p.settings.pixelSnapperPaletteId = other.id;
+  assert.deepEqual(resolvePixelSnapperPalette(p), [[7, 7, 7]]);
 });
 
 

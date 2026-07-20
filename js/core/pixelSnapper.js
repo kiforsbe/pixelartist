@@ -41,6 +41,14 @@
 
 import { getPixel, setPixel, createBitmap } from './pixels.js';
 
+// Matches the reference implementation's MAX_PALETTE_COLORS -- a
+// deliberately generous quantization budget for "no target palette
+// selected" callers (see js/app/state.js's maybeSnapPixels), so the
+// snapped output keeps close to full RGB fidelity instead of being forced
+// through the default 16-cluster budget meant for pre-palette noise
+// smoothing.
+export const MAX_PALETTE_COLORS = 256;
+
 export const DEFAULT_PIXEL_SNAPPER_CONFIG = {
   kColors: 16,
   maxKmeansIterations: 15,
@@ -184,7 +192,20 @@ export function computeProfiles(bmp) {
 
 // Median spacing between clean (distance-filtered) local-maxima peaks of a
 // profile; null when there aren't at least 2 usable peaks. Mirrors
-// estimate_step_size.
+// estimate_step_size, with one deliberate deviation: peaks are detected as
+// PLATEAUS (a maximal run of equal values strictly higher than the values
+// immediately outside the run), not single points requiring strict `>` on
+// both immediate neighbors. The reference implementation's literal
+// single-point check misses a very common case for this app specifically:
+// a cleanly nearest-neighbor-scaled (no anti-aliasing) pixel-art image --
+// exactly what re-pasting/re-importing already-exported pixel art looks
+// like -- produces an EXACT tie between the two samples straddling every
+// sharp edge (the [-1,0,1] kernel responds identically on both sides of a
+// flat step), so the strict version finds zero peaks and the whole
+// pipeline falls back to step=1 (no snapping at all). Plateau detection
+// still finds the single-point peaks the original algorithm found
+// (a plateau of width 1 behaves identically), so this only ADDS detection
+// for the tied case, it never removes a peak the original would have kept.
 export function estimateStepSize(profile, config) {
   if (profile.length === 0) return null;
   let maxVal = 0;
@@ -193,8 +214,18 @@ export function estimateStepSize(profile, config) {
   const threshold = maxVal * config.peakThresholdMultiplier;
 
   const peaks = [];
-  for (let i = 1; i < profile.length - 1; i++) {
-    if (profile[i] > threshold && profile[i] > profile[i - 1] && profile[i] > profile[i + 1]) peaks.push(i);
+  let i = 1;
+  while (i < profile.length - 1) {
+    if (profile[i] <= threshold || profile[i] < profile[i - 1]) { i++; continue; }
+    let j = i;
+    while (j + 1 < profile.length && profile[j + 1] === profile[i]) j++;
+    // valid only if the plateau doesn't run off the right edge -- mirrors
+    // the original's `i in 1..len-2` bound, which always has a real
+    // profile[i+1] to compare against.
+    if (j < profile.length - 1 && profile[i] > profile[i - 1] && profile[i] > profile[j + 1]) {
+      peaks.push(Math.floor((i + j) / 2));
+    }
+    i = j + 1;
   }
   if (peaks.length < 2) return null;
 
@@ -458,12 +489,14 @@ export function applyPalette(bmp, palette) {
 
 // Full pipeline entry point. `palette`, if given, is an array of [r,g,b]
 // triples the final image is snapped to (this app defaults it to the
-// project's active indexed palette -- see js/core/model.js's
-// activePaletteColors()); omit/null to keep the raw k-means-quantized
-// colors. Images smaller than 3x3 are returned unchanged (the reference
-// implementation errors here; a silent no-op is friendlier for interactive
-// paste/import than blocking on a tiny sprite). Mirrors
-// process_image_common.
+// project's active/selected palette -- see js/core/model.js's
+// resolvePixelSnapperPalette()); omit/null to keep the raw k-means-
+// quantized colors. `pixelSizeOverride`, if given, skips auto-detection
+// entirely and forces this exact pixel size (this app exposes it as
+// project.settings.pixelSnapperPixelSizeOverride). Images smaller than 3x3
+// are returned unchanged (the reference implementation errors here; a
+// silent no-op is friendlier for interactive paste/import than blocking on
+// a tiny sprite). Mirrors process_image_common.
 export function snapPixels(bmp, options = {}) {
   const { kColors = DEFAULT_PIXEL_SNAPPER_CONFIG.kColors, seed = 42, palette = null, pixelSizeOverride = null, config: userConfig = {} } = options;
   const config = { ...DEFAULT_PIXEL_SNAPPER_CONFIG, ...userConfig };

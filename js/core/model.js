@@ -3,6 +3,7 @@ import { newId } from './palettes.js';
 import { compositeFloatOnLayer } from './floating.js';
 import { removeEntry } from './strips.js';
 import { NEIGHBOR_DIRS } from './neighbors.js';
+import { MAX_PALETTE_COLORS } from './pixelSnapper.js';
 
 export const PROJECT_VERSION = 2;
 export const DEFAULT_SETTINGS = {
@@ -23,7 +24,22 @@ export const DEFAULT_SETTINGS = {
   exportColorMode: 'strict',
   // See js/core/pixelSnapper.js -- auto-detects and snaps a pasted/
   // imported image's implicit pixel grid back to its true resolution.
+  // Applies to both Document > Import Sheet from Image and OS-clipboard
+  // paste (js/app/main.js, js/ui/floatsession.js).
   pixelSnapperEnabled: false,
+  // Quantization budget for grid detection (and, with no target palette,
+  // the final output's own color count) -- defaults to the module's max so
+  // "no palette selected" keeps close to full RGB fidelity per its own
+  // default. See js/core/pixelSnapper.js's snapPixels `kColors` option.
+  pixelSnapperKColors: MAX_PALETTE_COLORS,
+  // Skips auto-detection entirely and forces this exact pixel size when
+  // set; null means auto-detect. See snapPixels' `pixelSizeOverride`.
+  pixelSnapperPixelSizeOverride: null,
+  // Which palette the snapped output is remapped to: '' (default) tracks
+  // whatever palette is currently active in the Colors panel, 'none' skips
+  // palette-remapping entirely (raw quantized colors), any other value is
+  // a specific palette's id. See resolvePixelSnapperPalette() below.
+  pixelSnapperPaletteId: '',
 };
 const MAX_DIM = 4096;
 
@@ -86,15 +102,31 @@ export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
     sheets: [], palettes: [], activePaletteId: null };
 }
 
-// The project's active indexed palette as plain [r,g,b] triples, or null
-// when there's no active palette or it isn't indexed (e.g. a continuous/
-// gradient palette has no fixed color list to snap to). Used by
-// js/core/pixelSnapper.js callers (paste/import) to default pixel-snapping
-// to the project's current palette.
-export function activePaletteColors(project) {
-  const palette = project.palettes.find(p => p.id === project.activePaletteId);
-  if (!palette?.indexed) return null;
+// Works for both indexed (fixed-size) and free-form swatch palettes --
+// `indexed` only matters for export quantization budgets (see js/app/
+// main.js's resolveC99Items), not for "is there a color list to use" here.
+function paletteColorsById(project, id) {
+  const palette = project.palettes.find(p => p.id === id);
+  if (!palette?.colors.length) return null;
   return palette.colors.map(c => [c[0], c[1], c[2]]);
+}
+
+// The project's active palette's colors as plain [r,g,b] triples, or null
+// when there's no active palette or it has no colors yet.
+export function activePaletteColors(project) {
+  return paletteColorsById(project, project.activePaletteId);
+}
+
+// Resolves project.settings.pixelSnapperPaletteId into actual [r,g,b]
+// colors for js/core/pixelSnapper.js's snapPixels `palette` option: ''
+// (the default) tracks whatever palette is currently active in the Colors
+// panel, 'none' means no target palette at all (raw quantized colors,
+// full RGB fidelity), anything else is a specific palette's id.
+export function resolvePixelSnapperPalette(project) {
+  const id = project.settings.pixelSnapperPaletteId;
+  if (!id) return activePaletteColors(project);
+  if (id === 'none') return null;
+  return paletteColorsById(project, id);
 }
 
 // A sheet owns everything about it (layerTree, frames, animations, and for
@@ -602,15 +634,18 @@ export function deserializeProject(json, imagesByPath) {
   if (!v.ok) throw new Error(v.error);
   return {
     version: json.version, name: json.name,
-    // onion/targetPlatform/exportColorMode fall back to their defaults for
-    // files saved before those fields existed -- deserializeProject only
-    // ever runs on a freshly-parsed json, so this is never aliased to
-    // another live project.
+    // onion/targetPlatform/exportColorMode/pixelSnapper* fall back to their
+    // defaults for files saved before those fields existed --
+    // deserializeProject only ever runs on a freshly-parsed json, so this
+    // is never aliased to another live project.
     settings: {
       onion: defaultOnionSettings(),
       targetPlatform: DEFAULT_SETTINGS.targetPlatform,
       exportColorMode: DEFAULT_SETTINGS.exportColorMode,
       pixelSnapperEnabled: DEFAULT_SETTINGS.pixelSnapperEnabled,
+      pixelSnapperKColors: DEFAULT_SETTINGS.pixelSnapperKColors,
+      pixelSnapperPixelSizeOverride: DEFAULT_SETTINGS.pixelSnapperPixelSizeOverride,
+      pixelSnapperPaletteId: DEFAULT_SETTINGS.pixelSnapperPaletteId,
       ...json.settings,
     },
     activePaletteId: json.activePaletteId ?? null,

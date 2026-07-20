@@ -66,10 +66,11 @@
   </div>
   <div class="row dlg-actions"><button id="np-create" class="btn-sm">Create</button><button id="np-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
-<dialog id="dlg-projectsettings" class="dlg-wide">
+<dialog id="dlg-projectsettings" class="dlg-wide dlg-scrolls">
   <h3>Project Settings</h3>
   <div class="dlg-tabs">
     <button type="button" id="ps-tab-general" class="dlg-tab active">General</button>
+    <button type="button" id="ps-tab-import" class="dlg-tab">Import</button>
     <button type="button" id="ps-tab-onion" class="dlg-tab">Onion Steps</button>
   </div>
   <div id="ps-page-general" class="dlg-grid">
@@ -98,11 +99,6 @@
     <span>Smooth thumbnails</span>
     <input id="ps-smooth-thumbnails" type="checkbox" style="grid-column: 2; justify-self: start;">
 
-    <span class="dlg-section-header">Import</span>
-    <span>Pixel snapper</span>
-    <input id="ps-pixel-snapper" type="checkbox" style="grid-column: 2; justify-self: start;">
-    <span class="about-meta" style="grid-column: 1 / span 4;">Auto-detects and snaps pasted/imported images to their true pixel grid, using the active palette.</span>
-
     <span class="dlg-section-header">Compatibility</span>
     <span>Target platform</span>
     <select id="ps-target-platform" style="grid-column: 2 / span 3"></select>
@@ -111,6 +107,18 @@
       <option value="strict">Restrict to hardware limit per sprite/tile</option>
       <option value="total">Use full system palette (still capped per sprite/tile)</option>
     </select>
+  </div>
+  <div id="ps-page-import" class="dlg-grid" hidden>
+    <span>Pixel snapper</span>
+    <input id="ps-pixel-snapper" type="checkbox" style="grid-column: 2; justify-self: start;">
+    <span class="about-meta" style="grid-column: 1 / span 4;">Auto-detects and snaps pasted/imported images to their true pixel grid.</span>
+
+    <span>Palette</span>
+    <select id="ps-pixel-snapper-palette" style="grid-column: 2 / span 3"></select>
+    <span>Colors (k)</span>
+    <input id="ps-pixel-snapper-kcolors" type="number" min="1" max="256" title="Quantization budget for grid detection (and the output's own color count when no palette is set).">
+    <span>Pixel size</span>
+    <input id="ps-pixel-snapper-pixelsize" type="number" min="1" max="256" placeholder="auto" title="Leave blank to auto-detect; set to skip detection and force this exact pixel size.">
   </div>
   <div id="ps-page-onion" hidden>
     <p class="about-meta">Per-step color overrides for onion-skin ghosts in the frame editor. Leave a step on "default" to use that direction's toolbar color.</p>
