@@ -14,7 +14,7 @@ import {
 } from './platformExport.js';
 import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from './animationExport.js';
 import { encodeGif } from '../core/gif.js';
-import { buildPalette, quantizeBitmap, colorFrequency, medianCutPalette } from '../core/quantize.js';
+import { buildPalette, quantizeBitmap, colorFrequency, medianCutPalette, resolveAlphaForQuantize } from '../core/quantize.js';
 import { PLATFORMS, checkItemAgainstPlatform, NES_PALETTE, C64_PALETTE, GB_PALETTE, snapPaletteToHardware } from '../core/platforms.js';
 import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
@@ -434,14 +434,15 @@ function quantizeToPalette(mode, param, allLayers, preferOpaque = false) {
   const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
   if (!layers.length) return;
   const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
+  const quantizeSource = (mode === 'count' && preferOpaque) ? resolveAlphaForQuantize(befores, param) : befores;
   const colors = mode === 'count'
-    ? medianCutPalette(befores, param, preferOpaque).map(c => [c[0], c[1], c[2], 255])
+    ? medianCutPalette(quantizeSource, param).map(c => [c[0], c[1], c[2], 255])
     : param;
   if (!colors.length) return;
   const palette = { colors };
   const patches = layers.map((l, i) => {
     const before = befores[i];
-    const after = cloneBitmap(before);
+    const after = cloneBitmap(quantizeSource[i]);
     quantizeBitmapToPalette(after, palette);
     return { layer: l, before, after };
   }).filter(p => !bitmapsEqual(p.before, p.after));

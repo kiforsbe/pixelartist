@@ -52,21 +52,17 @@ export function quantizeBitmap(bmp, palette) {
 
 // Counts pixels by exact (r,g,b) across all bitmaps, skipping alpha === 0
 // (mirrors colorFrequency's transparency rule, but keys on RGB only --
-// alpha otherwise never enters median-cut, see the note above
-// medianCutPalette). When `preferOpaque` is set, each pixel contributes
-// alpha/255 instead of a flat 1, so semi-transparent (anti-aliased edge)
-// pixels influence the palette proportionally less than fully-opaque ones
-// -- never zero, so a region with no fully-opaque pixels still works.
-function rgbHistogram(bitmaps, preferOpaque = false) {
+// alpha never enters median-cut itself, see the note above
+// medianCutPalette; per-pixel alpha handling for the "prefer opaque
+// colors" option lives in resolveAlphaForQuantize instead).
+function rgbHistogram(bitmaps) {
   const counts = new Map();
   for (const bmp of bitmaps) {
     const d = bmp.data;
     for (let i = 0; i < d.length; i += 4) {
-      const a = d[i + 3];
-      if (a === 0) continue;
+      if (d[i + 3] === 0) continue;
       const key = `${d[i]},${d[i + 1]},${d[i + 2]}`;
-      const weight = preferOpaque ? a / 255 : 1;
-      counts.set(key, (counts.get(key) ?? 0) + weight);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
   return [...counts.entries()].map(([key, count]) => {
@@ -137,8 +133,8 @@ function averageColor(box) {
 // only the source pixel's, so it would only add noise). Returns up to
 // maxColors [r,g,b] triples, fewer if there are fewer distinct RGB values
 // than maxColors in the input.
-export function medianCutPalette(bitmaps, maxColors, preferOpaque = false) {
-  const hist = rgbHistogram(bitmaps, preferOpaque);
+export function medianCutPalette(bitmaps, maxColors) {
+  const hist = rgbHistogram(bitmaps);
   if (hist.length <= maxColors) return hist.map(c => [c.r, c.g, c.b]);
   let boxes = [hist];
   while (boxes.length < maxColors) {
@@ -148,4 +144,41 @@ export function medianCutPalette(bitmaps, maxColors, preferOpaque = false) {
     boxes.splice(idx, 1, left, right);
   }
   return boxes.map(averageColor);
+}
+
+// Transparency-cleanup pass for the "prefer opaque colors" quantize option:
+// decides each opaque-ish pixel's OUTPUT alpha (RGB is left untouched) so
+// the result mostly avoids in-between alpha values -- pixels that are
+// mostly invisible become fully transparent, pixels that are mostly solid
+// become fully opaque, and only a narrow near-opaque band (7%-25%
+// transparent) can keep its real alpha, and only when that pixel's exact
+// color is common enough to be "important" to the palette (its pixel count
+// is at least totalWeight/maxColors -- roughly what an average palette
+// slot's share would be, i.e. it would plausibly earn its own slot on its
+// own merits). Returns new bitmaps; does not mutate the inputs, since
+// callers also need the untouched originals for undo diffing.
+export function resolveAlphaForQuantize(bitmaps, maxColors) {
+  const hist = rgbHistogram(bitmaps);
+  const totalWeight = hist.reduce((s, c) => s + c.count, 0);
+  const threshold = totalWeight / maxColors;
+  const weightByKey = new Map(hist.map(c => [`${c.r},${c.g},${c.b}`, c.count]));
+
+  return bitmaps.map(bmp => {
+    const data = new Uint8ClampedArray(bmp.data);
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a === 0) continue;
+      const transparency = 1 - a / 255;
+      if (transparency >= 0.75) { data[i + 3] = 0; continue; }
+      if (transparency < 0.07) { data[i + 3] = 255; continue; }
+      if (transparency < 0.25) {
+        const key = `${data[i]},${data[i + 1]},${data[i + 2]}`;
+        const important = (weightByKey.get(key) ?? 0) >= threshold;
+        data[i + 3] = important ? a : 255;
+        continue;
+      }
+      data[i + 3] = 255;
+    }
+    return { width: bmp.width, height: bmp.height, data };
+  });
 }
