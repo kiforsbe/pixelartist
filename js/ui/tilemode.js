@@ -1779,7 +1779,6 @@ export function mountTilePanel(el) {
     if (!sheet) return;
 
     const tile = sheet.tiles.find(t => t.id === state.selectedTileId);
-    syncSelectedTerrainSetFromTile(tile);
     if (!tile) {
       // No tile selected -- if a terrain set is still "current" (e.g. just
       // created via Add Terrain Set with no preset, so no tile belongs to
@@ -1898,10 +1897,20 @@ export function mountTilePanel(el) {
     queued = true;
     queueMicrotask(() => { queued = false; render(); });
   }
+  // Only re-derive state.selectedTerrainSetId from the selected tile on an
+  // actual 'selection' event -- see mountAutotilesPanel's syncSelection
+  // comment for why doing this on every render (including 'project' events
+  // from slot edits that mutate the selected tile's own terrainSetId) was
+  // wrong.
+  function syncSelection() {
+    const sheet = activeSheet();
+    if (sheet) syncSelectedTerrainSetFromTile(sheet.tiles.find(t => t.id === state.selectedTileId));
+  }
   on('project', schedule);
   on('history', schedule);
   on('view', schedule);
-  on('selection', schedule);
+  on('selection', () => { syncSelection(); schedule(); });
+  syncSelection();
   render();
 }
 
@@ -1934,11 +1943,6 @@ export function mountAutotilesPanel(el) {
     terrainSetEditor.innerHTML = '';
     if (!sheet) return;
 
-    // No explicit terrain-set list any more -- membership is already
-    // visible via each tile's info (Tiles panel), so which set shows here
-    // just follows the selected tile when it belongs to one.
-    syncSelectedTerrainSetFromTile(sheet.tiles.find(t => t.id === state.selectedTileId));
-
     const selectedTerrainSet = sheet.terrainSets.find(ts => ts.id === state.selectedTerrainSetId);
     if (selectedTerrainSet) {
       renderTerrainSetEditor(terrainSetEditor, sheet, selectedTerrainSet, tilePickerDialog);
@@ -1948,6 +1952,20 @@ export function mountAutotilesPanel(el) {
       hint.textContent = 'No terrain set selected — select a tile that belongs to one, or add a new set in the Tiles panel.';
       terrainSetEditor.appendChild(hint);
     }
+  }
+
+  // No explicit terrain-set list any more -- membership is already visible
+  // via each tile's info (Tiles panel), so which set shows here just
+  // follows the selected tile when it belongs to one. Only re-derived on
+  // an actual 'selection' event, NOT on every render: slot edits (e.g.
+  // clearing the currently-selected tile's own slot) also mutate that
+  // tile's terrainSetId and fire 'project', and re-syncing from render()
+  // used to misread that as "an unrelated tile got selected", wiping
+  // state.selectedTerrainSetId and kicking the user out of the editor
+  // they were just using.
+  function syncSelection() {
+    const sheet = activeSheet();
+    if (sheet) syncSelectedTerrainSetFromTile(sheet.tiles.find(t => t.id === state.selectedTileId));
   }
 
   let queued = false;
@@ -1960,7 +1978,8 @@ export function mountAutotilesPanel(el) {
   on('history', () => { invalidateFlat(); schedule(); });
   on('pixels', () => { invalidateFlat(); schedule(); });
   on('view', schedule);
-  on('selection', schedule);
+  on('selection', () => { syncSelection(); schedule(); });
+  syncSelection();
   render();
 }
 
