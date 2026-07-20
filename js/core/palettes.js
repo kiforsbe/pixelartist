@@ -41,6 +41,20 @@ export function nearestColor(palette, rgba) {
   return best ? [best[0], best[1], best[2], rgba[3]] : [...rgba];
 }
 
+// Mutates `bitmap` in place: every pixel with alpha > 0 is replaced by its
+// nearest-RGB-distance match in `palette.colors` (alpha untouched, exact
+// per-pixel semantics as nearestColor). Fully transparent pixels are
+// skipped -- no visual effect, and skipping avoids bloating an undo diff
+// with invisible changes.
+export function quantizeBitmapToPalette(bitmap, palette) {
+  const d = bitmap.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) continue;
+    const [r, g, b, a] = nearestColor(palette, [d[i], d[i + 1], d[i + 2], d[i + 3]]);
+    d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a;
+  }
+}
+
 export function remapColor(bitmap, from, to) {
   let count = 0;
   const d = bitmap.data;

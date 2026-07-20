@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createPalette, parseHexColors, setEntry, addSwatch, removeSwatch,
-  moveSwatch, nearestColor, remapColor, INDEXED_SIZE_PRESETS,
+  moveSwatch, nearestColor, remapColor, quantizeBitmapToPalette, INDEXED_SIZE_PRESETS,
 } from '../js/core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../js/core/systempalettes.js';
 import { createBitmap, setPixel, getPixel } from '../js/core/pixels.js';
@@ -62,4 +62,23 @@ test('system palettes present with expected sizes', () => {
 
 test('size presets exported', () => {
   assert.deepEqual(INDEXED_SIZE_PRESETS, [2, 4, 16, 256]);
+});
+
+test('quantizeBitmapToPalette: maps opaque pixels to nearest palette color, preserves alpha; skips fully transparent pixels', () => {
+  const b = createBitmap(3, 1);
+  setPixel(b, 0, 0, [250, 5, 5, 255]);   // near red
+  setPixel(b, 1, 0, [5, 5, 250, 128]);   // near blue, half alpha
+  setPixel(b, 2, 0, [9, 9, 9, 0]);       // fully transparent -- must stay untouched
+  const palette = { colors: [[255, 0, 0, 255], [0, 0, 255, 255]] };
+  quantizeBitmapToPalette(b, palette);
+  assert.deepEqual(getPixel(b, 0, 0), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(b, 1, 0), [0, 0, 255, 128]);
+  assert.deepEqual(getPixel(b, 2, 0), [9, 9, 9, 0]);
+});
+
+test('quantizeBitmapToPalette: exact palette match is left byte-identical', () => {
+  const b = createBitmap(1, 1);
+  setPixel(b, 0, 0, [0, 0, 255, 255]);
+  quantizeBitmapToPalette(b, { colors: [[255, 0, 0, 255], [0, 0, 255, 255]] });
+  assert.deepEqual(getPixel(b, 0, 0), [0, 0, 255, 255]);
 });
