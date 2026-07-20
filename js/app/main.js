@@ -793,6 +793,71 @@ const psPixelSnapper = document.getElementById('ps-pixel-snapper');
 const psPixelSnapperPalette = document.getElementById('ps-pixel-snapper-palette');
 const psPixelSnapperKColors = document.getElementById('ps-pixel-snapper-kcolors');
 const psPixelSnapperPixelSize = document.getElementById('ps-pixel-snapper-pixelsize');
+// Advanced pixel-snapper tuning fields (Project Settings > Import >
+// Advanced): DOM id suffix, project.settings key, human label (used in the
+// out-of-range alert below). All nine are plain numeric inputs sharing the
+// exact same populate/save/validate shape, so they're driven from this
+// table instead of nine repeats of the same few lines.
+const PS_ADVANCED_FIELDS = [
+  ['max-iterations', 'pixelSnapperMaxIterations', 'Max iterations'],
+  ['peak-threshold', 'pixelSnapperPeakThreshold', 'Peak threshold'],
+  ['peak-distance-filter', 'pixelSnapperPeakDistanceFilter', 'Peak distance filter'],
+  ['search-window-ratio', 'pixelSnapperSearchWindowRatio', 'Search window ratio'],
+  ['min-search-window', 'pixelSnapperMinSearchWindow', 'Min search window'],
+  ['strength-threshold', 'pixelSnapperStrengthThreshold', 'Strength threshold'],
+  ['min-cuts-per-axis', 'pixelSnapperMinCutsPerAxis', 'Min cuts per axis'],
+  ['fallback-segments', 'pixelSnapperFallbackSegments', 'Fallback segments'],
+  ['max-step-ratio', 'pixelSnapperMaxStepRatio', 'Max step ratio'],
+];
+const psAdvancedInputs = Object.fromEntries(
+  PS_ADVANCED_FIELDS.map(([id, key]) => [key, document.getElementById(`ps-ps-${id}`)])
+);
+function psAdvancedValue(key) {
+  const v = parseFloat(psAdvancedInputs[key].value);
+  return Number.isFinite(v) ? v : DEFAULT_SETTINGS[key];
+}
+// Per-field "reset to default" buttons: hidden unless the field's current
+// value differs from its default, click restores it (nothing is saved
+// until OK, same as any other edit in this dialog). `sync()` re-checks
+// visibility on every edit and is also called once after populating each
+// field in openProjectSettings() below, so a freshly-opened dialog starts
+// with the right buttons already hidden.
+function wireFieldReset(input, resetBtn, defaultStr) {
+  const sync = () => { resetBtn.style.display = input.value === defaultStr ? 'none' : ''; };
+  input.addEventListener('input', sync);
+  input.addEventListener('change', sync);
+  resetBtn.addEventListener('click', () => { input.value = defaultStr; sync(); });
+  sync();
+  return sync;
+}
+const syncPaletteReset = wireFieldReset(psPixelSnapperPalette, document.getElementById('ps-pixel-snapper-palette-reset'), '');
+const syncKColorsReset = wireFieldReset(psPixelSnapperKColors, document.getElementById('ps-pixel-snapper-kcolors-reset'), String(DEFAULT_SETTINGS.pixelSnapperKColors));
+const syncPixelSizeReset = wireFieldReset(psPixelSnapperPixelSize, document.getElementById('ps-pixel-snapper-pixelsize-reset'), '');
+const psAdvancedResetSyncs = Object.fromEntries(PS_ADVANCED_FIELDS.map(([id, key]) =>
+  [key, wireFieldReset(psAdvancedInputs[key], document.getElementById(`ps-ps-${id}-reset`), String(DEFAULT_SETTINGS[key]))]));
+// Every pixel-snapper numeric field's own min/max/step (native constraint
+// validation) is the single source of truth for what's permissible --
+// out-of-range values get a visible red outline (see app.css's
+// `.dlg-grid input:invalid` rule) live as you type, via the browser's
+// built-in :invalid styling, no JS needed for that part. Pixel size is
+// exempt while blank (that's "auto", not a number to validate).
+const PS_NUMERIC_FIELDS = [
+  ['Colors (k)', psPixelSnapperKColors],
+  ['Pixel size', psPixelSnapperPixelSize],
+  ...PS_ADVANCED_FIELDS.map(([, key, label]) => [label, psAdvancedInputs[key]]),
+];
+// Returns the label of the first invalid field, or null if all pass. Used
+// to block OK (see psOk below) instead of silently clamping an
+// out-of-range value to its nearest bound -- a typo like 2048 in a
+// 1-65536 field used to clamp to 256 with no feedback at all, which just
+// looked like "my edit didn't save".
+function firstInvalidPsField() {
+  for (const [label, input] of PS_NUMERIC_FIELDS) {
+    if (input === psPixelSnapperPixelSize && input.value.trim() === '') continue;
+    if (!input.checkValidity()) return { label, input };
+  }
+  return null;
+}
 const psTargetPlatform = document.getElementById('ps-target-platform');
 for (const [id, p] of Object.entries(PLATFORMS)) psTargetPlatform.appendChild(new Option(p.label, id));
 const psExportColorMode = document.getElementById('ps-export-color-mode');
@@ -964,8 +1029,15 @@ function openProjectSettings(tab) {
   psPixelSnapperPalette.appendChild(new Option('(none — full RGB)', 'none'));
   for (const p of project.palettes) psPixelSnapperPalette.appendChild(new Option(p.name, p.id));
   psPixelSnapperPalette.value = settings.pixelSnapperPaletteId ?? '';
+  syncPaletteReset();
   psPixelSnapperKColors.value = String(settings.pixelSnapperKColors ?? MAX_PALETTE_COLORS);
+  syncKColorsReset();
   psPixelSnapperPixelSize.value = settings.pixelSnapperPixelSizeOverride != null ? String(settings.pixelSnapperPixelSizeOverride) : '';
+  syncPixelSizeReset();
+  for (const [, key] of PS_ADVANCED_FIELDS) {
+    psAdvancedInputs[key].value = String(settings[key] ?? DEFAULT_SETTINGS[key]);
+    psAdvancedResetSyncs[key]();
+  }
   psTargetPlatform.value = settings.targetPlatform ?? 'none';
   psExportColorMode.value = settings.exportColorMode ?? 'strict';
   psSpriteLock.resnap();
@@ -1017,6 +1089,14 @@ psOk.addEventListener('click', () => {
     alert('Please enter valid positive numbers for all fields.');
     return;
   }
+  const invalidPs = firstInvalidPsField();
+  if (invalidPs) {
+    const step = invalidPs.input.step;
+    const stepNote = (step && step !== '1' && step !== 'any') ? `, step ${step}` : '';
+    alert(`"${invalidPs.label}" is ${invalidPs.input.validationMessage || 'not a valid value'} (allowed: ${invalidPs.input.min}–${invalidPs.input.max}${stepNote}).`);
+    invalidPs.input.focus();
+    return;
+  }
   const beforeName = project.name;
   const beforeSettings = { ...project.settings };
   // Preserve every OTHER settings field (onion, etc.) verbatim -- this dialog
@@ -1035,8 +1115,12 @@ psOk.addEventListener('click', () => {
     smoothThumbnails: psSmoothThumbnails.checked,
     pixelSnapperEnabled: psPixelSnapper.checked,
     pixelSnapperPaletteId: psPixelSnapperPalette.value,
-    pixelSnapperKColors: Math.max(1, Math.min(256, parseInt(psPixelSnapperKColors.value, 10) || MAX_PALETTE_COLORS)),
-    pixelSnapperPixelSizeOverride: psPixelSnapperPixelSize.value.trim() === '' ? null : Math.max(1, parseInt(psPixelSnapperPixelSize.value, 10) || 1),
+    // firstInvalidPsField() already blocked save (above) if either of
+    // these were out of range, so a plain parseInt here is exactly what
+    // was typed/left -- no silent clamping.
+    pixelSnapperKColors: parseInt(psPixelSnapperKColors.value, 10),
+    pixelSnapperPixelSizeOverride: psPixelSnapperPixelSize.value.trim() === '' ? null : parseInt(psPixelSnapperPixelSize.value, 10),
+    ...Object.fromEntries(PS_ADVANCED_FIELDS.map(([, key]) => [key, psAdvancedValue(key)])),
     targetPlatform: psTargetPlatform.value,
     exportColorMode: psExportColorMode.value,
   };

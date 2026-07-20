@@ -3,7 +3,7 @@ import { newId } from './palettes.js';
 import { compositeFloatOnLayer } from './floating.js';
 import { removeEntry } from './strips.js';
 import { NEIGHBOR_DIRS } from './neighbors.js';
-import { MAX_PALETTE_COLORS } from './pixelSnapper.js';
+import { MAX_PALETTE_COLORS, DEFAULT_PIXEL_SNAPPER_CONFIG } from './pixelSnapper.js';
 
 export const PROJECT_VERSION = 2;
 export const DEFAULT_SETTINGS = {
@@ -40,6 +40,20 @@ export const DEFAULT_SETTINGS = {
   // palette-remapping entirely (raw quantized colors), any other value is
   // a specific palette's id. See resolvePixelSnapperPalette() below.
   pixelSnapperPaletteId: '',
+  // Advanced tuning knobs (Project Settings > Import > Advanced) -- mirror
+  // js/core/pixelSnapper.js's own DEFAULT_PIXEL_SNAPPER_CONFIG exactly, so
+  // leaving them untouched reproduces today's default behavior. Passed
+  // through as snapPixels' `config` override; see js/app/state.js's
+  // maybeSnapPixels for the exact field mapping.
+  pixelSnapperMaxIterations: DEFAULT_PIXEL_SNAPPER_CONFIG.maxKmeansIterations,
+  pixelSnapperPeakThreshold: DEFAULT_PIXEL_SNAPPER_CONFIG.peakThresholdMultiplier,
+  pixelSnapperPeakDistanceFilter: DEFAULT_PIXEL_SNAPPER_CONFIG.peakDistanceFilter,
+  pixelSnapperSearchWindowRatio: DEFAULT_PIXEL_SNAPPER_CONFIG.walkerSearchWindowRatio,
+  pixelSnapperMinSearchWindow: DEFAULT_PIXEL_SNAPPER_CONFIG.walkerMinSearchWindow,
+  pixelSnapperStrengthThreshold: DEFAULT_PIXEL_SNAPPER_CONFIG.walkerStrengthThreshold,
+  pixelSnapperMinCutsPerAxis: DEFAULT_PIXEL_SNAPPER_CONFIG.minCutsPerAxis,
+  pixelSnapperFallbackSegments: DEFAULT_PIXEL_SNAPPER_CONFIG.fallbackTargetSegments,
+  pixelSnapperMaxStepRatio: DEFAULT_PIXEL_SNAPPER_CONFIG.maxStepRatio,
 };
 const MAX_DIM = 4096;
 
@@ -642,10 +656,11 @@ export function deserializeProject(json, imagesByPath) {
       onion: defaultOnionSettings(),
       targetPlatform: DEFAULT_SETTINGS.targetPlatform,
       exportColorMode: DEFAULT_SETTINGS.exportColorMode,
-      pixelSnapperEnabled: DEFAULT_SETTINGS.pixelSnapperEnabled,
-      pixelSnapperKColors: DEFAULT_SETTINGS.pixelSnapperKColors,
-      pixelSnapperPixelSizeOverride: DEFAULT_SETTINGS.pixelSnapperPixelSizeOverride,
-      pixelSnapperPaletteId: DEFAULT_SETTINGS.pixelSnapperPaletteId,
+      // Every pixelSnapper* field (enabled/palette/kColors/override + the
+      // 9 advanced tuning knobs) defaults the same way -- spread instead of
+      // listing each one, so a future addition doesn't need a matching
+      // edit here too.
+      ...Object.fromEntries(Object.entries(DEFAULT_SETTINGS).filter(([k]) => k.startsWith('pixelSnapper'))),
       ...json.settings,
     },
     activePaletteId: json.activePaletteId ?? null,

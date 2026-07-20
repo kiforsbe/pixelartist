@@ -114,11 +114,71 @@
     <span class="about-meta" style="grid-column: 1 / span 4;">Auto-detects and snaps pasted/imported images to their true pixel grid.</span>
 
     <span>Palette</span>
-    <select id="ps-pixel-snapper-palette" style="grid-column: 2 / span 3"></select>
+    <span class="dlg-field-with-reset" style="grid-column: 2 / span 3">
+      <select id="ps-pixel-snapper-palette"></select>
+      <button type="button" id="ps-pixel-snapper-palette-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default: active palette">↺</button>
+    </span>
     <span>Colors (k)</span>
-    <input id="ps-pixel-snapper-kcolors" type="number" min="1" max="256" title="Quantization budget for grid detection (and the output's own color count when no palette is set).">
+    <span class="dlg-field-with-reset">
+      <input id="ps-pixel-snapper-kcolors" type="number" min="1" max="65536" title="Quantization budget for grid detection (and the output's own color count when no palette is set). 256+ is rarely useful but not blocked -- large values just make grid detection slower.">
+      <button type="button" id="ps-pixel-snapper-kcolors-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+    </span>
     <span>Pixel size</span>
-    <input id="ps-pixel-snapper-pixelsize" type="number" min="1" max="256" placeholder="auto" title="Leave blank to auto-detect; set to skip detection and force this exact pixel size.">
+    <span class="dlg-field-with-reset">
+      <input id="ps-pixel-snapper-pixelsize" type="number" min="1" max="256" placeholder="auto" title="Leave blank to auto-detect; set to skip detection and force this exact pixel size.">
+      <button type="button" id="ps-pixel-snapper-pixelsize-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default: auto-detect">↺</button>
+    </span>
+
+    <details id="ps-pixel-snapper-advanced" style="grid-column: 1 / -1;">
+      <summary>Advanced</summary>
+      <div class="dlg-grid">
+        <span>Max iterations</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-max-iterations" type="number" min="1" max="200" title="K-means clustering stops early once centroids stabilize, but never runs more than this many passes.">
+          <button type="button" id="ps-ps-max-iterations-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Peak threshold</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-peak-threshold" type="number" min="0" max="1" step="any" title="Fraction of the strongest gradient in the image a point must clear to be considered a grid-line candidate.">
+          <button type="button" id="ps-ps-peak-threshold-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Peak distance filter</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-peak-distance-filter" type="number" min="1" max="100" title="Candidate grid-lines closer together than this (in pixels) are merged into one.">
+          <button type="button" id="ps-ps-peak-distance-filter-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Search window ratio</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-search-window-ratio" type="number" min="0" max="5" step="any" title="How far (as a fraction of the estimated pixel size) the walker looks around each step for a stronger nearby edge.">
+          <button type="button" id="ps-ps-search-window-ratio-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Min search window</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-min-search-window" type="number" min="0" max="100" step="any" title="Floor on the search window above, in pixels -- keeps it from shrinking to nothing for very small pixel sizes.">
+          <button type="button" id="ps-ps-min-search-window-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Strength threshold</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-strength-threshold" type="number" min="0" max="5" step="any" title="Fraction of the profile's average gradient a nearby edge must clear before the walker snaps to it instead of the raw step position.">
+          <button type="button" id="ps-ps-strength-threshold-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Min cuts per axis</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-min-cuts-per-axis" type="number" min="2" max="500" title="An axis with fewer detected grid-lines than this gets re-snapped to a uniform grid instead of trusted as-is.">
+          <button type="button" id="ps-ps-min-cuts-per-axis-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Fallback segments</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-fallback-segments" type="number" min="1" max="1000" title="Target cell count used when no grid could be estimated for an axis at all.">
+          <button type="button" id="ps-ps-fallback-segments-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+        <span>Max step ratio</span>
+        <span class="dlg-field-with-reset">
+          <input id="ps-ps-max-step-ratio" type="number" min="1" max="50" step="any" title="How much the two axes' estimated pixel sizes may disagree before the smaller one wins outright instead of averaging.">
+          <button type="button" id="ps-ps-max-step-ratio-reset" class="dlg-reset-btn" tabindex="-1" title="Reset to default">↺</button>
+        </span>
+      </div>
+    </details>
   </div>
   <div id="ps-page-onion" hidden>
     <p class="about-meta">Per-step color overrides for onion-skin ghosts in the frame editor. Leave a step on "default" to use that direction's toolbar color.</p>

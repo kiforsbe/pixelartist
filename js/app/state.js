@@ -90,6 +90,17 @@ export function maybeSnapPixels(bitmap) {
     palette: resolvePixelSnapperPalette(state.project),
     kColors: settings.pixelSnapperKColors,
     pixelSizeOverride: settings.pixelSnapperPixelSizeOverride,
+    config: {
+      maxKmeansIterations: settings.pixelSnapperMaxIterations,
+      peakThresholdMultiplier: settings.pixelSnapperPeakThreshold,
+      peakDistanceFilter: settings.pixelSnapperPeakDistanceFilter,
+      walkerSearchWindowRatio: settings.pixelSnapperSearchWindowRatio,
+      walkerMinSearchWindow: settings.pixelSnapperMinSearchWindow,
+      walkerStrengthThreshold: settings.pixelSnapperStrengthThreshold,
+      minCutsPerAxis: settings.pixelSnapperMinCutsPerAxis,
+      fallbackTargetSegments: settings.pixelSnapperFallbackSegments,
+      maxStepRatio: settings.pixelSnapperMaxStepRatio,
+    },
   }).bitmap;
 }
 export function markDirty() { state.dirty = true; emit('project'); }

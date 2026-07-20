@@ -136,6 +136,12 @@ dialog.dlg-scrolls[open] > #ps-page-onion { overflow-y: auto; flex: 1 1 auto; mi
    OK/Cancel buttons out of reach. Two selectors beats one, so this wins
    over the plain `.dlg-grid` rule above whenever both apply. */
 .dlg-grid[hidden] { display: none; }
+/* Out-of-range numeric fields (their own min/max/step, native constraint
+   validation) get a visible red outline instead of silently clamping on
+   save -- clamping-with-no-feedback is exactly what made a mistyped 2048
+   in Colors (k) look like a "my edit didn't save" bug when it was really
+   just quietly clamped to the old 256 max. */
+.dlg-grid input:invalid { outline: 1px solid #e05252; outline-offset: -1px; }
 /* Project Settings' General page adds a 5th column for the dim-lock button
    after each W/×/H triplet -- scoped by id so it doesn't affect the other
    .dlg-grid dialogs (New Project, New Sheet), which don't have one. */
@@ -152,6 +158,16 @@ dialog.dlg-scrolls[open] > #ps-page-onion { overflow-y: auto; flex: 1 1 auto; mi
 .dlg-section-header { grid-column: 1 / -1; font-size: 11px; text-transform: uppercase;
   letter-spacing: .08em; color: #8b8d98; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .dlg-section-header:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+/* Collapsible "Advanced" subsection inside a .dlg-grid tab page (Project
+   Settings > Import) -- summary reads like a .dlg-section-header (thin top
+   divider, uppercase label) but stays interactive/expandable; its nested
+   .dlg-grid gets its own margin since the outer grid's row `gap` doesn't
+   reach inside a spanned cell. */
+details > summary { grid-column: 1 / -1; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .08em; color: #8b8d98; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border);
+  cursor: pointer; }
+details > summary:hover { color: var(--fg); }
+details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 /* Width/height ratio-lock toggle, sitting where a plain "×" separator used
    to between a W and H field -- locked (default) keeps them proportional;
    see js/app/main.js's makeDimLock(). */
@@ -159,6 +175,16 @@ dialog.dlg-scrolls[open] > #ps-page-onion { overflow-y: auto; flex: 1 1 auto; mi
   font-size: 13px; opacity: .35; filter: grayscale(1); justify-self: center; }
 .dlg-dim-lock:hover { border-color: transparent; opacity: .6; }
 .dlg-dim-lock.locked { opacity: 1; filter: none; }
+/* Per-field "reset to default" control (Project Settings > Import): the
+   input/select and its reset button share ONE grid cell (instead of each
+   field getting its own extra column), so the existing 2-fields-per-row
+   layout doesn't have to change to fit them. */
+.dlg-field-with-reset { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.dlg-field-with-reset > input,
+.dlg-field-with-reset > select { flex: 1; min-width: 0; }
+.dlg-reset-btn { background: transparent; border: none; padding: 0; width: auto; min-width: 0;
+  flex: none; font-size: 10px; line-height: 1; opacity: .5; }
+.dlg-reset-btn:hover { border-color: transparent; opacity: 1; }
 
 /* onion step-color grid (Project Settings > Onion Steps) */
 .onion-steps-grid { display: grid; grid-template-columns: auto repeat(4, 1fr); gap: 4px 10px; align-items: center; margin-bottom: 10px; }

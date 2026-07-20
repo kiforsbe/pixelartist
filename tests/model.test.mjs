@@ -434,6 +434,27 @@ test('deserializeProject: targetPlatform/exportColorMode/pixelSnapper* fall back
   assert.equal(p.settings.pixelSnapperKColors, DEFAULT_SETTINGS.pixelSnapperKColors);
   assert.equal(p.settings.pixelSnapperPixelSizeOverride, null);
   assert.equal(p.settings.pixelSnapperPaletteId, '');
+  // the 9 advanced tuning knobs -- spread-filled by the `startsWith('pixelSnapper')`
+  // catch-all in deserializeProject, not listed individually there
+  for (const key of [
+    'pixelSnapperMaxIterations', 'pixelSnapperPeakThreshold', 'pixelSnapperPeakDistanceFilter',
+    'pixelSnapperSearchWindowRatio', 'pixelSnapperMinSearchWindow', 'pixelSnapperStrengthThreshold',
+    'pixelSnapperMinCutsPerAxis', 'pixelSnapperFallbackSegments', 'pixelSnapperMaxStepRatio',
+  ]) {
+    assert.equal(p.settings[key], DEFAULT_SETTINGS[key], `${key} should fall back to its default`);
+  }
+});
+
+test('DEFAULT_SETTINGS: pixelSnapper advanced knobs mirror pixelSnapper.js\'s own DEFAULT_PIXEL_SNAPPER_CONFIG exactly', () => {
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperMaxIterations, 15);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperPeakThreshold, 0.2);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperPeakDistanceFilter, 4);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperSearchWindowRatio, 0.35);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperMinSearchWindow, 2.0);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperStrengthThreshold, 0.5);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperMinCutsPerAxis, 4);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperFallbackSegments, 64);
+  assert.equal(DEFAULT_SETTINGS.pixelSnapperMaxStepRatio, 1.8);
 });
 
 test('activePaletteColors: null when there is no active palette, or the active one has no colors yet', () => {
