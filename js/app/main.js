@@ -1,4 +1,4 @@
-import { state, on, emit, activeSheet, activeLayer, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty, maybeSnapPixels } from './state.js';
+import { state, on, emit, activeSheet, activeLayer, activeLayerScope, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty, maybeSnapPixels } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
 import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext, DEFAULT_SETTINGS } from '../core/model.js';
@@ -18,7 +18,9 @@ import { buildPalette, quantizeBitmap, colorFrequency } from '../core/quantize.j
 import { PLATFORMS, checkItemAgainstPlatform, NES_PALETTE, C64_PALETTE, GB_PALETTE, snapPaletteToHardware } from '../core/platforms.js';
 import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
-import { copyRegion } from '../core/pixels.js';
+import { copyRegion, cloneBitmap, blitRegion } from '../core/pixels.js';
+import { quantizeBitmapToPalette } from '../core/palettes.js';
+import { SYSTEM_PALETTES } from '../core/systempalettes.js';
 import { collectProjectExportEntries } from './projectExport.js';
 import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
@@ -32,7 +34,7 @@ import { mountAnimationsPanel } from '../ui/animpanel.js';
 import { buildBaseDurationControl } from '../ui/baseDurationControl.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
-import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../ui/floatsession.js';
+import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection, currentEditRegion } from '../ui/floatsession.js';
 import { defineAction, runAction, bindAction } from './actions.js';
 import { mountMenuBar } from '../ui/menubar.js';
 import { markDefaultAction } from '../ui/dialogs.js';
@@ -415,6 +417,102 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// ---- quantize to palette ----
+function bitmapsEqual(a, b) {
+  if (a.data.length !== b.data.length) return false;
+  for (let i = 0; i < a.data.length; i++) if (a.data[i] !== b.data[i]) return false;
+  return true;
+}
+
+function quantizeToPalette(colors, allLayers) {
+  commitFloatIfAny();
+  const sheet = activeSheet();
+  if (!sheet) return;
+  const rr = currentEditRegion();
+  if (!rr) return;
+  const { region } = rr;
+  const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+  const palette = { colors };
+  const patches = layers.map(l => {
+    const before = copyRegion(l.bitmap, region.x, region.y, region.w, region.h);
+    const after = cloneBitmap(before);
+    quantizeBitmapToPalette(after, palette);
+    return { layer: l, before, after };
+  }).filter(p => !bitmapsEqual(p.before, p.after));
+  if (!patches.length) return;
+  state.commands.push({
+    label: 'quantize to palette',
+    do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
+    undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
+  });
+  markDirty();
+}
+
+const dlgQuantize = document.getElementById('dlg-quantize');
+const qzPalette = document.getElementById('qz-palette');
+const qzAllLayers = document.getElementById('qz-alllayers');
+const qzOk = document.getElementById('qz-ok');
+const qzCancel = document.getElementById('qz-cancel');
+markDefaultAction(dlgQuantize, qzOk);
+
+function refreshQuantizePaletteOptions() {
+  qzPalette.innerHTML = '';
+  const projGroup = document.createElement('optgroup');
+  projGroup.label = 'Project Palettes';
+  for (const p of state.project?.palettes ?? []) {
+    if (!p.colors.length) continue;
+    const o = document.createElement('option');
+    o.value = `proj:${p.id}`;
+    o.textContent = p.indexed ? `${p.name} (${p.colors.length})` : p.name;
+    projGroup.appendChild(o);
+  }
+  if (projGroup.children.length) qzPalette.appendChild(projGroup);
+
+  const sysGroup = document.createElement('optgroup');
+  sysGroup.label = 'System Palettes';
+  for (const sys of SYSTEM_PALETTES) {
+    const o = document.createElement('option');
+    o.value = `sys:${sys.name}`;
+    o.textContent = `${sys.name} (${sys.colors.length})`;
+    sysGroup.appendChild(o);
+  }
+  qzPalette.appendChild(sysGroup);
+
+  const activeOpt = state.project?.activePaletteId ? `proj:${state.project.activePaletteId}` : null;
+  if (activeOpt && [...qzPalette.options].some(o => o.value === activeOpt)) qzPalette.value = activeOpt;
+  else if (qzPalette.options.length) qzPalette.selectedIndex = 0;
+}
+
+function resolveQuantizePalette(value) {
+  if (value.startsWith('proj:')) return state.project?.palettes.find(p => p.id === value.slice(5)) ?? null;
+  if (value.startsWith('sys:')) return SYSTEM_PALETTES.find(s => s.name === value.slice(4)) ?? null;
+  return null;
+}
+
+defineAction('edit.filters', {
+  label: 'Filters',
+  submenu: [
+    { action: 'edit.filters.quantizeToPalette' },
+  ],
+  isEnabled: () => !!activeSheet(),
+});
+defineAction('edit.filters.quantizeToPalette', {
+  label: 'Quantize to Palette…',
+  run: () => {
+    refreshQuantizePaletteOptions();
+    qzAllLayers.checked = false;
+    dlgQuantize.showModal();
+  },
+  isEnabled: () => !!activeLayer(),
+});
+qzCancel.addEventListener('click', () => dlgQuantize.close());
+qzOk.addEventListener('click', () => {
+  const pal = resolveQuantizePalette(qzPalette.value);
+  dlgQuantize.close();
+  if (!pal || !pal.colors.length) return;
+  quantizeToPalette(pal.colors, qzAllLayers.checked);
+});
+
 // ---- shortcuts: brush size [ / ], swap colors X (Ctrl/Alt-free, gated) ----
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -704,6 +802,7 @@ const MENUS = [
   { label: 'Edit', items: [
     { action: 'edit.undo' }, { action: 'edit.redo' }, { separator: true },
     { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' }, { separator: true },
+    { action: 'edit.filters' }, { separator: true },
     { action: 'edit.projectSettings' },
   ] },
   { label: 'View', items: [
