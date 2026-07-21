@@ -26,13 +26,42 @@ test('chromaKeyBitmap: fully transparent source pixels are skipped even at zero 
   assert.deepEqual([...out.data], [0, 0, 0, 0]);
 });
 
-test('chromaKeyBitmap transparent mode: mid-softness-band match gets partial alpha, RGB untouched', () => {
+test('chromaKeyBitmap transparent mode: mid-softness-band match gets partial alpha; RGB unaffected here since the pixel is already neutral grey', () => {
   // Grey-axis key (black) + grey-axis pixel cancels the sqrt(3) term out of the strength
   // ratio, so at tolerance=0/softness=100 strength reduces exactly to (255 - d) / 255,
   // which makes the resulting alpha come out to exactly d (128) with no rounding ambiguity.
+  // Spill-suppression desaturation (see the dedicated test below) is a no-op on an
+  // already-grey pixel -- its luma equals every channel already -- so RGB stays [128,128,128]
+  // here specifically, not because desaturation was skipped.
   const b = bmp(1, 1, [[128, 128, 128, 255]]);
   const out = chromaKeyBitmap(b, { keyColor: [0, 0, 0], tolerance: 0, softness: 100, mode: 'transparent', replacementColor: [255, 255, 255] });
   assert.deepEqual([...out.data], [128, 128, 128, 128]);
+});
+
+test('chromaKeyBitmap transparent mode: partial match on a colorful pixel desaturates it toward its own luminance (spill suppression)', () => {
+  // Key is colorful (not grey) here, and the pixel is key+50 in every channel -- same
+  // grey-axis-relative-to-key trick as above (dist = 50*sqrt(3), so tolerance=0/softness=100
+  // gives strength = (255sqrt3 - 50sqrt3) / 255sqrt3 = 205/255 = 41/51 exactly), but since the
+  // KEY isn't grey, the pixel itself, [50,150,250], isn't grey either -- so desaturation has a
+  // real, checkable effect this time. luma = 0.299*50 + 0.587*150 + 0.114*250 = 131.5.
+  // newR = round(50 + (131.5-50)*41/51) = round(115.5196) = 116
+  // newG = round(150 + (131.5-150)*41/51) = round(135.1275) = 135
+  // newB = round(250 + (131.5-250)*41/51) = round(154.7353) = 155
+  // newA = round(255 * (1 - 41/51)) = round(255 * 10/51) = 50 exactly (255/51 = 5)
+  const b = bmp(1, 1, [[50, 150, 250, 255]]);
+  const out = chromaKeyBitmap(b, { keyColor: [0, 100, 200], tolerance: 0, softness: 100, mode: 'transparent', replacementColor: [255, 255, 255] });
+  assert.deepEqual([...out.data], [116, 135, 155, 50]);
+});
+
+test('chromaKeyBitmap: percent-to-radius easing keeps a modest softness from sweeping in loosely-similar colors', () => {
+  // Radius is eased with a square curve (see percentToRadius in the source), not linear, so a
+  // grey pixel just 20 units off black on the grey axis (dist = 20*sqrt(3) ~= 34.6) falls
+  // outside even the full 0%-tolerance + 10%-softness band (edge = (10/100)^2 * 255sqrt(3) ~=
+  // 4.4) and is left completely untouched -- a linear mapping would have given this same
+  // 10% softness an edge of ~44, which WOULD have partially caught this pixel.
+  const b = bmp(1, 1, [[20, 20, 20, 255]]);
+  const out = chromaKeyBitmap(b, { keyColor: [0, 0, 0], tolerance: 0, softness: 10, mode: 'transparent', replacementColor: [255, 255, 255] });
+  assert.deepEqual([...out.data], [20, 20, 20, 255]);
 });
 
 test('chromaKeyBitmap replace mode: full-strength match lerps RGB fully to replacementColor, alpha untouched', () => {
