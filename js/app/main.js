@@ -1,4 +1,4 @@
-import { state, on, emit, activeSheet, activeLayer, activeLayerScope, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty, maybeSnapPixels } from './state.js';
+import { state, on, emit, activeSheet, activeLayer, activeLayerScope, currentContextLayers, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty, maybeSnapPixels } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
 import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext, DEFAULT_SETTINGS } from '../core/model.js';
@@ -20,6 +20,8 @@ import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../core/pixels.js';
 import { quantizeBitmapToPalette } from '../core/palettes.js';
+import { chromaKeyBitmap } from '../core/chromakey.js';
+import { rgbaToHex, hexToRgb } from '../ui/panels.js';
 import { SYSTEM_PALETTES } from '../core/systempalettes.js';
 import { collectProjectExportEntries } from './projectExport.js';
 import { CanvasView } from '../ui/canvasview.js';
@@ -29,7 +31,7 @@ import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } f
 import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
-import { mountPreviewPanel } from '../ui/previewpanel.js';
+import { mountPreviewPanel, previewWithOverride, refreshPreviewPanel } from '../ui/previewpanel.js';
 import { mountAnimationsPanel } from '../ui/animpanel.js';
 import { buildBaseDurationControl } from '../ui/baseDurationControl.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
@@ -417,6 +419,33 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// ---- shared filter-preview plumbing (chroma key + quantize) ----
+
+// Builds a layers array suitable for flattenSheetLayers/previewWithOverride:
+// every layer in currentContextLayers() passes through unchanged EXCEPT
+// layers with a patch, which get a shallow-cloned layer object wrapping a
+// bitmap clone with `after` blitted into `region` -- real layer data is
+// never touched by a preview.
+function buildPreviewLayers(region, patches) {
+  const byId = new Map(patches.map(p => [p.layer.id, p]));
+  return currentContextLayers().map(l => {
+    const p = byId.get(l.id);
+    if (!p) return l;
+    const bitmap = cloneBitmap(l.bitmap);
+    blitRegion(bitmap, p.after, region.x, region.y);
+    return { ...l, bitmap };
+  });
+}
+
+// result: { region, patches } as returned by computeQuantizePatches/
+// computeChromaKeyPatches, or null. Pushes a live preview of the
+// not-yet-committed edit into the Preview panel, or drops back to the
+// real state when there's nothing to preview (e.g. no layer selected).
+function pushLivePreview(result) {
+  if (!result || !result.patches.length) { refreshPreviewPanel(); return; }
+  previewWithOverride(buildPreviewLayers(result.region, result.patches));
+}
+
 // ---- quantize to palette ----
 function bitmapsEqual(a, b) {
   if (a.data.length !== b.data.length) return false;
@@ -424,21 +453,24 @@ function bitmapsEqual(a, b) {
   return true;
 }
 
-function quantizeToPalette(mode, param, allLayers, preferOpaque = false) {
-  commitFloatIfAny();
+// Pure compute half: resolves the target region/layers and returns
+// { region, patches } with no-op layers filtered out -- shared by the real
+// commit (quantizeToPalette) and the dialog's live preview. Returns null
+// when there's no sheet/region/layer/color to operate on.
+function computeQuantizePatches(mode, param, allLayers, preferOpaque = false) {
   const sheet = activeSheet();
-  if (!sheet) return;
+  if (!sheet) return null;
   const rr = currentEditRegion();
-  if (!rr) return;
+  if (!rr) return null;
   const { region } = rr;
   const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
-  if (!layers.length) return;
+  if (!layers.length) return null;
   const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
   const quantizeSource = (mode === 'count' && preferOpaque) ? resolveAlphaForQuantize(befores, param) : befores;
   const colors = mode === 'count'
     ? medianCutPalette(quantizeSource, param).map(c => [c[0], c[1], c[2], 255])
     : param;
-  if (!colors.length) return;
+  if (!colors.length) return null;
   const palette = { colors };
   const patches = layers.map((l, i) => {
     const before = befores[i];
@@ -446,7 +478,14 @@ function quantizeToPalette(mode, param, allLayers, preferOpaque = false) {
     quantizeBitmapToPalette(after, palette);
     return { layer: l, before, after };
   }).filter(p => !bitmapsEqual(p.before, p.after));
-  if (!patches.length) return;
+  return { region, patches };
+}
+
+function quantizeToPalette(mode, param, allLayers, preferOpaque = false) {
+  commitFloatIfAny();
+  const result = computeQuantizePatches(mode, param, allLayers, preferOpaque);
+  if (!result || !result.patches.length) return;
+  const { region, patches } = result;
   state.commands.push({
     label: 'quantize to palette',
     do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
@@ -475,8 +514,23 @@ function updateQuantizeModeUI() {
   qzCountRow.hidden = !isCount;
   qzPreferOpaqueRow.hidden = !isCount;
 }
-qzModePalette.addEventListener('change', updateQuantizeModeUI);
-qzModeCount.addEventListener('change', updateQuantizeModeUI);
+function previewQuantize() {
+  let result;
+  if (qzModeCount.checked) {
+    const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
+    result = computeQuantizePatches('count', n, qzAllLayers.checked, qzPreferOpaque.checked);
+  } else {
+    const pal = resolveQuantizePalette(qzPalette.value);
+    result = pal && pal.colors.length ? computeQuantizePatches('palette', pal.colors, qzAllLayers.checked) : null;
+  }
+  pushLivePreview(result);
+}
+qzModePalette.addEventListener('change', () => { updateQuantizeModeUI(); previewQuantize(); });
+qzModeCount.addEventListener('change', () => { updateQuantizeModeUI(); previewQuantize(); });
+qzPalette.addEventListener('change', previewQuantize);
+qzCount.addEventListener('input', previewQuantize);
+qzPreferOpaque.addEventListener('change', previewQuantize);
+qzAllLayers.addEventListener('change', previewQuantize);
 
 function refreshQuantizePaletteOptions() {
   qzPalette.innerHTML = '';
@@ -516,6 +570,7 @@ defineAction('edit.filters', {
   label: 'Filters',
   submenu: [
     { action: 'edit.filters.quantizeToPalette' },
+    { action: 'edit.filters.chromaKey' },
   ],
   isEnabled: () => !!activeSheet(),
 });
@@ -527,12 +582,14 @@ defineAction('edit.filters.quantizeToPalette', {
     updateQuantizeModeUI();
     qzAllLayers.checked = false;
     qzPreferOpaque.checked = false;
+    previewQuantize();
     dlgQuantize.showModal();
   },
   isEnabled: () => !!activeLayer(),
 });
-qzCancel.addEventListener('click', () => dlgQuantize.close());
+qzCancel.addEventListener('click', () => { refreshPreviewPanel(); dlgQuantize.close(); });
 qzOk.addEventListener('click', () => {
+  refreshPreviewPanel();
   if (qzModeCount.checked) {
     const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
     dlgQuantize.close();
@@ -543,6 +600,138 @@ qzOk.addEventListener('click', () => {
     if (!pal || !pal.colors.length) return;
     quantizeToPalette('palette', pal.colors, qzAllLayers.checked);
   }
+});
+
+// ---- chroma key ----
+
+// Pure compute half, mirroring computeQuantizePatches -- shared by the
+// real commit (commitChromaKey) and the dialog's live preview.
+function computeChromaKeyPatches(params, allLayers) {
+  const sheet = activeSheet();
+  if (!sheet) return null;
+  const rr = currentEditRegion();
+  if (!rr) return null;
+  const { region } = rr;
+  const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+  if (!layers.length) return null;
+  const patches = layers.map(l => {
+    const before = copyRegion(l.bitmap, region.x, region.y, region.w, region.h);
+    const after = chromaKeyBitmap(before, params);
+    return { layer: l, before, after };
+  }).filter(p => !bitmapsEqual(p.before, p.after));
+  return { region, patches };
+}
+
+function commitChromaKey(params, allLayers) {
+  commitFloatIfAny();
+  const result = computeChromaKeyPatches(params, allLayers);
+  if (!result || !result.patches.length) return;
+  const { region, patches } = result;
+  state.commands.push({
+    label: 'chroma key',
+    do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
+    undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
+  });
+  markDirty();
+}
+
+const dlgChromaKey = document.getElementById('dlg-chromakey');
+const ckColor = document.getElementById('ck-color');
+const ckColorHex = document.getElementById('ck-color-hex');
+const ckColorPrimary = document.getElementById('ck-color-primary');
+const ckColorSecondary = document.getElementById('ck-color-secondary');
+const ckModeTransparent = document.getElementById('ck-mode-transparent');
+const ckModeReplace = document.getElementById('ck-mode-replace');
+const ckReplaceRow = document.getElementById('ck-replace-row');
+const ckReplaceColor = document.getElementById('ck-replace-color');
+const ckReplaceHex = document.getElementById('ck-replace-hex');
+const ckReplacePrimary = document.getElementById('ck-replace-primary');
+const ckReplaceSecondary = document.getElementById('ck-replace-secondary');
+const ckTolerance = document.getElementById('ck-tolerance');
+const ckToleranceVal = document.getElementById('ck-tolerance-val');
+const ckSoftness = document.getElementById('ck-softness');
+const ckSoftnessVal = document.getElementById('ck-softness-val');
+const ckAllLayers = document.getElementById('ck-alllayers');
+const ckOk = document.getElementById('ck-ok');
+const ckCancel = document.getElementById('ck-cancel');
+markDefaultAction(dlgChromaKey, ckOk);
+
+function setColorInputs(colorEl, hexEl, rgb) {
+  hexEl.value = rgbaToHex(rgb);
+  colorEl.value = hexEl.value;
+}
+
+// Reads from the native color inputs (ckColor/ckReplaceColor), not the
+// free-text hex fields -- a <input type="color"> value is ALWAYS a valid
+// lowercase 6-digit hex per spec, whereas the hex text field can be
+// mid-edit and invalid (e.g. OK clicked while it reads "#ff"), which would
+// otherwise feed garbage into hexToRgb.
+function currentChromaKeyParams() {
+  return {
+    keyColor: hexToRgb(ckColor.value),
+    tolerance: Number(ckTolerance.value),
+    softness: Number(ckSoftness.value),
+    mode: ckModeReplace.checked ? 'replace' : 'transparent',
+    replacementColor: hexToRgb(ckReplaceColor.value),
+  };
+}
+
+function previewChromaKey() {
+  pushLivePreview(computeChromaKeyPatches(currentChromaKeyParams(), ckAllLayers.checked));
+}
+
+ckColor.addEventListener('input', () => { ckColorHex.value = ckColor.value; previewChromaKey(); });
+ckColorHex.addEventListener('input', () => {
+  if (!/^#[0-9a-fA-F]{6}$/.test(ckColorHex.value)) return;
+  // <input type="color">.value must be lowercase per the HTML "simple color"
+  // spec -- assigning mixed-/upper-case hex silently resets it to black in
+  // strict implementations, so normalize before assigning.
+  ckColor.value = ckColorHex.value.toLowerCase();
+  previewChromaKey();
+});
+ckColorPrimary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.primary); previewChromaKey(); });
+ckColorSecondary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.secondary); previewChromaKey(); });
+
+ckReplaceColor.addEventListener('input', () => { ckReplaceHex.value = ckReplaceColor.value; previewChromaKey(); });
+ckReplaceHex.addEventListener('input', () => {
+  if (!/^#[0-9a-fA-F]{6}$/.test(ckReplaceHex.value)) return;
+  ckReplaceColor.value = ckReplaceHex.value.toLowerCase();
+  previewChromaKey();
+});
+ckReplacePrimary.addEventListener('click', () => { setColorInputs(ckReplaceColor, ckReplaceHex, state.primary); previewChromaKey(); });
+ckReplaceSecondary.addEventListener('click', () => { setColorInputs(ckReplaceColor, ckReplaceHex, state.secondary); previewChromaKey(); });
+
+function updateChromaKeyModeUI() {
+  ckReplaceRow.hidden = !ckModeReplace.checked;
+}
+ckModeTransparent.addEventListener('change', () => { updateChromaKeyModeUI(); previewChromaKey(); });
+ckModeReplace.addEventListener('change', () => { updateChromaKeyModeUI(); previewChromaKey(); });
+
+ckTolerance.addEventListener('input', () => { ckToleranceVal.textContent = ckTolerance.value; previewChromaKey(); });
+ckSoftness.addEventListener('input', () => { ckSoftnessVal.textContent = ckSoftness.value; previewChromaKey(); });
+ckAllLayers.addEventListener('change', previewChromaKey);
+
+defineAction('edit.filters.chromaKey', {
+  label: 'Chroma Key…',
+  run: () => {
+    setColorInputs(ckColor, ckColorHex, state.primary);
+    ckModeTransparent.checked = true;
+    updateChromaKeyModeUI();
+    setColorInputs(ckReplaceColor, ckReplaceHex, state.secondary);
+    ckTolerance.value = '15'; ckToleranceVal.textContent = '15';
+    ckSoftness.value = '10'; ckSoftnessVal.textContent = '10';
+    ckAllLayers.checked = false;
+    previewChromaKey();
+    dlgChromaKey.showModal();
+  },
+  isEnabled: () => !!activeLayer(),
+});
+ckCancel.addEventListener('click', () => { refreshPreviewPanel(); dlgChromaKey.close(); });
+ckOk.addEventListener('click', () => {
+  refreshPreviewPanel();
+  const params = currentChromaKeyParams();
+  dlgChromaKey.close();
+  commitChromaKey(params, ckAllLayers.checked);
 });
 
 // ---- shortcuts: brush size [ / ], swap colors X (Ctrl/Alt-free, gated) ----

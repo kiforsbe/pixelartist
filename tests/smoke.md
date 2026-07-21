@@ -618,6 +618,22 @@ is a pass condition for the whole run, not just the final step.
      taller panel, bigger/sharper thumbnails. Reload the page: the chosen
      height persists (stored in `localStorage`, not the project file).
 
+## 19. Chroma key + live preview
+
+102. [A] Edit > Filters > Quantize to Palette…: opening the dialog
+     immediately shows a live preview of the current settings in the
+     Preview panel (right sidebar); changing palette/count/prefer-opaque/
+     all-layers updates the preview in real time; Cancel reverts the panel
+     to the real (unchanged) content; OK commits and the panel matches the
+     committed result.
+103. [A] Edit > Filters > Chroma Key…: opens pre-filled with the primary
+     color as Key color; toggling "Replace with color" reveals the
+     Replace-with color row; dragging Tolerance/Softness and editing the
+     color/hex fields all update the Preview panel live; "← Primary"/
+     "← Secondary" buttons re-seed the corresponding color field; OK
+     commits one undo step (Ctrl+Z restores the pre-key pixels), Cancel
+     discards the preview and leaves pixels untouched.
+
 ## Pass criteria
 
 - All **[A]** items complete with no unexpected state and zero console
