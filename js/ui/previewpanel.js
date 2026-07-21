@@ -85,10 +85,15 @@ export function setPreviewBitmap(bmp) {
   draw();
 }
 
-function render() {
+// overrideLayers: when given, flattened instead of currentContextLayers() --
+// lets a filter dialog preview a hypothetical edit without touching real
+// layer data. Only the layer CONTENT being previewed is swappable; which
+// frame/tile is shown is still resolved from real state either way.
+function render(overrideLayers = null) {
   if (!canvas) return;
   const sheet = activeSheet();
   if (!sheet) { setPreviewBitmap(null); return; }
+  const layers = overrideLayers ?? currentContextLayers();
 
   if (state.mode === 'sprites') {
     // An animation is selected: timeline.js owns the canvas (playhead frame,
@@ -97,16 +102,27 @@ function render() {
     const frameId = state.editingFrameId ?? state.selectedFrameId;
     const frame = sheet.frames.find(f => f.id === frameId);
     if (!frame) { setPreviewBitmap(null); return; }
-    const flat = flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id);
+    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
     setPreviewBitmap(copyRegion(flat, frame.x, frame.y, frame.w, frame.h));
   } else {
     const tileId = state.editingTileId ?? state.selectedTileId;
     const tile = sheet.tiles.find(t => t.id === tileId);
     if (!tile) { setPreviewBitmap(null); return; }
-    const flat = flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id);
+    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
     setPreviewBitmap(copyRegion(flat, tile.x, tile.y, tile.w, tile.h));
   }
 }
+
+// Runs the normal frame/tile-rect selection + flatten + copyRegion +
+// setPreviewBitmap pipeline against a caller-supplied layers array instead
+// of the real ones -- the hook filter dialogs use to preview an edit that
+// hasn't been committed yet.
+export function previewWithOverride(overrideLayers) { render(overrideLayers); }
+
+// Re-renders from real project state -- what a filter dialog calls on
+// close (OK or Cancel) to drop any speculative preview and resume normal
+// context-driven display.
+export function refreshPreviewPanel() { render(); }
 
 function setManualZoom(z) {
   zoomMode = 'manual';
