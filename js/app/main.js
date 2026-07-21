@@ -439,11 +439,14 @@ function buildPreviewLayers(region, patches) {
 
 // result: { region, patches } as returned by computeQuantizePatches/
 // computeChromaKeyPatches, or null. Pushes a live preview of the
-// not-yet-committed edit into the Preview panel, or drops back to the
-// real state when there's nothing to preview (e.g. no layer selected).
+// not-yet-committed edit into BOTH the Preview panel and the main canvas,
+// or drops back to real state in both when there's nothing to preview
+// (e.g. no layer selected).
 function pushLivePreview(result) {
-  if (!result || !result.patches.length) { refreshPreviewPanel(); return; }
-  previewWithOverride(buildPreviewLayers(result.region, result.patches));
+  if (!result || !result.patches.length) { refreshPreviewPanel(); clearCanvasPreview(); return; }
+  const layers = buildPreviewLayers(result.region, result.patches);
+  previewWithOverride(layers);
+  pushCanvasPreview(layers);
 }
 
 // ---- quantize to palette ----
@@ -594,11 +597,12 @@ defineAction('edit.filters.quantizeToPalette', {
   },
   isEnabled: () => !!activeLayer(),
 });
-function cancelQuantizeDialog() { refreshPreviewPanel(); dlgQuantize.close(); }
+function cancelQuantizeDialog() { refreshPreviewPanel(); clearCanvasPreview(); dlgQuantize.close(); }
 qzCancel.addEventListener('click', cancelQuantizeDialog);
 closeOnEscape(dlgQuantize, cancelQuantizeDialog);
 qzOk.addEventListener('click', () => {
   refreshPreviewPanel();
+  clearCanvasPreview();
   if (qzModeCount.checked) {
     const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
     dlgQuantize.close();
@@ -738,11 +742,12 @@ defineAction('edit.filters.chromaKey', {
   },
   isEnabled: () => !!activeLayer(),
 });
-function cancelChromaKeyDialog() { refreshPreviewPanel(); dlgChromaKey.close(); }
+function cancelChromaKeyDialog() { refreshPreviewPanel(); clearCanvasPreview(); dlgChromaKey.close(); }
 ckCancel.addEventListener('click', cancelChromaKeyDialog);
 closeOnEscape(dlgChromaKey, cancelChromaKeyDialog);
 ckOk.addEventListener('click', () => {
   refreshPreviewPanel();
+  clearCanvasPreview();
   const params = currentChromaKeyParams();
   dlgChromaKey.close();
   commitChromaKey(params, ckAllLayers.checked);
@@ -828,11 +833,27 @@ let scratchCanvas = null;
 let scratchDirty = true;
 let scratchSheet = null; // sheet identity — mode switches swap sheets of equal size
 function invalidateScratch() { scratchDirty = true; }
+// Set while a filter dialog's live preview is active: an overrideLayers
+// array (see model.js's flattenSheet) substituted into the main canvas's
+// own flatten pass, same mechanism previewpanel.js uses for the side
+// Preview panel -- real layer data is never touched by a preview.
+let canvasPreviewLayers = null;
+function pushCanvasPreview(layers) {
+  canvasPreviewLayers = layers;
+  invalidateScratch();
+  canvasView.requestRender();
+}
+function clearCanvasPreview() {
+  if (!canvasPreviewLayers) return;
+  canvasPreviewLayers = null;
+  invalidateScratch();
+  canvasView.requestRender();
+}
 function getScratchCanvas() {
   const sheet = activeSheet();
   if (!sheet) return null;
   if (scratchDirty || scratchSheet !== sheet || !scratchCanvas || scratchCanvas.width !== sheet.width || scratchCanvas.height !== sheet.height) {
-    const bitmap = flattenSheet(sheet, state.floating);
+    const bitmap = flattenSheet(sheet, state.floating, canvasPreviewLayers);
     if (!scratchCanvas || scratchCanvas.width !== bitmap.width || scratchCanvas.height !== bitmap.height) {
       scratchCanvas = (typeof OffscreenCanvas !== 'undefined')
         ? new OffscreenCanvas(bitmap.width, bitmap.height)

@@ -339,7 +339,20 @@ export function flattenSheetLayers(layers, width, height, floating = null, sheet
   return out;
 }
 
-export function flattenSheet(sheet, floating = null) {
+// overrideLayers: optional array of layer-shaped objects ({id, bitmap, ...}).
+// Any real layer whose id matches one here is swapped for the override
+// version for this flatten pass only -- lets a filter dialog preview a
+// hypothetical edit on the real canvas/sheet without touching real layer
+// data (same by-id substitution previewpanel.js's own override mechanism
+// uses for the side Preview panel; js/app/main.js's buildPreviewLayers
+// builds the array either one consumes).
+function withOverrides(layers, overrideLayers) {
+  if (!overrideLayers) return layers;
+  const byId = new Map(overrideLayers.map(l => [l.id, l]));
+  return layers.map(l => byId.get(l.id) ?? l);
+}
+
+export function flattenSheet(sheet, floating = null, overrideLayers = null) {
   const acceptedStrips = (sheet.animations ?? [])
     .filter(a => a.strip && a.layerGroupId)
     .map(a => ({ anim: a, group: findGroup(sheet.layerTree, a.layerGroupId) }))
@@ -349,7 +362,7 @@ export function flattenSheet(sheet, floating = null) {
   for (const { group } of acceptedStrips) for (const l of flattenLayers(group)) stripLayerIds.add(l.id);
 
   // Everything except an accepted strip's own layers composites normally.
-  const baseLayers = sheetLayers(sheet).filter(l => !stripLayerIds.has(l.id));
+  const baseLayers = withOverrides(sheetLayers(sheet).filter(l => !stripLayerIds.has(l.id)), overrideLayers);
   const out = flattenSheetLayers(baseLayers, sheet.width, sheet.height, floating, sheet.id);
 
   // Each accepted strip then exclusively (hard-replace, not alpha-blend)
@@ -357,7 +370,7 @@ export function flattenSheet(sheet, floating = null) {
   // genuinely transparent (not a peek-through) wherever the strip itself
   // has none of its own content.
   for (const { anim, group } of acceptedStrips) {
-    const stripComposite = flattenSheetLayers(flattenLayers(group), sheet.width, sheet.height, floating, sheet.id);
+    const stripComposite = flattenSheetLayers(withOverrides(flattenLayers(group), overrideLayers), sheet.width, sheet.height, floating, sheet.id);
     for (const entry of anim.frames) {
       const frame = sheet.frames.find(f => f.id === entry.frameId);
       if (!frame) continue;
