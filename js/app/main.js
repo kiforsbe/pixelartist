@@ -20,7 +20,7 @@ import { encodePng } from './pngcodec.js';
 import { zipWrite } from '../core/zip.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../core/pixels.js';
 import { quantizeBitmapToPalette } from '../core/palettes.js';
-import { chromaKeyBitmap } from '../core/chromakey.js';
+import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../core/chromakey.js';
 import { rgbaToHex, hexToRgb } from '../ui/panels.js';
 import { SYSTEM_PALETTES } from '../core/systempalettes.js';
 import { collectProjectExportEntries } from './projectExport.js';
@@ -618,7 +618,11 @@ qzOk.addEventListener('click', () => {
 // ---- chroma key ----
 
 // Pure compute half, mirroring computeQuantizePatches -- shared by the
-// real commit (commitChromaKey) and the dialog's live preview.
+// real commit (commitChromaKey), the dialog's live preview, AND its
+// distance histograms (via `befores`, the per-layer region content BEFORE
+// any patch is applied -- kept even for layers whose patch got filtered
+// out below, since a histogram wants the whole region's actual color
+// distribution regardless of which layers the current settings affect).
 function computeChromaKeyPatches(params, allLayers) {
   const sheet = activeSheet();
   if (!sheet) return null;
@@ -627,12 +631,10 @@ function computeChromaKeyPatches(params, allLayers) {
   const { region } = rr;
   const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
   if (!layers.length) return null;
-  const patches = layers.map(l => {
-    const before = copyRegion(l.bitmap, region.x, region.y, region.w, region.h);
-    const after = chromaKeyBitmap(before, params);
-    return { layer: l, before, after };
-  }).filter(p => !bitmapsEqual(p.before, p.after));
-  return { region, patches };
+  const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
+  const patches = layers.map((l, i) => ({ layer: l, before: befores[i], after: chromaKeyBitmap(befores[i], params) }))
+    .filter(p => !bitmapsEqual(p.before, p.after));
+  return { region, patches, befores };
 }
 
 function commitChromaKey(params, allLayers) {
@@ -664,6 +666,18 @@ const ckTolerance = document.getElementById('ck-tolerance');
 const ckToleranceVal = document.getElementById('ck-tolerance-val');
 const ckSoftness = document.getElementById('ck-softness');
 const ckSoftnessVal = document.getElementById('ck-softness-val');
+const ckKeyHistogramCanvas = document.getElementById('ck-key-histogram');
+const ckProtectEnabled = document.getElementById('ck-protect-enabled');
+const ckProtectRow = document.getElementById('ck-protect-row');
+const ckProtectColor = document.getElementById('ck-protect-color');
+const ckProtectHex = document.getElementById('ck-protect-hex');
+const ckProtectPrimary = document.getElementById('ck-protect-primary');
+const ckProtectSecondary = document.getElementById('ck-protect-secondary');
+const ckProtectTolerance = document.getElementById('ck-protect-tolerance');
+const ckProtectToleranceVal = document.getElementById('ck-protect-tolerance-val');
+const ckProtectSoftness = document.getElementById('ck-protect-softness');
+const ckProtectSoftnessVal = document.getElementById('ck-protect-softness-val');
+const ckProtectHistogramCanvas = document.getElementById('ck-protect-histogram');
 const ckAllLayers = document.getElementById('ck-alllayers');
 const ckOk = document.getElementById('ck-ok');
 const ckCancel = document.getElementById('ck-cancel');
@@ -687,6 +701,9 @@ function currentChromaKeyParams() {
     softness: Number(ckSoftness.value),
     mode: ckModeReplace.checked ? 'replace' : 'transparent',
     replacementColor: hexToRgb(ckReplaceColor.value),
+    protectColor: ckProtectEnabled.checked ? hexToRgb(ckProtectColor.value) : null,
+    protectTolerance: Number(ckProtectTolerance.value),
+    protectSoftness: Number(ckProtectSoftness.value),
   };
 }
 
@@ -694,7 +711,82 @@ function previewChromaKey() {
   pushLivePreview(computeChromaKeyPatches(currentChromaKeyParams(), ckAllLayers.checked));
 }
 
-ckColor.addEventListener('input', () => { ckColorHex.value = ckColor.value; previewChromaKey(); });
+// Cached per-layer "before" bitmaps for the region/scope the histograms
+// are currently showing, plus their bucketed distance data -- recomputed
+// only when the underlying pixel SAMPLE or reference color could have
+// changed (color pickers, All layers, opening the dialog), not on every
+// tolerance/softness tick: re-walking the whole region on every slider
+// tick would be wasted work the bucket counts don't actually depend on.
+let ckHistogramBefores = [];
+let ckKeyHistogramData = null;
+let ckProtectHistogramData = null;
+
+const CK_HISTOGRAM_TINT_REMOVE = { band: 'rgba(255,90,90,.22)', bar: 'rgba(225,227,235,.85)' };
+const CK_HISTOGRAM_TINT_PROTECT = { band: 'rgba(90,200,140,.25)', bar: 'rgba(225,227,235,.85)' };
+
+// Draws one distance histogram: a solid shaded band from 0..matchDist,
+// fading out from matchDist..edge (the same hard-cutoff/feather split
+// matchStrength itself uses internally), with the region's actual pixel-
+// count-by-distance distribution as bars on top. Bar heights are log-
+// scaled since a background color's own bucket is typically orders of
+// magnitude taller than everything else, which would otherwise flatten
+// every other bucket down to invisible.
+function drawChromaKeyHistogram(canvas, histogram, matchDist, edge, tint) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  if (!histogram) return;
+  const { counts, maxDistance } = histogram;
+  const matchX = Math.min(w, (matchDist / maxDistance) * w);
+  const edgeX = Math.min(w, (edge / maxDistance) * w);
+  ctx.fillStyle = tint.band;
+  ctx.fillRect(0, 0, matchX, h);
+  if (edgeX > matchX) {
+    const grad = ctx.createLinearGradient(matchX, 0, edgeX, 0);
+    grad.addColorStop(0, tint.band);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(matchX, 0, edgeX - matchX, h);
+  }
+  const maxCount = Math.max(1, ...counts);
+  const barW = w / counts.length;
+  ctx.fillStyle = tint.bar;
+  for (let i = 0; i < counts.length; i++) {
+    if (!counts[i]) continue;
+    const barH = Math.round((Math.log(counts[i] + 1) / Math.log(maxCount + 1)) * (h - 2));
+    ctx.fillRect(i * barW, h - barH, Math.max(1, barW - 1), barH);
+  }
+}
+
+// Redraws both histogram canvases from the CACHED bucket data -- cheap,
+// since tolerance/softness only move the overlay band, not the
+// underlying distribution. Wired to every tolerance/softness input.
+function drawChromaKeyHistograms() {
+  const params = currentChromaKeyParams();
+  drawChromaKeyHistogram(ckKeyHistogramCanvas, ckKeyHistogramData,
+    percentToRadius(params.tolerance), percentToRadius(params.tolerance) + percentToRadius(params.softness), CK_HISTOGRAM_TINT_REMOVE);
+  if (ckProtectEnabled.checked) {
+    drawChromaKeyHistogram(ckProtectHistogramCanvas, ckProtectHistogramData,
+      percentToRadius(params.protectTolerance), percentToRadius(params.protectTolerance) + percentToRadius(params.protectSoftness), CK_HISTOGRAM_TINT_PROTECT);
+  }
+}
+
+// Re-walks the current region (via computeChromaKeyPatches's `befores`)
+// to rebuild both histograms' bucket data, then redraws. Wired to
+// whatever can change WHICH pixels are being sampled or WHICH color
+// they're measured against: color pickers, All layers, opening the
+// dialog -- not tolerance/softness, see drawChromaKeyHistograms.
+function refreshChromaKeyHistograms() {
+  const params = currentChromaKeyParams();
+  const result = computeChromaKeyPatches(params, ckAllLayers.checked);
+  ckHistogramBefores = result?.befores ?? [];
+  ckKeyHistogramData = ckHistogramBefores.length ? distanceHistogram(ckHistogramBefores, params.keyColor) : null;
+  ckProtectHistogramData = (ckProtectEnabled.checked && ckHistogramBefores.length)
+    ? distanceHistogram(ckHistogramBefores, params.protectColor) : null;
+  drawChromaKeyHistograms();
+}
+
+ckColor.addEventListener('input', () => { ckColorHex.value = ckColor.value; previewChromaKey(); refreshChromaKeyHistograms(); });
 ckColorHex.addEventListener('input', () => {
   if (!/^#[0-9a-fA-F]{6}$/.test(ckColorHex.value)) return;
   // <input type="color">.value must be lowercase per the HTML "simple color"
@@ -702,9 +794,10 @@ ckColorHex.addEventListener('input', () => {
   // strict implementations, so normalize before assigning.
   ckColor.value = ckColorHex.value.toLowerCase();
   previewChromaKey();
+  refreshChromaKeyHistograms();
 });
-ckColorPrimary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.primary); previewChromaKey(); });
-ckColorSecondary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.secondary); previewChromaKey(); });
+ckColorPrimary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.primary); previewChromaKey(); refreshChromaKeyHistograms(); });
+ckColorSecondary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.secondary); previewChromaKey(); refreshChromaKeyHistograms(); });
 
 ckReplaceColor.addEventListener('input', () => { ckReplaceHex.value = ckReplaceColor.value; previewChromaKey(); });
 ckReplaceHex.addEventListener('input', () => {
@@ -721,9 +814,26 @@ function updateChromaKeyModeUI() {
 ckModeTransparent.addEventListener('change', () => { updateChromaKeyModeUI(); previewChromaKey(); });
 ckModeReplace.addEventListener('change', () => { updateChromaKeyModeUI(); previewChromaKey(); });
 
-ckTolerance.addEventListener('input', () => { ckToleranceVal.textContent = ckTolerance.value; previewChromaKey(); });
-ckSoftness.addEventListener('input', () => { ckSoftnessVal.textContent = ckSoftness.value; previewChromaKey(); });
-ckAllLayers.addEventListener('change', previewChromaKey);
+ckTolerance.addEventListener('input', () => { ckToleranceVal.textContent = ckTolerance.value; previewChromaKey(); drawChromaKeyHistograms(); });
+ckSoftness.addEventListener('input', () => { ckSoftnessVal.textContent = ckSoftness.value; previewChromaKey(); drawChromaKeyHistograms(); });
+
+function updateChromaKeyProtectUI() {
+  ckProtectRow.hidden = !ckProtectEnabled.checked;
+}
+ckProtectEnabled.addEventListener('change', () => { updateChromaKeyProtectUI(); previewChromaKey(); refreshChromaKeyHistograms(); });
+ckProtectColor.addEventListener('input', () => { ckProtectHex.value = ckProtectColor.value; previewChromaKey(); refreshChromaKeyHistograms(); });
+ckProtectHex.addEventListener('input', () => {
+  if (!/^#[0-9a-fA-F]{6}$/.test(ckProtectHex.value)) return;
+  ckProtectColor.value = ckProtectHex.value.toLowerCase();
+  previewChromaKey();
+  refreshChromaKeyHistograms();
+});
+ckProtectPrimary.addEventListener('click', () => { setColorInputs(ckProtectColor, ckProtectHex, state.primary); previewChromaKey(); refreshChromaKeyHistograms(); });
+ckProtectSecondary.addEventListener('click', () => { setColorInputs(ckProtectColor, ckProtectHex, state.secondary); previewChromaKey(); refreshChromaKeyHistograms(); });
+ckProtectTolerance.addEventListener('input', () => { ckProtectToleranceVal.textContent = ckProtectTolerance.value; previewChromaKey(); drawChromaKeyHistograms(); });
+ckProtectSoftness.addEventListener('input', () => { ckProtectSoftnessVal.textContent = ckProtectSoftness.value; previewChromaKey(); drawChromaKeyHistograms(); });
+
+ckAllLayers.addEventListener('change', () => { previewChromaKey(); refreshChromaKeyHistograms(); });
 
 defineAction('edit.filters.chromaKey', {
   label: 'Chroma Key…',
@@ -734,9 +844,15 @@ defineAction('edit.filters.chromaKey', {
     setColorInputs(ckReplaceColor, ckReplaceHex, state.secondary);
     ckTolerance.value = '15'; ckToleranceVal.textContent = '15';
     ckSoftness.value = '10'; ckSoftnessVal.textContent = '10';
+    ckProtectEnabled.checked = false;
+    updateChromaKeyProtectUI();
+    setColorInputs(ckProtectColor, ckProtectHex, [0, 0, 0]);
+    ckProtectTolerance.value = '15'; ckProtectToleranceVal.textContent = '15';
+    ckProtectSoftness.value = '20'; ckProtectSoftnessVal.textContent = '20';
     ckAllLayers.checked = false;
     if (dlgQuantize.open) dlgQuantize.close();
     previewChromaKey();
+    refreshChromaKeyHistograms();
     dlgChromaKey.show();
     if (!dlgChromaKey.style.left) centerDialog(dlgChromaKey);
   },

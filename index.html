@@ -214,27 +214,41 @@
   <div class="row"><label><input type="checkbox" id="qz-alllayers"> All layers</label></div>
   <div class="row dlg-actions"><button id="qz-ok" class="btn-sm">OK</button><button id="qz-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
-<dialog id="dlg-chromakey" class="dlg-movable">
+<dialog id="dlg-chromakey" class="dlg-movable dlg-scrolls">
   <h3>Chroma Key</h3>
-  <div class="row"><label class="ck-color-field">Key color <input type="color" id="ck-color"> <input type="text" id="ck-color-hex" size="7"></label></div>
-  <div class="row ck-color-actions">
-    <button type="button" id="ck-color-primary" class="btn-sm">← Primary</button>
-    <button type="button" id="ck-color-secondary" class="btn-sm">← Secondary</button>
-  </div>
-  <div class="row">
-    <label><input type="radio" name="ck-mode" id="ck-mode-transparent" checked> Make transparent</label>
-    <label><input type="radio" name="ck-mode" id="ck-mode-replace"> Replace with color</label>
-  </div>
-  <div id="ck-replace-row" hidden>
-    <div class="row"><label class="ck-color-field">Replace with <input type="color" id="ck-replace-color"> <input type="text" id="ck-replace-hex" size="7"></label></div>
+  <div class="dlg-body">
+    <div class="row"><label class="ck-color-field">Key color <input type="color" id="ck-color"> <input type="text" id="ck-color-hex" size="7"></label></div>
     <div class="row ck-color-actions">
-      <button type="button" id="ck-replace-primary" class="btn-sm">← Primary</button>
-      <button type="button" id="ck-replace-secondary" class="btn-sm">← Secondary</button>
+      <button type="button" id="ck-color-primary" class="btn-sm">← Primary</button>
+      <button type="button" id="ck-color-secondary" class="btn-sm">← Secondary</button>
     </div>
+    <div class="row">
+      <label><input type="radio" name="ck-mode" id="ck-mode-transparent" checked> Make transparent</label>
+      <label><input type="radio" name="ck-mode" id="ck-mode-replace"> Replace with color</label>
+    </div>
+    <div id="ck-replace-row" hidden>
+      <div class="row"><label class="ck-color-field">Replace with <input type="color" id="ck-replace-color"> <input type="text" id="ck-replace-hex" size="7"></label></div>
+      <div class="row ck-color-actions">
+        <button type="button" id="ck-replace-primary" class="btn-sm">← Primary</button>
+        <button type="button" id="ck-replace-secondary" class="btn-sm">← Secondary</button>
+      </div>
+    </div>
+    <div class="row"><label>Tolerance <input type="range" id="ck-tolerance" min="0" max="100" value="15"> <span id="ck-tolerance-val">15</span></label></div>
+    <div class="row"><label>Softness <input type="range" id="ck-softness" min="0" max="100" value="10"> <span id="ck-softness-val">10</span></label></div>
+    <div class="row"><canvas id="ck-key-histogram" class="ck-histogram" width="328" height="48"></canvas></div>
+    <div class="row"><label><input type="checkbox" id="ck-protect-enabled"> Protect a color</label></div>
+    <div id="ck-protect-row" hidden>
+      <div class="row"><label class="ck-color-field">Protect color <input type="color" id="ck-protect-color"> <input type="text" id="ck-protect-hex" size="7"></label></div>
+      <div class="row ck-color-actions">
+        <button type="button" id="ck-protect-primary" class="btn-sm">← Primary</button>
+        <button type="button" id="ck-protect-secondary" class="btn-sm">← Secondary</button>
+      </div>
+      <div class="row"><label>Protect tolerance <input type="range" id="ck-protect-tolerance" min="0" max="100" value="15"> <span id="ck-protect-tolerance-val">15</span></label></div>
+      <div class="row"><label>Protect softness <input type="range" id="ck-protect-softness" min="0" max="100" value="20"> <span id="ck-protect-softness-val">20</span></label></div>
+      <div class="row"><canvas id="ck-protect-histogram" class="ck-histogram" width="328" height="48"></canvas></div>
+    </div>
+    <div class="row"><label><input type="checkbox" id="ck-alllayers"> All layers</label></div>
   </div>
-  <div class="row"><label>Tolerance <input type="range" id="ck-tolerance" min="0" max="100" value="15"> <span id="ck-tolerance-val">15</span></label></div>
-  <div class="row"><label>Softness <input type="range" id="ck-softness" min="0" max="100" value="10"> <span id="ck-softness-val">10</span></label></div>
-  <div class="row"><label><input type="checkbox" id="ck-alllayers"> All layers</label></div>
   <div class="row dlg-actions"><button id="ck-ok" class="btn-sm">OK</button><button id="ck-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
 <dialog id="dlg-about" class="sys-dialog">

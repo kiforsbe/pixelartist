@@ -140,6 +140,12 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 #dlg-chromakey { width: 360px; }
 .ck-color-field { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ck-color-actions { margin-top: -2px; }
+/* Live distance-from-key/-protect-color histogram (see distanceHistogram
+   in js/core/chromakey.js): a plain bitmap canvas, so it needs its own
+   background/border since it isn't a themed control like the rest of the
+   dialog -- block display drops the few stray px of inline-baseline gap
+   a bare <canvas> otherwise leaves beneath itself. */
+.ck-histogram { display: block; width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; }
 /* Settings dialogs can grow past the viewport as fields get added over
    time (Project Settings especially) -- cap the dialog's own height and
    let its tab pages scroll internally, so the header (title/tabs) and
@@ -154,7 +160,8 @@ dialog.dlg-scrolls[open] { max-height: 85vh; display: flex; flex-direction: colu
 dialog.dlg-scrolls[open] > .dlg-tabs,
 dialog.dlg-scrolls[open] > .dlg-actions { flex: none; }
 dialog.dlg-scrolls[open] > .dlg-grid,
-dialog.dlg-scrolls[open] > #ps-page-onion { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+dialog.dlg-scrolls[open] > #ps-page-onion,
+dialog.dlg-scrolls[open] > .dlg-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
 /* Windows-standard dialog button row: right-aligned, affirmative action
    (OK/Create/...) before Cancel -- applied to every dialog's footer row on

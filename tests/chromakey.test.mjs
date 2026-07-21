@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chromaKeyBitmap } from '../js/core/chromakey.js';
+import { chromaKeyBitmap, distanceHistogram } from '../js/core/chromakey.js';
 
 function bmp(width, height, pixels) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -93,6 +93,47 @@ test('chromaKeyBitmap: percent-to-radius easing keeps a modest softness from swe
   const b = bmp(1, 1, [[20, 20, 20, 255]]);
   const out = chromaKeyBitmap(b, { keyColor: [0, 0, 0], tolerance: 0, softness: 10, mode: 'transparent', replacementColor: [255, 255, 255] });
   assert.deepEqual([...out.data], [20, 20, 20, 255]);
+});
+
+test('chromaKeyBitmap: protectColor fully shields a pixel that exactly matches both the key and the protect color', () => {
+  const key = [0, 255, 0];
+  const b = bmp(1, 1, [[...key, 255]]);
+  const out = chromaKeyBitmap(b, {
+    keyColor: key, tolerance: 50, softness: 0, mode: 'transparent', replacementColor: [255, 255, 255],
+    protectColor: key, protectTolerance: 50, protectSoftness: 0,
+  });
+  // Without protection this pixel is a full key match (dist=0) and would get zeroed --
+  // protectStrength is also 1 here (dist to protectColor is 0 too, same color), so effective
+  // strength = 1 * (1-1) = 0 and the pixel is left completely untouched.
+  assert.deepEqual([...out.data], [0, 255, 0, 255]);
+});
+
+test('chromaKeyBitmap: protectColor partially shields a pixel that only partially matches the protect color', () => {
+  const key = [0, 255, 0];
+  const pixel = [10, 90, 10, 255]; // dark greenish -- a strong key match on its own
+  const withoutProtect = chromaKeyBitmap(bmp(1, 1, [pixel]), { keyColor: key, tolerance: 60, softness: 20, mode: 'transparent', replacementColor: [255, 255, 255] });
+  const withProtect = chromaKeyBitmap(bmp(1, 1, [pixel]), {
+    keyColor: key, tolerance: 60, softness: 20, mode: 'transparent', replacementColor: [255, 255, 255],
+    protectColor: [0, 0, 0], protectTolerance: 40, protectSoftness: 40,
+  });
+  assert.deepEqual([...withoutProtect.data], [0, 0, 0, 0]); // fully keyed with no protection at all
+  assert.deepEqual([...withProtect.data], [33, 74, 33, 132]); // shielded: keeps some alpha and color, not zeroed
+});
+
+test('distanceHistogram: buckets pixel counts by distance from the reference color', () => {
+  const b = bmp(3, 1, [[0, 0, 0, 255], [50, 50, 50, 255], [255, 255, 255, 255]]);
+  const { counts, maxDistance } = distanceHistogram([b], [0, 0, 0], 10);
+  // Grey-on-grey distance reduces to the plain pixel value (same identity the mid-band tests
+  // above rely on): dist(black)=0 -> bucket 0, dist([50,50,50])=50 -> bucket floor(50/300*10)=1,
+  // dist(white)=255 -> bucket floor(255/300*10)=8.
+  assert.deepEqual([...counts], [1, 1, 0, 0, 0, 0, 0, 0, 1, 0]);
+  assert.equal(maxDistance, 300);
+});
+
+test('distanceHistogram: fully transparent pixels are excluded, same as chromaKeyBitmap', () => {
+  const b = bmp(1, 1, [[0, 0, 0, 0]]);
+  const { counts } = distanceHistogram([b], [0, 0, 0], 4);
+  assert.deepEqual([...counts], [0, 0, 0, 0]);
 });
 
 test('chromaKeyBitmap: does not mutate the input bitmap', () => {

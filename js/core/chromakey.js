@@ -11,7 +11,7 @@
 // toward luminance-driven matching instead of treating every gray as
 // "the same color" as every other gray.
 
-const MAX_DISTANCE = 300; // calibration reference for percentToRadius, see its own note
+export const MAX_DISTANCE = 300; // calibration reference for percentToRadius, see its own note
 
 function rgbToYCbCr(r, g, b) {
   return {
@@ -30,7 +30,7 @@ function rgbToYCbCr(r, g, b) {
 // alone already discriminates it from other hues well). chromaMagnitude
 // (0 for any gray, ~135 for a fully saturated primary/secondary color)
 // is what decides where a given key falls on that scale.
-function colorDistance(r, g, b, keyColor) {
+export function colorDistance(r, g, b, keyColor) {
   const p = rgbToYCbCr(r, g, b);
   const k = rgbToYCbCr(keyColor[0], keyColor[1], keyColor[2]);
   const keySaturation = Math.min(1, Math.sqrt(k.cb * k.cb + k.cr * k.cr) / 100);
@@ -47,7 +47,7 @@ function colorDistance(r, g, b, keyColor) {
 // in a hugely disproportionate share of colors. Squaring the percent
 // still reaches full coverage at 100% (same fixed point a linear mapping
 // would have), but compresses everything below it.
-function percentToRadius(percent) {
+export function percentToRadius(percent) {
   const t = Math.max(0, Math.min(100, percent)) / 100;
   return t * t * MAX_DISTANCE;
 }
@@ -66,6 +66,26 @@ function matchStrength(r, g, b, keyColor, tolerance, softness) {
   return (edge - dist) / softDist;
 }
 
+// Buckets pixel counts by distance-to-referenceColor across one or more
+// bitmaps (opaque pixels only, mirrors chromaKeyBitmap's own alpha===0
+// skip) -- feeds the Chroma Key dialog's live distance histogram, which
+// shows where the region's actual colors sit relative to the current
+// tolerance/softness band instead of leaving that to guesswork. `buckets`
+// spans evenly over 0..MAX_DISTANCE.
+export function distanceHistogram(bitmaps, referenceColor, buckets = 64) {
+  const counts = new Uint32Array(buckets);
+  for (const bmp of bitmaps) {
+    const d = bmp.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      const dist = colorDistance(d[i], d[i + 1], d[i + 2], referenceColor);
+      const bucket = Math.min(buckets - 1, Math.floor((dist / MAX_DISTANCE) * buckets));
+      counts[bucket]++;
+    }
+  }
+  return { counts, maxDistance: MAX_DISTANCE };
+}
+
 // mode 'transparent': full-strength match becomes [0,0,0,0] (mirrors the
 // eraser tool's own zero-everything convention, see js/ui/tools.js); a
 // partial-strength match scales alpha down by (1 - strength) AND
@@ -82,12 +102,28 @@ function matchStrength(r, g, b, keyColor, tolerance, softness) {
 // left untouched (a recolor, not a transparency op). Pixels already fully
 // transparent are skipped -- nothing to key out, same alpha===0 skip
 // convention as quantize.js.
-export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, replacementColor }) {
+//
+// protectColor (optional): a second reference color whose own match
+// strength (same tolerance/softness-style matching, via
+// protectTolerance/protectSoftness) SCALES DOWN the key's effect before
+// it's applied, instead of overriding it outright -- a pixel that's
+// close to both the key and the protect color (a classic case: an
+// anti-aliased edge between a colored background and a black outline,
+// which is itself a blend of the two) gets proportionally shielded
+// rather than either fully keyed or left with a hard, visible boundary.
+// Left out (null/undefined) entirely skips this, unchanged from before
+// protect-color existed.
+export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, replacementColor, protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
   const data = new Uint8ClampedArray(bmp.data);
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] === 0) continue;
-    const strength = matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness);
+    let strength = matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness);
     if (strength <= 0) continue;
+    if (protectColor) {
+      const protectStrength = matchStrength(data[i], data[i + 1], data[i + 2], protectColor, protectTolerance, protectSoftness);
+      strength *= (1 - protectStrength);
+      if (strength <= 0) continue;
+    }
     if (mode === 'transparent') {
       if (strength >= 1) { data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0; }
       else {
