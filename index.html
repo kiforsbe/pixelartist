@@ -251,6 +251,41 @@
   </div>
   <div class="row dlg-actions"><button id="ck-ok" class="btn-sm">OK</button><button id="ck-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
+<dialog id="dlg-checkerboard" class="dlg-movable dlg-scrolls">
+  <h3>Remove Checkerboard</h3>
+  <div class="dlg-body">
+    <div class="row"><button type="button" id="cb-autodetect" class="btn-sm">Auto-detect from image</button></div>
+    <div class="row"><label class="ck-color-field">Color A <input type="color" id="cb-colora"> <input type="text" id="cb-colora-hex" size="7"></label></div>
+    <div class="row"><label class="ck-color-field">Color B <input type="color" id="cb-colorb"> <input type="text" id="cb-colorb-hex" size="7"></label></div>
+    <div class="row">
+      <label><input type="radio" name="cb-mode" id="cb-mode-transparent" checked> Make transparent</label>
+      <label><input type="radio" name="cb-mode" id="cb-mode-replace"> Replace with color</label>
+    </div>
+    <div id="cb-replace-row" hidden>
+      <div class="row"><label class="ck-color-field">Replace with <input type="color" id="cb-replace-color"> <input type="text" id="cb-replace-hex" size="7"></label></div>
+      <div class="row ck-color-actions">
+        <button type="button" id="cb-replace-primary" class="btn-sm">← Primary</button>
+        <button type="button" id="cb-replace-secondary" class="btn-sm">← Secondary</button>
+      </div>
+    </div>
+    <div class="row"><label>Tolerance <input type="range" id="cb-tolerance" min="0" max="100" value="18"> <span id="cb-tolerance-val">18</span></label></div>
+    <div class="row"><label>Softness <input type="range" id="cb-softness" min="0" max="100" value="0"> <span id="cb-softness-val">0</span></label></div>
+    <div class="row"><label>Cell size <input type="range" id="cb-cellsize" min="2" max="128" value="12"> <span id="cb-cellsize-val">12</span>px</label></div>
+    <div class="row"><label>Min. alternation <input type="range" id="cb-minmix" min="1" max="50" value="12"> <span id="cb-minmix-val">12</span>%</label></div>
+    <div class="row"><label><input type="checkbox" id="cb-protect-enabled"> Protect a color</label></div>
+    <div id="cb-protect-row" hidden>
+      <div class="row"><label class="ck-color-field">Protect color <input type="color" id="cb-protect-color"> <input type="text" id="cb-protect-hex" size="7"></label></div>
+      <div class="row ck-color-actions">
+        <button type="button" id="cb-protect-primary" class="btn-sm">← Primary</button>
+        <button type="button" id="cb-protect-secondary" class="btn-sm">← Secondary</button>
+      </div>
+      <div class="row"><label>Protect tolerance <input type="range" id="cb-protect-tolerance" min="0" max="100" value="15"> <span id="cb-protect-tolerance-val">15</span></label></div>
+      <div class="row"><label>Protect softness <input type="range" id="cb-protect-softness" min="0" max="100" value="20"> <span id="cb-protect-softness-val">20</span></label></div>
+    </div>
+    <div class="row"><label><input type="checkbox" id="cb-alllayers"> All layers</label></div>
+  </div>
+  <div class="row dlg-actions"><button id="cb-ok" class="btn-sm">OK</button><button id="cb-cancel" class="btn-sm">Cancel</button></div>
+</dialog>
 <dialog id="dlg-about" class="sys-dialog">
   <h3>About PixelArtist</h3>
   <p id="about-version" class="about-meta"></p>

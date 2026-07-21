@@ -21,6 +21,7 @@ import { zipWrite } from '../core/zip.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../core/pixels.js';
 import { quantizeBitmapToPalette } from '../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../core/chromakey.js';
+import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize } from '../core/checkerboard.js';
 import { rgbaToHex, hexToRgb } from '../ui/panels.js';
 import { SYSTEM_PALETTES } from '../core/systempalettes.js';
 import { collectProjectExportEntries } from './projectExport.js';
@@ -575,6 +576,7 @@ defineAction('edit.filters', {
   submenu: [
     { action: 'edit.filters.quantizeToPalette' },
     { action: 'edit.filters.chromaKey' },
+    { action: 'edit.filters.checkerboard' },
   ],
   isEnabled: () => !!activeSheet(),
 });
@@ -586,11 +588,12 @@ defineAction('edit.filters.quantizeToPalette', {
     updateQuantizeModeUI();
     qzAllLayers.checked = false;
     qzPreferOpaque.checked = false;
-    // Both filter dialogs are non-modal and share the Preview panel --
-    // having both open at once would be confusing (whichever dialog's
-    // control was touched last "wins" the preview), so opening one closes
-    // the other.
+    // All filter dialogs are non-modal and share the Preview panel --
+    // having more than one open at once would be confusing (whichever
+    // dialog's control was touched last "wins" the preview), so opening
+    // one closes the others.
     if (dlgChromaKey.open) dlgChromaKey.close();
+    if (dlgCheckerboard.open) dlgCheckerboard.close();
     previewQuantize();
     dlgQuantize.show();
     if (!dlgQuantize.style.left) centerDialog(dlgQuantize);
@@ -851,6 +854,7 @@ defineAction('edit.filters.chromaKey', {
     ckProtectSoftness.value = '20'; ckProtectSoftnessVal.textContent = '20';
     ckAllLayers.checked = false;
     if (dlgQuantize.open) dlgQuantize.close();
+    if (dlgCheckerboard.open) dlgCheckerboard.close();
     previewChromaKey();
     refreshChromaKeyHistograms();
     dlgChromaKey.show();
@@ -867,6 +871,213 @@ ckOk.addEventListener('click', () => {
   const params = currentChromaKeyParams();
   dlgChromaKey.close();
   commitChromaKey(params, ckAllLayers.checked);
+});
+
+// ---- checkerboard remover ----
+
+// Resolves the region + target layers for the current filter scope, or
+// null when there's nothing to operate on -- shared by
+// computeCheckerboardPatches and the Auto-detect button (which needs the
+// region's raw pixels but not a checkerboardRemoveBitmap call).
+function checkerboardRegionAndLayers(allLayers) {
+  const sheet = activeSheet();
+  if (!sheet) return null;
+  const rr = currentEditRegion();
+  if (!rr) return null;
+  const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+  if (!layers.length) return null;
+  return { region: rr.region, layers };
+}
+
+// Pure compute half, mirroring computeChromaKeyPatches -- shared by the
+// real commit (commitCheckerboard) and the dialog's live preview.
+function computeCheckerboardPatches(params, allLayers) {
+  const rl = checkerboardRegionAndLayers(allLayers);
+  if (!rl) return null;
+  const { region, layers } = rl;
+  const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
+  const patches = layers.map((l, i) => ({ layer: l, before: befores[i], after: checkerboardRemoveBitmap(befores[i], params) }))
+    .filter(p => !bitmapsEqual(p.before, p.after));
+  return { region, patches, befores };
+}
+
+function commitCheckerboard(params, allLayers) {
+  commitFloatIfAny();
+  const result = computeCheckerboardPatches(params, allLayers);
+  if (!result || !result.patches.length) return;
+  const { region, patches } = result;
+  state.commands.push({
+    label: 'remove checkerboard',
+    do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
+    undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
+  });
+  markDirty();
+}
+
+const dlgCheckerboard = document.getElementById('dlg-checkerboard');
+const cbAutodetect = document.getElementById('cb-autodetect');
+const cbColorA = document.getElementById('cb-colora');
+const cbColorAHex = document.getElementById('cb-colora-hex');
+const cbColorB = document.getElementById('cb-colorb');
+const cbColorBHex = document.getElementById('cb-colorb-hex');
+const cbModeTransparent = document.getElementById('cb-mode-transparent');
+const cbModeReplace = document.getElementById('cb-mode-replace');
+const cbReplaceRow = document.getElementById('cb-replace-row');
+const cbReplaceColor = document.getElementById('cb-replace-color');
+const cbReplaceHex = document.getElementById('cb-replace-hex');
+const cbReplacePrimary = document.getElementById('cb-replace-primary');
+const cbReplaceSecondary = document.getElementById('cb-replace-secondary');
+const cbTolerance = document.getElementById('cb-tolerance');
+const cbToleranceVal = document.getElementById('cb-tolerance-val');
+const cbSoftness = document.getElementById('cb-softness');
+const cbSoftnessVal = document.getElementById('cb-softness-val');
+const cbCellSize = document.getElementById('cb-cellsize');
+const cbCellSizeVal = document.getElementById('cb-cellsize-val');
+const cbMinMix = document.getElementById('cb-minmix');
+const cbMinMixVal = document.getElementById('cb-minmix-val');
+const cbProtectEnabled = document.getElementById('cb-protect-enabled');
+const cbProtectRow = document.getElementById('cb-protect-row');
+const cbProtectColor = document.getElementById('cb-protect-color');
+const cbProtectHex = document.getElementById('cb-protect-hex');
+const cbProtectPrimary = document.getElementById('cb-protect-primary');
+const cbProtectSecondary = document.getElementById('cb-protect-secondary');
+const cbProtectTolerance = document.getElementById('cb-protect-tolerance');
+const cbProtectToleranceVal = document.getElementById('cb-protect-tolerance-val');
+const cbProtectSoftness = document.getElementById('cb-protect-softness');
+const cbProtectSoftnessVal = document.getElementById('cb-protect-softness-val');
+const cbAllLayers = document.getElementById('cb-alllayers');
+const cbOk = document.getElementById('cb-ok');
+const cbCancel = document.getElementById('cb-cancel');
+markDefaultAction(dlgCheckerboard, cbOk);
+makeDialogMovable(dlgCheckerboard, dlgCheckerboard.querySelector('h3'));
+
+function currentCheckerboardParams() {
+  return {
+    colorA: hexToRgb(cbColorA.value),
+    colorB: hexToRgb(cbColorB.value),
+    tolerance: Number(cbTolerance.value),
+    softness: Number(cbSoftness.value),
+    windowRadius: Number(cbCellSize.value),
+    minMixFraction: Number(cbMinMix.value) / 100,
+    mode: cbModeReplace.checked ? 'replace' : 'transparent',
+    replacementColor: hexToRgb(cbReplaceColor.value),
+    protectColor: cbProtectEnabled.checked ? hexToRgb(cbProtectColor.value) : null,
+    protectTolerance: Number(cbProtectTolerance.value),
+    protectSoftness: Number(cbProtectSoftness.value),
+  };
+}
+
+function previewCheckerboard() {
+  pushLivePreview(computeCheckerboardPatches(currentCheckerboardParams(), cbAllLayers.checked));
+}
+
+// Re-samples the current region's pixels and re-runs detectCheckerboardColors
+// / estimateCheckerCellSize, filling colorA/colorB/cell size from the actual
+// image instead of requiring the user to eyedropper both checker shades and
+// guess a cell size by hand. Silently no-ops (mirrors the rest of this
+// dialog's error handling) when there's no region or no confident color
+// pair -- the user's existing manual values are left alone either way.
+cbAutodetect.addEventListener('click', () => {
+  const rl = checkerboardRegionAndLayers(cbAllLayers.checked);
+  if (!rl) return;
+  const befores = rl.layers.map(l => copyRegion(l.bitmap, rl.region.x, rl.region.y, rl.region.w, rl.region.h));
+  const detected = detectCheckerboardColors(befores);
+  if (!detected) return;
+  setColorInputs(cbColorA, cbColorAHex, detected.colorA);
+  setColorInputs(cbColorB, cbColorBHex, detected.colorB);
+  const cellSize = estimateCheckerCellSize(befores, detected.colorA, detected.colorB, { tolerance: Number(cbTolerance.value) });
+  if (cellSize) { cbCellSize.value = String(Math.min(128, Math.max(2, cellSize))); cbCellSizeVal.textContent = cbCellSize.value; }
+  previewCheckerboard();
+});
+
+cbColorA.addEventListener('input', () => { cbColorAHex.value = cbColorA.value; previewCheckerboard(); });
+cbColorAHex.addEventListener('input', () => {
+  if (!/^#[0-9a-fA-F]{6}$/.test(cbColorAHex.value)) return;
+  cbColorA.value = cbColorAHex.value.toLowerCase();
+  previewCheckerboard();
+});
+cbColorB.addEventListener('input', () => { cbColorBHex.value = cbColorB.value; previewCheckerboard(); });
+cbColorBHex.addEventListener('input', () => {
+  if (!/^#[0-9a-fA-F]{6}$/.test(cbColorBHex.value)) return;
+  cbColorB.value = cbColorBHex.value.toLowerCase();
+  previewCheckerboard();
+});
+
+cbReplaceColor.addEventListener('input', () => { cbReplaceHex.value = cbReplaceColor.value; previewCheckerboard(); });
+cbReplaceHex.addEventListener('input', () => {
+  if (!/^#[0-9a-fA-F]{6}$/.test(cbReplaceHex.value)) return;
+  cbReplaceColor.value = cbReplaceHex.value.toLowerCase();
+  previewCheckerboard();
+});
+cbReplacePrimary.addEventListener('click', () => { setColorInputs(cbReplaceColor, cbReplaceHex, state.primary); previewCheckerboard(); });
+cbReplaceSecondary.addEventListener('click', () => { setColorInputs(cbReplaceColor, cbReplaceHex, state.secondary); previewCheckerboard(); });
+
+function updateCheckerboardModeUI() {
+  cbReplaceRow.hidden = !cbModeReplace.checked;
+}
+cbModeTransparent.addEventListener('change', () => { updateCheckerboardModeUI(); previewCheckerboard(); });
+cbModeReplace.addEventListener('change', () => { updateCheckerboardModeUI(); previewCheckerboard(); });
+
+cbTolerance.addEventListener('input', () => { cbToleranceVal.textContent = cbTolerance.value; previewCheckerboard(); });
+cbSoftness.addEventListener('input', () => { cbSoftnessVal.textContent = cbSoftness.value; previewCheckerboard(); });
+cbCellSize.addEventListener('input', () => { cbCellSizeVal.textContent = cbCellSize.value; previewCheckerboard(); });
+cbMinMix.addEventListener('input', () => { cbMinMixVal.textContent = cbMinMix.value; previewCheckerboard(); });
+
+function updateCheckerboardProtectUI() {
+  cbProtectRow.hidden = !cbProtectEnabled.checked;
+}
+cbProtectEnabled.addEventListener('change', () => { updateCheckerboardProtectUI(); previewCheckerboard(); });
+cbProtectColor.addEventListener('input', () => { cbProtectHex.value = cbProtectColor.value; previewCheckerboard(); });
+cbProtectHex.addEventListener('input', () => {
+  if (!/^#[0-9a-fA-F]{6}$/.test(cbProtectHex.value)) return;
+  cbProtectColor.value = cbProtectHex.value.toLowerCase();
+  previewCheckerboard();
+});
+cbProtectPrimary.addEventListener('click', () => { setColorInputs(cbProtectColor, cbProtectHex, state.primary); previewCheckerboard(); });
+cbProtectSecondary.addEventListener('click', () => { setColorInputs(cbProtectColor, cbProtectHex, state.secondary); previewCheckerboard(); });
+cbProtectTolerance.addEventListener('input', () => { cbProtectToleranceVal.textContent = cbProtectTolerance.value; previewCheckerboard(); });
+cbProtectSoftness.addEventListener('input', () => { cbProtectSoftnessVal.textContent = cbProtectSoftness.value; previewCheckerboard(); });
+
+cbAllLayers.addEventListener('change', previewCheckerboard);
+
+defineAction('edit.filters.checkerboard', {
+  label: 'Remove Checkerboard…',
+  run: () => {
+    setColorInputs(cbColorA, cbColorAHex, [255, 255, 255]);
+    setColorInputs(cbColorB, cbColorBHex, [192, 192, 192]);
+    cbModeTransparent.checked = true;
+    updateCheckerboardModeUI();
+    setColorInputs(cbReplaceColor, cbReplaceHex, state.secondary);
+    cbTolerance.value = '18'; cbToleranceVal.textContent = '18';
+    cbSoftness.value = '0'; cbSoftnessVal.textContent = '0';
+    cbCellSize.value = '12'; cbCellSizeVal.textContent = '12';
+    cbMinMix.value = '12'; cbMinMixVal.textContent = '12';
+    cbProtectEnabled.checked = false;
+    updateCheckerboardProtectUI();
+    setColorInputs(cbProtectColor, cbProtectHex, [0, 0, 0]);
+    cbProtectTolerance.value = '15'; cbProtectToleranceVal.textContent = '15';
+    cbProtectSoftness.value = '20'; cbProtectSoftnessVal.textContent = '20';
+    cbAllLayers.checked = false;
+    if (dlgQuantize.open) dlgQuantize.close();
+    if (dlgChromaKey.open) dlgChromaKey.close();
+    dlgCheckerboard.show();
+    if (!dlgCheckerboard.style.left) centerDialog(dlgCheckerboard);
+    // Auto-detect on open -- the whole point of this filter is to save the
+    // user from hand-picking checker colors/cell size, so start from a
+    // real guess instead of the flat [255]/[192] fallback above.
+    cbAutodetect.click();
+  },
+  isEnabled: () => !!activeLayer(),
+});
+function cancelCheckerboardDialog() { refreshPreviewPanel(); clearCanvasPreview(); dlgCheckerboard.close(); }
+cbCancel.addEventListener('click', cancelCheckerboardDialog);
+closeOnEscape(dlgCheckerboard, cancelCheckerboardDialog);
+cbOk.addEventListener('click', () => {
+  refreshPreviewPanel();
+  clearCanvasPreview();
+  const params = currentCheckerboardParams();
+  dlgCheckerboard.close();
+  commitCheckerboard(params, cbAllLayers.checked);
 });
 
 // ---- shortcuts: brush size [ / ], swap colors X (Ctrl/Alt-free, gated) ----

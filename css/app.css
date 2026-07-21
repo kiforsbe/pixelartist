@@ -137,7 +137,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
    their own row underneath (.ck-color-actions) rather than crammed onto
    the same line as the color inputs, which was the main source of the
    cramped wrapping this whole block exists to fix. */
-#dlg-chromakey { width: 360px; }
+#dlg-chromakey, #dlg-checkerboard { width: 360px; }
 .ck-color-field { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ck-color-actions { margin-top: -2px; }
 /* Live distance-from-key/-protect-color histogram (see distanceHistogram
