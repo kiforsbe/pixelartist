@@ -1,13 +1,42 @@
 // Chroma-key filter: removes or recolors pixels close to a chosen key
-// color. Pure/immutable like quantize.js -- returns a new bitmap, never
-// mutates its input, so callers can diff before/after for undo and reuse
-// the same call for a live preview.
+// color, matched by CHROMINANCE rather than raw RGB -- that's what
+// "chroma" in "chroma key" actually refers to. Converts to YCbCr and
+// measures distance mostly in the Cb/Cr (color) plane, so different
+// shades of the SAME background hue (a lighting gradient, JPEG
+// artifacts, anti-aliasing) all read as close without having to re-pick
+// the key color for every shade. Luminance (Y) still contributes, but
+// weighted by how saturated the KEY color itself is: chrominance carries
+// ~0 discriminating information for a near-gray key (black/white/every
+// gray in between all sit at Cb=Cr=0), so a neutral key falls back
+// toward luminance-driven matching instead of treating every gray as
+// "the same color" as every other gray.
 
-const MAX_DISTANCE = Math.sqrt(3 * 255 * 255);
+const MAX_DISTANCE = 300; // calibration reference for percentToRadius, see its own note
 
-function colorDistance(r, g, b, key) {
-  const dr = r - key[0], dg = g - key[1], db = b - key[2];
-  return Math.sqrt(dr * dr + dg * dg + db * db);
+function rgbToYCbCr(r, g, b) {
+  return {
+    y: 0.299 * r + 0.587 * g + 0.114 * b,
+    cb: -0.168736 * r - 0.331264 * g + 0.5 * b,
+    cr: 0.5 * r - 0.418688 * g - 0.081312 * b,
+  };
+}
+
+// Euclidean distance in YCbCr space, with Y (luminance) scaled down by
+// lumaWeight before squaring -- lumaWeight is 1 for a fully neutral key
+// (grays can only be told apart by luminance, so it needs full weight,
+// which also makes this degrade gracefully toward a plain-RGB-ish
+// distance for a black/white background) down to 0.15 for a fully
+// saturated key (brightness of that hue should barely matter -- Cb/Cr
+// alone already discriminates it from other hues well). chromaMagnitude
+// (0 for any gray, ~135 for a fully saturated primary/secondary color)
+// is what decides where a given key falls on that scale.
+function colorDistance(r, g, b, keyColor) {
+  const p = rgbToYCbCr(r, g, b);
+  const k = rgbToYCbCr(keyColor[0], keyColor[1], keyColor[2]);
+  const keySaturation = Math.min(1, Math.sqrt(k.cb * k.cb + k.cr * k.cr) / 100);
+  const lumaWeight = 1 - 0.85 * keySaturation;
+  const dCb = p.cb - k.cb, dCr = p.cr - k.cr, dY = (p.y - k.y) * lumaWeight;
+  return Math.sqrt(dCb * dCb + dCr * dCr + dY * dY);
 }
 
 // Percent (0-100) -> a radius in the same units as colorDistance. Eased
@@ -15,11 +44,9 @@ function colorDistance(r, g, b, key) {
 // nearly all practical use happens -- gets much finer control: the count
 // of colors within radius R of a point grows roughly with R^3, so a
 // linear percent-to-radius mapping made even a modest softness bump sweep
-// in a hugely disproportionate share of colors, worst right around the
-// default black key color (a corner of the RGB cube, where nearby colors
-// are densest). Squaring the percent still reaches full coverage at 100%
-// (same fixed point a linear mapping would have), but compresses
-// everything below it.
+// in a hugely disproportionate share of colors. Squaring the percent
+// still reaches full coverage at 100% (same fixed point a linear mapping
+// would have), but compresses everything below it.
 function percentToRadius(percent) {
   const t = Math.max(0, Math.min(100, percent)) / 100;
   return t * t * MAX_DISTANCE;
@@ -49,14 +76,12 @@ function matchStrength(r, g, b, keyColor, tolerance, softness) {
 // leaving its RGB untouched would keep a visible tint/halo of the key
 // color once composited over something else. Pushing it toward luma
 // (spill suppression) removes that colorfulness without needing to know
-// which specific hue the key was -- unlike classic single-channel "green
-// spill" suppression, which only works for a green/blue screen.
-// mode 'replace': RGB is lerped toward replacementColor by strength
-// instead (no separate desaturation needed, since replacing already
-// overwrites whatever tint was there); alpha is left untouched (a
-// recolor, not a transparency op). Pixels already fully transparent are
-// skipped -- nothing to key out, same alpha===0 skip convention as
-// quantize.js.
+// which specific hue the key was. mode 'replace': RGB is lerped toward
+// replacementColor by strength instead (no separate desaturation needed,
+// since replacing already overwrites whatever tint was there); alpha is
+// left untouched (a recolor, not a transparency op). Pixels already fully
+// transparent are skipped -- nothing to key out, same alpha===0 skip
+// convention as quantize.js.
 export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, replacementColor }) {
   const data = new Uint8ClampedArray(bmp.data);
   for (let i = 0; i < data.length; i += 4) {
