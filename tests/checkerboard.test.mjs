@@ -219,7 +219,7 @@ test('detectGuideLines: a row of dense colorful content is not mistaken for a gu
   assert.equal(rowBands.length, 0);
 });
 
-test('removeGuideLines: erases confirmed guide-line pixels but leaves colorful content crossing the same row untouched, and leaves everything outside the band alone', () => {
+test('removeGuideLines: action "erase" unconditionally erases confirmed guide-line pixels, leaves colorful content crossing the same row untouched, and leaves everything outside the band alone', () => {
   const w = 200, h = 200;
   const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
   const positions = [10, 50, 90, 130, 170];
@@ -229,7 +229,7 @@ test('removeGuideLines: erases confirmed guide-line pixels but leaves colorful c
   bmp.data[contentIdx] = 200; bmp.data[contentIdx + 1] = 40; bmp.data[contentIdx + 2] = 40; bmp.data[contentIdx + 3] = 255;
 
   const { rowBands, colBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
-  const out = removeGuideLines(bmp, { rowBands, colBands });
+  const out = removeGuideLines(bmp, { rowBands, colBands, action: 'erase' });
 
   // Guide-line pixel: gone.
   const lineIdx = (10 * w + 20) * 4;
@@ -241,7 +241,7 @@ test('removeGuideLines: erases confirmed guide-line pixels but leaves colorful c
   assert.deepEqual([out.data[betweenIdx], out.data[betweenIdx + 1], out.data[betweenIdx + 2], out.data[betweenIdx + 3]], [bmp.data[betweenIdx], bmp.data[betweenIdx + 1], bmp.data[betweenIdx + 2], bmp.data[betweenIdx + 3]]);
 });
 
-test('removeGuideLines: protectColor shields real near-neutral content that happens to fall inside a confirmed band', () => {
+test('removeGuideLines: action "erase" + protectColor shields real near-neutral content that happens to fall inside a confirmed band', () => {
   const w = 200, h = 200;
   const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
   const positions = [10, 50, 90, 130, 170];
@@ -251,14 +251,14 @@ test('removeGuideLines: protectColor shields real near-neutral content that happ
   bmp.data[iconIdx] = 110; bmp.data[iconIdx + 1] = 110; bmp.data[iconIdx + 2] = 110; bmp.data[iconIdx + 3] = 255;
 
   const { rowBands, colBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
-  const withoutProtect = removeGuideLines(bmp, { rowBands, colBands });
+  const withoutProtect = removeGuideLines(bmp, { rowBands, colBands, action: 'erase' });
   assert.deepEqual([withoutProtect.data[iconIdx], withoutProtect.data[iconIdx + 1], withoutProtect.data[iconIdx + 2], withoutProtect.data[iconIdx + 3]], [0, 0, 0, 0]);
 
-  const withProtect = removeGuideLines(bmp, { rowBands, colBands, protectColor: [110, 110, 110], protectTolerance: 10, protectSoftness: 0 });
+  const withProtect = removeGuideLines(bmp, { rowBands, colBands, action: 'erase', protectColor: [110, 110, 110], protectTolerance: 10, protectSoftness: 0 });
   assert.deepEqual([withProtect.data[iconIdx], withProtect.data[iconIdx + 1], withProtect.data[iconIdx + 2], withProtect.data[iconIdx + 3]], [110, 110, 110, 255]);
 });
 
-test('detectGuideLines + removeGuideLines: works on both axes at once', () => {
+test('detectGuideLines + removeGuideLines: action "erase" works on both axes at once', () => {
   const w = 200, h = 200;
   const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
   drawGuideLines(bmp, 'row', [10, 50, 90, 130, 170], () => [150, 150, 150]);
@@ -267,8 +267,130 @@ test('detectGuideLines + removeGuideLines: works on both axes at once', () => {
   const { rowBands, colBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
   assert.equal(rowBands.length, 5);
   assert.equal(colBands.length, 5);
-  const out = removeGuideLines(bmp, { rowBands, colBands });
+  const out = removeGuideLines(bmp, { rowBands, colBands, action: 'erase' });
   const rowIdx = (10 * w + 60) * 4, colIdx = (60 * w + 15) * 4;
   assert.equal(out.data[rowIdx + 3], 0);
   assert.equal(out.data[colIdx + 3], 0);
+});
+
+test('removeGuideLines: action "heal" (default) reconstructs a guide line crossing real content instead of leaving a scratch, matching the actual checkerboard-removal pipeline (main pass runs first)', () => {
+  const w = 200, h = 200;
+  const colorA = [255, 255, 255], colorB = [192, 192, 192];
+  const bmp = checkerBitmap(w, h, 8, colorA, colorB);
+  drawGuideLines(bmp, 'row', [10, 50, 90, 130, 170], () => [150, 150, 150]);
+  // A solid near-neutral content block (e.g. a stone-tile icon) that a guide line cuts through.
+  for (let y = 70; y < 110; y++) {
+    for (let x = 40; x < 80; x++) {
+      const i = (y * w + x) * 4;
+      bmp.data[i] = 120; bmp.data[i + 1] = 120; bmp.data[i + 2] = 120; bmp.data[i + 3] = 255;
+    }
+  }
+
+  const { rowBands, colBands } = detectGuideLines([bmp], colorA, colorB);
+  // Real pipeline: main checkerboard pass runs BEFORE the guide-line pass, so background pixels
+  // flanking a guide line are already transparent by the time healing looks at their neighbors.
+  const afterMain = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 18, windowRadius: 10, minMixFraction: 0.12 });
+  const out = removeGuideLines(afterMain, { rowBands, colBands }); // action defaults to 'heal'
+
+  // Inside the content block: the guide line is healed back to the block's own color, not erased.
+  const insideIdx = (90 * w + 60) * 4;
+  assert.deepEqual([out.data[insideIdx], out.data[insideIdx + 1], out.data[insideIdx + 2], out.data[insideIdx + 3]], [120, 120, 120, 255]);
+  // Where that SAME guide row crosses plain checkerboard (no content to heal from -- the main
+  // pass already made those neighbors transparent), it still ends up transparent, same as erase.
+  const bgIdx = (90 * w + 150) * 4;
+  assert.equal(out.data[bgIdx + 3], 0);
+});
+
+test('removeGuideLines: action "heal" interpolates a gradient when the two flanking sides differ, rather than snapping to one side', () => {
+  const w = 100, h = 100;
+  const colorA = [255, 255, 255], colorB = [192, 192, 192];
+  const bmp = checkerBitmap(w, h, 8, colorA, colorB);
+  // Vertical guide line at x=50 embedded in a content block spanning most of the image, with a
+  // darker left half and lighter right half so a healed pixel MUST land strictly between them.
+  for (let y = 0; y < h; y++) {
+    for (let x = 20; x < 80; x++) {
+      const i = (y * w + x) * 4;
+      const shade = x < 50 ? 80 : 160;
+      bmp.data[i] = shade; bmp.data[i + 1] = shade; bmp.data[i + 2] = shade; bmp.data[i + 3] = 255;
+    }
+  }
+  const lineX = 50;
+  for (let y = 0; y < h; y++) { const i = (y * w + lineX) * 4; bmp.data[i] = 150; bmp.data[i + 1] = 150; bmp.data[i + 2] = 150; bmp.data[i + 3] = 255; }
+
+  // This test is about removeGuideLines's own heal math, given a confirmed band -- supply it
+  // directly rather than via detectGuideLines (which needs several recurring lines to confirm a
+  // period, and this test only has one).
+  const out = removeGuideLines(bmp, { rowBands: [], colBands: [[lineX, lineX]] });
+  const idx = (50 * w + lineX) * 4;
+  assert.ok(out.data[idx] > 80 && out.data[idx] < 160); // strictly between the two flanking shades
+  assert.equal(out.data[idx + 3], 255); // healed, not erased
+});
+
+test('removeGuideLines: healStrength blends the heal result toward the plain erase/replace result, 1 matches the old default and 0 matches action "erase"', () => {
+  const w = 200, h = 200;
+  const colorA = [255, 255, 255], colorB = [192, 192, 192];
+  const bmp = checkerBitmap(w, h, 8, colorA, colorB);
+  drawGuideLines(bmp, 'row', [10, 50, 90, 130, 170], () => [150, 150, 150]);
+  for (let y = 30; y < 70; y++) {
+    for (let x = 20; x < 80; x++) {
+      const i = (y * w + x) * 4;
+      bmp.data[i] = 120; bmp.data[i + 1] = 120; bmp.data[i + 2] = 120; bmp.data[i + 3] = 255;
+    }
+  }
+  const { rowBands, colBands } = detectGuideLines([bmp], colorA, colorB);
+  const afterMain = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 18, windowRadius: 10, minMixFraction: 0.12 });
+  const idx = (50 * w + 40) * 4;
+
+  const full = removeGuideLines(afterMain, { rowBands, colBands, healStrength: 1 });
+  const erased = removeGuideLines(afterMain, { rowBands, colBands, action: 'erase' });
+  const zero = removeGuideLines(afterMain, { rowBands, colBands, healStrength: 0 });
+  const half = removeGuideLines(afterMain, { rowBands, colBands, healStrength: 0.5 });
+
+  assert.equal(full.data[idx], 120); // full heal: matches the surrounding content exactly
+  assert.deepEqual([zero.data[idx], zero.data[idx + 3]], [erased.data[idx], erased.data[idx + 3]]); // 0 == plain erase
+  assert.ok(half.data[idx + 3] > 0 && half.data[idx + 3] < 255); // 0.5: partway between erased (transparent) and healed (opaque)
+});
+
+test('removeGuideLines: action "heal" leaves an intersection of a horizontal and vertical guide line over pure background transparent, instead of blending the two lines\' own raw colors into a spurious patch', () => {
+  const w = 200, h = 200;
+  const colorA = [255, 255, 255], colorB = [192, 192, 192];
+  const bmp = checkerBitmap(w, h, 8, colorA, colorB);
+  // No real content anywhere -- both lines cross only checkerboard background.
+  drawGuideLines(bmp, 'row', [10, 50, 90, 130, 170], () => [150, 150, 150]);
+  drawGuideLines(bmp, 'col', [15, 55, 95, 135, 175], () => [160, 160, 160]);
+
+  const { rowBands, colBands } = detectGuideLines([bmp], colorA, colorB);
+  const afterMain = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 18, windowRadius: 10, minMixFraction: 0.12 });
+  const out = removeGuideLines(afterMain, { rowBands, colBands }); // action defaults to 'heal'
+
+  // The crossing point of the row-50 and col-55 lines: must be fully transparent, not a healed
+  // blend of the two lines' own [150,150,150]/[160,160,160] colors.
+  const crossIdx = (50 * w + 55) * 4;
+  assert.equal(out.data[crossIdx + 3], 0);
+  // A non-intersecting stretch of the same lines still erases to transparent too (background).
+  const plainLineIdx = (50 * w + 20) * 4;
+  assert.equal(out.data[plainLineIdx + 3], 0);
+});
+
+test('removeGuideLines: action "heal" still reconstructs a real intersection area that sits over actual content', () => {
+  const w = 200, h = 200;
+  const colorA = [255, 255, 255], colorB = [192, 192, 192];
+  const bmp = checkerBitmap(w, h, 8, colorA, colorB);
+  drawGuideLines(bmp, 'row', [10, 50, 90, 130, 170], () => [150, 150, 150]);
+  drawGuideLines(bmp, 'col', [15, 55, 95, 135, 175], () => [160, 160, 160]);
+  // A near-neutral content block straddling the row-50/col-55 crossing.
+  for (let y = 30; y < 70; y++) {
+    for (let x = 35; x < 75; x++) {
+      const i = (y * w + x) * 4;
+      bmp.data[i] = 120; bmp.data[i + 1] = 120; bmp.data[i + 2] = 120; bmp.data[i + 3] = 255;
+    }
+  }
+
+  const { rowBands, colBands } = detectGuideLines([bmp], colorA, colorB);
+  const afterMain = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 18, windowRadius: 10, minMixFraction: 0.12 });
+  const out = removeGuideLines(afterMain, { rowBands, colBands });
+
+  const crossIdx = (50 * w + 55) * 4;
+  assert.equal(out.data[crossIdx + 3], 255); // reconstructed, not left as a hole
+  assert.equal(out.data[crossIdx], 120); // matches the surrounding block's own color
 });

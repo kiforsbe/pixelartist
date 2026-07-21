@@ -913,7 +913,7 @@ function computeCheckerboardPatches(params, allLayers) {
     const after = checkerboardRemoveBitmap(before, params);
     if (!rowBands.length && !colBands.length) return after;
     return removeGuideLines(after, {
-      rowBands, colBands, mode: params.mode, replacementColor: params.replacementColor,
+      rowBands, colBands, action: params.guideLines.action, healStrength: params.guideLines.healStrength, mode: params.mode, replacementColor: params.replacementColor,
       protectColor: params.protectColor, protectTolerance: params.protectTolerance, protectSoftness: params.protectSoftness,
     });
   });
@@ -970,6 +970,10 @@ const cbGridLinesEnabled = document.getElementById('cb-gridlines-enabled');
 const cbGridLinesRow = document.getElementById('cb-gridlines-row');
 const cbGridLinesThreshold = document.getElementById('cb-gridlines-threshold');
 const cbGridLinesThresholdVal = document.getElementById('cb-gridlines-threshold-val');
+const cbGridLinesAction = document.getElementById('cb-gridlines-action');
+const cbGridLinesHealStrengthRow = document.getElementById('cb-gridlines-healstrength-row');
+const cbGridLinesHealStrength = document.getElementById('cb-gridlines-healstrength');
+const cbGridLinesHealStrengthVal = document.getElementById('cb-gridlines-healstrength-val');
 const cbGridLinesStatus = document.getElementById('cb-gridlines-status');
 const cbAllLayers = document.getElementById('cb-alllayers');
 const cbOk = document.getElementById('cb-ok');
@@ -990,7 +994,7 @@ function currentCheckerboardParams() {
     protectColor: cbProtectEnabled.checked ? hexToRgb(cbProtectColor.value) : null,
     protectTolerance: Number(cbProtectTolerance.value),
     protectSoftness: Number(cbProtectSoftness.value),
-    guideLines: cbGridLinesEnabled.checked ? { threshold: Number(cbGridLinesThreshold.value) / 100 } : null,
+    guideLines: cbGridLinesEnabled.checked ? { threshold: Number(cbGridLinesThreshold.value) / 100, action: cbGridLinesAction.value, healStrength: Number(cbGridLinesHealStrength.value) / 100 } : null,
   };
 }
 
@@ -1079,9 +1083,12 @@ cbProtectSoftness.addEventListener('input', () => { cbProtectSoftnessVal.textCon
 
 function updateCheckerboardGridLinesUI() {
   cbGridLinesRow.hidden = !cbGridLinesEnabled.checked;
+  cbGridLinesHealStrengthRow.hidden = cbGridLinesAction.value !== 'heal';
 }
 cbGridLinesEnabled.addEventListener('change', () => { updateCheckerboardGridLinesUI(); previewCheckerboard(); });
 cbGridLinesThreshold.addEventListener('input', () => { cbGridLinesThresholdVal.textContent = cbGridLinesThreshold.value; previewCheckerboard(); });
+cbGridLinesAction.addEventListener('change', () => { updateCheckerboardGridLinesUI(); previewCheckerboard(); });
+cbGridLinesHealStrength.addEventListener('input', () => { cbGridLinesHealStrengthVal.textContent = cbGridLinesHealStrength.value; previewCheckerboard(); });
 
 cbAllLayers.addEventListener('change', previewCheckerboard);
 
@@ -1103,8 +1110,10 @@ defineAction('edit.filters.checkerboard', {
     cbProtectTolerance.value = '15'; cbProtectToleranceVal.textContent = '15';
     cbProtectSoftness.value = '20'; cbProtectSoftnessVal.textContent = '20';
     cbGridLinesEnabled.checked = false;
-    updateCheckerboardGridLinesUI();
     cbGridLinesThreshold.value = '70'; cbGridLinesThresholdVal.textContent = '70';
+    cbGridLinesAction.value = 'heal';
+    cbGridLinesHealStrength.value = '100'; cbGridLinesHealStrengthVal.textContent = '100';
+    updateCheckerboardGridLinesUI();
     cbGridLinesStatus.textContent = '';
     cbAllLayers.checked = false;
     if (dlgQuantize.open) dlgQuantize.close();

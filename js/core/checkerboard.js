@@ -366,50 +366,166 @@ export function detectGuideLines(bitmaps, colorA, colorB, { tolerance = 18, chro
   };
 }
 
-// Removes (or recolors) confirmed guide-line bands (see detectGuideLines)
-// -- ONLY near-neutral pixels (chroma <= chromaMax) inside a row band
-// (full width, at those y's) or column band (full height, at those x's)
-// are affected; colorful real content is left alone regardless of
-// position, and everything outside the confirmed bands is untouched no
-// matter its color. protectColor works exactly as in
-// checkerboardRemoveBitmap, for the rare case of real near-neutral
-// content (an icon's own grey fill/outline) that happens to fall inside a
-// band.
-export function removeGuideLines(bmp, { rowBands = [], colBands = [], chromaMax = 14, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+function lerpPixel(a, b, t) {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+    Math.round(a[3] + (b[3] - a[3]) * t),
+  ];
+}
+
+// Removes (or heals) confirmed guide-line bands (see detectGuideLines) --
+// ONLY near-neutral pixels (chroma <= chromaMax) inside a row band (full
+// width, at those y's) or column band (full height, at those x's) are
+// affected; colorful real content is left alone regardless of position,
+// and everything outside the confirmed bands is untouched no matter its
+// color.
+//
+// action 'heal' (default): for each affected pixel, look at the nearest
+// opaque pixel just OUTSIDE the band on either side (above/below for a
+// row band, left/right for a column band -- from `bmp` as passed in, i.e.
+// already past the main checkerboard-removal pass) and linearly
+// interpolate across the gap. This only fires when BOTH sides are
+// TRUSTED opaque content -- exactly the case a plain erase used to leave
+// as a visible scratch through a near-neutral icon the guide line
+// happened to cross. Where a guide line crosses the checkerboard
+// background instead, the main pass has already made those flanking
+// pixels transparent, so there's nothing to heal from and it falls back
+// to the same erase/replace behavior as action 'erase'.
+//
+// "Trusted" (pass 1 only, see below) excludes near-neutral pixels that
+// are themselves inside a row OR column band -- at a horizontal/vertical
+// guide crossing, the pixel just outside one band can still be sitting on
+// the OTHER band's own not-yet-resolved raw guide color rather than real
+// background/content, since neither pass has resolved it yet. Trusting it
+// there would blend two guide-line pixels together into a small colored
+// patch instead of leaving what's actually empty checkerboard as
+// transparent. A colorful pixel is always trusted regardless of band
+// membership, since colorful content is never itself guide-line material
+// (see the chromaMax check below).
+//
+// A genuine intersection over real content would then wrongly fall back
+// to erase too, though -- both its row-heal and column-heal neighbors are
+// themselves band pixels, so pass 1 can't tell "background under the
+// other line" apart from "content under the other line" yet. A second
+// pass fixes exactly that ambiguity: it re-attempts healing ONLY for
+// pixels pass 1 left un-healed, this time reading neighbors from pass 1's
+// OWN output instead of the original pixels -- which by now correctly
+// shows either real reconstructed content (if that neighbor turned out to
+// sit over content) or transparency (if it turned out to sit over
+// background), resolving the ambiguity for free.
+//
+// action 'erase': the original behavior, unconditionally -- every
+// affected pixel is erased/replaced regardless of what's on either side.
+// Useful if healing ever guesses wrong, or the guide line's own footprint
+// should just become a hole rather than a reconstruction.
+//
+// protectColor works exactly as in checkerboardRemoveBitmap, scaling how
+// much of whichever result (healed or erased) actually gets applied.
+//
+// healStrength (0-1, default 1): how much of the healed reconstruction to
+// use versus the plain erase/replace result, for pixels that DID find a
+// heal. A linear 2-point interpolation across a short gap can look
+// noticeably smoother/flatter than the dithered or noisy texture of real
+// surrounding content -- visible as a faint clean "seam" right where the
+// guide line was, even though the color itself matches. Turning this down
+// blends that reconstruction toward transparency/replacement instead of
+// forcing it to fully commit, which can read as less conspicuous than a
+// perfectly clean but slightly-too-smooth patch. 1 = full heal (default,
+// same as before this existed); 0 = identical to action 'erase', but only
+// for pixels that found a heal (background-crossing pixels that never had
+// one to begin with are unaffected either way).
+export function removeGuideLines(bmp, { rowBands = [], colBands = [], chromaMax = 14, action = 'heal', healStrength = 1, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
   const { width: w, height: h } = bmp;
   const src = bmp.data;
   const rowHit = new Uint8Array(h);
-  for (const [a, b] of rowBands) for (let y = a; y <= b; y++) rowHit[y] = 1;
+  const rowBandFor = new Int32Array(h).fill(-1);
+  rowBands.forEach(([a, b], idx) => { for (let y = a; y <= b; y++) { rowHit[y] = 1; rowBandFor[y] = idx; } });
   const colHit = new Uint8Array(w);
-  for (const [a, b] of colBands) for (let x = a; x <= b; x++) colHit[x] = 1;
+  const colBandFor = new Int32Array(w).fill(-1);
+  colBands.forEach(([a, b], idx) => { for (let x = a; x <= b; x++) { colHit[x] = 1; colBandFor[x] = idx; } });
+
+  const pixelAt = (source, x, y) => { const i = (y * w + x) * 4; return [source[i], source[i + 1], source[i + 2], source[i + 3]]; };
+  const trustedPass1 = (x, y) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return null;
+    const px = pixelAt(src, x, y);
+    if (px[3] === 0) return null;
+    if (chroma(px[0], px[1], px[2]) > chromaMax) return px;
+    return (rowHit[y] || colHit[x]) ? null : px;
+  };
+
+  function healAttempt(x, y, trustFn) {
+    if (rowHit[y]) {
+      const [a, bEnd] = rowBands[rowBandFor[y]];
+      const above = trustFn(x, a - 1), below = trustFn(x, bEnd + 1);
+      if (above && below) return lerpPixel(above, below, (y - a + 1) / (bEnd - a + 2));
+    }
+    if (colHit[x]) {
+      const [a, bEnd] = colBands[colBandFor[x]];
+      const left = trustFn(a - 1, y), right = trustFn(bEnd + 1, y);
+      if (left && right) return lerpPixel(left, right, (x - a + 1) / (bEnd - a + 2));
+    }
+    return null;
+  }
+
   const data = new Uint8ClampedArray(src);
+  // The plain erase/replace result at the given protectColor strength --
+  // used directly when there's no heal, and as the blend-toward target
+  // when healStrength < 1 for a pixel that DID find one.
+  function fallbackTarget(r, g, b, a, strength) {
+    if (mode === 'transparent') {
+      if (strength >= 1) return [0, 0, 0, 0];
+      const l = luma(r, g, b);
+      return [Math.round(r + (l - r) * strength), Math.round(g + (l - g) * strength), Math.round(b + (l - b) * strength), Math.round(a * (1 - strength))];
+    }
+    return [Math.round(r + (replacementColor[0] - r) * strength), Math.round(g + (replacementColor[1] - g) * strength), Math.round(b + (replacementColor[2] - b) * strength), a];
+  }
+  function applyResult(x, y, r, g, b, a, strength, healed) {
+    const i = (y * w + x) * 4;
+    const fallback = fallbackTarget(r, g, b, a, strength);
+    if (!healed) { data[i] = fallback[0]; data[i + 1] = fallback[1]; data[i + 2] = fallback[2]; data[i + 3] = fallback[3]; return; }
+    const healedApplied = [
+      Math.round(r + (healed[0] - r) * strength),
+      Math.round(g + (healed[1] - g) * strength),
+      Math.round(b + (healed[2] - b) * strength),
+      Math.round(a + (healed[3] - a) * strength),
+    ];
+    const out = healStrength >= 1 ? healedApplied : lerpPixel(fallback, healedApplied, healStrength);
+    data[i] = out[0]; data[i + 1] = out[1]; data[i + 2] = out[2]; data[i + 3] = out[3];
+  }
+
+  const stillNeedsHeal = [];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (!rowHit[y] && !colHit[x]) continue;
       const i = (y * w + x) * 4;
-      if (data[i + 3] === 0) continue;
-      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const a = src[i + 3];
+      if (a === 0) continue;
+      const r = src[i], g = src[i + 1], b = src[i + 2];
       if (chroma(r, g, b) > chromaMax) continue;
       let strength = 1;
       if (protectColor) {
         strength = 1 - matchStrength(r, g, b, protectColor, protectTolerance, protectSoftness);
         if (strength <= 0) continue;
       }
-      if (mode === 'transparent') {
-        if (strength >= 1) { data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0; }
-        else {
-          const l = luma(r, g, b);
-          data[i] = Math.round(r + (l - r) * strength);
-          data[i + 1] = Math.round(g + (l - g) * strength);
-          data[i + 2] = Math.round(b + (l - b) * strength);
-          data[i + 3] = Math.round(data[i + 3] * (1 - strength));
-        }
-      } else {
-        data[i] = Math.round(r + (replacementColor[0] - r) * strength);
-        data[i + 1] = Math.round(g + (replacementColor[1] - g) * strength);
-        data[i + 2] = Math.round(b + (replacementColor[2] - b) * strength);
-      }
+      const healed = action === 'heal' ? healAttempt(x, y, trustedPass1) : null;
+      applyResult(x, y, r, g, b, a, strength, healed);
+      if (action === 'heal' && !healed) stillNeedsHeal.push([x, y, r, g, b, a, strength]);
     }
   }
+
+  if (stillNeedsHeal.length) {
+    const trustedPass2 = (x, y) => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return null;
+      const px = pixelAt(data, x, y);
+      return px[3] === 0 ? null : px;
+    };
+    for (const [x, y, r, g, b, a, strength] of stillNeedsHeal) {
+      const healed = healAttempt(x, y, trustedPass2);
+      if (healed) applyResult(x, y, r, g, b, a, strength, healed);
+    }
+  }
+
   return { width: w, height: h, data };
 }

@@ -286,6 +286,11 @@
     <div id="cb-gridlines-row" hidden>
       <div class="row hint">Detects thin design-grid lines that recur at a regular pixel interval (e.g. sprite-slot dividers) and removes only those exact rows/columns -- everything else is left alone, regardless of color.</div>
       <div class="row"><label>Guide sensitivity <input type="range" id="cb-gridlines-threshold" min="30" max="95" value="70"> <span id="cb-gridlines-threshold-val">70</span>%</label></div>
+      <div class="row"><label>Algorithm <select id="cb-gridlines-action">
+        <option value="heal">Heal (blend across from either side)</option>
+        <option value="erase">Erase (transparent, no reconstruction)</option>
+      </select></label></div>
+      <div class="row" id="cb-gridlines-healstrength-row"><label>Heal strength <input type="range" id="cb-gridlines-healstrength" min="0" max="100" value="100"> <span id="cb-gridlines-healstrength-val">100</span>%</label></div>
       <div id="cb-gridlines-status" class="row hint"></div>
     </div>
     <div class="row"><label><input type="checkbox" id="cb-alllayers"> All layers</label></div>
