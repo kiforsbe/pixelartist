@@ -216,8 +216,8 @@
 </dialog>
 <dialog id="dlg-chromakey" class="dlg-movable">
   <h3>Chroma Key</h3>
-  <div class="row">
-    <label>Key color <input type="color" id="ck-color"> <input type="text" id="ck-color-hex" size="7"></label>
+  <div class="row"><label class="ck-color-field">Key color <input type="color" id="ck-color"> <input type="text" id="ck-color-hex" size="7"></label></div>
+  <div class="row ck-color-actions">
     <button type="button" id="ck-color-primary" class="btn-sm">← Primary</button>
     <button type="button" id="ck-color-secondary" class="btn-sm">← Secondary</button>
   </div>
@@ -225,10 +225,12 @@
     <label><input type="radio" name="ck-mode" id="ck-mode-transparent" checked> Make transparent</label>
     <label><input type="radio" name="ck-mode" id="ck-mode-replace"> Replace with color</label>
   </div>
-  <div class="row" id="ck-replace-row" hidden>
-    <label>Replace with <input type="color" id="ck-replace-color"> <input type="text" id="ck-replace-hex" size="7"></label>
-    <button type="button" id="ck-replace-primary" class="btn-sm">← Primary</button>
-    <button type="button" id="ck-replace-secondary" class="btn-sm">← Secondary</button>
+  <div id="ck-replace-row" hidden>
+    <div class="row"><label class="ck-color-field">Replace with <input type="color" id="ck-replace-color"> <input type="text" id="ck-replace-hex" size="7"></label></div>
+    <div class="row ck-color-actions">
+      <button type="button" id="ck-replace-primary" class="btn-sm">← Primary</button>
+      <button type="button" id="ck-replace-secondary" class="btn-sm">← Secondary</button>
+    </div>
   </div>
   <div class="row"><label>Tolerance <input type="range" id="ck-tolerance" min="0" max="100" value="15"> <span id="ck-tolerance-val">15</span></label></div>
   <div class="row"><label>Softness <input type="range" id="ck-softness" min="0" max="100" value="10"> <span id="ck-softness-val">10</span></label></div>

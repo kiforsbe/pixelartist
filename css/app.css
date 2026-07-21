@@ -128,6 +128,18 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   display: flex; align-items: center; gap: 8px;
   background: var(--bg3); border-bottom: 1px solid var(--border); }
 .dlg-movable h3::before { content: '⋮⋮'; letter-spacing: -2px; opacity: .45; font-size: 13px; }
+/* Chroma Key's color rows (key color / replace color): the label wraps a
+   text prompt plus a color swatch plus a hex field, all of which need to
+   stay on one line -- display: inline-flex (instead of a plain <label>'s
+   default inline layout) stops the hex field from wrapping onto its own
+   line when the row is narrow, which otherwise leaves it visually
+   orphaned below the swatch it belongs to. The quick-set buttons live in
+   their own row underneath (.ck-color-actions) rather than crammed onto
+   the same line as the color inputs, which was the main source of the
+   cramped wrapping this whole block exists to fix. */
+#dlg-chromakey { width: 360px; }
+.ck-color-field { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ck-color-actions { margin-top: -2px; }
 /* Settings dialogs can grow past the viewport as fields get added over
    time (Project Settings especially) -- cap the dialog's own height and
    let its tab pages scroll internally, so the header (title/tabs) and
