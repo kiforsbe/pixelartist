@@ -39,7 +39,7 @@ import { mountTileEditor } from '../ui/tileeditor.js';
 import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection, currentEditRegion } from '../ui/floatsession.js';
 import { defineAction, runAction, bindAction } from './actions.js';
 import { mountMenuBar } from '../ui/menubar.js';
-import { markDefaultAction } from '../ui/dialogs.js';
+import { markDefaultAction, makeDialogMovable, centerDialog, closeOnEscape } from '../ui/dialogs.js';
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -507,6 +507,7 @@ const qzAllLayers = document.getElementById('qz-alllayers');
 const qzOk = document.getElementById('qz-ok');
 const qzCancel = document.getElementById('qz-cancel');
 markDefaultAction(dlgQuantize, qzOk);
+makeDialogMovable(dlgQuantize, dlgQuantize.querySelector('h3'));
 
 function updateQuantizeModeUI() {
   const isCount = qzModeCount.checked;
@@ -582,12 +583,20 @@ defineAction('edit.filters.quantizeToPalette', {
     updateQuantizeModeUI();
     qzAllLayers.checked = false;
     qzPreferOpaque.checked = false;
+    // Both filter dialogs are non-modal and share the Preview panel --
+    // having both open at once would be confusing (whichever dialog's
+    // control was touched last "wins" the preview), so opening one closes
+    // the other.
+    if (dlgChromaKey.open) dlgChromaKey.close();
     previewQuantize();
-    dlgQuantize.showModal();
+    dlgQuantize.show();
+    if (!dlgQuantize.style.left) centerDialog(dlgQuantize);
   },
   isEnabled: () => !!activeLayer(),
 });
-qzCancel.addEventListener('click', () => { refreshPreviewPanel(); dlgQuantize.close(); });
+function cancelQuantizeDialog() { refreshPreviewPanel(); dlgQuantize.close(); }
+qzCancel.addEventListener('click', cancelQuantizeDialog);
+closeOnEscape(dlgQuantize, cancelQuantizeDialog);
 qzOk.addEventListener('click', () => {
   refreshPreviewPanel();
   if (qzModeCount.checked) {
@@ -655,6 +664,7 @@ const ckAllLayers = document.getElementById('ck-alllayers');
 const ckOk = document.getElementById('ck-ok');
 const ckCancel = document.getElementById('ck-cancel');
 markDefaultAction(dlgChromaKey, ckOk);
+makeDialogMovable(dlgChromaKey, dlgChromaKey.querySelector('h3'));
 
 function setColorInputs(colorEl, hexEl, rgb) {
   hexEl.value = rgbaToHex(rgb);
@@ -721,12 +731,16 @@ defineAction('edit.filters.chromaKey', {
     ckTolerance.value = '15'; ckToleranceVal.textContent = '15';
     ckSoftness.value = '10'; ckSoftnessVal.textContent = '10';
     ckAllLayers.checked = false;
+    if (dlgQuantize.open) dlgQuantize.close();
     previewChromaKey();
-    dlgChromaKey.showModal();
+    dlgChromaKey.show();
+    if (!dlgChromaKey.style.left) centerDialog(dlgChromaKey);
   },
   isEnabled: () => !!activeLayer(),
 });
-ckCancel.addEventListener('click', () => { refreshPreviewPanel(); dlgChromaKey.close(); });
+function cancelChromaKeyDialog() { refreshPreviewPanel(); dlgChromaKey.close(); }
+ckCancel.addEventListener('click', cancelChromaKeyDialog);
+closeOnEscape(dlgChromaKey, cancelChromaKeyDialog);
 ckOk.addEventListener('click', () => {
   refreshPreviewPanel();
   const params = currentChromaKeyParams();
