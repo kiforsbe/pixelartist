@@ -21,7 +21,7 @@ import { zipWrite } from '../core/zip.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../core/pixels.js';
 import { quantizeBitmapToPalette } from '../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../core/chromakey.js';
-import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize } from '../core/checkerboard.js';
+import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../core/checkerboard.js';
 import { rgbaToHex, hexToRgb } from '../ui/panels.js';
 import { SYSTEM_PALETTES } from '../core/systempalettes.js';
 import { collectProjectExportEntries } from './projectExport.js';
@@ -891,14 +891,35 @@ function checkerboardRegionAndLayers(allLayers) {
 
 // Pure compute half, mirroring computeChromaKeyPatches -- shared by the
 // real commit (commitCheckerboard) and the dialog's live preview.
+//
+// When params.guideLines is set, a second pass runs after the main
+// checkerboard removal: detectGuideLines looks for thin design-grid lines
+// that recur at a regular pixel interval (see js/core/checkerboard.js's
+// own note on why these need positional, not color, detection), using the
+// ORIGINAL (pre-removal) pixels -- once the main pass has already turned
+// checker cells transparent, the "is this near-neutral and NOT
+// colorA/colorB" comparison detection depends on no longer means anything.
+// removeGuideLines then only touches pixels inside the confirmed bands.
 function computeCheckerboardPatches(params, allLayers) {
   const rl = checkerboardRegionAndLayers(allLayers);
   if (!rl) return null;
   const { region, layers } = rl;
   const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
-  const patches = layers.map((l, i) => ({ layer: l, before: befores[i], after: checkerboardRemoveBitmap(befores[i], params) }))
+  let rowBands = [], colBands = [];
+  if (params.guideLines && befores.length) {
+    ({ rowBands, colBands } = detectGuideLines(befores, params.colorA, params.colorB, { threshold: params.guideLines.threshold }));
+  }
+  const afters = befores.map(before => {
+    const after = checkerboardRemoveBitmap(before, params);
+    if (!rowBands.length && !colBands.length) return after;
+    return removeGuideLines(after, {
+      rowBands, colBands, mode: params.mode, replacementColor: params.replacementColor,
+      protectColor: params.protectColor, protectTolerance: params.protectTolerance, protectSoftness: params.protectSoftness,
+    });
+  });
+  const patches = layers.map((l, i) => ({ layer: l, before: befores[i], after: afters[i] }))
     .filter(p => !bitmapsEqual(p.before, p.after));
-  return { region, patches, befores };
+  return { region, patches, befores, guideLineBands: { rowBands, colBands } };
 }
 
 function commitCheckerboard(params, allLayers) {
@@ -945,6 +966,11 @@ const cbProtectTolerance = document.getElementById('cb-protect-tolerance');
 const cbProtectToleranceVal = document.getElementById('cb-protect-tolerance-val');
 const cbProtectSoftness = document.getElementById('cb-protect-softness');
 const cbProtectSoftnessVal = document.getElementById('cb-protect-softness-val');
+const cbGridLinesEnabled = document.getElementById('cb-gridlines-enabled');
+const cbGridLinesRow = document.getElementById('cb-gridlines-row');
+const cbGridLinesThreshold = document.getElementById('cb-gridlines-threshold');
+const cbGridLinesThresholdVal = document.getElementById('cb-gridlines-threshold-val');
+const cbGridLinesStatus = document.getElementById('cb-gridlines-status');
 const cbAllLayers = document.getElementById('cb-alllayers');
 const cbOk = document.getElementById('cb-ok');
 const cbCancel = document.getElementById('cb-cancel');
@@ -964,11 +990,21 @@ function currentCheckerboardParams() {
     protectColor: cbProtectEnabled.checked ? hexToRgb(cbProtectColor.value) : null,
     protectTolerance: Number(cbProtectTolerance.value),
     protectSoftness: Number(cbProtectSoftness.value),
+    guideLines: cbGridLinesEnabled.checked ? { threshold: Number(cbGridLinesThreshold.value) / 100 } : null,
   };
 }
 
 function previewCheckerboard() {
-  pushLivePreview(computeCheckerboardPatches(currentCheckerboardParams(), cbAllLayers.checked));
+  const result = computeCheckerboardPatches(currentCheckerboardParams(), cbAllLayers.checked);
+  pushLivePreview(result);
+  if (cbGridLinesEnabled.checked) {
+    const { rowBands, colBands } = result?.guideLineBands ?? { rowBands: [], colBands: [] };
+    cbGridLinesStatus.textContent = (rowBands.length || colBands.length)
+      ? `Found ${rowBands.length} horizontal, ${colBands.length} vertical guide line(s).`
+      : 'No regularly-spaced guide lines found.';
+  } else {
+    cbGridLinesStatus.textContent = '';
+  }
 }
 
 // Re-samples the current region's pixels and re-runs detectCheckerboardColors
@@ -977,6 +1013,9 @@ function previewCheckerboard() {
 // guess a cell size by hand. Silently no-ops (mirrors the rest of this
 // dialog's error handling) when there's no region or no confident color
 // pair -- the user's existing manual values are left alone either way.
+// (Guide-line detection needs no manual color input at all -- it's purely
+// positional, see computeCheckerboardPatches/detectGuideLines -- so there's
+// nothing for Auto-detect to fill in for it beyond re-running the preview.)
 cbAutodetect.addEventListener('click', () => {
   const rl = checkerboardRegionAndLayers(cbAllLayers.checked);
   if (!rl) return;
@@ -1038,6 +1077,12 @@ cbProtectSecondary.addEventListener('click', () => { setColorInputs(cbProtectCol
 cbProtectTolerance.addEventListener('input', () => { cbProtectToleranceVal.textContent = cbProtectTolerance.value; previewCheckerboard(); });
 cbProtectSoftness.addEventListener('input', () => { cbProtectSoftnessVal.textContent = cbProtectSoftness.value; previewCheckerboard(); });
 
+function updateCheckerboardGridLinesUI() {
+  cbGridLinesRow.hidden = !cbGridLinesEnabled.checked;
+}
+cbGridLinesEnabled.addEventListener('change', () => { updateCheckerboardGridLinesUI(); previewCheckerboard(); });
+cbGridLinesThreshold.addEventListener('input', () => { cbGridLinesThresholdVal.textContent = cbGridLinesThreshold.value; previewCheckerboard(); });
+
 cbAllLayers.addEventListener('change', previewCheckerboard);
 
 defineAction('edit.filters.checkerboard', {
@@ -1057,6 +1102,10 @@ defineAction('edit.filters.checkerboard', {
     setColorInputs(cbProtectColor, cbProtectHex, [0, 0, 0]);
     cbProtectTolerance.value = '15'; cbProtectToleranceVal.textContent = '15';
     cbProtectSoftness.value = '20'; cbProtectSoftnessVal.textContent = '20';
+    cbGridLinesEnabled.checked = false;
+    updateCheckerboardGridLinesUI();
+    cbGridLinesThreshold.value = '70'; cbGridLinesThresholdVal.textContent = '70';
+    cbGridLinesStatus.textContent = '';
     cbAllLayers.checked = false;
     if (dlgQuantize.open) dlgQuantize.close();
     if (dlgChromaKey.open) dlgChromaKey.close();

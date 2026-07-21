@@ -146,6 +146,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
    dialog -- block display drops the few stray px of inline-baseline gap
    a bare <canvas> otherwise leaves beneath itself. */
 .ck-histogram { display: block; width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; }
+.hint { font-size: 12px; color: #9a9ca8; }
 /* Settings dialogs can grow past the viewport as fields get added over
    time (Project Settings especially) -- cap the dialog's own height and
    let its tab pages scroll internally, so the header (title/tabs) and

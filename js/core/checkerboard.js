@@ -124,9 +124,8 @@ function boxSum(sat, w, h, cx, cy, radius) {
 // `tolerance` (mirrors chromaKeyBitmap's own matchStrength). Feathering
 // this instead of using a hard cutoff is what lets a pixel just outside
 // the strict tolerance -- a common spot for the anti-aliased seam between
-// two checker cells, or between a checker cell and a design grid line --
-// fade out gracefully instead of surviving at full opacity as a stray
-// pixel.
+// two checker cells -- fade out gracefully instead of surviving at full
+// opacity as a stray pixel.
 function matchStrength(r, g, b, color, tolerance, softness) {
   const dist = channelDist(r, g, b, color);
   if (dist <= tolerance) return 1;
@@ -154,10 +153,13 @@ function matchStrength(r, g, b, color, tolerance, softness) {
 // strength before it's applied, instead of overriding it outright -- the
 // same shielding mechanism chromaKeyBitmap uses for outline protection.
 // This is what makes it safe to push tolerance/softness aggressively
-// enough to also sweep up stray design-grid lines or anti-aliasing seams
-// that sit between the two checker colors: point protectColor at the
-// sprites' own outline/fill color and those pixels get shielded instead of
-// eaten alongside the background.
+// enough to also sweep up anti-aliasing seams that sit between the two
+// checker colors: point protectColor at the sprites' own outline/fill
+// color and those pixels get shielded instead of eaten alongside the
+// background. (Distinct, periodic design-grid guide lines are a separate
+// concern -- see detectGuideLines/removeGuideLines below; they're not a
+// color near colorA/colorB at all, so widening tolerance/softness here
+// can't reach them, and shouldn't try to.)
 //
 // mode 'transparent': full-strength match zeroes RGBA (mirrors the eraser
 // tool's convention); a partial match scales alpha down by (1 - strength)
@@ -214,6 +216,199 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
       data[i] = Math.round(r + (replacementColor[0] - r) * strength);
       data[i + 1] = Math.round(g + (replacementColor[1] - g) * strength);
       data[i + 2] = Math.round(b + (replacementColor[2] - b) * strength);
+    }
+  }
+  return { width: w, height: h, data };
+}
+
+// ---- design-grid guide lines -----------------------------------------
+//
+// Some sheets have thin slot/grid guide lines baked in ON TOP of the
+// checkerboard, at a regular pixel interval (e.g. every 57px, marking
+// sprite-cell boundaries) -- visually a "grid", but NOT one flat color:
+// a guide line is itself semi-transparent/blended over whichever checker
+// cell happens to sit underneath at that point, so its apparent color
+// varies with the checker phase and can range broadly (confirmed against
+// a real file: neighboring guide pixels measured anywhere from ~90 to
+// ~190 in luma). Matching it by color at all -- even with a wide
+// tolerance -- either misses most of the line or starts eating real
+// content of a similar shade. What actually identifies a guide line has
+// nothing to do with its color: it's a thin band that recurs at a
+// consistent spacing. So this detects PURELY by position: which rows/
+// columns are anomalously non-checker, and among those, which ones repeat
+// at a regular interval -- then removal only touches near-neutral pixels
+// inside the confirmed bands, leaving everything else in the image
+// (including the checkerboard's own ordinary per-cell antialiasing noise,
+// and all real content) untouched.
+
+// Fraction, per row (axis='row') or column (axis='col'), of near-neutral
+// opaque pixels that DON'T match colorA or colorB -- i.e. how much of that
+// row/column looks like "not the checkerboard" among the pixels where
+// that comparison is meaningful (colorful real content is excluded from
+// both the numerator and denominator, so a row through dense, colorful
+// art doesn't read as deviant just for being colorful). Positions with
+// too little near-neutral coverage to judge (mostly transparent, or
+// mostly colorful content) get -1, treated as "not deviant" everywhere
+// this is consumed.
+function axisDeviation(bitmaps, colorA, colorB, axis, { tolerance = 18, chromaMax = 14, minCoverage = 0.5 } = {}) {
+  const { width: w, height: h } = bitmaps[0];
+  const length = axis === 'row' ? h : w;
+  const span = axis === 'row' ? w : h;
+  const dev = new Float64Array(length).fill(-1);
+  for (let pos = 0; pos < length; pos++) {
+    let neutral = 0, deviant = 0;
+    for (const bmp of bitmaps) {
+      const d = bmp.data;
+      for (let o = 0; o < span; o++) {
+        const x = axis === 'row' ? o : pos, y = axis === 'row' ? pos : o;
+        const i = (y * w + x) * 4;
+        if (d[i + 3] === 0) continue;
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (chroma(r, g, b) > chromaMax) continue;
+        neutral++;
+        if (channelDist(r, g, b, colorA) > tolerance && channelDist(r, g, b, colorB) > tolerance) deviant++;
+      }
+    }
+    if (neutral >= span * minCoverage) dev[pos] = deviant / neutral;
+  }
+  return dev;
+}
+
+// Groups consecutive positions whose deviation clears `threshold` into
+// [start,end] bands (inclusive), skipping the -1 "not enough coverage"
+// sentinel same as anything below threshold.
+function bandsFromDeviation(dev, threshold) {
+  const bands = [];
+  let start = null;
+  for (let i = 0; i < dev.length; i++) {
+    const hit = dev[i] >= threshold;
+    if (hit && start === null) start = i;
+    if (!hit && start !== null) { bands.push([start, i - 1]); start = null; }
+  }
+  if (start !== null) bands.push([start, dev.length - 1]);
+  return bands;
+}
+
+// Finds the most common spacing between EVERY pair of band centers (not
+// just consecutive ones) -- a true period shows up far more often than
+// any incidental spacing, because it also matches every multiple of
+// itself (period, 2x, 3x, ...), whereas one-off content-heavy bands only
+// contribute noise scattered across many different spacing values. Ties
+// are broken toward the SMALLEST spacing bin (found first, since bins
+// are scanned in increasing order below), which favors the base period
+// over its own harmonics when both happen to tie. Requires at least 2
+// pairs agreeing to avoid calling a single coincidence a "period".
+function estimatePeriod(centers, minPeriod) {
+  const bins = new Map();
+  for (let i = 0; i < centers.length; i++) {
+    for (let j = i + 1; j < centers.length; j++) {
+      const d = centers[j] - centers[i];
+      if (d < minPeriod) continue;
+      const bin = Math.round(d / 3) * 3;
+      bins.set(bin, (bins.get(bin) ?? 0) + 1);
+    }
+  }
+  let bestBin = null, bestCount = 0;
+  for (const bin of [...bins.keys()].sort((a, b) => a - b)) {
+    const count = bins.get(bin);
+    if (count > bestCount) { bestCount = count; bestBin = bin; }
+  }
+  return bestCount >= 2 ? bestBin : null;
+}
+
+// Finds the phase offset (0..period-1) that the most band centers sit
+// closest to, modulo period -- i.e. where the grid "starts".
+function snapPhase(centers, period) {
+  let bestOffset = 0, bestScore = -1;
+  for (let offset = 0; offset < period; offset++) {
+    let score = 0;
+    for (const c of centers) {
+      const rem = ((c - offset) % period + period) % period;
+      if (Math.min(rem, period - rem) <= 3) score++;
+    }
+    if (score > bestScore) { bestScore = score; bestOffset = offset; }
+  }
+  return bestOffset;
+}
+
+// Filters raw deviation bands down to only the ones consistent with a
+// confidently-detected period -- rejects one-off rows/columns that just
+// happen to be non-checker (e.g. a row that cuts through dense real
+// content) without a repeating partner. Requires at least 3 raw bands to
+// even attempt a period estimate (two points always trivially "agree").
+function confirmPeriodicBands(bandsRaw, minPeriod) {
+  if (bandsRaw.length < 3) return [];
+  const centers = bandsRaw.map(([a, b]) => (a + b) / 2);
+  const period = estimatePeriod(centers, minPeriod);
+  if (!period) return [];
+  const offset = snapPhase(centers, period);
+  const tolerance = Math.max(3, period * 0.15);
+  return bandsRaw.filter(([a, b]) => {
+    const c = (a + b) / 2;
+    const rem = ((c - offset) % period + period) % period;
+    return Math.min(rem, period - rem) <= tolerance;
+  });
+}
+
+// Detects periodic design-grid guide lines independently on each axis.
+// windowRadius isn't used here (guide lines don't need a checker-cell-
+// sized search window, unlike the main removal pass) -- minPeriod is the
+// shortest spacing worth considering a "grid" rather than checkerboard-
+// scale noise, and should generally stay well above the checker's own
+// cell size. Returns { rowBands, colBands }, each a (possibly empty)
+// array of [start,end] pixel ranges.
+export function detectGuideLines(bitmaps, colorA, colorB, { tolerance = 18, chromaMax = 14, threshold = 0.7, minCoverage = 0.5, minPeriod = 20 } = {}) {
+  const rowDev = axisDeviation(bitmaps, colorA, colorB, 'row', { tolerance, chromaMax, minCoverage });
+  const colDev = axisDeviation(bitmaps, colorA, colorB, 'col', { tolerance, chromaMax, minCoverage });
+  return {
+    rowBands: confirmPeriodicBands(bandsFromDeviation(rowDev, threshold), minPeriod),
+    colBands: confirmPeriodicBands(bandsFromDeviation(colDev, threshold), minPeriod),
+  };
+}
+
+// Removes (or recolors) confirmed guide-line bands (see detectGuideLines)
+// -- ONLY near-neutral pixels (chroma <= chromaMax) inside a row band
+// (full width, at those y's) or column band (full height, at those x's)
+// are affected; colorful real content is left alone regardless of
+// position, and everything outside the confirmed bands is untouched no
+// matter its color. protectColor works exactly as in
+// checkerboardRemoveBitmap, for the rare case of real near-neutral
+// content (an icon's own grey fill/outline) that happens to fall inside a
+// band.
+export function removeGuideLines(bmp, { rowBands = [], colBands = [], chromaMax = 14, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+  const { width: w, height: h } = bmp;
+  const src = bmp.data;
+  const rowHit = new Uint8Array(h);
+  for (const [a, b] of rowBands) for (let y = a; y <= b; y++) rowHit[y] = 1;
+  const colHit = new Uint8Array(w);
+  for (const [a, b] of colBands) for (let x = a; x <= b; x++) colHit[x] = 1;
+  const data = new Uint8ClampedArray(src);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!rowHit[y] && !colHit[x]) continue;
+      const i = (y * w + x) * 4;
+      if (data[i + 3] === 0) continue;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (chroma(r, g, b) > chromaMax) continue;
+      let strength = 1;
+      if (protectColor) {
+        strength = 1 - matchStrength(r, g, b, protectColor, protectTolerance, protectSoftness);
+        if (strength <= 0) continue;
+      }
+      if (mode === 'transparent') {
+        if (strength >= 1) { data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0; }
+        else {
+          const l = luma(r, g, b);
+          data[i] = Math.round(r + (l - r) * strength);
+          data[i + 1] = Math.round(g + (l - g) * strength);
+          data[i + 2] = Math.round(b + (l - b) * strength);
+          data[i + 3] = Math.round(data[i + 3] * (1 - strength));
+        }
+      } else {
+        data[i] = Math.round(r + (replacementColor[0] - r) * strength);
+        data[i + 1] = Math.round(g + (replacementColor[1] - g) * strength);
+        data[i + 2] = Math.round(b + (replacementColor[2] - b) * strength);
+      }
     }
   }
   return { width: w, height: h, data };

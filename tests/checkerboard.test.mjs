@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize } from '../js/core/checkerboard.js';
+import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../js/core/checkerboard.js';
 
 // Builds a w x h bitmap that's a checkerboard of `cell`-px squares
 // alternating colorA/colorB, with an opaque solid-colored rect of `fill`
@@ -152,4 +152,123 @@ test('checkerboardRemoveBitmap: protectColor shields real content even when tole
     protectColor: [150, 150, 150], protectTolerance: 20, protectSoftness: 0,
   });
   assert.deepEqual([protectedOut.data[lineIdx], protectedOut.data[lineIdx + 1], protectedOut.data[lineIdx + 2], protectedOut.data[lineIdx + 3]], [150, 150, 150, 255]);
+});
+
+// Draws full-span guide lines into an existing checker bitmap at the given
+// row (axis='row') or column (axis='col') positions. `colorAt(index)` lets
+// a test vary each line's color slightly, simulating a guide line that's
+// actually a blend with whatever checker cell sits underneath at each
+// point (see detectGuideLines's own note on why this varies in practice).
+function drawGuideLines(bmp, axis, positions, colorAt) {
+  const { width: w, height: h, data } = bmp;
+  positions.forEach((pos, idx) => {
+    const color = colorAt(idx);
+    if (axis === 'row') {
+      if (pos < 0 || pos >= h) return;
+      for (let x = 0; x < w; x++) { const i = (pos * w + x) * 4; data[i] = color[0]; data[i + 1] = color[1]; data[i + 2] = color[2]; data[i + 3] = 255; }
+    } else {
+      if (pos < 0 || pos >= w) return;
+      for (let y = 0; y < h; y++) { const i = (y * w + pos) * 4; data[i] = color[0]; data[i + 1] = color[1]; data[i + 2] = color[2]; data[i + 3] = 255; }
+    }
+  });
+}
+
+test('detectGuideLines: finds horizontal guide lines recurring at a regular interval, without being told the period', () => {
+  const w = 200, h = 200;
+  const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
+  const positions = [10, 50, 90, 130, 170]; // period 40
+  drawGuideLines(bmp, 'row', positions, () => [150, 150, 150]);
+
+  const { rowBands, colBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
+  assert.equal(colBands.length, 0);
+  assert.equal(rowBands.length, positions.length);
+  const foundYs = rowBands.map(([a, b]) => Math.round((a + b) / 2)).sort((a, b) => a - b);
+  assert.deepEqual(foundYs, positions);
+});
+
+test('detectGuideLines: tolerates per-line color variance (simulating a guide blended with whatever checker cell is underneath) via chroma/tolerance matching, not exact color', () => {
+  const w = 200, h = 200;
+  const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
+  const positions = [10, 50, 90, 130, 170];
+  // Each line is a visibly different grey -- no single exact color to match.
+  const shades = [[130, 130, 130], [150, 150, 150], [170, 170, 170], [140, 140, 140], [160, 160, 160]];
+  drawGuideLines(bmp, 'row', positions, (idx) => shades[idx]);
+
+  const { rowBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
+  const foundYs = rowBands.map(([a, b]) => Math.round((a + b) / 2)).sort((a, b) => a - b);
+  assert.deepEqual(foundYs, positions);
+});
+
+test('detectGuideLines: does not treat a single one-off non-checker row as a periodic guide', () => {
+  const w = 150, h = 150;
+  const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
+  drawGuideLines(bmp, 'row', [75], () => [150, 150, 150]); // just one row, no repetition
+  const { rowBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
+  assert.equal(rowBands.length, 0);
+});
+
+test('detectGuideLines: a row of dense colorful content is not mistaken for a guide line', () => {
+  const w = 200, h = 200;
+  const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
+  // A saturated (non-neutral) full-width stripe -- real content, not a grey guide.
+  for (let x = 0; x < w; x++) {
+    const i = (75 * w + x) * 4;
+    bmp.data[i] = 200; bmp.data[i + 1] = 40; bmp.data[i + 2] = 40; bmp.data[i + 3] = 255;
+  }
+  const { rowBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
+  assert.equal(rowBands.length, 0);
+});
+
+test('removeGuideLines: erases confirmed guide-line pixels but leaves colorful content crossing the same row untouched, and leaves everything outside the band alone', () => {
+  const w = 200, h = 200;
+  const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
+  const positions = [10, 50, 90, 130, 170];
+  drawGuideLines(bmp, 'row', positions, () => [150, 150, 150]);
+  // A colorful icon pixel that happens to sit ON one of the guide rows.
+  const contentIdx = (50 * w + 100) * 4;
+  bmp.data[contentIdx] = 200; bmp.data[contentIdx + 1] = 40; bmp.data[contentIdx + 2] = 40; bmp.data[contentIdx + 3] = 255;
+
+  const { rowBands, colBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
+  const out = removeGuideLines(bmp, { rowBands, colBands });
+
+  // Guide-line pixel: gone.
+  const lineIdx = (10 * w + 20) * 4;
+  assert.deepEqual([out.data[lineIdx], out.data[lineIdx + 1], out.data[lineIdx + 2], out.data[lineIdx + 3]], [0, 0, 0, 0]);
+  // Colorful content on the same row: untouched.
+  assert.deepEqual([out.data[contentIdx], out.data[contentIdx + 1], out.data[contentIdx + 2], out.data[contentIdx + 3]], [200, 40, 40, 255]);
+  // A row between guide lines: byte-identical to the source (checker, untouched).
+  const betweenIdx = (30 * w + 20) * 4;
+  assert.deepEqual([out.data[betweenIdx], out.data[betweenIdx + 1], out.data[betweenIdx + 2], out.data[betweenIdx + 3]], [bmp.data[betweenIdx], bmp.data[betweenIdx + 1], bmp.data[betweenIdx + 2], bmp.data[betweenIdx + 3]]);
+});
+
+test('removeGuideLines: protectColor shields real near-neutral content that happens to fall inside a confirmed band', () => {
+  const w = 200, h = 200;
+  const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
+  const positions = [10, 50, 90, 130, 170];
+  drawGuideLines(bmp, 'row', positions, () => [150, 150, 150]);
+  // A grey icon pixel sitting on a guide row -- e.g. a stone-tile icon's own fill color.
+  const iconIdx = (90 * w + 60) * 4;
+  bmp.data[iconIdx] = 110; bmp.data[iconIdx + 1] = 110; bmp.data[iconIdx + 2] = 110; bmp.data[iconIdx + 3] = 255;
+
+  const { rowBands, colBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
+  const withoutProtect = removeGuideLines(bmp, { rowBands, colBands });
+  assert.deepEqual([withoutProtect.data[iconIdx], withoutProtect.data[iconIdx + 1], withoutProtect.data[iconIdx + 2], withoutProtect.data[iconIdx + 3]], [0, 0, 0, 0]);
+
+  const withProtect = removeGuideLines(bmp, { rowBands, colBands, protectColor: [110, 110, 110], protectTolerance: 10, protectSoftness: 0 });
+  assert.deepEqual([withProtect.data[iconIdx], withProtect.data[iconIdx + 1], withProtect.data[iconIdx + 2], withProtect.data[iconIdx + 3]], [110, 110, 110, 255]);
+});
+
+test('detectGuideLines + removeGuideLines: works on both axes at once', () => {
+  const w = 200, h = 200;
+  const bmp = checkerBitmap(w, h, 8, [255, 255, 255], [192, 192, 192]);
+  drawGuideLines(bmp, 'row', [10, 50, 90, 130, 170], () => [150, 150, 150]);
+  drawGuideLines(bmp, 'col', [15, 55, 95, 135, 175], () => [160, 160, 160]);
+
+  const { rowBands, colBands } = detectGuideLines([bmp], [255, 255, 255], [192, 192, 192]);
+  assert.equal(rowBands.length, 5);
+  assert.equal(colBands.length, 5);
+  const out = removeGuideLines(bmp, { rowBands, colBands });
+  const rowIdx = (10 * w + 60) * 4, colIdx = (60 * w + 15) * 4;
+  assert.equal(out.data[rowIdx + 3], 0);
+  assert.equal(out.data[colIdx + 3], 0);
 });
