@@ -99,17 +99,18 @@ function render(overrideLayers = null) {
     // An animation is selected: timeline.js owns the canvas (playhead frame,
     // pushed via setPreviewBitmap on every scrub/tick) -- don't fight it.
     if (state.selectedAnimationId) return;
+    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
     const frameId = state.editingFrameId ?? state.selectedFrameId;
     const frame = sheet.frames.find(f => f.id === frameId);
-    if (!frame) { setPreviewBitmap(null); return; }
-    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
-    setPreviewBitmap(copyRegion(flat, frame.x, frame.y, frame.w, frame.h));
+    // No frame selected/being edited: fall back to the whole sheet rather
+    // than showing nothing -- most useful while editing whole-sheet content
+    // (e.g. a filter dialog's live preview with no frame selected).
+    setPreviewBitmap(frame ? copyRegion(flat, frame.x, frame.y, frame.w, frame.h) : flat);
   } else {
+    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
     const tileId = state.editingTileId ?? state.selectedTileId;
     const tile = sheet.tiles.find(t => t.id === tileId);
-    if (!tile) { setPreviewBitmap(null); return; }
-    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
-    setPreviewBitmap(copyRegion(flat, tile.x, tile.y, tile.w, tile.h));
+    setPreviewBitmap(tile ? copyRegion(flat, tile.x, tile.y, tile.w, tile.h) : flat);
   }
 }
 
