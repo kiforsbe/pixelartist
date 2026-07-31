@@ -672,6 +672,7 @@ const ckSoftness = document.getElementById('ck-softness');
 const ckSoftnessVal = document.getElementById('ck-softness-val');
 const ckKeyHistogramCanvas = document.getElementById('ck-key-histogram');
 const ckBackgroundOnly = document.getElementById('ck-background-only');
+const ckPreserveSoftShadows = document.getElementById('ck-preserve-soft-shadows');
 const ckProtectEnabled = document.getElementById('ck-protect-enabled');
 const ckProtectRow = document.getElementById('ck-protect-row');
 const ckProtectColor = document.getElementById('ck-protect-color');
@@ -707,6 +708,7 @@ function currentChromaKeyParams() {
     mode: ckModeReplace.checked ? 'replace' : (ckModeDespill.checked ? 'despill' : 'transparent'),
     replacementColor: hexToRgb(ckReplaceColor.value),
     backgroundOnly: ckBackgroundOnly.checked,
+    preserveSoftShadows: ckPreserveSoftShadows.checked,
     protectColor: ckProtectEnabled.checked ? hexToRgb(ckProtectColor.value) : null,
     protectTolerance: Number(ckProtectTolerance.value),
     protectSoftness: Number(ckProtectSoftness.value),
@@ -824,6 +826,7 @@ ckModeDespill.addEventListener('change', () => { updateChromaKeyModeUI(); previe
 ckTolerance.addEventListener('input', () => { ckToleranceVal.textContent = ckTolerance.value; previewChromaKey(); drawChromaKeyHistograms(); });
 ckSoftness.addEventListener('input', () => { ckSoftnessVal.textContent = ckSoftness.value; previewChromaKey(); drawChromaKeyHistograms(); });
 ckBackgroundOnly.addEventListener('change', previewChromaKey);
+ckPreserveSoftShadows.addEventListener('change', previewChromaKey);
 
 function updateChromaKeyProtectUI() {
   ckProtectRow.hidden = !ckProtectEnabled.checked;
@@ -853,6 +856,7 @@ defineAction('edit.filters.chromaKey', {
     ckTolerance.value = '15'; ckToleranceVal.textContent = '15';
     ckSoftness.value = '10'; ckSoftnessVal.textContent = '10';
     ckBackgroundOnly.checked = true;
+    ckPreserveSoftShadows.checked = true;
     ckProtectEnabled.checked = false;
     updateChromaKeyProtectUI();
     setColorInputs(ckProtectColor, ckProtectHex, [0, 0, 0]);

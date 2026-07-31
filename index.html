@@ -238,6 +238,7 @@
     <div class="row"><label>Softness <input type="range" id="ck-softness" min="0" max="100" value="10"> <span id="ck-softness-val">10</span></label></div>
     <div class="row"><canvas id="ck-key-histogram" class="ck-histogram" width="328" height="48"></canvas></div>
     <div class="row"><label title="Only remove key-like pixels connected to the selection or canvas edge. Turn off to key all matching pixels, including enclosed holes."><input type="checkbox" id="ck-background-only" checked> Background only (edge-connected)</label></div>
+    <div class="row"><label title="In Make transparent + Background only mode, Softness also follows the key hue through dark shadows. It removes their background share, leaving a decontaminated translucent shadow instead of opaque grey."><input type="checkbox" id="ck-preserve-soft-shadows" checked> Preserve soft shadows</label></div>
     <div class="row"><label title="Protect an intentionally key-colored art detail, especially one that touches the edge-connected background."><input type="checkbox" id="ck-protect-enabled"> Protect a color</label></div>
     <div id="ck-protect-row" hidden>
       <div class="row"><label class="ck-color-field">Protect color <input type="color" id="ck-protect-color"> <input type="text" id="ck-protect-hex" size="7"></label></div>

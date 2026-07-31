@@ -64,8 +64,7 @@ export function percentToRadius(percent) {
 // 1 inside `tolerance`, 0 beyond `tolerance + softness`, linear falloff
 // between the two -- softness === 0 collapses this to a hard cutoff at
 // `tolerance`. Both bounds go through percentToRadius, see its own note.
-function matchStrength(r, g, b, keyColor, tolerance, softness) {
-  const dist = colorDistance(r, g, b, keyColor);
+function strengthAtDistance(dist, tolerance, softness) {
   const matchDist = percentToRadius(tolerance);
   if (dist <= matchDist) return 1;
   const softDist = percentToRadius(softness);
@@ -73,6 +72,36 @@ function matchStrength(r, g, b, keyColor, tolerance, softness) {
   const edge = matchDist + softDist;
   if (dist >= edge) return 0;
   return (edge - dist) / softDist;
+}
+
+function matchStrength(r, g, b, keyColor, tolerance, softness) {
+  return strengthAtDistance(colorDistance(r, g, b, keyColor), tolerance, softness);
+}
+
+function shadowHueStrength(r, g, b, keyColor, _tolerance, softness) {
+  const p = rgbToYCbCr(r, g, b);
+  const k = rgbToYCbCr(keyColor[0], keyColor[1], keyColor[2]);
+  const pMagnitude = Math.hypot(p.cb, p.cr);
+  const kMagnitude = Math.hypot(k.cb, k.cr);
+  // A dark shadow has less chroma magnitude than the bright backdrop but
+  // points in the same Cb/Cr direction.  Compare that direction, not its
+  // magnitude; otherwise the useful softness band vanishes as the shadow
+  // darkens.  Near-neutral pixels carry no dependable hue and stay out.
+  if (pMagnitude < 4 || kMagnitude < 4) return 0;
+  const unitDistance = Math.hypot(p.cb / pMagnitude - k.cb / kMagnitude, p.cr / pMagnitude - k.cr / kMagnitude);
+  return strengthAtDistance(unitDistance * (MAX_DISTANCE / 2), 0, softness);
+}
+
+// Estimate how much of a soft, key-hued pixel is still background.  This is
+// deliberately separate from hue similarity: a dark magenta shadow may point
+// exactly along the key hue, yet contain only a small share of the bright
+// magenta backdrop.  Removing that estimated share leaves a translucent dark
+// shadow instead of an opaque grey stain.
+function shadowBackgroundShare(r, g, b, keyColor, hueStrength) {
+  const keyEnergy = keyColor[0] ** 2 + keyColor[1] ** 2 + keyColor[2] ** 2;
+  if (keyEnergy === 0) return 0;
+  const projection = (r * keyColor[0] + g * keyColor[1] + b * keyColor[2]) / keyEnergy;
+  return Math.max(0, Math.min(1, projection * hueStrength));
 }
 
 // Buckets pixel counts by distance-to-referenceColor across one or more
@@ -122,7 +151,7 @@ export function distanceHistogram(bitmaps, referenceColor, buckets = 64) {
 // backgroundOnly limits keying to matching pixels connected (4-way) to the
 // bitmap edge. It protects same-colored art enclosed by the subject, while
 // global matching remains available for enclosed background holes.
-function edgeConnectedMatches(bmp, keyColor, tolerance, softness) {
+function edgeConnectedMatches(bmp, keyColor, tolerance, softness, includeSoftShadows) {
   const { width, height, data } = bmp;
   const matches = new Uint8Array(width * height);
   const traversable = new Uint8Array(width * height);
@@ -130,7 +159,9 @@ function edgeConnectedMatches(bmp, keyColor, tolerance, softness) {
     // Existing transparency is already known background, so it must bridge
     // from the image edge to a detached colored halo around the artwork.
     if (data[i + 3] === 0) { traversable[p] = 1; continue; }
-    if (matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness) > 0) {
+    const matchesKey = matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness) > 0;
+    const matchesShadow = includeSoftShadows && shadowHueStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness) > 0;
+    if (matchesKey || matchesShadow) {
       matches[p] = 1;
       traversable[p] = 1;
     }
@@ -159,19 +190,33 @@ function edgeConnectedMatches(bmp, keyColor, tolerance, softness) {
   return connected;
 }
 
-export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, replacementColor, protectColor = null, protectTolerance = 0, protectSoftness = 0, backgroundOnly = false }) {
+export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, replacementColor, protectColor = null, protectTolerance = 0, protectSoftness = 0, backgroundOnly = false, preserveSoftShadows = false }) {
   const data = new Uint8ClampedArray(bmp.data);
-  const connected = backgroundOnly ? edgeConnectedMatches(bmp, keyColor, tolerance, softness) : null;
+  const keepSoftShadows = mode === 'transparent' && backgroundOnly && preserveSoftShadows;
+  const connected = backgroundOnly ? edgeConnectedMatches(bmp, keyColor, tolerance, softness, keepSoftShadows) : null;
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] === 0) continue;
     if (connected && !connected[i / 4]) continue;
     let strength = matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness);
+    const softShadowStrength = keepSoftShadows
+      ? shadowHueStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness)
+      : 0;
+    const softShadow = keepSoftShadows
+      && matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, 0) === 0
+      && softShadowStrength > 0;
+    // The normal soft match may be weak solely because brightness changed.
+    // For a preserved shadow, estimate its actual background share from its
+    // key-hue projection so it becomes a translucent shadow, not opaque grey.
+    if (softShadow) strength = shadowBackgroundShare(data[i], data[i + 1], data[i + 2], keyColor, softShadowStrength);
     if (strength <= 0) continue;
     if (protectColor) {
       const protectStrength = matchStrength(data[i], data[i + 1], data[i + 2], protectColor, protectTolerance, protectSoftness);
       strength *= (1 - protectStrength);
       if (strength <= 0) continue;
     }
+    // In background-only matte mode, the soft band represents a colored
+    // shadow/fringe rather than solid background. Neutralize it without
+    // thinning its alpha; only the hard tolerance core becomes transparent.
     if (mode === 'transparent') {
       if (strength >= 1) { data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0; }
       else {
@@ -187,7 +232,7 @@ export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, repl
       data[i] = Math.round(data[i] + (replacementColor[0] - data[i]) * strength);
       data[i + 1] = Math.round(data[i + 1] + (replacementColor[1] - data[i + 1]) * strength);
       data[i + 2] = Math.round(data[i + 2] + (replacementColor[2] - data[i + 2]) * strength);
-    } else { // 'despill'
+    } else { // 'despill' or a preserved soft shadow
       const pixel = rgbToYCbCr(data[i], data[i + 1], data[i + 2]);
       const key = rgbToYCbCr(keyColor[0], keyColor[1], keyColor[2]);
       const keyChromaSquared = key.cb * key.cb + key.cr * key.cr;

@@ -142,6 +142,32 @@ test('chromaKeyBitmap: background-only matching reaches a halo through transpare
   assert.deepEqual(getPixel(out, 3, 3), pink);
 });
 
+test('chromaKeyBitmap: neutral keys retain their normal soft matte behavior', () => {
+  const source = bmp(1, 1, [[100, 100, 100, 200]]);
+  const out = chromaKeyBitmap(source, {
+    keyColor: [0, 0, 0], tolerance: 0, softness: 80, mode: 'transparent', replacementColor: [255, 255, 255],
+    backgroundOnly: true, preserveSoftShadows: true,
+  });
+  // A neutral key has no hue direction to preserve, so this falls back to
+  // the regular soft matte calculation rather than treating every grey as a
+  // colored shadow.
+  assert.deepEqual([...out.data], [192, 192, 192, 104]);
+});
+
+test('chromaKeyBitmap: preserveSoftShadows follows key hue through a dark shadow', () => {
+  const key = [255, 0, 255];
+  // This is much darker than the key and intentionally fails the normal
+  // brightness-aware soft match.  Its chroma is still key-like, so the
+  // preserve-shadow pass reaches it and removes the magenta cast only.
+  const shadow = [80, 0, 80, 180];
+  const out = chromaKeyBitmap(bmp(1, 1, [shadow]), {
+    keyColor: key, tolerance: 0, softness: 60, mode: 'transparent', replacementColor: [255, 255, 255],
+    backgroundOnly: true, preserveSoftShadows: true,
+  });
+  assert.ok(out.data[3] > 0 && out.data[3] < 180, 'shadow becomes translucent rather than opaque grey');
+  assert.ok(out.data[0] - out.data[1] < 3 && out.data[2] - out.data[1] < 3, 'key tint is removed');
+});
+
 test('chromaKeyBitmap: percent-to-radius easing keeps a modest softness from sweeping in loosely-similar colors', () => {
   // Radius is eased with a square curve (see percentToRadius in the source), not linear, so a
   // grey pixel just 20 units off black on the grey axis falls outside even the full
