@@ -46,6 +46,8 @@ body {
 .tool-options { display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
 .tool-option-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; flex-wrap: wrap; }
 .tool-option-row input[type="number"] { width: 46px; flex: none; }
+.soft-flood-control { display: grid; grid-template-columns: 1fr auto; gap: 3px 6px; }
+.soft-flood-control input[type="range"] { grid-column: 1 / -1; width: 100%; min-width: 0; }
 .tool-option-checks { display: flex; flex-direction: column; gap: 4px; }
 #canvas-host { grid-column: 2; grid-row: 1; position: relative; overflow: hidden; background: var(--bg); min-height: 0; }
 #canvas-host canvas { position: absolute; inset: 0; }

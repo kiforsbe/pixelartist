@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createBitmap, cloneBitmap, getPixel, setPixel, drawLine, drawRect,
-  drawEllipse, floodFill, copyRegion, blitRegion, fillRegion, flipBitmap,
+  drawEllipse, floodFill, softFloodFill, copyRegion, blitRegion, fillRegion, flipBitmap,
   colorsEqual, scaleBitmap,
 } from '../js/core/pixels.js';
 
@@ -81,6 +81,34 @@ test('floodFill non-contiguous replaces color everywhere', () => {
   setPixel(b, 0, 0, RED); setPixel(b, 3, 3, RED);
   floodFill(b, 0, 0, BLUE, false);
   assert.deepEqual(getPixel(b, 3, 3), BLUE);
+});
+
+test('softFloodFill respects tolerance, feather, and contiguous boundaries', () => {
+  const b = createBitmap(5, 1);
+  setPixel(b, 0, 0, [100, 100, 100, 255]);
+  setPixel(b, 1, 0, [105, 100, 100, 255]);
+  setPixel(b, 2, 0, [115, 100, 100, 255]);
+  setPixel(b, 3, 0, [130, 100, 100, 255]);
+  setPixel(b, 4, 0, [100, 100, 100, 128]); // alpha participates in matching
+  const rect = softFloodFill(b, 0, 0, BLUE, { tolerance: 5, feather: 20 });
+  assert.deepEqual(getPixel(b, 0, 0), BLUE);
+  assert.deepEqual(getPixel(b, 1, 0), BLUE);
+  assert.deepEqual(getPixel(b, 2, 0), [58, 50, 178, 255]); // 50% blend at distance 15
+  assert.deepEqual(getPixel(b, 3, 0), [130, 100, 100, 255]);
+  assert.deepEqual(getPixel(b, 4, 0), [100, 100, 100, 128]);
+  assert.deepEqual(rect, { x: 0, y: 0, w: 3, h: 1 });
+});
+
+test('softFloodFill erases, handles hard cutoff, global matching, and no-ops', () => {
+  const b = createBitmap(3, 2);
+  setPixel(b, 0, 0, RED); setPixel(b, 2, 0, RED);
+  setPixel(b, 1, 0, BLUE); // prevents contiguous traversal to the second red pixel
+  softFloodFill(b, 0, 0, BLUE, { mode: 'erase', tolerance: 0, feather: 0 });
+  assert.deepEqual(getPixel(b, 0, 0), CLEAR);
+  assert.deepEqual(getPixel(b, 2, 0), RED);
+  softFloodFill(b, 2, 0, BLUE, { mode: 'fill', tolerance: 0, feather: 0, contiguous: false });
+  assert.deepEqual(getPixel(b, 2, 0), BLUE);
+  assert.equal(softFloodFill(b, 2, 0, BLUE, { tolerance: 0, feather: 0 }), null);
 });
 
 test('copy/blit/fill region and flip', () => {

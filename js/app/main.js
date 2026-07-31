@@ -1394,7 +1394,7 @@ const SHORTCUTS = [
   ['Ctrl+S', 'Save'],
   ['[ / ]', 'Decrease / increase brush size'],
   ['X', 'Swap primary/secondary color'],
-  ['B / E / G / L / U / O / I / M / V', 'Pencil / Eraser / Fill / Line / Rect / Ellipse / Eyedropper / Select / Move'],
+  ['B / E / G / K / L / U / O / I / M / V', 'Pencil / Eraser / Fill / Soft flood / Line / Rect / Ellipse / Eyedropper / Select / Move'],
   ['F', 'Frame tool (sprite sheets mode)'],
   ['T', 'Tile tool (tile sheets mode)'],
   ['Escape', 'Clear selection / cancel floating selection / back to sheet'],

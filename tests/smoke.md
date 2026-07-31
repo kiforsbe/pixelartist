@@ -39,6 +39,11 @@ is a pass condition for the whole run, not just the final step.
    ellipse (toggle "Filled" once).
 7. [A] Select Fill (`G`), click inside a closed shape. Toggle
    "Contiguous" and fill again.
+7a. [A] Select Soft flood (`K`). Set a nonzero tolerance and feather, then
+   left-click a shaded region to softly fill it; right-click a matching region
+   to softly erase it. Verify one undo/redo step per click. Repeat from the
+   tile sheet and the focused tile editor; pixels outside the active tile do
+   not change.
 8. [A] Press `Ctrl+Z` repeatedly back to the empty canvas; press
    `Ctrl+Y` (and `Ctrl+Shift+Z`) to redo forward again. Undo/redo
    buttons disable at the ends of the stack.

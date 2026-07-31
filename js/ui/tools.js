@@ -13,7 +13,7 @@
 
 import { state, on, emit, activeSheet, activeLayer, markDirty } from '../app/state.js';
 import {
-  cloneBitmap, drawLine, drawRect, drawEllipse, floodFill,
+  cloneBitmap, drawLine, drawRect, drawEllipse, floodFill, softFloodFill,
   copyRegion, blitRegion, getPixel,
 } from '../core/pixels.js';
 import { makePixelPatch } from '../core/commands.js';
@@ -30,6 +30,7 @@ export const TOOLS = [
   { id: 'pencil', icon: '✏️', key: 'b' },
   { id: 'eraser', icon: '🧽', key: 'e' },
   { id: 'fill', icon: '🪣', key: 'g' },
+  { id: 'softflood', label: 'Soft flood', icon: '🫗', key: 'k' },
   { id: 'line', icon: '📏', key: 'l' },
   { id: 'rect', icon: '▭', key: 'u' },
   { id: 'ellipse', icon: '◯', key: 'o' },
@@ -43,7 +44,25 @@ const SHAPE_TOOLS = new Set(['line', 'rect', 'ellipse']);
 
 // Shared tool options (fill contiguity, shape fill) — read by bindDrawing,
 // edited by the tool-options row built in mountToolPalette.
-export const toolOptions = { contiguous: true, filled: false };
+export const toolOptions = {
+  contiguous: true,
+  filled: false,
+  softFlood: { tolerance: 0, feather: 0, contiguous: true },
+};
+
+// Maps the evenly-spaced tolerance/feather slider positions onto
+// exponentially-spaced RGBA distances. This gives precise control over the
+// small distances commonly used for pixel art while retaining 0–255 at the end.
+const SOFT_FLOOD_DISTANCE_CURVE = 5;
+const SOFT_FLOOD_DISTANCE_SCALE = Math.exp(SOFT_FLOOD_DISTANCE_CURVE) - 1;
+function softFloodDistanceFromSlider(value) {
+  const progress = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
+  return Math.round(((Math.exp(SOFT_FLOOD_DISTANCE_CURVE * progress) - 1) / SOFT_FLOOD_DISTANCE_SCALE) * 255);
+}
+function softFloodDistanceToSlider(value) {
+  const tolerance = Math.max(0, Math.min(255, Number(value) || 0)) / 255;
+  return Math.round((Math.log(1 + tolerance * SOFT_FLOOD_DISTANCE_SCALE) / SOFT_FLOOD_DISTANCE_CURVE) * 100);
+}
 
 // ---------------------------------------------------------- external tools
 //
@@ -94,7 +113,7 @@ export function mountToolPalette(el) {
     btn.className = 'btn-icon-lg';
     btn.dataset.tool = t.id;
     btn.textContent = t.icon;
-    btn.title = `${t.id} (${t.key})`;
+    btn.title = `${t.label ?? t.id} (${t.key})`;
     btn.addEventListener('click', () => selectTool(t.id));
     buttons.set(t.id, btn);
     btnRow.appendChild(btn);
@@ -163,15 +182,43 @@ export function mountToolPalette(el) {
 
   optionsRow.appendChild(optionChecks);
 
+  const softFloodRow = document.createElement('div');
+  softFloodRow.className = 'tool-options';
+  for (const [label, key] of [['Tolerance', 'tolerance'], ['Feather', 'feather']]) {
+    const row = document.createElement('label');
+    row.className = 'tool-option-row soft-flood-control';
+    const labelEl = document.createElement('span'); labelEl.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'range'; input.min = '0'; input.max = '100';
+    input.value = String(softFloodDistanceToSlider(toolOptions.softFlood[key]));
+    const value = document.createElement('span'); value.textContent = input.value;
+    input.addEventListener('input', () => {
+      const actual = softFloodDistanceFromSlider(input.value);
+      toolOptions.softFlood[key] = actual;
+      value.textContent = String(actual);
+    });
+    value.textContent = String(toolOptions.softFlood[key]);
+    row.append(labelEl, value, input);
+    softFloodRow.appendChild(row);
+  }
+  const softContiguous = document.createElement('label');
+  softContiguous.className = 'tool-option-row';
+  const softContiguousInput = document.createElement('input');
+  softContiguousInput.type = 'checkbox'; softContiguousInput.checked = toolOptions.softFlood.contiguous;
+  softContiguousInput.addEventListener('change', () => { toolOptions.softFlood.contiguous = softContiguousInput.checked; });
+  softContiguous.append(document.createTextNode('Contiguous'), softContiguousInput);
+  softFloodRow.appendChild(softContiguous);
+  optionsRow.appendChild(softFloodRow);
+
   function toolLabel(id) {
     const t = TOOLS.find(x => x.id === id) ?? extraTools.find(x => x.id === id);
-    return t ? `${t.icon} ${t.id}` : id;
+    return t ? `${t.icon} ${t.label ?? t.id}` : id;
   }
 
   function toolTitle(id) {
     const t = TOOLS.find(x => x.id === id) ?? extraTools.find(x => x.id === id);
     if (!t) return id;
-    return t.id.charAt(0).toUpperCase() + t.id.slice(1);
+    return t.label ?? (t.id.charAt(0).toUpperCase() + t.id.slice(1));
   }
 
   function optionVisibleFor(id) {
@@ -179,6 +226,7 @@ export function mountToolPalette(el) {
       size: BRUSH_TOOLS.has(id),
       contiguous: id === 'fill',
       filled: id === 'rect' || id === 'ellipse',
+      softFlood: id === 'softflood',
     };
   }
 
@@ -194,6 +242,7 @@ export function mountToolPalette(el) {
     contiguousRow.style.display = vis.contiguous ? '' : 'none';
     filledRow.style.display = vis.filled ? '' : 'none';
     optionChecks.style.display = (vis.contiguous || vis.filled) ? '' : 'none';
+    softFloodRow.style.display = vis.softFlood ? '' : 'none';
     for (const { id, els } of extraRows)
       for (const rEl of els) rEl.style.display = state.tool === id ? '' : 'none';
   }
@@ -315,9 +364,9 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
 
   // swap=true returns the OTHER swatch for the pressed button (used as the
   // interior color of filled rect/ellipse shapes)
-  function currentColor(ev, swap = false) {
+  function currentColor(ev, swap = false, forcePrimary = false) {
     if (state.tool === 'eraser') return [0, 0, 0, 0];
-    const useSecondary = !!(ev.buttons & 2) !== swap;
+    const useSecondary = !forcePrimary && (!!(ev.buttons & 2) !== swap);
     let c = useSecondary ? state.secondary : state.primary;
     const pal = activePalette();
     if (pal && pal.indexed && pal.colors.length) c = nearestColor(pal, c);
@@ -374,7 +423,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (anim && !anim.layerGroupId) commitAcceptAnimation(sheet, anim);
   }
 
-  // ---- pencil / eraser / fill / line / rect / ellipse ----
+  // ---- pencil / eraser / fill / soft flood / line / rect / ellipse ----
 
   function handleDown(ev) {
     acceptFloatingContextIfAny();
@@ -397,6 +446,26 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         dirty = extend(null, t.x + r.x, t.y + r.y, t.x + r.x + r.w - 1, t.y + r.y + r.h - 1);
       }
       finalize(layer, before, dirty, 'fill', t);
+      stroke = null;
+      emit('pixels');
+      return;
+    }
+    if (tool === 'softflood') {
+      // Work on a target-sized copy, preserving the same strip/tile boundary
+      // guarantees as hard fill while the core algorithm computes its region.
+      const t = getTargetRect(ev.x, ev.y);
+      if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
+      const sub = copyRegion(layer.bitmap, t.x, t.y, t.w, t.h);
+      const r = softFloodFill(sub, ev.x - t.x, ev.y - t.y, currentColor(ev, false, true), {
+        ...toolOptions.softFlood,
+        mode: ev.buttons & 2 ? 'erase' : 'fill',
+      });
+      let dirty = null;
+      if (r) {
+        blitRegion(layer.bitmap, sub, t.x, t.y);
+        dirty = extend(null, t.x + r.x, t.y + r.y, t.x + r.x + r.w - 1, t.y + r.y + r.h - 1);
+      }
+      finalize(layer, before, dirty, 'soft flood', t);
       stroke = null;
       emit('pixels');
       return;

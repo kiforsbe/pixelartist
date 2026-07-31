@@ -101,6 +101,67 @@ export function floodFill(bmp, x, y, rgba, contiguous = true) {
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
+// Floods pixels similar to the untouched seed color. Tolerance is a maximum
+// per-channel RGBA distance; feather extends that range with a linear falloff.
+// Fill blends toward `rgba`; erase blends toward transparent black.
+export function softFloodFill(bmp, x, y, rgba, {
+  mode = 'fill', tolerance = 0, feather = 0, contiguous = true,
+} = {}) {
+  const seed = getPixel(bmp, x, y);
+  if (!seed) return null;
+  const source = new Uint8ClampedArray(bmp.data);
+  const t = Math.max(0, Math.min(255, Number(tolerance) || 0));
+  const f = Math.max(0, Math.min(255, Number(feather) || 0));
+  const edge = t + f;
+  const target = mode === 'erase' ? [0, 0, 0, 0] : rgba;
+  let minX = Infinity, minY = Infinity, maxX = -1, maxY = -1;
+
+  const sourcePixel = (px, py) => {
+    if (px < 0 || py < 0 || px >= bmp.width || py >= bmp.height) return null;
+    const i = (py * bmp.width + px) * 4;
+    return [source[i], source[i + 1], source[i + 2], source[i + 3]];
+  };
+  const strengthAt = (px, py) => {
+    const p = sourcePixel(px, py);
+    if (!p) return 0;
+    const dist = Math.max(...p.map((v, i) => Math.abs(v - seed[i])));
+    if (dist <= t) return 1;
+    if (f <= 0 || dist >= edge) return 0;
+    return (edge - dist) / f;
+  };
+  const apply = (px, py, strength) => {
+    const p = sourcePixel(px, py);
+    const out = p.map((v, i) => Math.round(v + (target[i] - v) * strength));
+    if (colorsEqual(p, out)) return;
+    setPixel(bmp, px, py, out);
+    minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+    minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+  };
+
+  if (!contiguous) {
+    for (let py = 0; py < bmp.height; py++)
+      for (let px = 0; px < bmp.width; px++) {
+        const strength = strengthAt(px, py);
+        if (strength > 0) apply(px, py, strength);
+      }
+  } else {
+    const seen = new Uint8Array(bmp.width * bmp.height);
+    const stack = [[x, y]];
+    while (stack.length) {
+      const [px, py] = stack.pop();
+      if (px < 0 || py < 0 || px >= bmp.width || py >= bmp.height) continue;
+      const index = py * bmp.width + px;
+      if (seen[index]) continue;
+      seen[index] = 1;
+      const strength = strengthAt(px, py);
+      if (strength <= 0) continue;
+      apply(px, py, strength);
+      stack.push([px + 1, py], [px - 1, py], [px, py + 1], [px, py - 1]);
+    }
+  }
+  return maxX < 0 ? null : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
 export function copyRegion(bmp, x, y, w, h) {
   const out = createBitmap(w, h);
   for (let dy = 0; dy < h; dy++)
