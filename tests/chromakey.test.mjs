@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromaKeyBitmap, distanceHistogram } from '../js/core/chromakey.js';
+import { getPixel } from '../js/core/pixels.js';
 
 function bmp(width, height, pixels) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -26,17 +27,16 @@ test('chromaKeyBitmap: fully transparent source pixels are skipped even at zero 
   assert.deepEqual([...out.data], [0, 0, 0, 0]);
 });
 
-test('chromaKeyBitmap transparent mode: mid-softness-band match gets partial alpha; RGB unaffected here since the pixel is already neutral grey', () => {
+test('chromaKeyBitmap transparent mode: mid-softness-band match unmixes the key color while reducing alpha', () => {
   // A grey key (black) has zero chrominance, so distance against a grey pixel reduces to
   // exactly |pixelValue| (Cb/Cr both 0 for any grey, Y == the grey's own value since the
   // Rec.601 luma coefficients sum to 1) -- at tolerance=0/softness=100 that puts distance=100
   // at strength (300-100)/300 = 2/3 exactly, so alpha comes out to round(255*(1 - 2/3)) = 85
-  // with no rounding ambiguity. Spill-suppression desaturation (see the dedicated test below)
-  // is a no-op on an already-grey pixel -- its luma equals every channel already -- so RGB
-  // stays [100,100,100] here specifically, not because desaturation was skipped.
+  // with no rounding ambiguity. With black as the estimated 2/3 background share,
+  // unmixing recovers a white foreground from the remaining 1/3.
   const b = bmp(1, 1, [[100, 100, 100, 255]]);
   const out = chromaKeyBitmap(b, { keyColor: [0, 0, 0], tolerance: 0, softness: 100, mode: 'transparent', replacementColor: [255, 255, 255] });
-  assert.deepEqual([...out.data], [100, 100, 100, 85]);
+  assert.deepEqual([...out.data], [255, 255, 255, 85]);
 });
 
 test('chromaKeyBitmap replace mode: full-strength match lerps RGB fully to replacementColor, alpha untouched', () => {
@@ -54,20 +54,24 @@ test('chromaKeyBitmap replace mode: mid-softness-band match partially blends RGB
   assert.deepEqual([...out.data], [203, 203, 203, 255]);
 });
 
-test('chromaKeyBitmap transparent mode: partial match on a colorful pixel desaturates it toward its own luminance (spill suppression)', () => {
-  // key=[20,50,235] is saturated enough (chroma magnitude ~102) to clamp keySaturation to 1,
-  // giving a fixed lumaWeight of exactly 0.15. pixel = key - 20 in every channel: Cb/Cr are
-  // unaffected by a uniform per-channel shift (their coefficients sum to 0 by construction),
-  // so dCb = dCr = 0 exactly and dY = -20 exactly, giving distance = |-20 * 0.15| = 3 exactly.
-  // At tolerance=0/softness=100 (edge=300), strength = (300-3)/300 = 99/100 = 0.99 exactly.
-  // luma = 0.299*0 + 0.587*30 + 0.114*215 = 42.12
-  // newR = round(0 + 42.12*0.99) = round(41.6988) = 42
-  // newG = round(30 + (42.12-30)*0.99) = round(41.9988) = 42
-  // newB = round(215 + (42.12-215)*0.99) = round(43.8488) = 44
-  // newA = round(255 * (1-0.99)) = round(2.55) = 3
-  const b = bmp(1, 1, [[0, 30, 215, 255]]);
-  const out = chromaKeyBitmap(b, { keyColor: [20, 50, 235], tolerance: 0, softness: 100, mode: 'transparent', replacementColor: [255, 255, 255] });
-  assert.deepEqual([...out.data], [42, 42, 44, 3]);
+test('chromaKeyBitmap despill mode neutralizes keyed color while preserving the shadow alpha', () => {
+  const shadow = [200, 50, 150, 120];
+  const out = chromaKeyBitmap(bmp(1, 1, [shadow]), {
+    keyColor: [200, 50, 150], tolerance: 10, softness: 0, mode: 'despill', replacementColor: [255, 255, 255],
+  });
+  assert.deepEqual([...out.data], [106, 106, 106, 120]);
+});
+
+test('chromaKeyBitmap transparent mode: decontaminates a green-screen fringe in one stable pass', () => {
+  // This is a 50/50 red foreground / green key composite. The chroma-distance
+  // estimate is not exactly 50%, but unmixing substantially removes the green
+  // contribution and the recovered edge is outside this practical soft band on
+  // a second run, avoiding the old repeated-filter erosion.
+  const b = bmp(1, 1, [[128, 128, 0, 255]]);
+  const params = { keyColor: [0, 255, 0], tolerance: 0, softness: 80, mode: 'transparent', replacementColor: [255, 255, 255] };
+  const out = chromaKeyBitmap(b, params);
+  assert.deepEqual([...out.data], [205, 51, 0, 159]);
+  assert.deepEqual([...chromaKeyBitmap(out, params).data], [...out.data]);
 });
 
 test('chromaKeyBitmap: one key pick catches multiple shades of the same hue, but leaves a differently-hued pixel of similar darkness untouched', () => {
@@ -84,6 +88,58 @@ test('chromaKeyBitmap: one key pick catches multiple shades of the same hue, but
   assert.deepEqual([...key2.data], [0, 0, 0, 0]);
   assert.deepEqual([...keptBlue.data], [10, 10, 80, 255]);
   assert.deepEqual([...keptRed.data], [80, 10, 10, 255]);
+});
+
+test('chromaKeyBitmap: balanced luminance guard preserves strongly darker same-hue art', () => {
+  // At tolerance 65%, the former 0.15 saturated-key luma weight keyed this
+  // dark green detail. The balanced 0.35 floor keeps it outside the match band.
+  const key = [0, 255, 0];
+  const darkGreenArt = chromaKeyBitmap(bmp(1, 1, [[0, 30, 0, 255]]), {
+    keyColor: key, tolerance: 65, softness: 0, mode: 'transparent', replacementColor: [255, 255, 255],
+  });
+  assert.deepEqual([...darkGreenArt.data], [0, 30, 0, 255]);
+});
+
+test('chromaKeyBitmap: global matching still removes disconnected matching background', () => {
+  const key = [0, 255, 0];
+  const out = chromaKeyBitmap(bmp(3, 1, [[...key, 255], [255, 0, 0, 255], [...key, 255]]), {
+    keyColor: key, tolerance: 10, softness: 0, mode: 'transparent', replacementColor: [255, 255, 255],
+  });
+  assert.deepEqual([...out.data], [0, 0, 0, 0, 255, 0, 0, 255, 0, 0, 0, 0]);
+});
+
+test('chromaKeyBitmap: background-only matching protects enclosed key-colored art', () => {
+  const key = [0, 255, 0];
+  // The center key-colored detail is isolated by red art, while the edge
+  // component is the true backdrop and should be the only one removed.
+  const out = chromaKeyBitmap(bmp(5, 5, [
+    [...key, 255], [...key, 255], [...key, 255], [...key, 255], [...key, 255],
+    [...key, 255], [255, 0, 0, 255], [255, 0, 0, 255], [255, 0, 0, 255], [...key, 255],
+    [...key, 255], [255, 0, 0, 255], [...key, 255], [255, 0, 0, 255], [...key, 255],
+    [...key, 255], [255, 0, 0, 255], [255, 0, 0, 255], [255, 0, 0, 255], [...key, 255],
+    [...key, 255], [...key, 255], [...key, 255], [...key, 255], [...key, 255],
+  ]), { keyColor: key, tolerance: 10, softness: 0, mode: 'transparent', replacementColor: [255, 255, 255], backgroundOnly: true });
+  assert.deepEqual(getPixel(out, 0, 0), [0, 0, 0, 0]);
+  assert.deepEqual(getPixel(out, 2, 2), [...key, 255]);
+});
+
+test('chromaKeyBitmap: background-only matching reaches a halo through transparent background', () => {
+  const key = [200, 50, 150];
+  const clear = [0, 0, 0, 0], red = [255, 0, 0, 255], pink = [...key, 255];
+  // A transparent border surrounds a detached key-colored halo. The flood
+  // must cross that transparency to clear the halo, but cannot cross the red
+  // art ring to reach the matching center detail.
+  const out = chromaKeyBitmap(bmp(7, 7, [
+    clear, clear, clear, clear, clear, clear, clear,
+    clear, pink, pink, pink, pink, pink, clear,
+    clear, pink, red, red, red, pink, clear,
+    clear, pink, red, pink, red, pink, clear,
+    clear, pink, red, red, red, pink, clear,
+    clear, pink, pink, pink, pink, pink, clear,
+    clear, clear, clear, clear, clear, clear, clear,
+  ]), { keyColor: key, tolerance: 10, softness: 0, mode: 'transparent', replacementColor: [255, 255, 255], backgroundOnly: true });
+  assert.deepEqual(getPixel(out, 1, 1), clear);
+  assert.deepEqual(getPixel(out, 3, 3), pink);
 });
 
 test('chromaKeyBitmap: percent-to-radius easing keeps a modest softness from sweeping in loosely-similar colors', () => {
@@ -117,7 +173,7 @@ test('chromaKeyBitmap: protectColor partially shields a pixel that only partiall
     protectColor: [0, 0, 0], protectTolerance: 40, protectSoftness: 40,
   });
   assert.deepEqual([...withoutProtect.data], [0, 0, 0, 0]); // fully keyed with no protection at all
-  assert.deepEqual([...withProtect.data], [33, 74, 33, 132]); // shielded: keeps some alpha and color, not zeroed
+  assert.deepEqual([...withProtect.data], [19, 0, 19, 132]); // shielded: keeps some alpha and decontaminated color
 });
 
 test('distanceHistogram: buckets pixel counts by distance from the reference color', () => {

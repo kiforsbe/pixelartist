@@ -225,6 +225,7 @@
     <div class="row">
       <label><input type="radio" name="ck-mode" id="ck-mode-transparent" checked> Make transparent</label>
       <label><input type="radio" name="ck-mode" id="ck-mode-replace"> Replace with color</label>
+      <label title="Remove the keyed color while retaining alpha and shadow darkness."><input type="radio" name="ck-mode" id="ck-mode-despill"> Neutralize key color</label>
     </div>
     <div id="ck-replace-row" hidden>
       <div class="row"><label class="ck-color-field">Replace with <input type="color" id="ck-replace-color"> <input type="text" id="ck-replace-hex" size="7"></label></div>
@@ -236,7 +237,8 @@
     <div class="row"><label>Tolerance <input type="range" id="ck-tolerance" min="0" max="100" value="15"> <span id="ck-tolerance-val">15</span></label></div>
     <div class="row"><label>Softness <input type="range" id="ck-softness" min="0" max="100" value="10"> <span id="ck-softness-val">10</span></label></div>
     <div class="row"><canvas id="ck-key-histogram" class="ck-histogram" width="328" height="48"></canvas></div>
-    <div class="row"><label><input type="checkbox" id="ck-protect-enabled"> Protect a color</label></div>
+    <div class="row"><label title="Only remove key-like pixels connected to the selection or canvas edge. Turn off to key all matching pixels, including enclosed holes."><input type="checkbox" id="ck-background-only" checked> Background only (edge-connected)</label></div>
+    <div class="row"><label title="Protect an intentionally key-colored art detail, especially one that touches the edge-connected background."><input type="checkbox" id="ck-protect-enabled"> Protect a color</label></div>
     <div id="ck-protect-row" hidden>
       <div class="row"><label class="ck-color-field">Protect color <input type="color" id="ck-protect-color"> <input type="text" id="ck-protect-hex" size="7"></label></div>
       <div class="row ck-color-actions">

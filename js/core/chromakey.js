@@ -21,20 +21,29 @@ function rgbToYCbCr(r, g, b) {
   };
 }
 
+function yCbCrToRgb(y, cb, cr) {
+  return [
+    y + 1.402 * cr,
+    y - 0.344136 * cb - 0.714136 * cr,
+    y + 1.772 * cb,
+  ];
+}
+
 // Euclidean distance in YCbCr space, with Y (luminance) scaled down by
 // lumaWeight before squaring -- lumaWeight is 1 for a fully neutral key
 // (grays can only be told apart by luminance, so it needs full weight,
 // which also makes this degrade gracefully toward a plain-RGB-ish
-// distance for a black/white background) down to 0.15 for a fully
-// saturated key (brightness of that hue should barely matter -- Cb/Cr
-// alone already discriminates it from other hues well). chromaMagnitude
+// distance for a black/white background) down to 0.35 for a fully
+// saturated key. This retains enough brightness discrimination to avoid
+// consuming differently-lit art that happens to share the backdrop hue.
+// chromaMagnitude
 // (0 for any gray, ~135 for a fully saturated primary/secondary color)
 // is what decides where a given key falls on that scale.
 export function colorDistance(r, g, b, keyColor) {
   const p = rgbToYCbCr(r, g, b);
   const k = rgbToYCbCr(keyColor[0], keyColor[1], keyColor[2]);
   const keySaturation = Math.min(1, Math.sqrt(k.cb * k.cb + k.cr * k.cr) / 100);
-  const lumaWeight = 1 - 0.85 * keySaturation;
+  const lumaWeight = 1 - 0.65 * keySaturation;
   const dCb = p.cb - k.cb, dCr = p.cr - k.cr, dY = (p.y - k.y) * lumaWeight;
   return Math.sqrt(dCb * dCb + dCr * dCr + dY * dY);
 }
@@ -88,19 +97,15 @@ export function distanceHistogram(bitmaps, referenceColor, buckets = 64) {
 
 // mode 'transparent': full-strength match becomes [0,0,0,0] (mirrors the
 // eraser tool's own zero-everything convention, see js/ui/tools.js); a
-// partial-strength match scales alpha down by (1 - strength) AND
-// desaturates the pixel toward its own luminance by that same fraction --
-// an edge pixel in the soft band is usually itself a blend of real
-// content and key-color bleed-through (anti-aliasing against the
-// original background, from before the art was imported here), so
-// leaving its RGB untouched would keep a visible tint/halo of the key
-// color once composited over something else. Pushing it toward luma
-// (spill suppression) removes that colorfulness without needing to know
-// which specific hue the key was. mode 'replace': RGB is lerped toward
-// replacementColor by strength instead (no separate desaturation needed,
-// since replacing already overwrites whatever tint was there); alpha is
-// left untouched (a recolor, not a transparency op). Pixels already fully
-// transparent are skipped -- nothing to key out, same alpha===0 skip
+// partial-strength match treats `strength` as the estimated background
+// share: alpha retains only the remaining foreground share, and RGB is
+// un-mixed from the key color. This removes key-colored fringe in a single
+// pass instead of merely desaturating it and requiring repeat filtering.
+// mode 'replace': RGB is lerped toward replacementColor by strength instead.
+// mode 'despill' subtracts only the selected key hue's chroma component while
+// retaining alpha, luminance, and chroma unrelated to the key. This keeps a
+// useful dark/soft shadow without its colored contamination. Pixels already
+// fully transparent are skipped -- nothing to key out, same alpha===0 skip
 // convention as quantize.js.
 //
 // protectColor (optional): a second reference color whose own match
@@ -113,10 +118,53 @@ export function distanceHistogram(bitmaps, referenceColor, buckets = 64) {
 // rather than either fully keyed or left with a hard, visible boundary.
 // Left out (null/undefined) entirely skips this, unchanged from before
 // protect-color existed.
-export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, replacementColor, protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+//
+// backgroundOnly limits keying to matching pixels connected (4-way) to the
+// bitmap edge. It protects same-colored art enclosed by the subject, while
+// global matching remains available for enclosed background holes.
+function edgeConnectedMatches(bmp, keyColor, tolerance, softness) {
+  const { width, height, data } = bmp;
+  const matches = new Uint8Array(width * height);
+  const traversable = new Uint8Array(width * height);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    // Existing transparency is already known background, so it must bridge
+    // from the image edge to a detached colored halo around the artwork.
+    if (data[i + 3] === 0) { traversable[p] = 1; continue; }
+    if (matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness) > 0) {
+      matches[p] = 1;
+      traversable[p] = 1;
+    }
+  }
+
+  const connected = new Uint8Array(matches.length);
+  const queue = new Int32Array(matches.length);
+  let head = 0, tail = 0;
+  const add = (p) => {
+    if (!traversable[p] || connected[p]) return;
+    connected[p] = 1;
+    queue[tail++] = p;
+  };
+  for (let x = 0; x < width; x++) { add(x); add((height - 1) * width + x); }
+  for (let y = 1; y < height - 1; y++) { add(y * width); add(y * width + width - 1); }
+  while (head < tail) {
+    const p = queue[head++], x = p % width, y = Math.floor(p / width);
+    if (x > 0) add(p - 1);
+    if (x + 1 < width) add(p + 1);
+    if (y > 0) add(p - width);
+    if (y + 1 < height) add(p + width);
+  }
+  // Transparent pixels are traversed only as bridges; only actual key matches
+  // are eligible for modification by the caller.
+  for (let p = 0; p < connected.length; p++) connected[p] &= matches[p];
+  return connected;
+}
+
+export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, replacementColor, protectColor = null, protectTolerance = 0, protectSoftness = 0, backgroundOnly = false }) {
   const data = new Uint8ClampedArray(bmp.data);
+  const connected = backgroundOnly ? edgeConnectedMatches(bmp, keyColor, tolerance, softness) : null;
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] === 0) continue;
+    if (connected && !connected[i / 4]) continue;
     let strength = matchStrength(data[i], data[i + 1], data[i + 2], keyColor, tolerance, softness);
     if (strength <= 0) continue;
     if (protectColor) {
@@ -127,16 +175,32 @@ export function chromaKeyBitmap(bmp, { keyColor, tolerance, softness, mode, repl
     if (mode === 'transparent') {
       if (strength >= 1) { data[i] = 0; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 0; }
       else {
-        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        data[i] = Math.round(data[i] + (luma - data[i]) * strength);
-        data[i + 1] = Math.round(data[i + 1] + (luma - data[i + 1]) * strength);
-        data[i + 2] = Math.round(data[i + 2] + (luma - data[i + 2]) * strength);
-        data[i + 3] = Math.round(data[i + 3] * (1 - strength));
+        const foregroundShare = 1 - strength;
+        const unmix = (channel, keyChannel) => Math.max(0, Math.min(255,
+          Math.round((channel - strength * keyChannel) / foregroundShare)));
+        data[i] = unmix(data[i], keyColor[0]);
+        data[i + 1] = unmix(data[i + 1], keyColor[1]);
+        data[i + 2] = unmix(data[i + 2], keyColor[2]);
+        data[i + 3] = Math.round(data[i + 3] * foregroundShare);
       }
-    } else {
+    } else if (mode === 'replace') {
       data[i] = Math.round(data[i] + (replacementColor[0] - data[i]) * strength);
       data[i + 1] = Math.round(data[i + 1] + (replacementColor[1] - data[i + 1]) * strength);
       data[i + 2] = Math.round(data[i + 2] + (replacementColor[2] - data[i + 2]) * strength);
+    } else { // 'despill'
+      const pixel = rgbToYCbCr(data[i], data[i + 1], data[i + 2]);
+      const key = rgbToYCbCr(keyColor[0], keyColor[1], keyColor[2]);
+      const keyChromaSquared = key.cb * key.cb + key.cr * key.cr;
+      if (keyChromaSquared > 0) {
+        // Remove only the component pointing in the key hue's chroma
+        // direction; a red/gold foreground near a magenta shadow retains the
+        // chroma orthogonal to that magenta direction instead of going grey.
+        const projection = Math.max(0, (pixel.cb * key.cb + pixel.cr * key.cr) / keyChromaSquared) * strength;
+        const rgb = yCbCrToRgb(pixel.y, pixel.cb - key.cb * projection, pixel.cr - key.cr * projection);
+        data[i] = Math.round(Math.max(0, Math.min(255, rgb[0])));
+        data[i + 1] = Math.round(Math.max(0, Math.min(255, rgb[1])));
+        data[i + 2] = Math.round(Math.max(0, Math.min(255, rgb[2])));
+      }
     }
   }
   return { width: bmp.width, height: bmp.height, data };

@@ -660,6 +660,7 @@ const ckColorPrimary = document.getElementById('ck-color-primary');
 const ckColorSecondary = document.getElementById('ck-color-secondary');
 const ckModeTransparent = document.getElementById('ck-mode-transparent');
 const ckModeReplace = document.getElementById('ck-mode-replace');
+const ckModeDespill = document.getElementById('ck-mode-despill');
 const ckReplaceRow = document.getElementById('ck-replace-row');
 const ckReplaceColor = document.getElementById('ck-replace-color');
 const ckReplaceHex = document.getElementById('ck-replace-hex');
@@ -670,6 +671,7 @@ const ckToleranceVal = document.getElementById('ck-tolerance-val');
 const ckSoftness = document.getElementById('ck-softness');
 const ckSoftnessVal = document.getElementById('ck-softness-val');
 const ckKeyHistogramCanvas = document.getElementById('ck-key-histogram');
+const ckBackgroundOnly = document.getElementById('ck-background-only');
 const ckProtectEnabled = document.getElementById('ck-protect-enabled');
 const ckProtectRow = document.getElementById('ck-protect-row');
 const ckProtectColor = document.getElementById('ck-protect-color');
@@ -702,8 +704,9 @@ function currentChromaKeyParams() {
     keyColor: hexToRgb(ckColor.value),
     tolerance: Number(ckTolerance.value),
     softness: Number(ckSoftness.value),
-    mode: ckModeReplace.checked ? 'replace' : 'transparent',
+    mode: ckModeReplace.checked ? 'replace' : (ckModeDespill.checked ? 'despill' : 'transparent'),
     replacementColor: hexToRgb(ckReplaceColor.value),
+    backgroundOnly: ckBackgroundOnly.checked,
     protectColor: ckProtectEnabled.checked ? hexToRgb(ckProtectColor.value) : null,
     protectTolerance: Number(ckProtectTolerance.value),
     protectSoftness: Number(ckProtectSoftness.value),
@@ -816,9 +819,11 @@ function updateChromaKeyModeUI() {
 }
 ckModeTransparent.addEventListener('change', () => { updateChromaKeyModeUI(); previewChromaKey(); });
 ckModeReplace.addEventListener('change', () => { updateChromaKeyModeUI(); previewChromaKey(); });
+ckModeDespill.addEventListener('change', () => { updateChromaKeyModeUI(); previewChromaKey(); });
 
 ckTolerance.addEventListener('input', () => { ckToleranceVal.textContent = ckTolerance.value; previewChromaKey(); drawChromaKeyHistograms(); });
 ckSoftness.addEventListener('input', () => { ckSoftnessVal.textContent = ckSoftness.value; previewChromaKey(); drawChromaKeyHistograms(); });
+ckBackgroundOnly.addEventListener('change', previewChromaKey);
 
 function updateChromaKeyProtectUI() {
   ckProtectRow.hidden = !ckProtectEnabled.checked;
@@ -847,6 +852,7 @@ defineAction('edit.filters.chromaKey', {
     setColorInputs(ckReplaceColor, ckReplaceHex, state.secondary);
     ckTolerance.value = '15'; ckToleranceVal.textContent = '15';
     ckSoftness.value = '10'; ckSoftnessVal.textContent = '10';
+    ckBackgroundOnly.checked = true;
     ckProtectEnabled.checked = false;
     updateChromaKeyProtectUI();
     setColorInputs(ckProtectColor, ckProtectHex, [0, 0, 0]);
