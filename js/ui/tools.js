@@ -22,7 +22,8 @@ import { nearestColor } from '../core/palettes.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../core/model.js';
 import { segmentAt } from '../core/strips.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat } from './floatsession.js';
-import { commitAcceptAnimation, stripOf } from './frames.js';
+import { commitAcceptAnimation } from '../features/animations/commands.js';
+import { stripForFrame as stripOf } from '../domain/sprites/strips.js';
 import { HANDLES_ALL, handlePoint, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 

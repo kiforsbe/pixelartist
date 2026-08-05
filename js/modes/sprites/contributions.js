@@ -1,4 +1,5 @@
-import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } from './sprite-sheet-controller.js';
+import { registerFrameTool, bindFrameTool, drawStripChrome } from './sprite-sheet-controller.js';
+import { mountFramesPanel } from './frame-panel.js';
 import { mountAnimationsPanel } from '../../ui/animpanel.js';
 import { mountTimeline } from '../../ui/timeline.js';
 import { mountFrameEditor } from '../../ui/frameeditor.js';

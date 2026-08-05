@@ -1,7 +1,10 @@
 import {
-  registerTileTool, bindTileTool, registerAutotilePaintTool, bindAutotilePaintTool,
-  mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome,
+  registerTileTool, bindTileTool, drawTileChrome,
 } from './tile-editor-controller.js';
+import { registerAutotilePaintTool, bindAutotilePaintTool } from './autotile-paint-controller.js';
+import { mountTilePanel } from './tile-panel.js';
+import { mountAutotilesPanel } from './autotiles-panel.js';
+import { mountTileLayersPanel } from './tile-layers-panel.js';
 import { mountTileEditor } from '../../ui/tileeditor.js';
 import { renderTilePreview } from './preview.js';
 

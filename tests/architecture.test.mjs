@@ -57,3 +57,14 @@ test('shared preview delegates rendering to mode providers', async () => {
   assert.doesNotMatch(source, /(?:mapmode|modes\/maps|renderMapPreviewBitmap)/);
   assert.match(source, /registries\.previews\.list/);
 });
+
+test('mode canvas controllers do not own contribution panels', async () => {
+  for (const file of [
+    join(root, 'js/modes/sprites/sprite-sheet-controller.js'),
+    join(root, 'js/modes/tiles/tile-editor-controller.js'),
+    join(root, 'js/modes/tiles/autotile-paint-controller.js'),
+  ]) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /export function mount[A-Za-z]+Panel\s*\(/, file);
+  }
+});

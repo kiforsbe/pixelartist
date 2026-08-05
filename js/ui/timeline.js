@@ -16,7 +16,7 @@
 import { state, on, emit, activeSheet, markDirty, confirmOrAuto, currentContextLayers } from '../app/state.js';
 import { addAnimation, contextLayers, flattenSheetLayers, findParent, renameAnimation, effectiveDuration } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
-import { commitBreakApartStrip } from './frames.js';
+import { commitBreakApartStrip } from '../features/animations/commands.js';
 import { setPreviewBitmap } from './previewpanel.js';
 
 // Thumbnail size tracks the dock's height (see the resize handle in
