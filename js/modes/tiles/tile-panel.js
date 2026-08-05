@@ -4,16 +4,13 @@ import {
   terrainSetNameField,
   terrainSetLayerField,
   terrainSetDeleteButton,
-  commitTileName,
-  commitGridCellField,
-  commitTileSize,
-  commitTileLayer,
-  buildTagsField,
-  openTileEditor,
-  commitDetachTile,
-  commitDeleteGrid,
   syncSelectedTerrainSetFromTile,
-} from './tile-editor-controller.js';
+} from './terrain-set-controller.js';
+import {
+  commitTileName, commitGridCellField, commitTileSize, commitTileLayer,
+  openTileEditor, commitDetachTile, commitDeleteGrid,
+} from './tile-sheet-commands.js';
+import { buildTagsField } from './tile-tags-field.js';
 
 function sizeField(labelText, value, onCommit) {
   const label = document.createElement('label');

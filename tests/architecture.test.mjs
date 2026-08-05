@@ -68,3 +68,22 @@ test('mode canvas controllers do not own contribution panels', async () => {
     assert.doesNotMatch(source, /export function mount[A-Za-z]+Panel\s*\(/, file);
   }
 });
+
+test('mode pointer controllers do not import contextual panels or terrain UI', async () => {
+  const spriteController = await readFile(join(root, 'js/modes/sprites/sprite-sheet-controller.js'), 'utf8');
+  assert.doesNotMatch(spriteController, /frame-panel/);
+
+  const tileController = await readFile(join(root, 'js/modes/tiles/tile-editor-controller.js'), 'utf8');
+  assert.doesNotMatch(tileController, /(?:tile-panel|autotiles-panel|tile-layers-panel|terrain-set-controller|tile-tags-field)/);
+});
+
+test('mode command modules do not access browser UI globals', async () => {
+  for (const file of [
+    join(root, 'js/modes/tiles/tile-sheet-commands.js'),
+    join(root, 'js/modes/tiles/terrain-set-commands.js'),
+    join(root, 'js/modes/tiles/tile-layer-commands.js'),
+  ]) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
+  }
+});
