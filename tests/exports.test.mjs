@@ -1,10 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createProject, createSheet, addFrame, addAnimation } from '../js/core/model.js';
+import { createProject, createSheet, createMap, addFrame, addAnimation } from '../js/core/model.js';
 import { createTileGrid } from '../js/core/tilegrids.js';
 import { setSlot } from '../js/core/neighbors.js';
 import { createTerrainSet, assignSlot } from '../js/core/terrainsets.js';
-import { buildFramesJson, buildTilesJson } from '../js/app/exports.js';
+import { buildFramesJson, buildTilesJson, buildMapJson } from '../js/app/exports.js';
+
+test('buildMapJson preserves reference placements and infinite-map settings', () => {
+  const p = createProject('demo'); const map = createMap(p, { name: 'scene', gridW: 8, gridH: 8 });
+  const sheet = createSheet(p, { name:'tiles', width:16, height:16, kind:'tile' });
+  sheet.terrainSets.push({ id:'ground', tileW:8, tileH:12, slots:[], symmetry:{ flip:false, rotate:false } });
+  map.layers[0].terrain.push({ id: 't', sheetId: sheet.id, terrainSetId: 'ground', x: -8, y: 4 });
+  map.bounds = { x:0, y:0, w:999, h:999 };
+  const json = buildMapJson(map, p);
+  assert.equal(json.infinite, true); assert.equal(json.layers[0].terrain[0].terrainSetId, 'ground');
+  assert.deepEqual(json.bounds, { x:-8, y:0, w:8, h:16 });
+});
 
 test('buildFramesJson: shape, indices, and animation frames-by-name', () => {
   const project = createProject('demo');

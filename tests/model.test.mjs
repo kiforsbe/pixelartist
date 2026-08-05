@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PROJECT_VERSION, DEFAULT_SETTINGS, defaultOnionSettings, createProject, createSheet, addLayer, removeLayer,
+  PROJECT_VERSION, DEFAULT_SETTINGS, defaultOnionSettings, createProject, createSheet, createMap, createMapLayer, mapContentBounds, refreshMapBounds, addLayer, removeLayer,
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
@@ -24,6 +24,51 @@ test('removeSheet splices the matching sheet out of project.sheets and returns i
   const removed = removeSheet(p, s1.id);
   assert.equal(removed, s1);
   assert.deepEqual(p.sheets, [s2]);
+});
+
+test('maps serialize, migrate, and preserve typed layer content', () => {
+  const p = createProject('map');
+  const map = createMap(p, { name: 'Test', gridW: 8, gridH: 12 });
+  map.layers[0].tiles.push({ id: 'a', sheetId: 's', tileId: 't', x: -8, y: 12 });
+  const { json, images } = serializeProject(p);
+  assert.equal(json.version, PROJECT_VERSION);
+  assert.deepEqual(json.maps[0].snap, { mode: 'map', gridW: 8, gridH: 12 });
+  assert.equal(deserializeProject(json, new Map(images.map(i => [i.path, i.bitmap]))).maps[0].layers[0].tiles[0].x, -8);
+  const v2 = { version: 2, name: 'old', settings: { ...DEFAULT_SETTINGS }, sheets: [] };
+  assert.deepEqual(deserializeProject(v2, new Map()).maps, []);
+});
+
+test('map bounds are the grid-aligned union of contents across every typed layer and shrink after removal', () => {
+  const p = createProject('map bounds');
+  const tiles = createSheet(p, { name:'tiles', width:32, height:16, kind:'tile' });
+  tiles.tiles.push({ id:'tile', x:0, y:0, w:8, h:6 });
+  tiles.terrainSets.push({ id:'terrain', tileW:16, tileH:10, slots:[], symmetry:{ flip:false, rotate:false } });
+  const sprites = createSheet(p, { name:'sprites', width:16, height:16, kind:'sprite' });
+  const frame = addFrame(sprites, { name:'frame', x:0, y:0, w:7, h:9 });
+  const map = createMap(p);
+  map.layers[0].tiles.push({ id:'tile-item', sheetId:tiles.id, tileId:'tile', x:10, y:20 });
+  map.layers[0].terrain.push({ id:'terrain-item', sheetId:tiles.id, terrainSetId:'terrain', x:-16, y:-8 });
+  const spriteLayer = createMapLayer(map, { type:'sprite' });
+  spriteLayer.visible = false; spriteLayer.locked = true;
+  spriteLayer.sprites.push({ id:'sprite-item', sheetId:sprites.id, kind:'frame', assetId:frame.id, x:40, y:-20 });
+
+  assert.deepEqual(mapContentBounds(p, map), { x:-16, y:-32, w:64, h:64 });
+  map.bounds = { x:0, y:0, w:999, h:999 };
+  assert.deepEqual(refreshMapBounds(p, map), { x:-16, y:-32, w:64, h:64 });
+
+  spriteLayer.sprites.length = 0;
+  assert.deepEqual(refreshMapBounds(p, map), { x:-16, y:-16, w:48, h:48 });
+  map.layers[0].tiles.length = 0; map.layers[0].terrain.length = 0;
+  assert.deepEqual(refreshMapBounds(p, map), { x:0, y:0, w:320, h:240 });
+});
+
+test('project serialization derives current map bounds instead of preserving stale bounds', () => {
+  const p = createProject('map bounds');
+  const tiles = createSheet(p, { name:'tiles', width:16, height:16, kind:'tile' });
+  tiles.tiles.push({ id:'tile', x:0, y:0, w:8, h:6 });
+  const map = createMap(p); map.bounds = { x:0, y:0, w:999, h:999 };
+  map.layers[0].tiles.push({ id:'item', sheetId:tiles.id, tileId:'tile', x:-5, y:7 });
+  assert.deepEqual(serializeProject(p).json.maps[0].bounds, { x:-16, y:0, w:32, h:16 });
 });
 
 test('removeSheet returns null and leaves sheets untouched for an unknown id', () => {
@@ -417,9 +462,9 @@ test('validateProjectJson rejects bad input', () => {
   assert.equal(validateProjectJson(serializeProject(p).json).ok, true);
 });
 
-test('project carries required settings; version 2', () => {
+test('project carries required settings; version 3', () => {
   const p = createProject('s');
-  assert.equal(p.version, 2);
+  assert.equal(p.version, 3);
   assert.deepEqual(p.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
   const p2 = createProject('s2', { ...DEFAULT_SETTINGS, tileW: 8 });
   assert.equal(p2.settings.tileW, 8);
@@ -523,7 +568,7 @@ test('animations carry strip flag; serialize round-trips settings and strip', ()
   const an = addAnimation(s, 'walk', true);
   assert.equal(an.strip, true);
   const { json, images } = serializeProject(p);
-  assert.equal(json.version, 2);
+  assert.equal(json.version, 3);
   assert.deepEqual(json.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
   const map = new Map(images.map(i => [i.path, i.bitmap]));
   const p2 = deserializeProject(structuredClone(json), map);

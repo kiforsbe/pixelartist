@@ -11,7 +11,7 @@ export const state = {
   project: null,
   fileHandle: null, dirHandle: null, saveMode: null, // 'packed'|'unpacked'|null
   dirty: false,
-  mode: 'sprites',            // 'sprites' | 'tiles'
+  mode: 'sprites',            // 'sprites' | 'tiles' | 'maps'
   view: 'sheet',              // 'sheet' | 'frame' | 'tile'  (focused editors)
   activeSheetId: null,        // per current mode
   activeLayerId: null,
@@ -21,6 +21,9 @@ export const state = {
   selectedFrameId: null, selectedAnimationId: null,
   selectedTileId: null,       // tile tool selection (tile mode)
   selectedTerrainSetId: null, // which terrain set's slot editor is open in the panel
+  activeMapId: null,
+  activeMapLayerId: null,
+  selectedMapItemId: null,
   editingFrameId: null,       // frame editor target
   editingTileId: null,        // tile editor target
   // Saved as part of the project (project.settings.onion) so onion-skin
@@ -49,6 +52,9 @@ export function emit(event, payload) {
 // 'tool', 'history', 'selection', 'pixels', 'colors', 'brushSize', 'playhead'
 export function activeSheet() {
   return state.project?.sheets.find(s => s.id === state.activeSheetId) ?? null;
+}
+export function activeMap() {
+  return state.project?.maps?.find(m => m.id === state.activeMapId) ?? null;
 }
 export function activeLayer() {
   const sheet = activeSheet();
@@ -115,6 +121,9 @@ export function setProject(project) {
   const sheet = project.sheets.find(s => s.kind === kind) ?? null;
   state.activeSheetId = sheet ? sheet.id : null;
   state.activeLayerId = sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null;
+  const map = project.maps?.[0] ?? null;
+  state.activeMapId = map?.id ?? null;
+  state.activeMapLayerId = map?.layers[0]?.id ?? null;
   state.commands.clear();
   state.dirty = false;
   emit('project');

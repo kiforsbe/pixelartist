@@ -1,10 +1,10 @@
-import { state, on, emit, activeSheet, activeLayer, activeLayerScope, currentContextLayers, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty, maybeSnapPixels } from './state.js';
+import { state, on, emit, activeSheet, activeLayer, activeLayerScope, currentContextLayers, activeMap, setProject, newDefaultProject, AUTOTEST, confirmOrAuto, markDirty, maybeSnapPixels } from './state.js';
 import * as io from './io.js';
 import { decodePng } from './pngcodec.js';
-import { flattenSheet, createSheet, removeSheet, sheetLayers, layerAnimationContext, DEFAULT_SETTINGS } from '../core/model.js';
+import { flattenSheet, createSheet, createMap, removeSheet, sheetLayers, layerAnimationContext, DEFAULT_SETTINGS } from '../core/model.js';
 import { MAX_PALETTE_COLORS } from '../core/pixelSnapper.js';
 import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../core/strips.js';
-import { buildFramesJson, buildTilesJson } from './exports.js';
+import { buildFramesJson, buildTilesJson, buildMapJson } from './exports.js';
 import { buildTiledTsx } from './tiledExport.js';
 import { buildC99, MAX_COLORS } from './c99Export.js';
 import {
@@ -37,6 +37,7 @@ import { mountAnimationsPanel } from '../ui/animpanel.js';
 import { buildBaseDurationControl } from '../ui/baseDurationControl.js';
 import { mountFrameEditor } from '../ui/frameeditor.js';
 import { mountTileEditor } from '../ui/tileeditor.js';
+import { registerMapTool, bindMapMode, paintMap, drawMapOverlay, mountMapPanel, mountMapAssetsPanel, focusMapCanvas } from '../ui/mapmode.js';
 import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste, hasSelection, currentEditRegion } from '../ui/floatsession.js';
 import { defineAction, runAction, bindAction } from './actions.js';
 import { mountMenuBar } from '../ui/menubar.js';
@@ -67,6 +68,7 @@ function positiveIntField(el) {
 // ---- element refs ----
 const tabSprites = document.getElementById('tab-sprites');
 const tabTiles = document.getElementById('tab-tiles');
+const tabMaps = document.getElementById('tab-maps');
 const statusTool = document.getElementById('status-tool');
 const statusPlatform = document.getElementById('status-platform');
 const statusPos = document.getElementById('status-pos');
@@ -115,9 +117,19 @@ markDefaultAction(dlgNewProject, npCreate);
 // ---- mode tabs ----
 function switchMode(mode) {
   if (state.mode === mode) return;
+  const previousMode = state.mode;
   state.mode = mode;
   tabSprites.classList.toggle('active', mode === 'sprites');
   tabTiles.classList.toggle('active', mode === 'tiles');
+  tabMaps.classList.toggle('active', mode === 'maps');
+  if (mode === 'maps') {
+    const map = state.project?.maps?.[0] ?? null;
+    state.activeMapId = map?.id ?? null;
+    state.activeMapLayerId = map?.layers[0]?.id ?? null;
+    state.activeSheetId = null; state.activeLayerId = null; state.view = 'map';
+    if (!['select', 'move', 'maptile', 'mapsprite'].includes(state.tool)) { state.tool = 'select'; emit('tool'); }
+    emit('view'); focusMapCanvas(mapCanvasView); return;
+  }
   const kind = mode === 'sprites' ? 'sprite' : 'tile';
   const sheet = state.project?.sheets.find(s => s.kind === kind) ?? null;
   state.activeSheetId = sheet ? sheet.id : null;
@@ -135,13 +147,27 @@ function switchMode(mode) {
   // pointer routing on a tool with nothing to dispatch to.
   if (mode !== 'sprites' && state.tool === 'frametool') { state.tool = 'pencil'; emit('tool'); }
   if (mode !== 'tiles' && state.tool === 'tiletool') { state.tool = 'pencil'; emit('tool'); }
+  if (mode !== 'maps' && ['maptile', 'mapsprite'].includes(state.tool)) { state.tool = 'pencil'; emit('tool'); }
   emit('view');
+  // Maps uses a deliberately distant, centred infinite-workspace camera.
+  // Returning to a finite sheet must recenter it; otherwise the sheet is
+  // still rendered but entirely outside the viewport (as in the reported
+  // blank Tile Sheets canvas).
+  if (previousMode === 'maps') canvasView.centerFit();
 }
 tabSprites.addEventListener('click', () => switchMode('sprites'));
 tabTiles.addEventListener('click', () => switchMode('tiles'));
+tabMaps.addEventListener('click', () => switchMode('maps'));
 
 // ---- sheet selector ----
 function refreshSheetSelect() {
+  if (state.mode === 'maps') {
+    const maps = state.project?.maps ?? [];
+    sheetSelect.innerHTML = '';
+    for (const m of maps) { const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.name; sheetSelect.appendChild(opt); }
+    sheetSelect.value = state.activeMapId ?? '';
+    return;
+  }
   const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
   const sheets = state.project?.sheets.filter(s => s.kind === kind) ?? [];
   sheetSelect.innerHTML = '';
@@ -164,6 +190,7 @@ on('view', scheduleSheetSelectRefresh);
 refreshSheetSelect();
 
 sheetSelect.addEventListener('change', () => {
+  if (state.mode === 'maps') { const map = state.project?.maps?.find(m => m.id === sheetSelect.value); if (!map) return; state.activeMapId = map.id; state.activeMapLayerId = map.layers[0]?.id ?? null; state.view = 'map'; emit('view'); focusMapCanvas(mapCanvasView); return; }
   const sheet = state.project?.sheets.find(s => s.id === sheetSelect.value);
   if (!sheet) return;
   state.activeSheetId = sheet.id;
@@ -222,6 +249,7 @@ defineAction('document.newSheet', {
   label: 'New Sheet',
   run: () => {
     if (!state.project) return;
+    if (state.mode === 'maps') { const map = createMap(state.project, { name: `Map ${state.project.maps.length}`, gridW: state.project.settings.tileW, gridH: state.project.settings.tileH }); state.activeMapId = map.id; state.activeMapLayerId = map.layers[0].id; markDirty(); emit('view'); return; }
     const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
     const settings = state.project.settings;
     const n = state.project.sheets.filter(s => s.kind === kind).length + 1;
@@ -259,7 +287,7 @@ nsCreate.addEventListener('click', () => {
 defineAction('document.importSheet', {
   label: 'Import Sheet from Image',
   run: async () => {
-    if (!state.project) return;
+    if (!state.project || state.mode === 'maps') return;
     let file;
     try {
       file = await io.pickImageFile();
@@ -290,7 +318,7 @@ defineAction('document.importSheet', {
     sheetLayers(sheet)[0].bitmap = bitmap;
     commitAddSheet(sheet);
   },
-  isEnabled: () => !!state.project,
+  isEnabled: () => !!state.project && state.mode !== 'maps',
 });
 bindAction(btnImportSheet, 'document.importSheet');
 
@@ -300,32 +328,38 @@ const dlgRenameSheet = document.getElementById('dlg-renamesheet');
 const rsName = document.getElementById('rs-name');
 const rsOk = document.getElementById('rs-ok');
 const rsCancel = document.getElementById('rs-cancel');
+const rsHeading = dlgRenameSheet.querySelector('h3');
+let renameTarget = null, renameTargetKind = 'sheet';
 markDefaultAction(dlgRenameSheet, rsOk);
 defineAction('document.renameSheet', {
-  label: 'Rename Sheet',
+  label: 'Rename',
   run: () => {
-    const sheet = activeSheet();
-    if (!sheet) return;
-    rsName.value = sheet.name;
+    renameTargetKind = state.mode === 'maps' ? 'map' : 'sheet';
+    renameTarget = renameTargetKind === 'map' ? activeMap() : activeSheet();
+    if (!renameTarget) return;
+    rsHeading.textContent = renameTargetKind === 'map' ? 'Rename Map' : 'Rename Sheet';
+    rsName.value = renameTarget.name;
     dlgRenameSheet.showModal();
   },
-  isEnabled: () => !!activeSheet(),
+  isEnabled: () => state.mode === 'maps' ? !!activeMap() : !!activeSheet(),
 });
 bindAction(btnRenameSheet, 'document.renameSheet');
-rsCancel.addEventListener('click', () => dlgRenameSheet.close());
+rsCancel.addEventListener('click', () => { renameTarget = null; dlgRenameSheet.close(); });
+dlgRenameSheet.addEventListener('close', () => { renameTarget = null; });
 rsOk.addEventListener('click', () => {
-  const sheet = activeSheet();
-  if (!sheet) { dlgRenameSheet.close(); return; }
+  const target = renameTarget;
+  if (!target) { dlgRenameSheet.close(); return; }
   const v = rsName.value.trim();
   if (!v) { alert('Name cannot be empty.'); return; }
-  const old = sheet.name;
+  const old = target.name, kind = renameTargetKind;
   // markDirty() in both directions: its 'project' emit refreshes the sheet
   // selector, which undo/redo would otherwise leave showing the stale name.
   state.commands.push({
-    label: 'rename sheet',
-    do() { sheet.name = v; markDirty(); },
-    undo() { sheet.name = old; markDirty(); },
+    label: `rename ${kind}`,
+    do() { target.name = v; markDirty(); },
+    undo() { target.name = old; markDirty(); },
   });
+  renameTarget = null;
   dlgRenameSheet.close();
 });
 
@@ -336,6 +370,30 @@ rsOk.addEventListener('click', () => {
 // per-sheet selections, any open frame/tile editor, and an in-progress
 // floating selection.
 const btnDeleteSheet = document.getElementById('btn-delete-sheet');
+function commitDeleteMap(map) {
+  const project = state.project, index = project.maps.indexOf(map);
+  if (index === -1) return;
+  const wasActive = state.activeMapId === map.id;
+  const prev = { activeMapId:state.activeMapId, activeMapLayerId:state.activeMapLayerId, selectedMapItemId:state.selectedMapItemId };
+  state.commands.push({
+    label: 'delete map',
+    do() {
+      const current = project.maps.indexOf(map); if (current !== -1) project.maps.splice(current, 1);
+      if (wasActive) {
+        const next = project.maps[Math.min(index, project.maps.length - 1)] ?? null;
+        state.activeMapId = next?.id ?? null;
+        state.activeMapLayerId = next?.layers[0]?.id ?? null;
+        state.selectedMapItemId = null;
+      }
+      markDirty(); emit('view');
+    },
+    undo() {
+      if (!project.maps.includes(map)) project.maps.splice(index, 0, map);
+      Object.assign(state, prev);
+      markDirty(); emit('view');
+    },
+  });
+}
 function commitDeleteSheet(sheet) {
   const project = state.project;
   const index = project.sheets.indexOf(sheet);
@@ -379,16 +437,30 @@ function commitDeleteSheet(sheet) {
   state.commands.push(cmd);
 }
 defineAction('document.deleteSheet', {
-  label: 'Delete Sheet',
+  label: 'Delete',
   run: () => {
+    if (state.mode === 'maps') {
+      const map = activeMap(); if (!map) return;
+      if (confirmOrAuto(`Delete map "${map.name}" and all of its layers and placements?`)) commitDeleteMap(map);
+      return;
+    }
     const sheet = activeSheet();
     if (!sheet) return;
     if (!confirmOrAuto(`Delete sheet "${sheet.name}" and everything in it (layers, frames, animations${sheet.kind === 'tile' ? ', tiles, autotile sets' : ''})?`)) return;
     commitDeleteSheet(sheet);
   },
-  isEnabled: () => !!activeSheet(),
+  isEnabled: () => state.mode === 'maps' ? !!activeMap() : !!activeSheet(),
 });
 bindAction(btnDeleteSheet, 'document.deleteSheet');
+function refreshDocumentControlTitles() {
+  const maps = state.mode === 'maps';
+  btnNewSheet.title = maps ? 'New map' : 'New sheet';
+  btnRenameSheet.title = maps ? 'Rename map' : 'Rename sheet';
+  btnDeleteSheet.title = maps ? 'Delete map' : 'Delete sheet';
+}
+on('view', refreshDocumentControlTitles);
+on('project', refreshDocumentControlTitles);
+refreshDocumentControlTitles();
 
 // ---- undo/redo ----
 state.commands.onChange = () => emit('history');
@@ -1221,6 +1293,18 @@ canvasView.onStatus = ({ x, y, zoom }) => {
   statusPos.textContent = (x == null || y == null) ? '' : `${x},${y}`;
   statusZoom.textContent = `${zoom}x`;
 };
+const mapCanvasHost = document.createElement('div');
+mapCanvasHost.className = 'map-editor-host';
+mapCanvasHost.hidden = true;
+canvasHost.appendChild(mapCanvasHost);
+const mapCanvasView = new CanvasView(mapCanvasHost);
+mapCanvasView.onStatus = ({ x, y, zoom }) => {
+  statusPos.textContent = (x == null || y == null) ? '' : `${x - 4096},${y - 4096}`;
+  statusZoom.textContent = `${zoom}x`;
+};
+mapCanvasView.onPaint = paintMap;
+mapCanvasView.onOverlay = (ctx) => drawMapOverlay(mapCanvasView, ctx);
+mapCanvasView.canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 // scratch OffscreenCanvas caching the active sheet's flattened bitmap; only
 // re-flattened when the project changes, not on every paint (pan/zoom-driven).
@@ -1268,6 +1352,10 @@ canvasView.onPaint = (ctx) => {
 };
 
 function refreshCanvasView() {
+  const maps = state.mode === 'maps';
+  canvasView.canvas.hidden = maps;
+  mapCanvasHost.hidden = !maps;
+  if (maps) { mapCanvasView.setContent({ width: 8192, height: 8192 }); mapCanvasView.requestRender(); return; }
   const sheet = activeSheet();
   if (sheet) canvasView.setContent({ width: sheet.width, height: sheet.height });
   canvasView.requestRender();
@@ -1323,8 +1411,10 @@ bindFrameTool(canvasView);
 // intercept at once (frametool is sprite-only, tiletool is tile-only).
 registerTileTool();
 registerAutotilePaintTool();
+registerMapTool();
 bindTileTool(canvasView);
 bindAutotilePaintTool(canvasView);
+bindMapMode(mapCanvasView);
 // Compose the sheet-view overlay chain: tools.js's marquee + frames.js's
 // create/move/resize ghost + tilemode.js's swap/move ghost (already chained
 // by bindFrameTool/bindTileTool above), then finally the frame/tile label
@@ -1353,6 +1443,8 @@ mountAnimationsPanel(document.getElementById('panel-animation'));
 mountTilePanel(document.getElementById('panel-context'));
 mountAutotilesPanel(document.getElementById('panel-autotiles'));
 mountTileLayersPanel(document.getElementById('panel-tilelayers'));
+mountMapPanel(document.getElementById('panel-context'));
+mountMapAssetsPanel(document.getElementById('panel-map-assets'));
 // Mounted before mountTimeline() so its own initial render() (below) runs
 // last and wins over previewpanel's mount-time render() -- both fire
 // synchronously in this init sequence, outside the event system.
@@ -1374,7 +1466,7 @@ const tileEditor = mountTileEditor(canvasHost);
 
 // ---- view: zoom ----
 function activeCanvasView() {
-  return state.view === 'frame' ? frameEditor.view : state.view === 'tile' ? tileEditor.view : canvasView;
+  return state.mode === 'maps' ? mapCanvasView : state.view === 'frame' ? frameEditor.view : state.view === 'tile' ? tileEditor.view : canvasView;
 }
 defineAction('view.zoomIn', { label: 'Zoom In', run: () => activeCanvasView().zoomIn() });
 defineAction('view.zoomOut', { label: 'Zoom Out', run: () => activeCanvasView().zoomOut() });
@@ -1446,7 +1538,7 @@ const MENUS = [
   { label: 'Document', items: [
     { action: 'document.newSheet' }, { action: 'document.importSheet' }, { separator: true },
     { action: 'document.renameSheet' }, { action: 'document.deleteSheet' }, { separator: true },
-    { action: 'document.exportSheet' }, { action: 'document.exportAnimation' },
+    { action: 'document.exportSheet' }, { action: 'document.exportAnimation' }, { action: 'document.exportMap' },
   ] },
   { label: 'Layer', items: [
     { action: 'layer.add' }, { action: 'layer.addGroup' }, { separator: true },
@@ -1971,6 +2063,12 @@ function exportFramesJson() {
   const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
   io.downloadBlob(blob, `${sheet.name}.frames.json`);
 }
+
+function exportMapJson() {
+  const map = activeMap();
+  if (!map || !state.project) return;
+  io.downloadBlob(new Blob([JSON.stringify(buildMapJson(map, state.project), null, 2)], { type: 'application/json' }), `${state.project.name}-${map.name}.map.json`);
+}
 function exportTilesJson() {
   commitFloatIfAny();
   const sheet = activeSheet();
@@ -2178,6 +2276,7 @@ function exportC64Native() {
 }
 
 defineAction('document.exportSheet.png', { label: 'Sheet PNG (flattened)', run: exportSheetPng });
+defineAction('document.exportMap', { label: 'Map JSON', run: exportMapJson, isEnabled: () => !!activeMap() });
 defineAction('document.exportSheet.frames', { label: 'Frames JSON', run: exportFramesJson, isEnabled: () => activeSheet()?.kind === 'sprite' });
 defineAction('document.exportSheet.tiles', { label: 'Tiles JSON', run: exportTilesJson, isEnabled: () => activeSheet()?.kind === 'tile' });
 defineAction('document.exportSheet.tsx', { label: 'Tiled TSX', run: exportTiledTsxFile, isEnabled: () => activeSheet()?.kind === 'tile' });

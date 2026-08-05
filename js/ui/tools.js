@@ -27,14 +27,15 @@ import { HANDLES_ALL, handlePoint, isCenterAnchorModifier, isProportionalModifie
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
 
 export const TOOLS = [
-  { id: 'pencil', icon: '✏️', key: 'b' },
-  { id: 'eraser', icon: '🧽', key: 'e' },
-  { id: 'fill', icon: '🪣', key: 'g' },
-  { id: 'softflood', label: 'Soft flood', icon: '🫗', key: 'k' },
-  { id: 'line', icon: '📏', key: 'l' },
-  { id: 'rect', icon: '▭', key: 'u' },
-  { id: 'ellipse', icon: '◯', key: 'o' },
-  { id: 'eyedropper', icon: '💉', key: 'i' },
+  { id: 'pencil', icon: '✏️', key: 'b', isAvailable: () => state.mode !== 'maps' },
+  { id: 'eraser', icon: '🧽', key: 'e', isAvailable: () => state.mode !== 'maps' },
+  { id: 'fill', icon: '🪣', key: 'g', isAvailable: () => state.mode !== 'maps' },
+  { id: 'softflood', label: 'Soft flood', icon: '🫗', key: 'k', isAvailable: () => state.mode !== 'maps' },
+  { id: 'line', icon: '📏', key: 'l', isAvailable: () => state.mode !== 'maps' },
+  { id: 'rect', icon: '▭', key: 'u', isAvailable: () => state.mode !== 'maps' },
+  { id: 'ellipse', icon: '◯', key: 'o', isAvailable: () => state.mode !== 'maps' },
+  { id: 'eyedropper', icon: '💉', key: 'i', isAvailable: () => state.mode !== 'maps' },
+  // These are shared with Maps mode; mapmode.js intercepts their pointer events.
   { id: 'select', icon: '⛶', key: 'm' },
   { id: 'move', icon: '✋', key: 'v' },
 ];
@@ -231,7 +232,11 @@ export function mountToolPalette(el) {
   }
 
   function refresh() {
-    for (const [id, btn] of buttons) btn.classList.toggle('active', state.tool === id);
+    for (const [id, btn] of buttons) {
+      const entry = TOOLS.find(t => t.id === id) ?? extraTools.find(t => t.id === id);
+      btn.classList.toggle('active', state.tool === id);
+      btn.hidden = !!entry?.isAvailable && !entry.isAvailable();
+    }
     for (const extra of extraTools) {
       const btn = buttons.get(extra.id);
       if (btn && extra.isAvailable) btn.hidden = !extra.isAvailable();
@@ -274,9 +279,8 @@ export function mountToolPalette(el) {
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
-    const t = [...TOOLS, ...extraTools].find(t => t.key === e.key.toLowerCase());
+    const t = [...TOOLS, ...extraTools].find(t => t.key === e.key.toLowerCase() && (!t.isAvailable || t.isAvailable()));
     if (!t) return;
-    if (t.isAvailable && !t.isAvailable()) return;
     e.preventDefault();
     selectTool(t.id);
   });

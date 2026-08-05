@@ -51,6 +51,7 @@ body {
 .tool-option-checks { display: flex; flex-direction: column; gap: 4px; }
 #canvas-host { grid-column: 2; grid-row: 1; position: relative; overflow: hidden; background: var(--bg); min-height: 0; }
 #canvas-host canvas { position: absolute; inset: 0; }
+.map-editor-host { position: absolute; inset: 0; overflow: hidden; background: #15161a; }
 #side-panels { grid-row: 1 / 3; min-height: 0; background: var(--bg2); border-left: 1px solid var(--border);
   overflow-y: auto; display: flex; flex-direction: column; }
 .panel { border-bottom: 1px solid var(--border); padding: 8px; }
@@ -100,6 +101,16 @@ input[type="number"]::-webkit-outer-spin-button {
   border-radius: 0 3px 3px 0;
   filter: invert(1) brightness(1.7);
 }
+
+/* Maps mode uses a visual brush palette instead of identifier dropdowns. */
+.map-brush-source { display: flex; gap: 5px; align-items: center; margin: 5px 0; font-size: 11px; }
+.map-brush-source select { min-width: 0; flex: 1; }
+.map-brush-kind { display: flex; gap: 4px; margin-bottom: 5px; }
+.map-brush-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 5px; max-height: 270px; overflow-y: auto; }
+.map-brush-swatch { min-width: 0; min-height: 72px; padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); }
+.map-brush-swatch:hover, .map-brush-swatch.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, var(--bg3)); }
+.map-brush-thumb { display: block; max-width: 56px; max-height: 56px; image-rendering: pixelated; background: conic-gradient(#777 25%, #aaa 25% 50%, #777 50% 75%, #aaa 75%) 0 0 / 8px 8px; }
+.map-brush-swatch span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; text-align: center; }
 input[type="number"]:hover::-webkit-inner-spin-button,
 input[type="number"]:hover::-webkit-outer-spin-button {
   filter: invert(1) brightness(2.2);

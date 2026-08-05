@@ -1,9 +1,9 @@
 // Color/palette panel and layers panel.
 
-import { state, on, emit, activeSheet, activeLayer, markDirty, confirmOrAuto } from '../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, activeMap, markDirty, confirmOrAuto } from '../app/state.js';
 import { commitDeleteAnimation } from './timeline.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
-import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, moveNode, animationGroup, layerAnimationContext } from '../core/model.js';
+import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, createMapLayer, refreshMapBounds, moveNode, animationGroup, layerAnimationContext } from '../core/model.js';
 import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
@@ -430,6 +430,11 @@ export function mountLayersPanel(el) {
   }
 
   function doAddLayer() {
+    if (state.mode === 'maps') {
+      const map = activeMap(); if (!map) return;
+      const layer = createMapLayer(map, { type: 'tile' });
+      state.activeMapLayerId = layer.id; markDirty(); emit('view'); return;
+    }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
     if (!sheet || !group) return;
@@ -455,6 +460,11 @@ export function mountLayersPanel(el) {
   }
 
   function doAddGroup() {
+    if (state.mode === 'maps') {
+      const map = activeMap(); if (!map) return;
+      const layer = createMapLayer(map, { type: 'sprite' });
+      state.activeMapLayerId = layer.id; markDirty(); emit('view'); return;
+    }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
     if (!sheet || !group) return;
@@ -480,6 +490,14 @@ export function mountLayersPanel(el) {
   }
 
   function doDelete() {
+    if (state.mode === 'maps') {
+      const map = activeMap(), layer = map?.layers.find(l => l.id === state.activeMapLayerId);
+      if (!map || !layer || map.layers.length <= 1) return;
+      if (!confirmOrAuto(`Delete ${layer.type} layer "${layer.name}"?`)) return;
+      const index = map.layers.indexOf(layer);
+      state.commands.push({ label: 'delete map layer', do() { map.layers.splice(map.layers.indexOf(layer), 1); state.activeMapLayerId = map.layers[Math.min(index, map.layers.length - 1)]?.id ?? null; refreshMapBounds(state.project, map); markDirty(); }, undo() { map.layers.splice(index, 0, layer); state.activeMapLayerId = layer.id; refreshMapBounds(state.project, map); markDirty(); } });
+      return;
+    }
     const sheet = activeSheet();
     if (!sheet) return;
     const layer = activeLayer();
@@ -989,6 +1007,28 @@ export function mountLayersPanel(el) {
     list.appendChild(row);
   }
 
+  function renderMapLayer(layer) {
+    const row = document.createElement('div');
+    row.className = 'layer-row layer-leaf' + (layer.id === state.activeMapLayerId ? ' active' : '');
+    row.style.paddingLeft = '4px'; row.tabIndex = 0;
+    row.addEventListener('click', () => { state.activeMapLayerId = layer.id; emit('view'); });
+    row.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      const map = activeMap(), i = map?.layers.indexOf(layer); if (i == null) return;
+      const target = e.key === 'ArrowUp' ? i + 1 : i - 1;
+      if (target < 0 || target >= map.layers.length) return;
+      e.preventDefault(); map.layers.splice(i, 1); map.layers.splice(target, 0, layer); markDirty(); emit('view');
+    });
+    const spacer = document.createElement('span'); spacer.className = 'tree-spacer leaf-spacer';
+    const thumb = document.createElement('canvas'); thumb.className = 'layer-thumb'; thumb.width = LAYER_THUMB_SIZE; thumb.height = LAYER_THUMB_SIZE;
+    const tctx = thumb.getContext('2d'); tctx.fillStyle = layer.type === 'tile' ? '#466b9c' : '#8a5b98'; tctx.fillRect(0, 0, thumb.width, thumb.height); tctx.fillStyle = '#fff'; tctx.font = '14px sans-serif'; tctx.textAlign = 'center'; tctx.textBaseline = 'middle'; tctx.fillText(layer.type === 'tile' ? '▦' : '♟', thumb.width / 2, thumb.height / 2);
+    const visBtn = document.createElement('button'); visBtn.type = 'button'; visBtn.textContent = layer.visible ? '👁' : '🚫'; visBtn.title = 'Toggle visibility'; visBtn.addEventListener('click', e => { e.stopPropagation(); layer.visible = !layer.visible; markDirty(); emit('view'); });
+    const nameEl = document.createElement('span'); nameEl.className = 'layer-name'; nameEl.textContent = layer.name; nameEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(layer, nameEl); });
+    const opacityInput = document.createElement('input'); opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100'; opacityInput.value = String(Math.round(layer.opacity * 100)); opacityInput.addEventListener('click', e => e.stopPropagation());
+    let before = null; opacityInput.addEventListener('pointerdown', e => { e.stopPropagation(); before = layer.opacity; }); opacityInput.addEventListener('input', () => { layer.opacity = Number(opacityInput.value) / 100; emit('view'); }); opacityInput.addEventListener('change', () => { if (before != null && before !== layer.opacity) state.commands.push({ label:'map layer opacity', do(){layer.opacity=Number(opacityInput.value)/100;markDirty();}, undo(){layer.opacity=before;markDirty();} }); before = null; });
+    row.append(spacer, thumb, visBtn, nameEl, opacityInput); list.appendChild(row);
+  }
+
   function renderNode(node, depth) {
     if (node.type === 'group') renderGroup(node, depth);
     else renderLayer(node, depth);
@@ -1014,6 +1054,13 @@ export function mountLayersPanel(el) {
   function renderList() {
     list.innerHTML = '';
     thumbCanvases.clear();
+    if (state.mode === 'maps') {
+      const map = activeMap();
+      btnAddLayer.title = 'Add tile layer'; btnAddGroup.title = 'Add sprite layer'; btnMerge.disabled = true;
+      if (map) for (let i = map.layers.length - 1; i >= 0; i--) renderMapLayer(map.layers[i]);
+      return;
+    }
+    btnAddLayer.title = 'Add layer'; btnAddGroup.title = 'Add group'; btnMerge.disabled = false;
     const sheet = activeSheet();
     if (!sheet) return;
     syncFromAnimationSelection(sheet);
@@ -1049,11 +1096,11 @@ export function mountLayersPanel(el) {
   // gain an animationId via frames.js's commitAcceptAnimation, which is
   // gated to sprite mode, so these actions can never create or touch an
   // animation-owned group on a tile sheet -- no isAvailable gating needed.
-  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet() });
+  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet() || (state.mode === 'maps' && !!activeMap()) });
   bindAction(btnAddLayer, 'layer.add');
-  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet() });
+  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet() || (state.mode === 'maps' && !!activeMap()) });
   bindAction(btnAddGroup, 'layer.addGroup');
-  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet() });
+  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet() || (state.mode === 'maps' && !!activeMap()) });
   bindAction(btnDelete, 'layer.delete');
   defineAction('layer.mergeDown', { label: 'Merge Down', run: doMergeDown, isEnabled: () => !!activeSheet() });
   bindAction(btnMerge, 'layer.mergeDown');

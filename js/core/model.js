@@ -5,7 +5,7 @@ import { removeEntry } from './strips.js';
 import { NEIGHBOR_DIRS } from './neighbors.js';
 import { MAX_PALETTE_COLORS, DEFAULT_PIXEL_SNAPPER_CONFIG } from './pixelSnapper.js';
 
-export const PROJECT_VERSION = 2;
+export const PROJECT_VERSION = 3;
 export const DEFAULT_SETTINGS = {
   spriteSheetW: 256, spriteSheetH: 256,
   tileSheetW: 256, tileSheetH: 256,
@@ -113,7 +113,85 @@ export function createGroupNode(name, { animationId = null, open = true } = {}) 
 
 export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
   return { version: PROJECT_VERSION, name, settings: { onion: defaultOnionSettings(), ...settings },
-    sheets: [], palettes: [], activePaletteId: null };
+    sheets: [], maps: [], palettes: [], activePaletteId: null };
+}
+
+export const DEFAULT_MAP_BOUNDS = Object.freeze({ x: 0, y: 0, w: 320, h: 240 });
+
+// Maps deliberately reference source sheet assets by id instead of copying
+// pixels. They are lightweight test scenes and always reflect current sheet
+// artwork, frames, tile records, and terrain slots.
+export function createMap(project, { name = 'Map', gridW = 16, gridH = 16 } = {}) {
+  const map = {
+    id: newId('mp'), name,
+    snap: { mode: 'map', gridW: Math.max(1, gridW), gridH: Math.max(1, gridH) },
+    // The map editor starts with a visible, finite workspace. It grows as
+    // placements extend beyond it; it is not an unbounded sheet canvas.
+    bounds: { ...DEFAULT_MAP_BOUNDS },
+    layers: [{ id: newId('ml'), name: 'Tile Layer 1', type: 'tile', visible: true, locked: false, opacity: 1, tiles: [], terrain: [] }],
+  };
+  project.maps.push(map);
+  return map;
+}
+
+export function createMapLayer(map, { name, type }) {
+  const layer = { id: newId('ml'), name: name ?? (type === 'sprite' ? 'Sprite Layer' : 'Tile Layer'), type,
+    visible: true, locked: false, opacity: 1,
+    ...(type === 'sprite' ? { sprites: [] } : { tiles: [], terrain: [] }),
+  };
+  map.layers.push(layer);
+  return layer;
+}
+
+function positiveSize(value, fallback = 16) { return Number.isFinite(value) && value > 0 ? value : fallback; }
+function mapPlacementSize(project, item) {
+  const sheet = project?.sheets?.find(candidate => candidate.id === item.sheetId);
+  if ('tileId' in item) {
+    const tile = sheet?.tiles?.find(candidate => candidate.id === item.tileId);
+    return { w:positiveSize(tile?.w), h:positiveSize(tile?.h) };
+  }
+  if ('terrainSetId' in item) {
+    const terrain = sheet?.terrainSets?.find(candidate => candidate.id === item.terrainSetId);
+    return { w:positiveSize(terrain?.tileW), h:positiveSize(terrain?.tileH) };
+  }
+  if (item.kind === 'animation') {
+    const animation = sheet?.animations?.find(candidate => candidate.id === item.assetId);
+    const frames = (animation?.frames ?? []).map(entry => sheet?.frames?.find(frame => frame.id === entry.frameId)).filter(Boolean);
+    if (frames.length) return { w:Math.max(...frames.map(frame => positiveSize(frame.w))), h:Math.max(...frames.map(frame => positiveSize(frame.h))) };
+  }
+  const frame = sheet?.frames?.find(candidate => candidate.id === item.assetId);
+  return { w:positiveSize(frame?.w), h:positiveSize(frame?.h) };
+}
+
+// Bounds are derived data: every placement on every typed layer contributes,
+// including hidden and locked layers. Animation instances reserve enough room
+// for their largest frame so playback cannot make the map bounds oscillate.
+export function mapContentBounds(project, map) {
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const layer of map?.layers ?? []) {
+    const items = layer.type === 'sprite' ? (layer.sprites ?? []) : [...(layer.tiles ?? []), ...(layer.terrain ?? [])];
+    for (const item of items) {
+      const x = Number.isFinite(item.x) ? item.x : 0, y = Number.isFinite(item.y) ? item.y : 0;
+      const size = mapPlacementSize(project, item);
+      left = Math.min(left, x); top = Math.min(top, y);
+      right = Math.max(right, x + size.w); bottom = Math.max(bottom, y + size.h);
+    }
+  }
+  if (left === Infinity) return { ...DEFAULT_MAP_BOUNDS };
+  // Content may include freely positioned sprites, but the map workspace is
+  // still cell-based. Round outward from the fixed map-grid origin instead of
+  // letting an off-grid sprite shift the bounds (and therefore the grid).
+  const gridW = positiveSize(map?.snap?.gridW, 1), gridH = positiveSize(map?.snap?.gridH, 1);
+  const x = Math.floor(left / gridW) * gridW, y = Math.floor(top / gridH) * gridH;
+  const alignedRight = Math.ceil(right / gridW) * gridW, alignedBottom = Math.ceil(bottom / gridH) * gridH;
+  return { x, y, w:alignedRight - x, h:alignedBottom - y };
+}
+
+export function refreshMapBounds(project, map) {
+  if (!map) return null;
+  const next = mapContentBounds(project, map), prior = map.bounds;
+  if (!prior || prior.x !== next.x || prior.y !== next.y || prior.w !== next.w || prior.h !== next.h) map.bounds = next;
+  return map.bounds;
 }
 
 // Works for both indexed (fixed-size) and free-form swatch palettes --
@@ -633,6 +711,11 @@ export function serializeProject(project) {
     settings: { ...project.settings },
     activePaletteId: project.activePaletteId,
     palettes: project.palettes.map(p => ({ ...p, colors: p.colors.map(c => [...c]) })),
+    maps: (project.maps ?? []).map(m => ({
+      ...m, bounds: mapContentBounds(project, m), snap: { ...m.snap }, layers: m.layers.map(l => ({
+        ...l, tiles: l.tiles?.map(t => ({ ...t })), terrain: l.terrain?.map(t => ({ ...t })), sprites: l.sprites?.map(s => ({ ...s })),
+      })),
+    })),
     sheets: project.sheets.map(s => ({
       id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
       tileGrids: s.tileGrids ? s.tileGrids.map(g => ({ ...g })) : null,
@@ -660,7 +743,7 @@ export function deserializeProject(json, imagesByPath) {
   const v = validateProjectJson(json);
   if (!v.ok) throw new Error(v.error);
   return {
-    version: json.version, name: json.name,
+    version: PROJECT_VERSION, name: json.name,
     // onion/targetPlatform/exportColorMode/pixelSnapper* fall back to their
     // defaults for files saved before those fields existed --
     // deserializeProject only ever runs on a freshly-parsed json, so this
@@ -678,6 +761,16 @@ export function deserializeProject(json, imagesByPath) {
     },
     activePaletteId: json.activePaletteId ?? null,
     palettes: json.palettes ?? [],
+    maps: (json.maps ?? []).map(m => ({
+      id: m.id, name: m.name ?? 'Map',
+      bounds: m.bounds ? { ...m.bounds } : { ...DEFAULT_MAP_BOUNDS },
+      snap: { mode: m.snap?.mode ?? 'map', gridW: Math.max(1, m.snap?.gridW ?? json.settings.tileW), gridH: Math.max(1, m.snap?.gridH ?? json.settings.tileH) },
+      layers: (m.layers ?? []).map(l => ({
+        id: l.id, name: l.name ?? (l.type === 'sprite' ? 'Sprite Layer' : 'Tile Layer'), type: l.type === 'sprite' ? 'sprite' : 'tile',
+        visible: l.visible !== false, locked: !!l.locked, opacity: l.opacity ?? 1,
+        ...(l.type === 'sprite' ? { sprites: (l.sprites ?? []).map(s => ({ ...s })) } : { tiles: (l.tiles ?? []).map(t => ({ ...t })), terrain: (l.terrain ?? []).map(t => ({ ...t })) }),
+      })),
+    })),
     sheets: json.sheets.map(s => {
       const layerTree = s.layerTree
         ? deserializeGroup(s.layerTree, s.id, imagesByPath)
@@ -706,7 +799,7 @@ const SETTINGS_KEYS = ['spriteSheetW', 'spriteSheetH', 'tileSheetW', 'tileSheetH
 
 export function validateProjectJson(json) {
   if (!json || typeof json !== 'object') return { ok: false, error: 'not an object' };
-  if (json.version !== PROJECT_VERSION)
+  if (json.version !== PROJECT_VERSION && json.version !== 2)
     return { ok: false, error: `unsupported version ${json.version} (expected ${PROJECT_VERSION})` };
   if (!json.settings || typeof json.settings !== 'object')
     return { ok: false, error: 'missing settings' };

@@ -3,7 +3,24 @@
 // main.js wraps the result in a Blob and hands it to io.downloadBlob.
 import { getPreset, NEIGHBOR_DIRS } from '../core/neighbors.js';
 import { blobIndexToMask, resolveTerrainSlot } from '../core/blob47.js';
-import { effectiveDuration } from '../core/model.js';
+import { effectiveDuration, mapContentBounds } from '../core/model.js';
+
+// Portable reference form for the in-project test scene. Asset ids point at
+// the accompanying PixelArtist sheets rather than duplicating sheet pixels.
+export function buildMapJson(map, project = null) {
+  return {
+    name: map.name,
+    infinite: true,
+    bounds: project ? mapContentBounds(project, map) : (map.bounds ? { ...map.bounds } : null),
+    snap: { ...map.snap },
+    layers: map.layers.map(layer => ({
+      name: layer.name, type: layer.type, visible: layer.visible, locked: layer.locked, opacity: layer.opacity,
+      ...(layer.type === 'tile'
+        ? { tiles: layer.tiles.map(t => ({ ...t })), terrain: layer.terrain.map(t => ({ ...t })) }
+        : { sprites: layer.sprites.map(s => ({ ...s })) }),
+    })),
+  };
+}
 
 // { sheet, width, height,
 //   frames: [{ name, index, x, y, w, h, pivotX, pivotY }],

@@ -1,7 +1,8 @@
 // General-purpose Preview panel: a single canvas in the right-hand side-panel
 // column that shows whatever is contextually relevant -- the selected/edited
-// frame, the selected tile, or (while an animation is selected) the timeline's
-// current playhead frame. It doesn't know about animation playback itself:
+// frame, the selected tile, the active map's complete bounded scene, or (while
+// an animation is selected) the timeline's current playhead frame. It doesn't
+// know about sprite-sheet animation playback itself:
 // timeline.js owns the play/scrub loop and pushes frames here via
 // setPreviewBitmap() at rAF rate, since it already tracks position/timing in
 // its own closure and re-deriving that here on every event would just be
@@ -17,10 +18,11 @@
 // current fit zoom into a manual one so the drag has room to move the
 // content off-center.
 
-import { state, on, activeSheet, currentContextLayers } from '../app/state.js';
+import { state, on, activeSheet, activeMap, currentContextLayers } from '../app/state.js';
 import { flattenSheetLayers } from '../core/model.js';
 import { copyRegion } from '../core/pixels.js';
 import { stepZoom, snapFitZoom } from '../core/zoom.js';
+import { renderMapPreviewBitmap } from './mapmode.js';
 
 // Module-level scratch canvas, mirroring timeline.js/panels.js's own copies
 // of this pattern -- reused across draws, resized only when the source
@@ -49,12 +51,21 @@ let lastBmp = null;
 let zoomMode = 'fit'; // 'fit' | 'manual'
 let manualZoom = 1;
 let panX = 0, panY = 0; // manual offset from centered, screen px
+let exactFit = false;
+let previewContextKey = null;
+let lastMapBoundsKey = null;
+let mapRefreshQueued = false;
+let mapRefreshGeneration = 0;
 
 // The zoom actually on screen right now, for both drawing and the readout.
 function displayedZoom() {
   if (zoomMode !== 'fit') return manualZoom;
   if (!lastBmp || lastBmp.width === 0 || lastBmp.height === 0) return 1;
-  return snapFitZoom(Math.min(canvas.width / lastBmp.width, canvas.height / lastBmp.height));
+  const fit = Math.min(canvas.width / lastBmp.width, canvas.height / lastBmp.height);
+  // Maps can be far larger than the preview panel. Unlike sprite/tile
+  // previews, Fit must be allowed below the zoom table's 25% floor so the
+  // complete bounded scene always remains visible.
+  return exactFit ? fit : snapFitZoom(fit);
 }
 
 function draw() {
@@ -80,7 +91,11 @@ function draw() {
 // straight into the panel through here, bypassing this module's own
 // context-driven render(). Zoom/pan state is left alone across bitmap swaps --
 // same as CanvasView, whose zoom doesn't reset just because content changed.
-export function setPreviewBitmap(bmp) {
+export function setPreviewBitmap(bmp, { map = false } = {}) {
+  // A timeline playback callback may still arrive during a mode switch; it
+  // must never overwrite the active map preview.
+  if (state.mode === 'maps' && !map) return;
+  exactFit = map;
   lastBmp = bmp;
   draw();
 }
@@ -91,6 +106,17 @@ export function setPreviewBitmap(bmp) {
 // frame/tile is shown is still resolved from real state either way.
 function render(overrideLayers = null) {
   if (!canvas) return;
+  if (state.mode === 'maps') {
+    const bmp = renderMapPreviewBitmap(), map = activeMap(), bounds = map?.bounds;
+    const key = `map:${state.activeMapId ?? ''}`;
+    const boundsKey = bounds ? `${bounds.x}:${bounds.y}:${bounds.w}:${bounds.h}` : '';
+    if (previewContextKey !== key || lastMapBoundsKey !== boundsKey) { zoomMode = 'fit'; panX = 0; panY = 0; }
+    previewContextKey = key; lastMapBoundsKey = boundsKey;
+    setPreviewBitmap(bmp, { map:true });
+    return;
+  }
+  if (previewContextKey?.startsWith('map:')) { zoomMode = 'fit'; panX = 0; panY = 0; }
+  previewContextKey = 'sheet'; lastMapBoundsKey = null;
   const sheet = activeSheet();
   if (!sheet) { setPreviewBitmap(null); return; }
   const layers = overrideLayers ?? currentContextLayers();
@@ -227,9 +253,38 @@ export function mountPreviewPanel(el) {
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
-  on('project', render);
-  on('history', render);
-  on('view', render);
-  on('selection', render);
+  const requestContextRender = () => {
+    if (state.mode !== 'maps') {
+      mapRefreshGeneration++; mapRefreshQueued = false;
+      render(); return;
+    }
+    // A drag stroke can emit several project/history/view notifications in
+    // one pointer event. Rasterize the bounded scene once, after all commands
+    // and cache invalidations for that frame have completed.
+    if (mapRefreshQueued) return;
+    mapRefreshQueued = true;
+    const generation = ++mapRefreshGeneration;
+    queueMicrotask(() => {
+      if (generation !== mapRefreshGeneration) return;
+      mapRefreshQueued = false; render();
+    });
+  };
+  const renderMapContentNow = () => {
+    if (state.mode !== 'maps') return;
+    // Map brush commands have finished mutating occupancy and recalculating
+    // bounds before this event is emitted. In particular, an autotile stroke
+    // can change the resolved artwork of every neighbouring terrain cell even
+    // when the bounds stay identical. Do not let that content-only update get
+    // folded into (or lost behind) the generic deferred UI refresh above.
+    mapRefreshGeneration++;
+    mapRefreshQueued = false;
+    render();
+  };
+  on('project', requestContextRender);
+  on('history', requestContextRender);
+  on('view', requestContextRender);
+  on('selection', requestContextRender);
+  on('pixels', requestContextRender);
+  on('map-content', renderMapContentNow);
   render();
 }
