@@ -14,7 +14,7 @@
 import { state, on, emit, activeSheet, activeLayer, markDirty } from '../app/state.js';
 import {
   cloneBitmap, drawLine, drawRect, drawEllipse, floodFill, softFloodFill,
-  copyRegion, blitRegion, getPixel,
+  copyRegion, blitRegion, fillRegion, getPixel,
 } from '../core/pixels.js';
 import { makePixelPatch } from '../core/commands.js';
 import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '../core/floating.js';
@@ -909,9 +909,26 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   };
 
   window.addEventListener('keydown', (e) => {
+    if (document.querySelector('dialog[open]')) return;
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
+    if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey
+      && state.tool === 'select' && state.view === viewKind && selection && !state.floating) {
+      const layer = activeLayer();
+      if (!layer) return;
+      const before = copyRegion(layer.bitmap, selection.x, selection.y, selection.w, selection.h);
+      const after = cloneBitmap(before);
+      fillRegion(after, 0, 0, after.width, after.height, [0, 0, 0, 0]);
+      // Avoid adding a no-op history entry for an already-empty selection.
+      if (before.data.every((value, index) => value === after.data[index])) return;
+      state.commands.push(makePixelPatch(layer.bitmap, selection, before, after, 'delete selection'));
+      markDirty();
+      emit('pixels');
+      view.requestRender();
+      e.preventDefault();
+      return;
+    }
     if (e.key !== 'Escape') return;
     if (state.floating) return; // floatsession's capture handler owns Escape while floating
-    if (document.querySelector('dialog[open]')) return;
     if (selection) { selection = null; view.requestRender(); }
   });
 }

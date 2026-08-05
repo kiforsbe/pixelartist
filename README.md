@@ -73,7 +73,7 @@ tool switch).
 | `Ctrl+S` | Save (same target as the Save button; opens Save As if the project has no file/folder yet) |
 | `[` / `]` | Decrease / increase brush size (pencil & eraser, clamped 1-8) |
 | `X` | Swap primary and secondary colors |
-| `Delete` | Delete the selected frame (frame tool, sprite mode) |
+| `Delete` | Clear the current marquee selection on the active layer (Select tool), or delete the selected frame (frame tool, sprite mode) |
 | `Enter` | Commit the floating selection (render it to the layer(s)); switching tools/sheets/views also commits |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy the marquee selection to the internal clipboard / paste as a new floating selection (`+Alt`: all layers merged). Cut/copy also mirror a flattened PNG to the OS clipboard (paste into Word, an image editor, etc). If the internal clipboard is empty, `Ctrl+V` instead pastes an image from the OS clipboard (e.g. copied in Windows Photos/Snipping Tool) as a new floating selection on the active layer |
 | `Escape` | Clear the active marquee selection, or cancel a pending floating selection (restores the cut-out pixels); back out of the frame editor or tile editor to the sheet view |
