@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   maskToBlobIndex, blobIndexToMask,
   SIXTEEN_TILE_INDICES, sixteenTileBlobIndex, resolveTerrainSlot, classifySlots,
+  BLOB47_PAINT_CELLS, blobIndexFromPaintMask,
 } from '../js/core/blob47.js';
 
 test('maskToBlobIndex reduces 256 raw masks to exactly 47 canonical buckets', () => {
@@ -22,6 +23,16 @@ test('known reference cases', () => {
   assert.equal(maskToBlobIndex[2], isolated);
   // N+E+NE (1+4+2=7) is its own distinct bucket from N+E alone (1+4=5).
   assert.notEqual(maskToBlobIndex[7], maskToBlobIndex[5]);
+});
+
+test('paint cells use Tiled-style edge/corner positions and canonicalize through Blob-47', () => {
+  assert.equal(BLOB47_PAINT_CELLS.length, 8);
+  const byPos = new Map(BLOB47_PAINT_CELLS.map(c => [`${c.col},${c.row}`, c.bit]));
+  assert.equal(byPos.get('1,0'), 1); // top edge = N
+  assert.equal(byPos.get('2,0'), 2); // top-right corner = NE
+  assert.equal(byPos.has('1,1'), false); // center carries no terrain value
+  assert.equal(blobIndexFromPaintMask(1 | 4 | 2), maskToBlobIndex[7]);
+  assert.equal(blobIndexFromPaintMask(2), maskToBlobIndex[0]); // invalid lone corner
 });
 
 test('canonical masks never have an ineligible corner bit set', () => {

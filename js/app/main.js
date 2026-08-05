@@ -29,7 +29,7 @@ import { CanvasView } from '../ui/canvasview.js';
 import { mountToolPalette, bindDrawing } from '../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../ui/panels.js';
 import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } from '../ui/frames.js';
-import { registerTileTool, bindTileTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome } from '../ui/tilemode.js';
+import { registerTileTool, bindTileTool, registerAutotilePaintTool, bindAutotilePaintTool, mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome } from '../ui/tilemode.js';
 import { drawSheetOverlays } from '../ui/overlays.js';
 import { mountTimeline } from '../ui/timeline.js';
 import { mountPreviewPanel, previewWithOverride, refreshPreviewPanel } from '../ui/previewpanel.js';
@@ -1322,7 +1322,9 @@ bindFrameTool(canvasView);
 // bindFrameTool so its wrapper chains on top, though the two never both
 // intercept at once (frametool is sprite-only, tiletool is tile-only).
 registerTileTool();
+registerAutotilePaintTool();
 bindTileTool(canvasView);
+bindAutotilePaintTool(canvasView);
 // Compose the sheet-view overlay chain: tools.js's marquee + frames.js's
 // create/move/resize ghost + tilemode.js's swap/move ghost (already chained
 // by bindFrameTool/bindTileTool above), then finally the frame/tile label

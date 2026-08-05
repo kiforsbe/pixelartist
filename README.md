@@ -63,6 +63,7 @@ tool switch).
 | `V` | Move (✋) — cuts the selection (or whole layer if none) into a floating selection with move/scale/rotate handles; hold `Alt` at drag start to float all layers. On the sheet with no marquee, grabbing a frame or strip segment starts a translate-only frame-float instead (frame chrome, no handles/rotation; all layers): committing moves the frame rects together with the pixels. Nothing is rendered to the image until committed |
 | `F` | Frame tool (sprite mode only) |
 | `T` | Tile tool (tile mode only) |
+| `A` | Autotile paint (while a terrain set is being painted) |
 
 **Editing**
 
@@ -146,6 +147,24 @@ the middle of each edge:
 - Dragging a grid tile's body (not a grip) always moves the whole grid,
   clamped to the sheet bounds — it never swaps or moves an individual
   tile's content.
+
+## Blob-47 autotile painting
+
+Select a terrain set in the Autotiles panel and choose **Paint terrain** to
+mark its whole tilesheet directly, without creating a tile grid. The painter
+uses the terrain set's tile size to split the sheet into a neat lattice and
+shows a 3×3 guide over each tile: paint the four corners and four side
+midpoints to mark terrain, or switch to **Erase** to clear them. Each stroke
+is undoable and becomes the matching canonical Blob-47 slot. Hovering a tile
+shows a 3×3 result preview with the resolved neighboring artwork, so you can
+check the connection before painting further. Below it, a compact 8×6
+Blob-47 reference map highlights the exact pattern the tile currently matches.
+A red outline means another tile already owns that shape; use the matching
+**Use #…** button in the panel to deliberately replace it.
+
+Use **Blob-47 coverage…** for a large, scrollable board: every card shows the
+expected reference artwork above your assigned tile, while any unresolved
+patterns are marked **MISSING** in red.
 
 ## Pixel snapping
 

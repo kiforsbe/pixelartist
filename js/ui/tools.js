@@ -269,6 +269,7 @@ export function mountToolPalette(el) {
 
   refresh();
   on('view', refresh); // re-check isAvailable() (e.g. sprite/tile mode switch)
+  on('tool', refresh);
 
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
