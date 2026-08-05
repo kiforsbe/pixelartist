@@ -8,8 +8,10 @@ import { BrowserImageCodec } from './platform/browser/image-codec.js';
 import { spriteMode } from './modes/sprites/index.js';
 import { tileMode } from './modes/tiles/index.js';
 import { mapMode } from './modes/maps/index.js';
+import { state as legacyState } from './app/state.js';
 
 export const editorHost = new EditorHost({
+  historyStack: legacyState.commands,
   preferences: new BrowserPreferences(),
   platform: {
     files: new BrowserFileSystem(),

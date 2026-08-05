@@ -10,6 +10,7 @@ export class HistoryService {
   #stack;
   #store;
   #listeners = new Set();
+  #suppressDirty = false;
 
   constructor({ stack = new CommandStack(), store = null } = {}) {
     this.#stack = stack;
@@ -17,7 +18,7 @@ export class HistoryService {
     const previous = stack.onChange;
     stack.onChange = value => {
       if (previous) previous(value);
-      if (this.#store) this.#store.markDirty(true);
+      if (this.#store && !this.#suppressDirty) this.#store.markDirty(true);
       for (const listener of [...this.#listeners]) listener(this.snapshot());
     };
   }
@@ -25,7 +26,11 @@ export class HistoryService {
   execute(command) { validateCommand(command); this.#stack.push(command); }
   undo() { this.#stack.undo(); }
   redo() { this.#stack.redo(); }
-  clear() { this.#stack.clear(); }
+  clear({ markDirty = false } = {}) {
+    this.#suppressDirty = !markDirty;
+    try { this.#stack.clear(); }
+    finally { this.#suppressDirty = false; }
+  }
   canUndo() { return this.#stack.canUndo(); }
   canRedo() { return this.#stack.canRedo(); }
   snapshot() { return { canUndo: this.canUndo(), canRedo: this.canRedo() }; }

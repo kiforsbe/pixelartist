@@ -20,7 +20,7 @@ export class EditorHost {
   #modeListeners = new Set();
   #disposed = false;
 
-  constructor({ store = new EditorStore(), preferences = null, platform = {} } = {}) {
+  constructor({ store = new EditorStore(), historyStack = undefined, preferences = null, platform = {} } = {}) {
     this.store = store;
     this.contextKeys = new ContextKeys();
     this.preferences = preferences;
@@ -36,7 +36,7 @@ export class EditorHost {
     });
 
     this.documents = new DocumentService(store);
-    this.history = new HistoryService({ store });
+    this.history = new HistoryService({ store, stack: historyStack });
     this.projects = new ProjectService(store, this.documents);
     this.selections = new SelectionService(store);
     this.exports = new ExportService();

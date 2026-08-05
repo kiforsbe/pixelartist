@@ -23,31 +23,57 @@ export class PanelManager {
     const wanted = new Set(this.#registry.list(keys).map(panel => panel.id));
     for (const [id, mounted] of this.#mounted) {
       if (wanted.has(id)) continue;
+      if (mounted.definition.persistent) {
+        mounted.frame.element.hidden = true;
+        continue;
+      }
       mounted.disposable.dispose();
-      mounted.frame.element.remove();
+      if (!mounted.frame.external) mounted.frame.element.remove();
       this.#mounted.delete(id);
     }
     for (const panel of this.#registry.list(keys)) {
-      if (this.#mounted.has(panel.id)) continue;
+      const existing = this.#mounted.get(panel.id);
+      if (existing) {
+        existing.frame.element.hidden = false;
+        continue;
+      }
       const region = this.#regions.get(panel.region);
       if (!region) continue;
       const prefKey = `workspace.panels.${panel.id}`;
       const preferences = this.#preferences?.get(prefKey, {}) ?? {};
       if (preferences.hidden) continue;
-      const frame = createPanelFrame({
-        id: panel.id,
-        title: panel.title ?? panel.id,
-        collapsed: !!preferences.collapsed,
-        onCollapsedChange: collapsed => this.#preferences?.set(prefKey, { ...preferences, collapsed }),
-      });
-      region.appendChild(frame.element);
+      const frame = this.#createFrame(panel, region, prefKey, preferences);
       const disposable = toDisposable(panel.create(frame.body, context));
-      this.#mounted.set(panel.id, { frame, disposable });
+      this.#mounted.set(panel.id, { definition: panel, frame, disposable });
     }
   }
 
   dispose() {
-    for (const mounted of this.#mounted.values()) mounted.disposable.dispose();
+    for (const mounted of this.#mounted.values()) {
+      mounted.disposable.dispose();
+      if (!mounted.frame.external) mounted.frame.element.remove();
+    }
     this.#mounted.clear();
+  }
+
+  #createFrame(panel, region, prefKey, preferences) {
+    if (panel.mountPoint) {
+      const mount = document.getElementById(panel.mountPoint);
+      if (!mount) throw new Error(`Panel "${panel.id}" mount point "${panel.mountPoint}" was not found`);
+      if (panel.useMountPointDirect) return { element: mount, body: mount, external: true };
+      const body = document.createElement('div');
+      body.className = 'workbench-contribution';
+      body.dataset.panelId = panel.id;
+      mount.appendChild(body);
+      return { element: body, body, external: false };
+    }
+    const frame = createPanelFrame({
+      id: panel.id,
+      title: panel.title ?? panel.id,
+      collapsed: !!preferences.collapsed,
+      onCollapsedChange: collapsed => this.#preferences?.set(prefKey, { ...preferences, collapsed }),
+    });
+    region.appendChild(frame.element);
+    return { ...frame, external: false };
   }
 }

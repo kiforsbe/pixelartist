@@ -3,25 +3,55 @@
 // once, wherever its logic already lives; buttons/menu items become thin
 // views over it, so they can never independently drift out of sync.
 import { on } from './state.js';
+import { CommandRegistry } from '../host/contributions/commands.js';
+import { getEditorHost } from '../host/runtime.js';
 
-const registry = new Map();
+// Compatibility facade for UI modules that still use the original action
+// vocabulary. In the browser the EditorHost registry is the sole source of
+// truth; the fallback keeps this small module independently testable.
+const fallbackRegistry = new CommandRegistry();
+const registrations = new Map();
+
+function registry() {
+  return getEditorHost()?.registries.commands ?? fallbackRegistry;
+}
+
+function commandContext() {
+  const host = getEditorHost();
+  return host ? Object.freeze({
+    host,
+    services: host.services,
+    contextKeys: host.contextKeys.snapshot(),
+  }) : Object.freeze({});
+}
 
 export function defineAction(id, def) {
-  registry.set(id, {
+  registrations.get(id)?.dispose();
+  const action = {
+    id,
     label: '', shortcut: null,
     isEnabled: () => true, isChecked: null, isAvailable: () => true,
     ...def,
-  });
+  };
+  if (typeof action.run !== 'function') {
+    if (!action.submenu) throw new TypeError(`Action "${id}" requires run()`);
+    action.run = () => undefined;
+  }
+  const registration = registry().register({
+    ...action,
+    when: context => action.isAvailable(context),
+    execute: (context, args) => action.run(context, args),
+  }, { owner: 'legacy-action-facade' });
+  registrations.set(id, registration);
+  return registration;
 }
 
 export function getAction(id) {
-  return registry.get(id);
+  return registry().get(id);
 }
 
-export function runAction(id) {
-  const a = registry.get(id);
-  if (!a || !a.isAvailable() || !a.isEnabled()) return;
-  a.run();
+export function runAction(id, args) {
+  return registry().execute(id, commandContext(), args);
 }
 
 const bound = new Map(); // action id -> Set<{ el, toggle }>
@@ -31,7 +61,7 @@ const bound = new Map(); // action id -> Set<{ el, toggle }>
 // refreshAction below) -- callers never need to remember to refresh it by
 // hand after a mutation.
 export function bindAction(el, id, { toggle = false } = {}) {
-  const a = registry.get(id);
+  const a = getAction(id);
   if (!a) throw new Error(`bindAction: unknown action "${id}"`);
   el.title = a.shortcut ? `${a.label} (${a.shortcut})` : a.label;
   el.addEventListener('click', () => runAction(id));
@@ -41,7 +71,7 @@ export function bindAction(el, id, { toggle = false } = {}) {
 }
 
 function refreshAction(id) {
-  const a = registry.get(id);
+  const a = getAction(id);
   const els = bound.get(id);
   if (!a || !els) return;
   const available = a.isAvailable();

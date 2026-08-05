@@ -38,6 +38,12 @@ test('runAction on an unknown id is a silent no-op', () => {
   assert.doesNotThrow(() => runAction('t1.nope'));
 });
 
+test('submenu-only actions register as non-running host commands', () => {
+  defineAction('t1.submenu', { label: 'More', submenu: [] });
+  assert.deepEqual(getAction('t1.submenu').submenu, []);
+  assert.doesNotThrow(() => runAction('t1.submenu'));
+});
+
 function fakeElement() {
   const listeners = {};
   return {

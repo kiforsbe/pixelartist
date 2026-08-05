@@ -1,7 +1,6 @@
-let nextId = 1;
+export { newId } from '../domain/shared/ids.js';
+import { newId } from '../domain/shared/ids.js';
 export const INDEXED_SIZE_PRESETS = [2, 4, 16, 256];
-
-export function newId(prefix) { return `${prefix}${Date.now().toString(36)}${(nextId++).toString(36)}`; }
 
 export function createPalette({ name, indexed = false, size = 0 }) {
   const colors = indexed ? Array.from({ length: size }, () => [0, 0, 0, 255]) : [];

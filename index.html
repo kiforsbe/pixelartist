@@ -27,12 +27,12 @@
   </div>
 </header>
 <main id="workspace">
-  <aside id="tool-palette">
+  <aside id="tool-palette" data-workbench-region="left">
     <div id="tool-panel" class="panel"><h3>Tools</h3></div>
     <div id="panel-colors" class="panel"><h3>Colors</h3></div>
   </aside>
-  <section id="canvas-host"></section>
-  <aside id="side-panels">
+  <section id="canvas-host" data-workbench-region="center"></section>
+  <aside id="side-panels" data-workbench-region="right">
     <div id="panel-layers" class="panel"><h3>Layers</h3></div>
     <div id="panel-context" class="panel"></div>
     <div id="panel-animation" class="panel"></div>
@@ -41,7 +41,7 @@
     <div id="panel-preview" class="panel"></div>
     <div id="panel-map-assets" class="panel"></div>
   </aside>
-  <div id="timeline-dock"></div>
+  <div id="timeline-dock" data-workbench-region="bottom"></div>
 </main>
 <footer id="status-bar"><span id="status-pos"></span><span id="status-zoom"></span><span id="status-tool"></span><span id="status-platform"></span></footer>
 <dialog id="dlg-export-project" class="dlg-wide">
