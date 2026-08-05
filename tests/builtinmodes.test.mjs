@@ -22,6 +22,9 @@ test('built-in modes provide documents, tools, panels, and views through registr
   assert.deepEqual(host.registries.views.list().map(view => view.id), [
     'sprites.sheet', 'sprites.frame', 'tiles.sheet', 'tiles.tile', 'maps.canvas',
   ]);
+  assert.deepEqual(host.registries.previews.list().map(preview => preview.id), [
+    'sprites.preview', 'tiles.preview', 'maps.preview',
+  ]);
 
   assert.deepEqual(host.registries.panels.list({ modeId: 'sprites' }).map(panel => panel.id), [
     'sprites.frames', 'sprites.timeline', 'sprites.animations',

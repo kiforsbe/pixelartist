@@ -7,6 +7,7 @@ import { MAX_PALETTE_COLORS, DEFAULT_PIXEL_SNAPPER_CONFIG } from './pixelSnapper
 import { DEFAULT_MAP_BOUNDS, mapContentBounds } from '../domain/maps/maps.js';
 
 export { DEFAULT_MAP_BOUNDS, createMap, createMapLayer, mapContentBounds, refreshMapBounds } from '../domain/maps/maps.js';
+export { fpsStepToMs, msToFps, effectiveDuration } from '../domain/sprites/animation-timing.js';
 
 export const PROJECT_VERSION = 3;
 export const DEFAULT_SETTINGS = {
@@ -456,30 +457,6 @@ export function addAnimation(sheet, name, strip = false, defaults = {}) {
   };
   sheet.animations.push(anim);
   return anim;
-}
-
-// fps/step -> ms conversion for the "animate on Ns" base-duration model (see
-// the Animation-panel design doc). Pure math, shared by js/ui/baseDurationControl.js
-// and anything else that needs to seed/redisplay a base duration from fps+step.
-export function fpsStepToMs(fps, step) {
-  return Math.round(1000 / fps * step);
-}
-export function msToFps(ms) {
-  return 1000 / ms;
-}
-
-// Resolves a per-frame animation entry's actual playback/export duration
-// (ms), honoring the "inherit until edited" model: an entry's own field is
-// read only when it matches the animation's current primary unit
-// (anim.baseFps set = fps-primary, reads entry.step; unset = ms-primary,
-// reads entry.duration) -- the OTHER field on the entry, if any, is dormant
-// and ignored, not deleted (see the design doc's non-destructive note).
-export function effectiveDuration(anim, entry) {
-  if (anim.baseFps) {
-    const step = entry.step ?? anim.baseStep ?? 1;
-    return fpsStepToMs(anim.baseFps, step);
-  }
-  return entry.duration ?? anim.baseDuration ?? 100;
 }
 
 // Promotes a floating animation into a committed one: freezes whatever's

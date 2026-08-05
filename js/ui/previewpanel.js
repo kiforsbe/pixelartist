@@ -18,11 +18,9 @@
 // current fit zoom into a manual one so the drag has room to move the
 // content off-center.
 
-import { state, on, activeSheet, activeMap, currentContextLayers } from '../app/state.js';
-import { flattenSheetLayers } from '../core/model.js';
-import { copyRegion } from '../core/pixels.js';
+import { state, on } from '../app/state.js';
 import { stepZoom, snapFitZoom } from '../core/zoom.js';
-import { renderMapPreviewBitmap } from './mapmode.js';
+import { getEditorHost } from '../host/runtime.js';
 
 // Module-level scratch canvas, mirroring timeline.js/panels.js's own copies
 // of this pattern -- reused across draws, resized only when the source
@@ -53,9 +51,9 @@ let manualZoom = 1;
 let panX = 0, panY = 0; // manual offset from centered, screen px
 let exactFit = false;
 let previewContextKey = null;
-let lastMapBoundsKey = null;
 let mapRefreshQueued = false;
 let mapRefreshGeneration = 0;
+let editorHost = null;
 
 // The zoom actually on screen right now, for both drawing and the readout.
 function displayedZoom() {
@@ -91,12 +89,25 @@ function draw() {
 // straight into the panel through here, bypassing this module's own
 // context-driven render(). Zoom/pan state is left alone across bitmap swaps --
 // same as CanvasView, whose zoom doesn't reset just because content changed.
-export function setPreviewBitmap(bmp, { map = false } = {}) {
+export function setPreviewBitmap(bmp) {
   // A timeline playback callback may still arrive during a mode switch; it
   // must never overwrite the active map preview.
-  if (state.mode === 'maps' && !map) return;
-  exactFit = map;
+  if (state.mode !== 'sprites') return;
+  exactFit = false;
   lastBmp = bmp;
+  draw();
+}
+
+function applyProviderResult(result) {
+  if (!result || result.managed) return;
+  exactFit = !!result.exactFit;
+  if (result.resetKey && previewContextKey !== result.resetKey) {
+    zoomMode = 'fit'; panX = 0; panY = 0;
+  } else if (!result.exactFit && previewContextKey?.startsWith('map:')) {
+    zoomMode = 'fit'; panX = 0; panY = 0;
+  }
+  previewContextKey = result.resetKey ?? 'sheet';
+  lastBmp = result.bitmap ?? null;
   draw();
 }
 
@@ -106,38 +117,8 @@ export function setPreviewBitmap(bmp, { map = false } = {}) {
 // frame/tile is shown is still resolved from real state either way.
 function render(overrideLayers = null) {
   if (!canvas) return;
-  if (state.mode === 'maps') {
-    const bmp = renderMapPreviewBitmap(), map = activeMap(), bounds = map?.bounds;
-    const key = `map:${state.activeMapId ?? ''}`;
-    const boundsKey = bounds ? `${bounds.x}:${bounds.y}:${bounds.w}:${bounds.h}` : '';
-    if (previewContextKey !== key || lastMapBoundsKey !== boundsKey) { zoomMode = 'fit'; panX = 0; panY = 0; }
-    previewContextKey = key; lastMapBoundsKey = boundsKey;
-    setPreviewBitmap(bmp, { map:true });
-    return;
-  }
-  if (previewContextKey?.startsWith('map:')) { zoomMode = 'fit'; panX = 0; panY = 0; }
-  previewContextKey = 'sheet'; lastMapBoundsKey = null;
-  const sheet = activeSheet();
-  if (!sheet) { setPreviewBitmap(null); return; }
-  const layers = overrideLayers ?? currentContextLayers();
-
-  if (state.mode === 'sprites') {
-    // An animation is selected: timeline.js owns the canvas (playhead frame,
-    // pushed via setPreviewBitmap on every scrub/tick) -- don't fight it.
-    if (state.selectedAnimationId) return;
-    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
-    const frameId = state.editingFrameId ?? state.selectedFrameId;
-    const frame = sheet.frames.find(f => f.id === frameId);
-    // No frame selected/being edited: fall back to the whole sheet rather
-    // than showing nothing -- most useful while editing whole-sheet content
-    // (e.g. a filter dialog's live preview with no frame selected).
-    setPreviewBitmap(frame ? copyRegion(flat, frame.x, frame.y, frame.w, frame.h) : flat);
-  } else {
-    const flat = flattenSheetLayers(layers, sheet.width, sheet.height, state.floating, sheet.id);
-    const tileId = state.editingTileId ?? state.selectedTileId;
-    const tile = sheet.tiles.find(t => t.id === tileId);
-    setPreviewBitmap(tile ? copyRegion(flat, tile.x, tile.y, tile.w, tile.h) : flat);
-  }
+  const provider = editorHost?.registries.previews.list(editorHost.contextKeys.snapshot())[0];
+  applyProviderResult(provider?.render({ overrideLayers }));
 }
 
 // Runs the normal frame/tile-rect selection + flatten + copyRegion +
@@ -175,6 +156,7 @@ function sizeCanvasToPanel(el) {
 }
 
 export function mountPreviewPanel(el) {
+  editorHost = getEditorHost();
   el.innerHTML = '';
   const h3 = document.createElement('h3');
   h3.textContent = 'Preview';

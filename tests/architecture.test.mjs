@@ -51,3 +51,9 @@ test('shared workbench composes mode registries without concrete mode UI imports
   assert.match(source, /new PanelManager/);
   assert.match(source, /registries\.views\.list/);
 });
+
+test('shared preview delegates rendering to mode providers', async () => {
+  const source = await readFile(join(root, 'js/ui/previewpanel.js'), 'utf8');
+  assert.doesNotMatch(source, /(?:mapmode|modes\/maps|renderMapPreviewBitmap)/);
+  assert.match(source, /registries\.previews\.list/);
+});

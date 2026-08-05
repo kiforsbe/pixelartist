@@ -1,9 +1,12 @@
 import {
   registerMapTool, bindMapMode, paintMap, drawMapOverlay,
-  mountMapPanel, mountMapAssetsPanel, focusMapCanvas,
+  focusMapCanvas,
 } from './map-editor.js';
+import { mountMapPanel, mountMapAssetsPanel } from './map-panels.js';
+import { renderMapPreview } from './preview.js';
 
 export function registerMapContributions(api) {
+  api.previews.register({ id: 'maps.preview', order: 30, when: keys => keys.modeId === 'maps', render: renderMapPreview });
   api.tools.register({
     id: 'maps.placement-tools', label: 'Map placement tools', order: 30,
     createController({ mapCanvasView }) {

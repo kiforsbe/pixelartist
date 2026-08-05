@@ -3,8 +3,10 @@ import {
   mountTilePanel, mountAutotilesPanel, mountTileLayersPanel, drawTileChrome,
 } from './tile-editor-controller.js';
 import { mountTileEditor } from '../../ui/tileeditor.js';
+import { renderTilePreview } from './preview.js';
 
 export function registerTileContributions(api) {
+  api.previews.register({ id: 'tiles.preview', order: 20, when: keys => keys.modeId === 'tiles', render: renderTilePreview });
   api.tools.register({
     id: 'tiles.edit-tools', label: 'Tile editing tools', order: 20,
     createController({ canvasView }) {

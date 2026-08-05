@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CommandRegistry } from '../js/host/contributions/commands.js';
 import { PanelRegistry } from '../js/host/contributions/panels.js';
+import { PreviewRegistry } from '../js/host/contributions/previews.js';
 import { ContextKeys } from '../js/host/context-keys.js';
 import { DisposableStore } from '../js/host/disposable.js';
 
@@ -32,6 +33,13 @@ test('panel registry validates fixed workbench regions', () => {
   assert.throws(() => panels.register({ id: 'bad', region: 'center', create() {} }), /invalid region/);
   panels.register({ id: 'good', region: 'right', create() {} });
   assert.equal(panels.get('good').region, 'right');
+});
+
+test('preview registry requires renderer providers', () => {
+  const previews = new PreviewRegistry();
+  assert.throws(() => previews.register({ id: 'broken.preview' }), /requires render/);
+  previews.register({ id: 'test.preview', render: () => ({ bitmap: null }) });
+  assert.equal(previews.get('test.preview').render().bitmap, null);
 });
 
 test('ContextKeys publishes changed keys and supports predicates', () => {

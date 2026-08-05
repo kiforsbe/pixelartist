@@ -13,7 +13,7 @@
 // so it must run after bindDrawing has installed its own).
 
 import { state, on, emit, activeSheet, markDirty, currentContextLayers } from '../../app/state.js';
-import { addFrame, removeFrame, addAnimation, animationGroup, acceptAnimation, flattenLayers } from '../../core/model.js';
+import { addFrame, removeFrame, addAnimation, animationGroup, flattenLayers } from '../../core/model.js';
 import { sliceGrid } from '../../core/slicing.js';
 import { segmentsOf, segmentOfFrame, segmentMembers, insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks } from '../../core/strips.js';
 import { createBitmap, copyRegion, fillRegion, blitRegion } from '../../core/pixels.js';
@@ -21,6 +21,7 @@ import { registerTool } from '../../ui/tools.js';
 import { markDefaultAction } from '../../ui/dialogs.js';
 import { drawRectDims, drawChainDims } from '../../ui/dimlabels.js';
 import { HANDLES_CORNER, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../core/resizeAnchor.js';
+import { commitAcceptAnimation, commitBreakApartStrip } from './sprite-commands.js';
 
 const HANDLE_SCREEN_PX = 6;
 
@@ -1452,16 +1453,6 @@ function commitNewStripFromFrame(sheet, frame, side, count) {
 // moving as a unit and become resizable again (membership in the animation
 // is unaffected). Exported so timeline.js's header button can push the same
 // command shape for the currently selected animation.
-export function commitBreakApartStrip(anim) {
-  const beforeBreaks = (anim.breaks ?? []).slice();
-  state.commands.push({
-    label: 'break apart strip',
-    do() { anim.strip = false; anim.breaks = []; },
-    undo() { anim.strip = true; anim.breaks = beforeBreaks.slice(); },
-  });
-  markDirty();
-}
-
 // Promotes a floating animation (no layer group yet -- see addAnimation/
 // acceptAnimation in core/model.js) into a committed one: freezes whatever's
 // currently visible under its own frames into a brand-new private layer,
@@ -1470,32 +1461,6 @@ export function commitBreakApartStrip(anim) {
 // no-op once already accepted) so this Enter-key trigger and tools.js's
 // auto-accept-on-first-paint hook can't double-fire against each other.
 // Exported for tools.js's hook.
-export function commitAcceptAnimation(sheet, anim) {
-  if (anim.layerGroupId) return;
-  const beforeActiveLayerId = state.activeLayerId;
-
-  const group = acceptAnimation(sheet, anim);
-  const animLayerId = group.children[0].id;
-  const groupIdx = sheet.layerTree.children.indexOf(group);
-
-  state.commands.push({
-    label: 'accept animation',
-    do() {
-      anim.layerGroupId = group.id;
-      if (!sheet.layerTree.children.includes(group))
-        sheet.layerTree.children.splice(Math.min(groupIdx, sheet.layerTree.children.length), 0, group);
-      if (sheet === activeSheet()) state.activeLayerId = animLayerId;
-    },
-    undo() {
-      anim.layerGroupId = null;
-      sheet.layerTree.children = sheet.layerTree.children.filter(c => c !== group);
-      if (state.activeLayerId === animLayerId) state.activeLayerId = beforeActiveLayerId;
-    },
-  });
-  markDirty();
-  emit('selection');
-}
-
 export function mountFramesPanel(el) {
   // #panel-context is shared with tilemode.js's tile panel (mode-exclusive
   // visibility). Each panel gets its own wrapper appended to `el` and toggles

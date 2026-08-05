@@ -12,6 +12,7 @@ import { PanelRegistry } from './contributions/panels.js';
 import { ToolRegistry } from './contributions/tools.js';
 import { ViewRegistry } from './contributions/views.js';
 import { MenuRegistry } from './contributions/menus.js';
+import { PreviewRegistry } from './contributions/previews.js';
 import { FocusService } from './workbench/focus-service.js';
 
 export class EditorHost {
@@ -33,6 +34,7 @@ export class EditorHost {
       tools: new ToolRegistry(),
       views: new ViewRegistry(),
       menus: new MenuRegistry(),
+      previews: new PreviewRegistry(),
     });
 
     this.documents = new DocumentService(store);
@@ -186,6 +188,7 @@ export class EditorHost {
       tools: scoped(this.registries.tools),
       views: scoped(this.registries.views),
       menus: scoped(this.registries.menus),
+      previews: scoped(this.registries.previews),
       documents: { register: provider => resources.add(this.documents.registerProvider(provider, { owner })) },
       services: this.services,
     });
@@ -203,12 +206,13 @@ export class EditorHost {
       tools: this.registries.tools,
       views: this.registries.views,
       menus: this.registries.menus,
+      previews: this.registries.previews,
     });
   }
 
   #removeOwner(owner) {
     this.documents.removeOwner(owner);
-    for (const registry of [this.registries.commands, this.registries.panels, this.registries.tools, this.registries.views, this.registries.menus]) {
+    for (const registry of [this.registries.commands, this.registries.panels, this.registries.tools, this.registries.views, this.registries.menus, this.registries.previews]) {
       registry.removeOwner(owner);
     }
   }

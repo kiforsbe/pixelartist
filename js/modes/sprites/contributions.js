@@ -2,8 +2,10 @@ import { registerFrameTool, bindFrameTool, mountFramesPanel, drawStripChrome } f
 import { mountAnimationsPanel } from '../../ui/animpanel.js';
 import { mountTimeline } from '../../ui/timeline.js';
 import { mountFrameEditor } from '../../ui/frameeditor.js';
+import { renderSpritePreview } from './preview.js';
 
 export function registerSpriteContributions(api) {
+  api.previews.register({ id: 'sprites.preview', order: 10, when: keys => keys.modeId === 'sprites', render: renderSpritePreview });
   api.tools.register({
     id: 'sprites.frame-tools', label: 'Sprite frame tools', order: 10,
     createController({ canvasView }) {

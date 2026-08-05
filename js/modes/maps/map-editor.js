@@ -1,4 +1,4 @@
-import { state, on, emit, activeMap, markDirty } from '../../app/state.js';
+import { state, emit, activeMap, markDirty } from '../../app/state.js';
 import { flattenSheet, effectiveDuration, refreshMapBounds, DEFAULT_MAP_BOUNDS } from '../../core/model.js';
 import { resolveTerrainSlot, maskToBlobIndex, DIRECTION_OFFSETS } from '../../core/blob47.js';
 import { newId } from '../../core/palettes.js';
@@ -8,7 +8,8 @@ import { registerTool } from '../../ui/tools.js';
 // persisted map coordinates naturally signed while remaining effectively
 // infinite for normal test scenes.
 export const MAP_ORIGIN = 4096, MAP_SPAN = MAP_ORIGIN * 2;
-let asset = { tileKind: 'tile', tileSheetId: '', tileId: '', terrainSheetId: '', terrainSetId: '', spriteSheetId: '', spriteKind: 'frame', spriteId: '' };
+export const mapAsset = { tileKind: 'tile', tileSheetId: '', tileId: '', terrainSheetId: '', terrainSetId: '', spriteSheetId: '', spriteKind: 'frame', spriteId: '' };
+const asset = mapAsset;
 let playing = false, playStarted = 0, drag = null, hover = null, brushStroke = null;
 let flatCache = new Map();
 let mapPreviewCanvas = null;
@@ -33,7 +34,7 @@ export function focusMapCanvas(view) {
   requestAnimationFrame(center);
 }
 
-function mapLayer(map) { return map?.layers.find(l => l.id === state.activeMapLayerId) ?? null; }
+export function mapLayer(map) { return map?.layers.find(l => l.id === state.activeMapLayerId) ?? null; }
 function drawingLayer(map, type) {
   const active = mapLayer(map);
   if (active?.type === type && !active.locked) return active;
@@ -45,8 +46,8 @@ function drawingLayer(map, type) {
   return compatible;
 }
 function mapXY(ev) { return { x: ev.x - MAP_ORIGIN, y: ev.y - MAP_ORIGIN }; }
-function sheet(id) { return state.project?.sheets.find(s => s.id === id) ?? null; }
-function flatCanvas(s) {
+export function sheet(id) { return state.project?.sheets.find(s => s.id === id) ?? null; }
+export function flatCanvas(s) {
   if (!s) return null;
   const cached = flatCache.get(s.id);
   if (cached?.width === s.width && cached?.height === s.height && cached.gen === state.project) return cached.canvas;
@@ -55,6 +56,13 @@ function flatCanvas(s) {
   canvas.getContext('2d').putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
   flatCache.set(s.id, { canvas, width: s.width, height: s.height, gen: state.project });
   return canvas;
+}
+export function clearMapRasterCache() { flatCache.clear(); }
+export function isMapPlaying() { return playing; }
+export function toggleMapPlayback() {
+  playing = !playing;
+  if (playing) playStarted = performance.now();
+  emit('view');
 }
 function snap(map, p, size) {
   const mode = map.snap?.mode ?? 'map';
@@ -327,41 +335,4 @@ export function bindMapMode(view) {
     if (ev.type === 'up' && drag) { const {item,before}=drag, after={x:item.x,y:item.y}; drag=null; if(before.x!==after.x||before.y!==after.y) state.commands.push({label:'move map item',do(){Object.assign(item,after);refreshBounds(map);markDirty();},undo(){Object.assign(item,before);refreshBounds(map);markDirty();}}); }
   };
   document.addEventListener('keydown', e => { if (state.mode !== 'maps' || e.key !== 'Delete' || !state.selectedMapItemId) return; const map=activeMap(), layer=map?.layers.find(l=>[...(l.tiles??[]),...(l.terrain??[]),...(l.sprites??[])].some(x=>x.id===state.selectedMapItemId)), item=[...(layer?.tiles??[]),...(layer?.terrain??[]),...(layer?.sprites??[])].find(x=>x.id===state.selectedMapItemId); if(item) { const collection='tileId' in item?layer.tiles:'terrainSetId' in item?layer.terrain:layer.sprites; push('delete map item',()=>collection.splice(collection.indexOf(item),1),()=>collection.push(item)); state.selectedMapItemId=null; emit('selection'); } });
-}
-
-export function mountMapPanel(container) {
-  const render = () => {
-    if (state.mode !== 'maps') { container.hidden = true; return; } container.hidden = false;
-    const map = activeMap(); container.innerHTML = '<h3>Map</h3>';
-    if (!map) { container.append('Create or select a map in the top bar.'); return; }
-    const row=document.createElement('div');row.className='row';
-    const play=document.createElement('button');play.className='btn-sm';play.textContent=playing?'Pause':'Play';play.onclick=()=>{playing=!playing;if(playing)playStarted=performance.now();emit('view');};row.append(play);container.append(row);
-    const snapRow=document.createElement('div');snapRow.className='row';snapRow.innerHTML='Snap ';const select=document.createElement('select'); for(const v of ['off','map','asset']){const o=document.createElement('option');o.value=v;o.textContent=v==='off'?'Off':v==='map'?'Map grid':'Asset grid';select.append(o);}select.value=map.snap.mode;select.onchange=()=>{map.snap.mode=select.value;markDirty();};snapRow.append(select); for(const k of ['gridW','gridH']){const i=document.createElement('input');i.type='number';i.min='1';i.value=map.snap[k];i.onchange=()=>{map.snap[k]=Math.max(1,+i.value||1);markDirty();emit('view');};snapRow.append(i);}container.append(snapRow);
-  }; on('view',render);on('project',()=>{flatCache.clear();render();});on('selection',render);render();
-}
-
-export function mountMapAssetsPanel(container) {
-  const addSelect = (label, items, value, set, fmt = x => x.name) => {
-    const r = document.createElement('label'); r.className = 'map-brush-source'; r.textContent = `${label} `;
-    const q = document.createElement('select');
-    for (const it of items) { const o = document.createElement('option'); o.value = it.id; o.textContent = fmt(it); q.append(o); }
-    q.value = value; q.onchange = () => { set(q.value); render(); }; r.append(q); container.append(r);
-  };
-  const addSwatch = (grid, { selected, title, sourceSheet, rect, choose }) => {
-    const button = document.createElement('button'); button.type = 'button'; button.className = `map-brush-swatch${selected ? ' active' : ''}`; button.title = title; button.setAttribute('aria-label', title);
-    const canvas = document.createElement('canvas'); const scale = Math.max(1, Math.floor(56 / Math.max(rect.w, rect.h))); canvas.width = Math.max(1, rect.w * scale); canvas.height = Math.max(1, rect.h * scale); canvas.className = 'map-brush-thumb';
-    const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false; const source = flatCanvas(sourceSheet); if (source) ctx.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
-    const label = document.createElement('span'); label.textContent = title; button.append(canvas, label); button.onclick = () => { choose(); render(); }; grid.append(button);
-  };
-  const addBrushGrid = () => { const grid = document.createElement('div'); grid.className = 'map-brush-grid'; container.append(grid); return grid; };
-  const render=()=>{if(state.mode!=='maps'){container.hidden=true;return;}container.hidden=false;container.innerHTML='<h3>Brushes</h3>';const map=activeMap(),layer=mapLayer(map);if(!map||!layer){container.append('Create a map first.');return;}
-    const tiles=state.project.sheets.filter(s=>s.kind==='tile'), sprites=state.project.sheets.filter(s=>s.kind==='sprite');
-    if(state.tool==='maptile') {
-      const kindRow=document.createElement('div');kindRow.className='map-brush-kind';for(const [value,label] of [['tile','Tiles'],['terrain','Autotiles']]){const b=document.createElement('button');b.type='button';b.className=`btn-sm${asset.tileKind===value?' active':''}`;b.textContent=label;b.onclick=()=>{asset.tileKind=value;render();};kindRow.append(b);}container.append(kindRow);
-      if(asset.tileKind==='tile'){ addSelect('Sheet',tiles,asset.tileSheetId,v=>asset.tileSheetId=v); const s=sheet(asset.tileSheetId)||tiles[0];if(s){asset.tileSheetId=s.id;if(!s.tiles.some(t=>t.id===asset.tileId))asset.tileId=s.tiles[0]?.id??'';const grid=addBrushGrid();for(const tile of s.tiles)addSwatch(grid,{selected:asset.tileId===tile.id,title:tile.name??`Tile ${s.tiles.indexOf(tile)+1}`,sourceSheet:s,rect:tile,choose:()=>asset.tileId=tile.id});} }
-      else { addSelect('Sheet',tiles,asset.terrainSheetId,v=>asset.terrainSheetId=v); const s=sheet(asset.terrainSheetId)||tiles[0];if(s){asset.terrainSheetId=s.id;if(!s.terrainSets.some(t=>t.id===asset.terrainSetId))asset.terrainSetId=s.terrainSets[0]?.id??'';const grid=addBrushGrid();for(const terrain of s.terrainSets){const tileId=Object.values(terrain.slots??{}).find(Boolean), tile=tileId&&s.tiles.find(t=>t.id===tileId);if(tile)addSwatch(grid,{selected:asset.terrainSetId===terrain.id,title:terrain.name??'Autotile set',sourceSheet:s,rect:tile,choose:()=>asset.terrainSetId=terrain.id});}if(!grid.children.length)grid.textContent='This sheet has no painted autotile brushes yet.';} }
-    } else if(state.tool==='mapsprite') {
-      addSelect('Sheet',sprites,asset.spriteSheetId,v=>asset.spriteSheetId=v);const s=sheet(asset.spriteSheetId)||sprites[0];if(s){asset.spriteSheetId=s.id;const kindRow=document.createElement('div');kindRow.className='map-brush-kind';for(const [value,label] of [['frame','Frames'],['animation','Animations']]){const b=document.createElement('button');b.type='button';b.className=`btn-sm${asset.spriteKind===value?' active':''}`;b.textContent=label;b.onclick=()=>{asset.spriteKind=value;asset.spriteId='';render();};kindRow.append(b);}container.append(kindRow);const grid=addBrushGrid();const items=asset.spriteKind==='frame'?s.frames:s.animations;if(!items.some(item=>item.id===asset.spriteId))asset.spriteId=items[0]?.id??'';for(const item of items){const frame=asset.spriteKind==='animation'?s.frames.find(f=>f.id===item.frames?.[0]?.frameId):item;if(frame)addSwatch(grid,{selected:asset.spriteId===item.id,title:item.name??(asset.spriteKind==='frame'?`Frame ${s.frames.indexOf(item)+1}`:'Animation'),sourceSheet:s,rect:frame,choose:()=>asset.spriteId=item.id});}}
-    } else container.append('Select or move placed items on the active layer.');
-  };on('view',render);on('project',render);on('tool',render);render();
 }
