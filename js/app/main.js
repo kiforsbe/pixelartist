@@ -42,6 +42,10 @@ import { initFloatSession, commitFloatIfAny, cutSelection, copySelection, paste,
 import { defineAction, runAction, bindAction } from './actions.js';
 import { mountMenuBar } from '../ui/menubar.js';
 import { markDefaultAction, makeDialogMovable, centerDialog, closeOnEscape } from '../ui/dialogs.js';
+import { getEditorHost } from '../host/runtime.js';
+import { syncLegacyStateToHost } from '../features/project/legacy-state-adapter.js';
+
+const editorHost = getEditorHost();
 
 function isCancel(e) {
   return e?.name === 'AbortError' || e?.message === 'cancelled';
@@ -115,7 +119,11 @@ const npCancel = document.getElementById('np-cancel');
 markDefaultAction(dlgNewProject, npCreate);
 
 // ---- mode tabs ----
-function switchMode(mode) {
+function switchMode(mode, { fromHost = false } = {}) {
+  if (!fromHost && editorHost && editorHost.activeModeId !== mode) {
+    editorHost.activateMode(mode);
+    return;
+  }
   if (state.mode === mode) return;
   const previousMode = state.mode;
   state.mode = mode;
@@ -155,9 +163,22 @@ function switchMode(mode) {
   // blank Tile Sheets canvas).
   if (previousMode === 'maps') canvasView.centerFit();
 }
+editorHost?.onDidChangeMode(({ modeId }) => switchMode(modeId, { fromHost: true }));
 tabSprites.addEventListener('click', () => switchMode('sprites'));
 tabTiles.addEventListener('click', () => switchMode('tiles'));
 tabMaps.addEventListener('click', () => switchMode('maps'));
+
+// Transitional bridge: the host is authoritative for mode activation while
+// legacy feature controllers still write the existing state object. Mirroring
+// the remaining state into the new service store lets features migrate one at
+// a time without maintaining two independent application states.
+const syncEditorHost = () => syncLegacyStateToHost(editorHost, state);
+on('project', syncEditorHost);
+on('view', syncEditorHost);
+on('selection', syncEditorHost);
+on('tool', syncEditorHost);
+on('history', syncEditorHost);
+syncEditorHost();
 
 // ---- sheet selector ----
 function refreshSheetSelect() {
