@@ -1,6 +1,6 @@
 // Terrain set CRUD + slot mutation helpers. Mirrors js/core/tilegrids.js's
 // role: pure, DOM-free, mutates the sheet directly (the eager-mutate half
-// of this codebase's do()-then-snapshot command idiom -- js/ui/tilemode.js
+// of this codebase's do()-then-snapshot command idiom -- the Tile mode
 // wraps these with state.commands.push()).
 import { newId } from './palettes.js';
 
@@ -78,7 +78,7 @@ export function detachFromTerrainSetIfMismatched(sheet, tile) {
 // same blobIndex on more than one cell (the Blob-47 templates do this
 // intentionally, e.g. "isolated" 3x in the 7x7 layout, at cells (0,0),
 // (6,0), and (0,6) -- tile indices 0, 6, and 42; (0,0) wins). Shared by
-// applyLayoutPreset below and js/ui/tilemode.js's Add Terrain Set layout
+// applyLayoutPreset below and the Tile mode's Add Terrain Set layout
 // preview, so both agree on which cell is primary without duplicating the
 // grouping rule.
 export function groupCellsByBlobIndex(cells) {
@@ -97,7 +97,7 @@ export function groupCellsByBlobIndex(cells) {
 //
 // A duplicate blobIndex's non-primary cells are left with no
 // blobIndex/terrainSetId of their own, even though importPresetArtOntoLayer
-// (js/ui/tilemode.js) still paints reference art onto them. Track those as
+// Tile mode still paints reference art onto them. Track those as
 // `duplicateOf` (-> the tile that won the slot) purely so the UI can flag
 // them as dead ends; nothing else reads this field.
 export function applyLayoutPreset(sheet, terrainSet, preset, sourceTiles, cols) {

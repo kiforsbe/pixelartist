@@ -466,7 +466,7 @@ export function addAnimation(sheet, name, strip = false, defaults = {}) {
 // already-accepted strip freezes ITS content, not something hidden below
 // it) into one brand-new layer, then wires the group in. Caller's
 // responsibility to only call this once, while anim.layerGroupId is still
-// null -- see commitAcceptAnimation's idempotency guard in ui/frames.js.
+// null -- see the Sprite mode's commitAcceptAnimation idempotency guard.
 export function acceptAnimation(sheet, anim) {
   const group = createGroupNode(anim.name, { animationId: anim.id });
   const layer = createLayerNode('Layer 1', sheet.width, sheet.height);
