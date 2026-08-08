@@ -958,8 +958,8 @@ git commit -m "feat(maps): add presentation-layer Canvas renderer"
 - Create: `js/modes/maps/presentation/map-tool-presenter.js`
 
 **Interfaces:**
-- Consumes: Task 1's geometry functions; Task 2's `mapBrushState`; Task 3/4's command functions (dispatched directly by function reference — the "dispatch by id" architecture rule applies to `js/host/contributions/commands.js`-registered Commands, not to plain function calls within a mode's own presenter; maps mode does not register these as `EditorHost` Commands since nothing outside maps mode needs to invoke them by id); `js/host/runtime.js`'s `getEditorHost`; `js/ui/tools.js`'s `registerTool`.
-- Produces: `registerMapTool()`, `bindMapMode(view)`.
+- Consumes: Task 1's geometry functions; Task 2's `mapBrushState`; `js/host/runtime.js`'s `getEditorHost`; `js/ui/tools.js`'s `registerTool`. Dispatches Task 3/4's Command Handlers **by id**, via `getEditorHost().registries.commands.execute(id, context, args)` (`js/host/contributions/commands.js`'s `CommandRegistry`, already wired into `EditorHost` as the public `registries.commands` property since Phase 0, but not yet used by any mode) — Task 8's `contributions.js` is what actually imports and registers the Task 3/4 functions under these ids, since `contributions.js` lives outside `presentation/` and isn't subject to the "presentation dispatches by id only" ban. This Presenter file itself has **zero imports from `application/commands/**`**, satisfying `tests/architecture.test.mjs`'s existing rule.
+- Produces: `registerMapTool()`, `bindMapMode(view)`. Also produces the exact command-id contract Task 8 must register against: `maps.paintTile({mapId, layerId, sheetId, tileId, at})`, `maps.eraseTile({mapId, layerId, at})`, `maps.paintTerrain({mapId, layerId, sheetId, terrainSetId, at})`, `maps.eraseTerrain({mapId, layerId, sheetId, terrainSetId, at})`, `maps.paintSprite({mapId, layerId, sheetId, kind, assetId, at})`, `maps.eraseSprite({mapId, layerId, itemId})`, `maps.moveItem({mapId, layerId, itemId, before, after})`, `maps.deleteItem({mapId, layerId, itemId})` — each called as `getEditorHost().registries.commands.execute('maps.paintTile', { modeId: state.mode }, { mapId, layerId, sheetId, tileId, at })`, i.e. the `args` shape is a single named-fields object matching the Command Handler's positional parameters in order (minus `services`, which the registrant in Task 8 supplies itself).
 
 Selection (`layerId`, `mapItemId`) now reads/writes exclusively through `getEditorHost().selections`, keyed by `{ kind: 'map', id: map.id }` — no more `state.activeMapLayerId`/`state.selectedMapItemId`.
 
@@ -975,13 +975,6 @@ import {
   hitMapItem, brushSpacing, strokeSamples, claimStrokeCell,
 } from '../application/map-geometry.js';
 import { mapBrushState as asset } from '../application/map-brush-state.js';
-import {
-  paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
-  moveMapItem, deleteMapItem,
-} from '../application/commands/map-paint-commands.js';
-import { addMapLayer } from '../application/commands/map-layer-commands.js';
-
-export { addMapLayer };
 
 let drag = null, brushStroke = null;
 
@@ -1005,7 +998,11 @@ export function registerMapTool() {
   registerTool({ id: 'mapsprite', label: 'Sprite brush', icon: '👾', key: 'p', isAvailable: onlyMaps });
 }
 
-function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
+// Dispatches a Task 3/4 Command Handler by id (registered in contributions.js,
+// Task 8) rather than importing it directly — this Presenter lives under
+// presentation/, and tests/architecture.test.mjs bans presentation-layer code
+// from importing anything under application/commands/.
+function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
 
 function applyMapBrush(map, project, p, button, stroke) {
   const erase = button === 2;
@@ -1015,15 +1012,15 @@ function applyMapBrush(map, project, p, button, stroke) {
       const { sheet, terrain } = selectedTerrain(project, asset); if (!sheet || !terrain) return;
       const at = snap(map, p, terrain), key = `terrain:${erase ? 'erase' : terrain.id}:${at.x}:${at.y}`;
       if (!claimStrokeCell(stroke, key)) return;
-      if (erase) eraseMapTerrain(services(), map.id, layer.id, sheet.id, terrain.id, at);
-      else paintMapTerrain(services(), map.id, layer.id, sheet.id, terrain.id, at);
+      if (erase) dispatch('maps.eraseTerrain', { mapId: map.id, layerId: layer.id, sheetId: sheet.id, terrainSetId: terrain.id, at });
+      else dispatch('maps.paintTerrain', { mapId: map.id, layerId: layer.id, sheetId: sheet.id, terrainSetId: terrain.id, at });
       return;
     }
     const { sheet, tile } = selectedTile(project, asset); if (!sheet || !tile) return;
     const at = snap(map, p, tile), key = `tile:${erase ? 'erase' : tile.id}:${at.x}:${at.y}`;
     if (!claimStrokeCell(stroke, key)) return;
-    if (erase) eraseMapTile(services(), map.id, layer.id, at);
-    else paintMapTile(services(), map.id, layer.id, sheet.id, tile.id, at);
+    if (erase) dispatch('maps.eraseTile', { mapId: map.id, layerId: layer.id, at });
+    else dispatch('maps.paintTile', { mapId: map.id, layerId: layer.id, sheetId: sheet.id, tileId: tile.id, at });
     return;
   }
   if (state.tool === 'mapsprite') {
@@ -1031,13 +1028,13 @@ function applyMapBrush(map, project, p, button, stroke) {
     if (erase) {
       const hit = hitMapItem(project, layer, p), key = hit ? `sprite:erase:${hit.id}` : `sprite:empty:${Math.floor(p.x)}:${Math.floor(p.y)}`;
       if (!claimStrokeCell(stroke, key)) return;
-      if (hit) eraseMapSprite(services(), map.id, layer.id, hit.id);
+      if (hit) dispatch('maps.eraseSprite', { mapId: map.id, layerId: layer.id, itemId: hit.id });
       return;
     }
     const { sheet, item, size } = selectedSprite(project, asset); if (!sheet || !item) return;
     const at = snap(map, p, size), key = `sprite:${item.id}:${at.x}:${at.y}`;
     if (!claimStrokeCell(stroke, key)) return;
-    paintMapSprite(services(), map.id, layer.id, sheet.id, asset.spriteKind, item.id, at);
+    dispatch('maps.paintSprite', { mapId: map.id, layerId: layer.id, sheetId: sheet.id, kind: asset.spriteKind, assetId: item.id, at });
   }
 }
 
@@ -1079,7 +1076,7 @@ export function bindMapMode(view) {
     if (ev.type === 'move' && !drag) { view.requestRender(); }
     if (ev.type === 'up' && drag) {
       const { item, before } = drag, after = { x: item.x, y: item.y }; drag = null;
-      if (before.x !== after.x || before.y !== after.y) moveMapItem(services(), map.id, activeLayer.id, item.id, before, after);
+      if (before.x !== after.x || before.y !== after.y) dispatch('maps.moveItem', { mapId: map.id, layerId: activeLayer.id, itemId: item.id, before, after });
     }
   };
   document.addEventListener('keydown', e => {
@@ -1089,12 +1086,14 @@ export function bindMapMode(view) {
     if (!selection.mapItemId) return;
     const layer = map.layers.find(l => [...(l.tiles ?? []), ...(l.terrain ?? []), ...(l.sprites ?? [])].some(x => x.id === selection.mapItemId));
     if (!layer) return;
-    deleteMapItem(services(), map.id, layer.id, selection.mapItemId);
+    dispatch('maps.deleteItem', { mapId: map.id, layerId: layer.id, itemId: selection.mapItemId });
     setItem(map, null);
     emit('selection');
   });
 }
 ```
+
+Note: `addMapLayer` is no longer imported/re-exported from this file — nothing in the original file's `bindMapMode`/`applyMapBrush` actually called it (Task 4's layer commands are only ever invoked from `js/ui/panels.js`, which lives outside `presentation/` and imports `addMapLayer`/`deleteMapLayer` directly from `application/commands/map-layer-commands.js` in Task 9 — that import is architecturally fine there since the "dispatch by id" ban only scopes to `presentation/**`). The original `export { addMapLayer };` was dead re-export; dropping it is not a behavior change.
 
 Behavior note: the original `bindMapMode`'s drag-move path called `refreshBounds(map)` on every pointer-move frame in addition to the final commit; `moveMapItem`'s command already calls `refreshMapBounds` inside `runCommand`, and the live-drag-in-progress visual doesn't need bounds refreshed mid-drag (the overlay just follows `item.x/y` directly) — dropped as dead work, not a behavior change users can observe.
 
@@ -1232,8 +1231,8 @@ git commit -m "feat(maps): move panels into presentation layer, read active laye
 - Delete: `js/modes/maps/map-editor.js`, `js/modes/maps/map-panels.js`
 
 **Interfaces:**
-- Consumes: Task 5 (`focusMapCanvas`, `paintMap`, `drawMapOverlay`, `renderMapPreviewBitmap`, `isMapPlaying`), Task 6 (`registerMapTool`, `bindMapMode`), Task 7 (`mountMapPanel`, `mountMapAssetsPanel`).
-- Produces: same public contribution ids as today — `maps.preview`, `maps.placement-tools`, `maps.properties`, `maps.assets`, `maps.canvas` — required by `tests/builtinmodes.test.mjs`, which must keep passing unchanged.
+- Consumes: Task 5 (`focusMapCanvas`, `paintMap`, `drawMapOverlay`, `renderMapPreviewBitmap`, `isMapPlaying`), Task 6 (`registerMapTool`, `bindMapMode`, and the command-id contract it dispatches against), Task 7 (`mountMapPanel`, `mountMapAssetsPanel`), Task 3's 8 Command Handler functions from `application/commands/map-paint-commands.js` (imported here, NOT in `presentation/`, so this is architecturally allowed — see Task 6's note).
+- Produces: same public contribution ids as today — `maps.preview`, `maps.placement-tools`, `maps.properties`, `maps.assets`, `maps.canvas` — required by `tests/builtinmodes.test.mjs`, which must keep passing unchanged. Also newly produces 8 `EditorHost` Command contributions (`maps.paintTile`, `maps.eraseTile`, `maps.paintTerrain`, `maps.eraseTerrain`, `maps.paintSprite`, `maps.eraseSprite`, `maps.moveItem`, `maps.deleteItem`) matching the exact id/args contract Task 6's Presenter dispatches against — this is what makes Task 6's `dispatch(id, args)` calls actually do something.
 
 The current `contributions.js` (verified by reading the file directly, not from memory) is:
 
@@ -1299,8 +1298,33 @@ import { mountMapPanel } from './presentation/map-panel.js';
 import { mountMapAssetsPanel } from './presentation/map-assets-panel.js';
 import { renderMapPreview } from './preview.js';
 import { getEditorHost } from '../../host/runtime.js';
+import {
+  paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
+  moveMapItem, deleteMapItem,
+} from './application/commands/map-paint-commands.js';
+
+function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
+
+// Registered by id so map-tool-presenter.js (presentation/) can dispatch
+// through getEditorHost().registries.commands.execute(id, context, args)
+// instead of importing these Command Handlers directly — this file lives
+// outside presentation/, so importing application/commands/ here is fine;
+// tests/architecture.test.mjs only bans that import from presentation/**.
+function registerMapCommands(api) {
+  const whenMaps = keys => keys.modeId === 'maps';
+  api.commands.register({ id: 'maps.paintTile', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, tileId, at }) => paintMapTile(services(), mapId, layerId, sheetId, tileId, at) });
+  api.commands.register({ id: 'maps.eraseTile', when: whenMaps, execute: (_context, { mapId, layerId, at }) => eraseMapTile(services(), mapId, layerId, at) });
+  api.commands.register({ id: 'maps.paintTerrain', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, terrainSetId, at }) => paintMapTerrain(services(), mapId, layerId, sheetId, terrainSetId, at) });
+  api.commands.register({ id: 'maps.eraseTerrain', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, terrainSetId, at }) => eraseMapTerrain(services(), mapId, layerId, sheetId, terrainSetId, at) });
+  api.commands.register({ id: 'maps.paintSprite', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, kind, assetId, at }) => paintMapSprite(services(), mapId, layerId, sheetId, kind, assetId, at) });
+  api.commands.register({ id: 'maps.eraseSprite', when: whenMaps, execute: (_context, { mapId, layerId, itemId }) => eraseMapSprite(services(), mapId, layerId, itemId) });
+  api.commands.register({ id: 'maps.moveItem', when: whenMaps, execute: (_context, { mapId, layerId, itemId, before, after }) => moveMapItem(services(), mapId, layerId, itemId, before, after) });
+  api.commands.register({ id: 'maps.deleteItem', when: whenMaps, execute: (_context, { mapId, layerId, itemId }) => deleteMapItem(services(), mapId, layerId, itemId) });
+}
 
 export function registerMapContributions(api) {
+  registerMapCommands(api);
+
   api.previews.register({ id: 'maps.preview', order: 30, when: keys => keys.modeId === 'maps', render: renderMapPreview });
 
   api.tools.register({
@@ -1334,7 +1358,7 @@ export function registerMapContributions(api) {
 }
 ```
 
-This preserves every id, `order`, panel title, the `contextmenu` guard, and the `{ view, focus }` return contract from the current file exactly — only the imports and the internals of `onPaint`/`onOverlay` change, to call through the new renderer/presenter with explicit state instead of the old file's implicit legacy-global reads.
+This preserves every id, `order`, panel title, the `contextmenu` guard, and the `{ view, focus }` return contract from the current file exactly — only the imports and the internals of `onPaint`/`onOverlay` change, to call through the new renderer/presenter with explicit state instead of the old file's implicit legacy-global reads. The new `registerMapCommands` block is additive — it doesn't touch any of the 5 pre-existing contribution ids `tests/builtinmodes.test.mjs` asserts on.
 
 - [ ] **Step 3: Update preview.js**
 
@@ -1914,6 +1938,8 @@ Per project convention, pointer-drag interactions are not simulated in Playwrigh
 
 **Placeholder scan:** No TBD/TODO markers. Task 8's `contributions.js`/`preview.js` wiring and Tasks 3-4's erase/delete Command Handlers were each verified/corrected against the real current files before finalizing this plan (see the quoted "current file" blocks inline) — every task below contains complete, final code, not a stub to be resolved at implementation time.
 
-**Type/signature consistency:** `services` (`{projects, history}`) is used identically across Tasks 3, 4, 6, 9. `mapDocument`/`{kind:'map', id}` shape matches `legacy-state-adapter.js`'s existing convention (confirmed via investigation). `mapBrushState`/`asset` field names (`tileKind`, `tileSheetId`, `tileId`, `terrainSheetId`, `terrainSetId`, `spriteSheetId`, `spriteKind`, `spriteId`) match the original `mapAsset` object exactly, used consistently in Tasks 5-7.
+**Type/signature consistency:** `services` (`{projects, history}`) is used identically across Tasks 3, 4, 9 (constructed inside `registerMapCommands`/`js/ui/panels.js` where the Command Handlers are actually called; Task 6's Presenter no longer constructs it directly, since it dispatches by id instead — see below). `mapDocument`/`{kind:'map', id}` shape matches `legacy-state-adapter.js`'s existing convention (confirmed via investigation). `mapBrushState`/`asset` field names (`tileKind`, `tileSheetId`, `tileId`, `terrainSheetId`, `terrainSetId`, `spriteSheetId`, `spriteKind`, `spriteId`) match the original `mapAsset` object exactly, used consistently in Tasks 5-7.
+
+**Correction during execution (Task 6):** the original draft had Task 6's Presenter import Task 3/4's Command Handler functions directly and call them by reference, arguing the "dispatch by id" architecture rule (enforced by `tests/architecture.test.mjs`'s `presentation-layer mode code dispatches commands by id only, never imports command handlers directly` test) didn't really apply since nothing outside maps mode needed to invoke them by id. That argument doesn't survive contact with the actual test, which bans the import path unconditionally, with no same-mode exception — running the Task 6 implementer surfaced this as a real test failure, not implementer error. Per the user's direction, the plan was corrected (not the test): Task 8's `contributions.js` now registers all 8 Command Handlers as `EditorHost` Commands via `api.commands.register({id, when, execute})` (the existing but previously-unused `js/host/contributions/commands.js` `CommandRegistry`, already wired into `EditorHost` as the public `registries.commands` property since Phase 0), and Task 6's Presenter calls them via `getEditorHost().registries.commands.execute(id, context, args)`. This is the pattern Sprites/Tiles (Phase 2/3) should also follow, since Maps is the pilot mode establishing it. Tasks 3/4/9 (already implemented and reviewed before this was caught) required no changes — only Task 6's Presenter and Task 8's `contributions.js` were affected.
 
 **Scope check:** Every shared-file edit (Tasks 9-12) touches only maps-specific branches/lines; sprite/tile behavior in those files is unmodified, verified by each task's instruction to run the existing full suite before committing.
