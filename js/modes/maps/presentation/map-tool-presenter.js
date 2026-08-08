@@ -9,6 +9,8 @@ import {
 import { mapBrushState as asset } from '../application/map-brush-state.js';
 
 let drag = null, brushStroke = null;
+let hover = null;
+export function mapHoverPoint() { return hover; }
 
 function mapDocument(map) { return { kind: 'map', id: map.id }; }
 function currentSelection(map) { return getEditorHost().selections.get(mapDocument(map)) ?? {}; }
@@ -80,6 +82,7 @@ export function bindMapMode(view) {
     const p = mapXY(ev);
     const brushTool = state.tool === 'maptile' || state.tool === 'mapsprite';
     if (ev.type === 'down') {
+      hover = p;
       if (brushTool) {
         const button = ev.buttons & 2 ? 2 : ev.buttons & 1 ? 1 : 0; if (!button) return;
         brushStroke = { tool: state.tool, button, visited: new Set(), lastPoint: p };
@@ -95,6 +98,7 @@ export function bindMapMode(view) {
       }
     }
     if (ev.type === 'move' && brushTool) {
+      hover = p;
       if (brushStroke && brushStroke.tool === state.tool && (ev.buttons & brushStroke.button)) {
         const spacing = brushSpacing(map, state.tool, asset, project);
         for (const sample of strokeSamples(map, brushStroke.lastPoint, p, spacing)) applyMapBrush(map, project, sample, brushStroke.button, brushStroke);
@@ -102,10 +106,10 @@ export function bindMapMode(view) {
       } else if (brushStroke) brushStroke = null;
       view.requestRender(); return;
     }
-    if (ev.type === 'up' && brushTool) { brushStroke = null; view.requestRender(); return; }
+    if (ev.type === 'up' && brushTool) { brushStroke = null; hover = p; view.requestRender(); return; }
     if (!activeLayer) return;
     if (ev.type === 'move' && drag) { const at = snap(map, p, drag.size); drag.item.x = at.x; drag.item.y = at.y; emit('view'); }
-    if (ev.type === 'move' && !drag) { view.requestRender(); }
+    if (ev.type === 'move' && !drag) { hover = p; view.requestRender(); }
     if (ev.type === 'up' && drag) {
       const { item, before } = drag, after = { x: item.x, y: item.y }; drag = null;
       if (before.x !== after.x || before.y !== after.y) dispatch('maps.moveItem', { mapId: map.id, layerId: activeLayer.id, itemId: item.id, before, after });

@@ -1,12 +1,39 @@
-import {
-  registerMapTool, bindMapMode, paintMap, drawMapOverlay,
-  focusMapCanvas,
-} from './map-editor.js';
-import { mountMapPanel, mountMapAssetsPanel } from './map-panels.js';
+import { state, activeMap } from '../../app/state.js';
+import { registerMapTool, bindMapMode, mapHoverPoint } from './presentation/map-tool-presenter.js';
+import { paintMap, drawMapOverlay, focusMapCanvas } from './presentation/map-renderer.js';
+import { mountMapPanel } from './presentation/map-panel.js';
+import { mountMapAssetsPanel } from './presentation/map-assets-panel.js';
 import { renderMapPreview } from './preview.js';
+import { getEditorHost } from '../../host/runtime.js';
+import {
+  paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
+  moveMapItem, deleteMapItem,
+} from './application/commands/map-paint-commands.js';
+
+function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
+
+// Registered by id so map-tool-presenter.js (presentation/) can dispatch
+// through getEditorHost().registries.commands.execute(id, context, args)
+// instead of importing these Command Handlers directly — this file lives
+// outside presentation/, so importing application/commands/ here is fine;
+// tests/architecture.test.mjs only bans that import from presentation/**.
+function registerMapCommands(api) {
+  const whenMaps = keys => keys.modeId === 'maps';
+  api.commands.register({ id: 'maps.paintTile', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, tileId, at }) => paintMapTile(services(), mapId, layerId, sheetId, tileId, at) });
+  api.commands.register({ id: 'maps.eraseTile', when: whenMaps, execute: (_context, { mapId, layerId, at }) => eraseMapTile(services(), mapId, layerId, at) });
+  api.commands.register({ id: 'maps.paintTerrain', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, terrainSetId, at }) => paintMapTerrain(services(), mapId, layerId, sheetId, terrainSetId, at) });
+  api.commands.register({ id: 'maps.eraseTerrain', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, terrainSetId, at }) => eraseMapTerrain(services(), mapId, layerId, sheetId, terrainSetId, at) });
+  api.commands.register({ id: 'maps.paintSprite', when: whenMaps, execute: (_context, { mapId, layerId, sheetId, kind, assetId, at }) => paintMapSprite(services(), mapId, layerId, sheetId, kind, assetId, at) });
+  api.commands.register({ id: 'maps.eraseSprite', when: whenMaps, execute: (_context, { mapId, layerId, itemId }) => eraseMapSprite(services(), mapId, layerId, itemId) });
+  api.commands.register({ id: 'maps.moveItem', when: whenMaps, execute: (_context, { mapId, layerId, itemId, before, after }) => moveMapItem(services(), mapId, layerId, itemId, before, after) });
+  api.commands.register({ id: 'maps.deleteItem', when: whenMaps, execute: (_context, { mapId, layerId, itemId }) => deleteMapItem(services(), mapId, layerId, itemId) });
+}
 
 export function registerMapContributions(api) {
+  registerMapCommands(api);
+
   api.previews.register({ id: 'maps.preview', order: 30, when: keys => keys.modeId === 'maps', render: renderMapPreview });
+
   api.tools.register({
     id: 'maps.placement-tools', label: 'Map placement tools', order: 30,
     createController({ mapCanvasView }) {
@@ -23,8 +50,14 @@ export function registerMapContributions(api) {
   api.views.register({
     id: 'maps.canvas', order: 50,
     create(_host, { mapCanvasView }) {
-      mapCanvasView.onPaint = paintMap;
-      mapCanvasView.onOverlay = ctx => drawMapOverlay(mapCanvasView, ctx);
+      mapCanvasView.onPaint = ctx => paintMap(ctx, state.project, activeMap(), () => mapCanvasView.requestRender());
+      mapCanvasView.onOverlay = ctx => {
+        const map = activeMap(); if (!map) return;
+        const selection = getEditorHost().selections.get({ kind: 'map', id: map.id }) ?? {};
+        drawMapOverlay(mapCanvasView, ctx, state.project, map, {
+          tool: state.tool, hover: mapHoverPoint(), selectedItemId: selection.mapItemId, activeLayerId: selection.layerId,
+        });
+      };
       mapCanvasView.canvas.addEventListener('contextmenu', event => event.preventDefault());
       return { view: mapCanvasView, focus: () => focusMapCanvas(mapCanvasView) };
     },
