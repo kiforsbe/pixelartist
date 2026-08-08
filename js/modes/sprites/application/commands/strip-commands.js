@@ -40,6 +40,9 @@ export function insertStripFrame(services, sheetId, animationId, runIndex, k) {
   const beforeBreaks = (anim.breaks ?? []).slice();
 
   const tail = members.slice(k);
+  // ASSUMES sheetId === state.activeSheetId -- currentContextLayers() reads
+  // the ACTIVE sheet, not the sheetId this handler was dispatched with.
+  // Callers must ensure they match; see final-review finding for context.
   const mv = tail.length ? buildMovePatches(tail, fw, 0, stripLayersOf(sheet, anim) ?? currentContextLayers()) : null;
   const frame = addFrame(sheet, {
     name: `${anim.name}_${anim.frames.length}`,
@@ -108,7 +111,18 @@ export function resizeStripSegment(services, sheetId, animationId, runIndex, sid
   if (count === count0) return;
   const fw = members[0].w, fh = members[0].h;
   const bbox = frameBounds(members);
-  const delta = count - count0;
+  let delta = count - count0;
+  if (delta > 0) {
+    // Bounds-clamp the grow: mirrors insertStripFrame's sheet.width refusal
+    // guard, but clamps to what fits rather than refusing outright (this is
+    // a variable-count drag-driven grow, unlike insertStripFrame's fixed
+    // single-frame insert, so partial fulfillment is meaningful). Strips are
+    // horizontal-only here (no sheet.height counterpart exists in this file).
+    const room = side === 'right' ? sheet.width - (bbox.x + bbox.w) : bbox.x;
+    const maxGrow = Math.max(0, Math.floor(room / fw));
+    if (maxGrow === 0) return;
+    delta = Math.min(delta, maxGrow);
+  }
 
   const beforeSheetFrames = sheet.frames.slice();
   const beforeEntries = anim.frames.map(e => ({ ...e }));
@@ -190,6 +204,9 @@ export function removeStripMember(services, sheetId, animationId, frameId) {
   const wasSelected = state.selectedFrameId === frameId;
 
   const tail = members.slice(k + 1);
+  // ASSUMES sheetId === state.activeSheetId -- currentContextLayers() reads
+  // the ACTIVE sheet, not the sheetId this handler was dispatched with.
+  // Callers must ensure they match; see final-review finding for context.
   const mv = tail.length ? buildMovePatches(tail, -fw, 0, stripLayersOf(sheet, anim) ?? currentContextLayers()) : null;
   removeFrame(sheet, frameId);
 
@@ -295,9 +312,16 @@ export function newStripFromFrame(services, sheetId, frameId, side, count) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   const frame = sheet?.frames.find(f => f.id === frameId);
   if (!sheet || !frame) return;
-  const extra = count - 1;
+  let extra = count - 1;
   if (extra <= 0) return;
   const fw = frame.w, fh = frame.h;
+  // Bounds-clamp the grow: mirrors resizeStripSegment's grow-side clamp (see
+  // that comment for rationale) so a promoted strip never places frames off
+  // the sheet edge. Horizontal-only, like the rest of this file.
+  const room = side === 'right' ? sheet.width - (frame.x + fw) : frame.x;
+  const maxExtra = Math.max(0, Math.floor(room / fw));
+  if (maxExtra === 0) return;
+  extra = Math.min(extra, maxExtra);
   const duration = defaultDuration(services);
   const name = `strip_${sheet.animations.length}`;
 
