@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/(?:[A-Za-z]:)/, value => value.slice(1));
 
@@ -85,5 +85,32 @@ test('mode command modules do not access browser UI globals', async () => {
   ]) {
     const source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
+  }
+});
+
+test('application-layer code (js/host, excluding workbench, and any mode application/ folders) never touches DOM or Canvas rendering', async () => {
+  // Matches concrete DOM/Canvas API surface, not the word "document"/"window" used
+  // as an ordinary identifier (this file's own domain vocabulary is "documents").
+  const bannedGlobals = /document\.(?:getElementById|querySelector|querySelectorAll|createElement|createElementNS|createTextNode|createDocumentFragment|body|documentElement|activeElement|addEventListener|removeEventListener|dispatchEvent)\b|window\.(?:innerWidth|innerHeight|devicePixelRatio|requestAnimationFrame|cancelAnimationFrame|localStorage|sessionStorage|location|navigator|matchMedia|addEventListener|removeEventListener)\b|\balert\(|\bconfirm\(|\bprompt\(|CanvasRenderingContext2D|OffscreenCanvas|\.getContext\(/;
+
+  const hostFiles = (await jsFiles(join(root, 'js/host')))
+    .filter(file => !file.includes(`${sep}workbench${sep}`));
+  const modeApplicationFiles = (await jsFiles(join(root, 'js/modes')))
+    .filter(file => file.includes(`${sep}application${sep}`));
+
+  for (const file of [...hostFiles, ...modeApplicationFiles]) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, bannedGlobals, file);
+  }
+});
+
+test('presentation-layer mode code dispatches commands by id only, never imports command handlers directly', async () => {
+  const presentationFiles = (await jsFiles(join(root, 'js/modes')))
+    .filter(file => file.includes(`${sep}presentation${sep}`));
+
+  for (const file of presentationFiles) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /from\s+['"][^'"]*application[\\/]commands[\\/]/, file);
+    assert.doesNotMatch(source, /from\s+['"][^'"]*core[\\/]commands\.js['"]/, file);
   }
 });
