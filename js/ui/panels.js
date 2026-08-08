@@ -498,14 +498,14 @@ export function mountLayersPanel(el) {
   function doDelete() {
     if (state.mode === 'maps') {
       const host = getEditorHost();
-      const map = activeMap(), layerId = host.selections.get({ kind: 'map', id: map?.id }).layerId;
+      const map = activeMap(), layerId = (host.selections.get({ kind: 'map', id: map?.id }) ?? {}).layerId;
       const layer = map?.layers.find(l => l.id === layerId);
       if (!map || !layer || map.layers.length <= 1) return;
       if (!confirmOrAuto(`Delete ${layer.type} layer "${layer.name}"?`)) return;
       const remainingIndex = Math.min(map.layers.indexOf(layer), map.layers.length - 2);
       deleteMapLayer({ projects: host.projects, history: host.history }, map.id, layer.id);
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: map.layers[Math.max(0, remainingIndex)]?.id ?? null }, { kind: 'map', id: map.id });
-      return;
+      emit('view'); return;
     }
     const sheet = activeSheet();
     if (!sheet) return;
@@ -1019,7 +1019,7 @@ export function mountLayersPanel(el) {
   function renderMapLayer(layer) {
     const host = getEditorHost();
     const map = activeMap();
-    const activeLayerId = host.selections.get({ kind: 'map', id: map?.id }).layerId;
+    const activeLayerId = (host.selections.get({ kind: 'map', id: map?.id }) ?? {}).layerId;
     const row = document.createElement('div');
     row.className = 'layer-row layer-leaf' + (layer.id === activeLayerId ? ' active' : '');
     row.style.paddingLeft = '4px'; row.tabIndex = 0;
