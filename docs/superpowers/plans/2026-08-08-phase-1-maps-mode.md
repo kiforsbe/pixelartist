@@ -1511,7 +1511,7 @@ with:
 ```js
     if (state.mode === 'maps') {
       const host = getEditorHost();
-      const map = activeMap(), layerId = host.selections.get({ kind: 'map', id: map?.id }).layerId;
+      const map = activeMap(), layerId = (host.selections.get({ kind: 'map', id: map?.id }) ?? {}).layerId;
       const layer = map?.layers.find(l => l.id === layerId);
       if (!map || !layer || map.layers.length <= 1) return;
       if (!confirmOrAuto(`Delete ${layer.type} layer "${layer.name}"?`)) return;
@@ -1526,10 +1526,11 @@ Note: `deleteMapLayer` (Task 4) doesn't reassign the active layer selection afte
       const remainingIndex = Math.min(map.layers.indexOf(layer), map.layers.length - 2);
       deleteMapLayer({ projects: host.projects, history: host.history }, map.id, layer.id);
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: map.layers[Math.max(0, remainingIndex)]?.id ?? null }, { kind: 'map', id: map.id });
+      emit('view');
       return;
 ```
 
-(Compute `remainingIndex` from `map.layers` **before** calling `deleteMapLayer`, since the array is mutated in place by the command.)
+(Compute `remainingIndex` from `map.layers` **before** calling `deleteMapLayer`, since the array is mutated in place by the command. The `emit('view')` matches `doAddLayer`/`doAddGroup`'s convention in this same file — `deleteMapLayer`'s host-side mutation doesn't itself trigger a legacy re-render, so without this the layer panel would show a stale list until some unrelated legacy event happened to fire.)
 
 - [ ] **Step 5: Redirect `renderMapLayer`**
 
@@ -1549,7 +1550,7 @@ with:
   function renderMapLayer(layer) {
     const host = getEditorHost();
     const map = activeMap();
-    const activeLayerId = host.selections.get({ kind: 'map', id: map?.id }).layerId;
+    const activeLayerId = (host.selections.get({ kind: 'map', id: map?.id }) ?? {}).layerId;
     const row = document.createElement('div');
     row.className = 'layer-row layer-leaf' + (layer.id === activeLayerId ? ' active' : '');
     row.style.paddingLeft = '4px'; row.tabIndex = 0;
