@@ -16,14 +16,24 @@ export function syncLegacyStateToHost(host, legacyState) {
       : legacyState.view === 'tile' ? 'tiles.tile'
       : `${modeId}.sheet`;
     state.session.activeToolId = legacyState.tool;
-    if (reference) {
+    if (reference && modeId === 'maps') {
+      // Maps' layer/item selection is host-authoritative (SelectionService is
+      // the sole writer, from the map Presenter and the map-layer panel). Only
+      // seed a default the first time this map is seen this session; otherwise
+      // an unconditional overwrite here would clobber every SelectionService
+      // write on the very next legacy event.
+      const key = `${reference.kind}:${reference.id}`;
+      if (!state.session.selectionsByDocument[key]) {
+        const map = legacyState.project?.maps?.find(m => m.id === reference.id);
+        state.session.selectionsByDocument[key] = { layerId: map?.layers[0]?.id ?? null, mapItemId: null };
+      }
+    } else if (reference) {
       state.session.selectionsByDocument[`${reference.kind}:${reference.id}`] = {
-        layerId: modeId === 'maps' ? legacyState.activeMapLayerId : legacyState.activeLayerId,
+        layerId: legacyState.activeLayerId,
         frameId: legacyState.selectedFrameId,
         animationId: legacyState.selectedAnimationId,
         tileId: legacyState.selectedTileId,
         terrainSetId: legacyState.selectedTerrainSetId,
-        mapItemId: legacyState.selectedMapItemId,
       };
     }
   });
