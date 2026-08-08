@@ -1,38 +1,27 @@
-import { state, activeSheet, markDirty, emit } from '../../app/state.js';
-import { acceptAnimation } from '../../core/model.js';
+// js/features/animations/commands.js
+// Legacy façade: js/ui/timeline.js and js/ui/tools.js still call these two by
+// import. The handlers themselves now live in js/modes/sprites/application/
+// commands/animation-commands.js and are registered as host Commands by
+// js/modes/sprites/contributions.js, so this file only dispatches by id —
+// shared UI must never import a mode's command handlers directly. Delete this
+// file once both callers dispatch for themselves (sub-phase 2b/2c).
+import { activeSheet } from '../../app/state.js';
+import { getEditorHost } from '../../host/runtime.js';
+
+// Context is pinned to 'sprites' rather than the live state.mode: both of
+// these are inherently sprite-sheet operations (the caller already resolved a
+// sprite sheet), and the registered commands' `when` predicate requires it.
+function dispatch(id, args) {
+  return getEditorHost()?.registries.commands.execute(id, { modeId: 'sprites' }, args);
+}
 
 export function commitBreakApartStrip(animation) {
-  const beforeBreaks = (animation.breaks ?? []).slice();
-  state.commands.push({
-    label: 'break apart strip',
-    do() { animation.strip = false; animation.breaks = []; },
-    undo() { animation.strip = true; animation.breaks = beforeBreaks.slice(); },
-  });
-  markDirty();
+  const sheet = activeSheet();
+  if (!sheet || !animation) return;
+  dispatch('sprites.breakApartStrip', { sheetId: sheet.id, animationId: animation.id });
 }
 
 export function commitAcceptAnimation(sheet, animation) {
-  if (animation.layerGroupId) return;
-  const beforeActiveLayerId = state.activeLayerId;
-  const group = acceptAnimation(sheet, animation);
-  const animationLayerId = group.children[0].id;
-  const groupIndex = sheet.layerTree.children.indexOf(group);
-
-  state.commands.push({
-    label: 'accept animation',
-    do() {
-      animation.layerGroupId = group.id;
-      if (!sheet.layerTree.children.includes(group)) {
-        sheet.layerTree.children.splice(Math.min(groupIndex, sheet.layerTree.children.length), 0, group);
-      }
-      if (sheet === activeSheet()) state.activeLayerId = animationLayerId;
-    },
-    undo() {
-      animation.layerGroupId = null;
-      sheet.layerTree.children = sheet.layerTree.children.filter(child => child !== group);
-      if (state.activeLayerId === animationLayerId) state.activeLayerId = beforeActiveLayerId;
-    },
-  });
-  markDirty();
-  emit('selection');
+  if (!sheet || !animation) return;
+  dispatch('sprites.acceptAnimation', { sheetId: sheet.id, animationId: animation.id });
 }
