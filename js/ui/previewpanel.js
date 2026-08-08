@@ -267,6 +267,6 @@ export function mountPreviewPanel(el) {
   on('view', requestContextRender);
   on('selection', requestContextRender);
   on('pixels', requestContextRender);
-  on('map-content', renderMapContentNow);
+  getEditorHost()?.history.subscribe(() => { if (state.mode === 'maps') renderMapContentNow(); });
   render();
 }
