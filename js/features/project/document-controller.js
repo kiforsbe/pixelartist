@@ -51,7 +51,6 @@ export function mountDocumentController({ editorHost, workbench }) {
     if (mode === 'maps') {
       const map = state.project?.maps?.[0] ?? null;
       state.activeMapId = map?.id ?? null;
-      state.activeMapLayerId = map?.layers[0]?.id ?? null;
       state.activeSheetId = null; state.activeLayerId = null; state.view = 'map';
       if (!['select', 'move', 'maptile', 'mapsprite'].includes(state.tool)) { state.tool = 'select'; emit('tool'); }
       emit('view'); workbench.focusMap(); return;
@@ -129,7 +128,7 @@ export function mountDocumentController({ editorHost, workbench }) {
   refreshSheetSelect();
   
   sheetSelect.addEventListener('change', () => {
-    if (state.mode === 'maps') { const map = state.project?.maps?.find(m => m.id === sheetSelect.value); if (!map) return; state.activeMapId = map.id; state.activeMapLayerId = map.layers[0]?.id ?? null; state.view = 'map'; emit('view'); workbench.focusMap(); return; }
+    if (state.mode === 'maps') { const map = state.project?.maps?.find(m => m.id === sheetSelect.value); if (!map) return; state.activeMapId = map.id; state.view = 'map'; emit('view'); workbench.focusMap(); return; }
     const sheet = state.project?.sheets.find(s => s.id === sheetSelect.value);
     if (!sheet) return;
     state.activeSheetId = sheet.id;
@@ -188,7 +187,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     label: 'New Sheet',
     run: () => {
       if (!state.project) return;
-      if (state.mode === 'maps') { const map = createMap(state.project, { name: `Map ${state.project.maps.length}`, gridW: state.project.settings.tileW, gridH: state.project.settings.tileH }); state.activeMapId = map.id; state.activeMapLayerId = map.layers[0].id; markDirty(); emit('view'); return; }
+      if (state.mode === 'maps') { const map = createMap(state.project, { name: `Map ${state.project.maps.length}`, gridW: state.project.settings.tileW, gridH: state.project.settings.tileH }); state.activeMapId = map.id; markDirty(); emit('view'); return; }
       const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
       const settings = state.project.settings;
       const n = state.project.sheets.filter(s => s.kind === kind).length + 1;
@@ -313,7 +312,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     const project = state.project, index = project.maps.indexOf(map);
     if (index === -1) return;
     const wasActive = state.activeMapId === map.id;
-    const prev = { activeMapId:state.activeMapId, activeMapLayerId:state.activeMapLayerId, selectedMapItemId:state.selectedMapItemId };
+    const prev = { activeMapId: state.activeMapId };
     state.commands.push({
       label: 'delete map',
       do() {
@@ -321,8 +320,6 @@ export function mountDocumentController({ editorHost, workbench }) {
         if (wasActive) {
           const next = project.maps[Math.min(index, project.maps.length - 1)] ?? null;
           state.activeMapId = next?.id ?? null;
-          state.activeMapLayerId = next?.layers[0]?.id ?? null;
-          state.selectedMapItemId = null;
         }
         markDirty(); emit('view');
       },

@@ -22,8 +22,6 @@ export const state = {
   selectedTileId: null,       // tile tool selection (tile mode)
   selectedTerrainSetId: null, // which terrain set's slot editor is open in the panel
   activeMapId: null,
-  activeMapLayerId: null,
-  selectedMapItemId: null,
   editingFrameId: null,       // frame editor target
   editingTileId: null,        // tile editor target
   // Saved as part of the project (project.settings.onion) so onion-skin
@@ -123,7 +121,6 @@ export function setProject(project) {
   state.activeLayerId = sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null;
   const map = project.maps?.[0] ?? null;
   state.activeMapId = map?.id ?? null;
-  state.activeMapLayerId = map?.layers[0]?.id ?? null;
   state.commands.clear();
   state.dirty = false;
   emit('project');
