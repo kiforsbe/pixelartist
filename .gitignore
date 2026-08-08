@@ -19,3 +19,5 @@ desktop.ini
 *.log
 *.swp
 *~
+
+.worktrees/
