@@ -1182,7 +1182,7 @@ export function mountMapAssetsPanel(container) {
     const label = document.createElement('span'); label.textContent = title; button.append(canvas, label); button.onclick = () => { choose(); render(); }; grid.append(button);
   };
   const addBrushGrid = () => { const grid = document.createElement('div'); grid.className = 'map-brush-grid'; container.append(grid); return grid; };
-  const activeLayerId = () => getEditorHost().selections.get({ kind: 'map', id: activeMap()?.id }).layerId;
+  const activeLayerId = () => (getEditorHost().selections.get({ kind: 'map', id: activeMap()?.id }) ?? {}).layerId;
   const render = () => {
     if (state.mode !== 'maps') { container.hidden = true; return; }
     container.hidden = false; container.innerHTML = '<h3>Brushes</h3>';
