@@ -7,7 +7,7 @@ import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
 import { state } from '../js/app/state.js';
 import {
-  paintMapTile, eraseMapTile, paintMapTerrain, paintMapSprite, eraseMapSprite,
+  paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
   moveMapItem, deleteMapItem,
 } from '../js/modes/maps/application/commands/map-paint-commands.js';
 
@@ -26,7 +26,7 @@ function makeProject() {
   };
   const sheet = {
     id: 'sheet1', kind: 'tile',
-    tiles: [{ id: 'tile1', w: 16, h: 16 }],
+    tiles: [{ id: 'tile1', w: 16, h: 16 }, { id: 'tile2', w: 16, h: 16 }],
     terrainSets: [{ id: 'terrain1', tileW: 16, tileH: 16 }],
     frames: [{ id: 'frame1', w: 16, h: 16 }],
     animations: [],
@@ -120,4 +120,85 @@ test('deleteMapItem removes any item kind by id and is undoable', () => {
 
   services.history.undo();
   assert.equal(project.maps[0].layers[0].tiles.length, 1);
+});
+
+test('paintMapTile repainting the identical tile onto an occupied cell is a no-op', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
+  const layer = project.maps[0].layers[0];
+  const lengthBefore = layer.tiles.length;
+  const idBefore = layer.tiles[0].id;
+
+  paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
+  assert.equal(layer.tiles.length, lengthBefore);
+  assert.equal(layer.tiles[0].id, idBefore);
+});
+
+test('paintMapTile painting a different tile onto an occupied cell replaces the occupant, undo restores original', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
+  const layer = project.maps[0].layers[0];
+  const originalId = layer.tiles[0].id;
+  const originalTileId = layer.tiles[0].tileId;
+
+  paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile2', { x: 0, y: 0 });
+  assert.equal(layer.tiles.length, 1);
+  assert.equal(layer.tiles[0].tileId, 'tile2');
+
+  services.history.undo();
+  assert.equal(layer.tiles.length, 1);
+  assert.equal(layer.tiles[0].id, originalId);
+  assert.equal(layer.tiles[0].tileId, originalTileId);
+});
+
+test('eraseMapTile fully clears a cell after repeated repaints of the same tile', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
+  paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
+  paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
+  const layer = project.maps[0].layers[0];
+
+  eraseMapTile(services, 'map1', 'layer1', { x: 0, y: 0 });
+  assert.equal(layer.tiles.length, 0);
+});
+
+test('paintMapTerrain repainting an occupied cell is a no-op and does not grow the undo stack', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  paintMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', { x: 0, y: 0 });
+  const layer = project.maps[0].layers[0];
+  assert.equal(layer.terrain.length, 1);
+
+  paintMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', { x: 0, y: 0 });
+  assert.equal(layer.terrain.length, 1);
+
+  services.history.undo();
+  assert.equal(layer.terrain.length, 0);
+});
+
+test('eraseMapTerrain removes a terrain entry at a point and undo restores it', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  paintMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', { x: 0, y: 0 });
+  const layer = project.maps[0].layers[0];
+  assert.equal(layer.terrain.length, 1);
+
+  eraseMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', { x: 0, y: 0 });
+  assert.equal(layer.terrain.length, 0);
+
+  services.history.undo();
+  assert.equal(layer.terrain.length, 1);
 });

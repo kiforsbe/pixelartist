@@ -26,10 +26,13 @@ function runCommand(services, mapId, label, apply, revert) {
 }
 
 export function paintMapTile(services, mapId, layerId, sheetId, tileId, at) {
+  const layer = findLayer(findMap(services.projects.project, mapId), layerId);
+  const old = layer?.tiles.find(t => t.x === at.x && t.y === at.y);
+  if (old?.sheetId === sheetId && old?.tileId === tileId) return;
   const entry = { id: newId('mi'), sheetId, tileId, x: at.x, y: at.y };
   runCommand(services, mapId, 'place map tile',
-    map => { findLayer(map, layerId).tiles.push(entry); },
-    map => { const layer = findLayer(map, layerId); layer.tiles = layer.tiles.filter(t => t.id !== entry.id); });
+    map => { const layer = findLayer(map, layerId); if (old) layer.tiles = layer.tiles.filter(t => t.id !== old.id); layer.tiles.push(entry); },
+    map => { const layer = findLayer(map, layerId); layer.tiles = layer.tiles.filter(t => t.id !== entry.id); if (old) layer.tiles.push(old); });
 }
 
 export function eraseMapTile(services, mapId, layerId, at) {
@@ -42,12 +45,14 @@ export function eraseMapTile(services, mapId, layerId, at) {
 }
 
 export function paintMapTerrain(services, mapId, layerId, sheetId, terrainSetId, at) {
+  const project = services.projects.project;
+  const layer = findLayer(findMap(project, mapId), layerId);
+  const sheet = findSheet(project, sheetId);
+  const terrain = sheet?.terrainSets.find(t => t.id === terrainSetId);
+  if (layer && sheet && terrain && terrainAt(layer, sheet, terrain, at.x, at.y)) return;
   const entry = { id: newId('mt'), sheetId, terrainSetId, x: at.x, y: at.y };
   runCommand(services, mapId, 'paint map terrain',
-    (map, project) => {
-      const layer = findLayer(map, layerId), sheet = findSheet(project, sheetId), terrain = sheet.terrainSets.find(t => t.id === terrainSetId);
-      if (!terrainAt(layer, sheet, terrain, at.x, at.y)) layer.terrain.push(entry);
-    },
+    map => { findLayer(map, layerId).terrain.push(entry); },
     map => { const layer = findLayer(map, layerId); layer.terrain = layer.terrain.filter(t => t.id !== entry.id); });
 }
 

@@ -10,7 +10,6 @@ import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
 import { defineAction, bindAction } from '../app/actions.js';
 import { markDefaultAction } from './dialogs.js';
 import { getEditorHost } from '../host/runtime.js';
-import { addMapLayer, deleteMapLayer } from '../modes/maps/application/commands/map-layer-commands.js';
 
 export function rgbaToHex([r, g, b]) {
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
@@ -434,8 +433,8 @@ export function mountLayersPanel(el) {
   function doAddLayer() {
     if (state.mode === 'maps') {
       const map = activeMap(); if (!map) return;
-      const host = getEditorHost(), services = { projects: host.projects, history: host.history };
-      const layerId = addMapLayer(services, map.id, 'tile');
+      const host = getEditorHost();
+      const layerId = host.registries.commands.execute('maps.addLayer', { modeId: state.mode }, { mapId: map.id, type: 'tile' });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
       emit('view'); return;
     }
@@ -466,8 +465,8 @@ export function mountLayersPanel(el) {
   function doAddGroup() {
     if (state.mode === 'maps') {
       const map = activeMap(); if (!map) return;
-      const host = getEditorHost(), services = { projects: host.projects, history: host.history };
-      const layerId = addMapLayer(services, map.id, 'sprite');
+      const host = getEditorHost();
+      const layerId = host.registries.commands.execute('maps.addLayer', { modeId: state.mode }, { mapId: map.id, type: 'sprite' });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
       emit('view'); return;
     }
@@ -503,7 +502,7 @@ export function mountLayersPanel(el) {
       if (!map || !layer || map.layers.length <= 1) return;
       if (!confirmOrAuto(`Delete ${layer.type} layer "${layer.name}"?`)) return;
       const remainingIndex = Math.min(map.layers.indexOf(layer), map.layers.length - 2);
-      deleteMapLayer({ projects: host.projects, history: host.history }, map.id, layer.id);
+      host.registries.commands.execute('maps.deleteLayer', { modeId: state.mode }, { mapId: map.id, layerId: layer.id });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: map.layers[Math.max(0, remainingIndex)]?.id ?? null }, { kind: 'map', id: map.id });
       emit('view'); return;
     }

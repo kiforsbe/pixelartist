@@ -9,6 +9,7 @@ import {
   paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
   moveMapItem, deleteMapItem,
 } from './application/commands/map-paint-commands.js';
+import { addMapLayer, deleteMapLayer } from './application/commands/map-layer-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
 
@@ -27,6 +28,8 @@ function registerMapCommands(api) {
   api.commands.register({ id: 'maps.eraseSprite', when: whenMaps, execute: (_context, { mapId, layerId, itemId }) => eraseMapSprite(services(), mapId, layerId, itemId) });
   api.commands.register({ id: 'maps.moveItem', when: whenMaps, execute: (_context, { mapId, layerId, itemId, before, after }) => moveMapItem(services(), mapId, layerId, itemId, before, after) });
   api.commands.register({ id: 'maps.deleteItem', when: whenMaps, execute: (_context, { mapId, layerId, itemId }) => deleteMapItem(services(), mapId, layerId, itemId) });
+  api.commands.register({ id: 'maps.addLayer', when: whenMaps, execute: (_context, { mapId, type }) => addMapLayer(services(), mapId, type) });
+  api.commands.register({ id: 'maps.deleteLayer', when: whenMaps, execute: (_context, { mapId, layerId }) => deleteMapLayer(services(), mapId, layerId) });
 }
 
 export function registerMapContributions(api) {

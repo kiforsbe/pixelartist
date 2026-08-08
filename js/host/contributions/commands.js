@@ -11,8 +11,11 @@ export class CommandRegistry extends ContributionRegistry {
 
   execute(id, context, args) {
     const command = this.get(id);
-    if (!command || (command.when && !command.when(context)) ||
-        (command.isEnabled && !command.isEnabled(context))) return undefined;
+    if (!command) {
+      console.warn(`Unknown command "${id}"`);
+      return undefined;
+    }
+    if ((command.when && !command.when(context)) || (command.isEnabled && !command.isEnabled(context))) return undefined;
     return command.execute(context, args);
   }
 }
