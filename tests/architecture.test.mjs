@@ -104,6 +104,8 @@ test('sprite command modules do not access browser UI globals', async () => {
     join(root, 'js/modes/sprites/application/commands/strip-commands.js'),
     join(root, 'js/modes/sprites/application/commands/frame-metadata-commands.js'),
     join(root, 'js/modes/sprites/application/commands/animation-commands.js'),
+    join(root, 'js/modes/sprites/application/commands/animation-lifecycle-commands.js'),
+    join(root, 'js/modes/sprites/application/commands/animation-frame-commands.js'),
   ]) {
     const source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);

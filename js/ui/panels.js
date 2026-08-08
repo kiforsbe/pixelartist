@@ -1,7 +1,7 @@
 // Color/palette panel and layers panel.
 
 import { state, on, emit, activeSheet, activeLayer, activeMap, markDirty, confirmOrAuto } from '../app/state.js';
-import { commitDeleteAnimation } from './timeline.js';
+import { commitDeleteAnimation } from '../features/animations/commands.js';
 import { cloneBitmap, blitRegion } from '../core/pixels.js';
 import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, createMapLayer, refreshMapBounds, moveNode, animationGroup, layerAnimationContext } from '../core/model.js';
 import { compositeFloatOnLayer } from '../core/floating.js';
@@ -549,7 +549,7 @@ export function mountLayersPanel(el) {
           const anim = sheet.animations.find(a => a.id === g.animationId);
           if (!confirmOrAuto(`Delete animation "${anim?.name ?? g.name}" and its frames?`)) return;
           commitDeleteAnimation(sheet, g.animationId);
-          // commitDeleteAnimation lives in timeline.js and has no knowledge
+          // commitDeleteAnimation lives in js/features/animations/commands.js and has no knowledge
           // of this panel's own local selectedNodeId -- clear it so a stale
           // id (pointing at the now-deleted group) doesn't linger, matching
           // the layer-delete branch above which resets it after its own

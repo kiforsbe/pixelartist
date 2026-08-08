@@ -1,8 +1,8 @@
 // js/modes/sprites/contributions.js
 import { registerFrameTool, bindFrameTool, drawStripChrome } from './presentation/frame-tool-presenter.js';
 import { mountFramesPanel } from './presentation/frames-panel.js';
-import { mountAnimationsPanel } from '../../ui/animpanel.js';
-import { mountTimeline } from '../../ui/timeline.js';
+import { mountAnimationsPanel } from './presentation/animations-panel.js';
+import { mountTimeline } from './presentation/timeline-presenter.js';
 import { mountFrameEditor } from '../../ui/frameeditor.js';
 import { renderSpritePreview } from './preview.js';
 import { getEditorHost } from '../../host/runtime.js';
@@ -17,6 +17,12 @@ import {
   setFrameField, moveStripTo, setStripFrameSize, setStripPivot,
 } from './application/commands/frame-metadata-commands.js';
 import { breakApartStrip, acceptAnimation } from './application/commands/animation-commands.js';
+import {
+  newAnimation, deleteAnimation, renameAnimation, toggleAnimationLoop, setAnimationBaseDuration,
+} from './application/commands/animation-lifecycle-commands.js';
+import {
+  addAnimationFrame, removeAnimationFrame, reorderAnimationFrame, setAnimationFrameDuration, setAnimationFrameStep,
+} from './application/commands/animation-frame-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
 
@@ -52,6 +58,18 @@ function registerSpriteCommands(api) {
 
   command('sprites.breakApartStrip', (_context, { sheetId, animationId }) => breakApartStrip(services(), sheetId, animationId));
   command('sprites.acceptAnimation', (_context, { sheetId, animationId }) => acceptAnimation(services(), sheetId, animationId));
+
+  command('sprites.newAnimation', (_context, { sheetId }) => newAnimation(services(), sheetId));
+  command('sprites.deleteAnimation', (_context, { sheetId, animationId }) => deleteAnimation(services(), sheetId, animationId));
+  command('sprites.renameAnimation', (_context, { sheetId, animationId, name }) => renameAnimation(services(), sheetId, animationId, name));
+  command('sprites.toggleAnimationLoop', (_context, { sheetId, animationId, loop }) => toggleAnimationLoop(services(), sheetId, animationId, loop));
+  command('sprites.setAnimationBaseDuration', (_context, { sheetId, animationId, before, after }) => setAnimationBaseDuration(services(), sheetId, animationId, before, after));
+
+  command('sprites.addAnimationFrame', (_context, { sheetId, animationId, frameId }) => addAnimationFrame(services(), sheetId, animationId, frameId));
+  command('sprites.removeAnimationFrame', (_context, { sheetId, animationId, index }) => removeAnimationFrame(services(), sheetId, animationId, index));
+  command('sprites.reorderAnimationFrame', (_context, { sheetId, animationId, fromIndex, toIndex }) => reorderAnimationFrame(services(), sheetId, animationId, fromIndex, toIndex));
+  command('sprites.setAnimationFrameDuration', (_context, { sheetId, animationId, index, duration }) => setAnimationFrameDuration(services(), sheetId, animationId, index, duration));
+  command('sprites.setAnimationFrameStep', (_context, { sheetId, animationId, index, step }) => setAnimationFrameStep(services(), sheetId, animationId, index, step));
 }
 
 export function registerSpriteContributions(api) {

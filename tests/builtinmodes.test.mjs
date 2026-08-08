@@ -49,11 +49,13 @@ test('sprites mode registers exactly the expected sprites.* command ids', () => 
   assert.deepEqual(
     host.registries.commands.list().map(command => command.id).filter(id => id.startsWith('sprites.')),
     [
-      'sprites.acceptAnimation', 'sprites.breakApartStrip', 'sprites.createFrame', 'sprites.deleteFrame',
-      'sprites.insertStripFrame', 'sprites.mergeStripSegments', 'sprites.moveFrames', 'sprites.moveStripTo',
-      'sprites.newStripFromFrame', 'sprites.removeStripMember', 'sprites.resizeFrame', 'sprites.resizeStripSegment',
-      'sprites.setFrameField', 'sprites.setStripFrameSize', 'sprites.setStripPivot', 'sprites.sliceGrid',
-      'sprites.splitStrip',
+      'sprites.acceptAnimation', 'sprites.addAnimationFrame', 'sprites.breakApartStrip', 'sprites.createFrame',
+      'sprites.deleteAnimation', 'sprites.deleteFrame', 'sprites.insertStripFrame', 'sprites.mergeStripSegments',
+      'sprites.moveFrames', 'sprites.moveStripTo', 'sprites.newAnimation', 'sprites.newStripFromFrame',
+      'sprites.removeAnimationFrame', 'sprites.removeStripMember', 'sprites.renameAnimation', 'sprites.reorderAnimationFrame',
+      'sprites.resizeFrame', 'sprites.resizeStripSegment', 'sprites.setAnimationBaseDuration', 'sprites.setAnimationFrameDuration',
+      'sprites.setAnimationFrameStep', 'sprites.setFrameField', 'sprites.setStripFrameSize', 'sprites.setStripPivot',
+      'sprites.sliceGrid', 'sprites.splitStrip', 'sprites.toggleAnimationLoop',
     ],
   );
 });
