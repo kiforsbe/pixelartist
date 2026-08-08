@@ -16,7 +16,7 @@ function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
   const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), stack };
 }
 
 function makeProject() {
@@ -194,4 +194,63 @@ test('sliceSheetIntoFrames with replace clears existing frames and every animati
   assert.equal(sheet.frames[0].id, oldFrameId);
   assert.deepEqual(sheet.animations[0].frames, [{ frameId: oldFrameId, duration: 100 }]);
   assert.deepEqual(sheet.animations[0].breaks, [1]);
+});
+
+test('moveFrames with multiple plain frames uses "move strip" label and moves both by the same delta', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  reset();
+  const sheet = project.sheets[0];
+  const layer = createLayerNode('Layer 1', sheet.width, sheet.height);
+  sheet.layerTree.children.push(layer);
+  setPixel(layer.bitmap, 1, 1, [255, 0, 0, 255]);
+  createFrame(services, 'sheet1', { x: 0, y: 0, w: 16, h: 16 });
+  createFrame(services, 'sheet1', { x: 20, y: 0, w: 16, h: 16 });
+  const frame0 = sheet.frames[0];
+  const frame1 = sheet.frames[1];
+
+  moveFrames(services, 'sheet1', [frame0.id, frame1.id], 16, 8, null);
+  assert.deepEqual({ x: frame0.x, y: frame0.y }, { x: 16, y: 8 });
+  assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 36, y: 8 });
+  assert.equal(services.stack.done[services.stack.done.length - 1].label, 'move strip');
+  assert.deepEqual(getPixel(layer.bitmap, 1, 1), [255, 0, 0, 255]);
+
+  services.history.undo();
+  assert.deepEqual({ x: frame0.x, y: frame0.y }, { x: 0, y: 0 });
+  assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 20, y: 0 });
+});
+
+test('moveFrames with multiple frames on an accepted strip uses "move strip" label and carries pixels for each frame', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  reset();
+  const sheet = project.sheets[0];
+  const group = createGroupNode('strip_0', { animationId: 'an1' });
+  const layer = createLayerNode('Layer 1', sheet.width, sheet.height);
+  group.children.push(layer);
+  sheet.layerTree.children.push(group);
+  setPixel(layer.bitmap, 1, 1, [255, 0, 0, 255]);
+  setPixel(layer.bitmap, 20, 1, [0, 255, 0, 255]);
+  createFrame(services, 'sheet1', { x: 0, y: 0, w: 16, h: 16 });
+  createFrame(services, 'sheet1', { x: 20, y: 0, w: 16, h: 16 });
+  const frame0 = sheet.frames[0];
+  const frame1 = sheet.frames[1];
+  sheet.animations.push({ id: 'an1', name: 'strip_0', strip: true, loop: true, breaks: [], frames: [{ frameId: frame0.id, duration: 100 }, { frameId: frame1.id, duration: 100 }], layerGroupId: group.id });
+
+  moveFrames(services, 'sheet1', [frame0.id, frame1.id], 16, 8, 'an1');
+  assert.deepEqual({ x: frame0.x, y: frame0.y }, { x: 16, y: 8 });
+  assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 36, y: 8 });
+  assert.equal(services.stack.done[services.stack.done.length - 1].label, 'move strip');
+  assert.deepEqual(getPixel(layer.bitmap, 17, 9), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 36, 9), [0, 255, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 1, 1), [0, 0, 0, 0]);
+  assert.deepEqual(getPixel(layer.bitmap, 20, 1), [0, 0, 0, 0]);
+
+  services.history.undo();
+  assert.deepEqual({ x: frame0.x, y: frame0.y }, { x: 0, y: 0 });
+  assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 20, y: 0 });
+  assert.deepEqual(getPixel(layer.bitmap, 1, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 20, 1), [0, 255, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 17, 9), [0, 0, 0, 0]);
+  assert.deepEqual(getPixel(layer.bitmap, 36, 9), [0, 0, 0, 0]);
 });
