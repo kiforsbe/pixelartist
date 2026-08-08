@@ -1,9 +1,9 @@
-import { EditorStore } from '../application/editor-store.js';
-import { DocumentService } from '../application/document-service.js';
-import { HistoryService } from '../application/history-service.js';
-import { ProjectService } from '../application/project-service.js';
-import { SelectionService } from '../application/selection-service.js';
-import { ExportService } from '../application/export-service.js';
+import { EditorStore } from './editor-store.js';
+import { DocumentService } from './document-service.js';
+import { HistoryService } from './history-service.js';
+import { ProjectService } from './project-service.js';
+import { SelectionService } from './selection-service.js';
+import { ExportService } from './export-service.js';
 import { ContextKeys } from './context-keys.js';
 import { DisposableStore, toDisposable } from './disposable.js';
 import { ModeRegistry } from './mode-registry.js';

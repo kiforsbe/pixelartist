@@ -6,8 +6,8 @@ build step, no framework — plain ES modules loaded directly by the browser
 
 This document describes the code as it exists *today*. It is mid-migration:
 a legacy globally-mutable app (`js/app`, `js/ui`) is being incrementally
-wrapped by a newer host/registry framework (`js/host`, `js/application`,
-`js/modes`, `js/features`). Both are live at once, bridged explicitly — see
+wrapped by a newer host/registry framework (`js/host`, `js/modes`,
+`js/features`). Both are live at once, bridged explicitly — see
 [State model](#state-model).
 
 ## Layering
@@ -17,9 +17,8 @@ js/domain      pure, dependency-free document-kind logic (maps, sprites)
 js/core        generic engine: bitmap ops, sheet/layer model, undo stack,
                palettes, autotiling, filters, encoders
 js/host        framework: EditorHost, contribution registries, workbench
-               primitives — knows nothing app-specific
-js/application services on EditorStore: documents, history, selection,
-               project, export
+               primitives, and application services on EditorStore
+               (documents, history, selection, project, export)
 js/platform    concrete adapters (preferences, file-system, clipboard,
                image-codec) injected into EditorHost
 js/modes       one self-contained vertical slice per document kind:
@@ -50,8 +49,7 @@ graph TD
     FEATURES["js/features<br/>(shell: workbench, menu, file I/O)"]
     MODES["js/modes<br/>(sprites, tiles, maps)"]
     PLATFORM["js/platform<br/>(browser adapters)"]
-    APPLICATION["js/application<br/>(services on EditorStore)"]
-    HOST["js/host<br/>(EditorHost, registries)"]
+    HOST["js/host<br/>(EditorHost, registries, application services)"]
     CORE["js/core<br/>(engine: model, undo, palettes)"]
     DOMAIN["js/domain<br/>(pure doc-kind logic)"]
 
@@ -64,8 +62,7 @@ graph TD
     MODES --> UI
     UI --> APP
     APP --> CORE
-    HOST --> APPLICATION
-    APPLICATION --> CORE
+    HOST --> CORE
     PLATFORM --> HOST
     CORE --> DOMAIN
 ```
@@ -137,8 +134,8 @@ against. It owns:
 - `registries` — frozen object of 7 `ContributionRegistry` subclasses:
   `modes, commands, panels, tools, views, menus, previews`
 - `documents/history/projects/selections/exports/focus` — the application
-  services from `js/application/*`, exposed individually and bundled as
-  `services`
+  services (now colocated in `js/host/*`), exposed individually and
+  bundled as `services`
 
 Key methods:
 
@@ -428,7 +425,7 @@ understand before changing anything here:
    'playhead' | '*'`). Almost all actual document mutation still happens
    here, and most of `js/ui`/`js/modes`/`js/features` read/write it
    directly.
-2. **New** — `js/application/editor-store.js`'s `EditorStore`: a small
+2. **New** — `js/host/editor-store.js`'s `EditorStore`: a small
    selector-based reactive store (`getState()`, `transaction(reason,
    mutate)`, `subscribe(selector, listener, {equals, signal,
    fireImmediately})`) holding `{project, session, interaction,

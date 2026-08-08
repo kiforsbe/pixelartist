@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EditorStore } from '../js/application/editor-store.js';
-import { HistoryService } from '../js/application/history-service.js';
+import { EditorStore } from '../js/host/editor-store.js';
+import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
 
 test('HistoryService executes undoable edits separately from UI commands', () => {

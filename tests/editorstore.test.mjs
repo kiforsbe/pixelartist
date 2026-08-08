@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EditorStore, documentKey } from '../js/application/editor-store.js';
+import { EditorStore, documentKey } from '../js/host/editor-store.js';
 
 test('EditorStore batches selector notifications at transaction boundaries', () => {
   const store = new EditorStore();
