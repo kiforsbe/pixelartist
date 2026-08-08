@@ -9,6 +9,8 @@ import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } 
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
 import { defineAction, bindAction } from '../app/actions.js';
 import { markDefaultAction } from './dialogs.js';
+import { getEditorHost } from '../host/runtime.js';
+import { addMapLayer, deleteMapLayer } from '../modes/maps/application/commands/map-layer-commands.js';
 
 export function rgbaToHex([r, g, b]) {
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
@@ -432,8 +434,10 @@ export function mountLayersPanel(el) {
   function doAddLayer() {
     if (state.mode === 'maps') {
       const map = activeMap(); if (!map) return;
-      const layer = createMapLayer(map, { type: 'tile' });
-      state.activeMapLayerId = layer.id; markDirty(); emit('view'); return;
+      const host = getEditorHost(), services = { projects: host.projects, history: host.history };
+      const layerId = addMapLayer(services, map.id, 'tile');
+      host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
+      emit('view'); return;
     }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
@@ -462,8 +466,10 @@ export function mountLayersPanel(el) {
   function doAddGroup() {
     if (state.mode === 'maps') {
       const map = activeMap(); if (!map) return;
-      const layer = createMapLayer(map, { type: 'sprite' });
-      state.activeMapLayerId = layer.id; markDirty(); emit('view'); return;
+      const host = getEditorHost(), services = { projects: host.projects, history: host.history };
+      const layerId = addMapLayer(services, map.id, 'sprite');
+      host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
+      emit('view'); return;
     }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
@@ -491,11 +497,14 @@ export function mountLayersPanel(el) {
 
   function doDelete() {
     if (state.mode === 'maps') {
-      const map = activeMap(), layer = map?.layers.find(l => l.id === state.activeMapLayerId);
+      const host = getEditorHost();
+      const map = activeMap(), layerId = host.selections.get({ kind: 'map', id: map?.id }).layerId;
+      const layer = map?.layers.find(l => l.id === layerId);
       if (!map || !layer || map.layers.length <= 1) return;
       if (!confirmOrAuto(`Delete ${layer.type} layer "${layer.name}"?`)) return;
-      const index = map.layers.indexOf(layer);
-      state.commands.push({ label: 'delete map layer', do() { map.layers.splice(map.layers.indexOf(layer), 1); state.activeMapLayerId = map.layers[Math.min(index, map.layers.length - 1)]?.id ?? null; refreshMapBounds(state.project, map); markDirty(); }, undo() { map.layers.splice(index, 0, layer); state.activeMapLayerId = layer.id; refreshMapBounds(state.project, map); markDirty(); } });
+      const remainingIndex = Math.min(map.layers.indexOf(layer), map.layers.length - 2);
+      deleteMapLayer({ projects: host.projects, history: host.history }, map.id, layer.id);
+      host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: map.layers[Math.max(0, remainingIndex)]?.id ?? null }, { kind: 'map', id: map.id });
       return;
     }
     const sheet = activeSheet();
@@ -1008,10 +1017,16 @@ export function mountLayersPanel(el) {
   }
 
   function renderMapLayer(layer) {
+    const host = getEditorHost();
+    const map = activeMap();
+    const activeLayerId = host.selections.get({ kind: 'map', id: map?.id }).layerId;
     const row = document.createElement('div');
-    row.className = 'layer-row layer-leaf' + (layer.id === state.activeMapLayerId ? ' active' : '');
+    row.className = 'layer-row layer-leaf' + (layer.id === activeLayerId ? ' active' : '');
     row.style.paddingLeft = '4px'; row.tabIndex = 0;
-    row.addEventListener('click', () => { state.activeMapLayerId = layer.id; emit('view'); });
+    row.addEventListener('click', () => {
+      host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: layer.id }, { kind: 'map', id: map.id });
+      emit('view');
+    });
     row.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
       const map = activeMap(), i = map?.layers.indexOf(layer); if (i == null) return;
