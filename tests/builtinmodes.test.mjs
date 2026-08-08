@@ -36,3 +36,24 @@ test('built-in modes provide documents, tools, panels, and views through registr
     'maps.properties', 'maps.assets',
   ]);
 });
+
+// Locks the registered sprites.* command ids to the exact set contributions.js
+// registers, so a typo or rename on either the registration side or a
+// dispatch call site (Presenter, panel, dialog) doesn't silently no-op --
+// CommandRegistry.execute() only console.warns and returns undefined for an
+// unknown id, so nothing else would catch that at runtime.
+test('sprites mode registers exactly the expected sprites.* command ids', () => {
+  const host = new EditorHost();
+  host.registerMode(spriteMode);
+
+  assert.deepEqual(
+    host.registries.commands.list().map(command => command.id).filter(id => id.startsWith('sprites.')),
+    [
+      'sprites.acceptAnimation', 'sprites.breakApartStrip', 'sprites.createFrame', 'sprites.deleteFrame',
+      'sprites.insertStripFrame', 'sprites.mergeStripSegments', 'sprites.moveFrames', 'sprites.moveStripTo',
+      'sprites.newStripFromFrame', 'sprites.removeStripMember', 'sprites.resizeFrame', 'sprites.resizeStripSegment',
+      'sprites.setFrameField', 'sprites.setStripFrameSize', 'sprites.setStripPivot', 'sprites.sliceGrid',
+      'sprites.splitStrip',
+    ],
+  );
+});
