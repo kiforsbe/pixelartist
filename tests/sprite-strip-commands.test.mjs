@@ -4,6 +4,8 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
+import { setPixel, getPixel } from '../js/core/pixels.js';
+import { createLayerNode, createGroupNode } from '../js/core/model.js';
 import { state } from '../js/app/state.js';
 import {
   insertStripFrame, splitStrip, resizeStripSegment, removeStripMember,
@@ -36,6 +38,20 @@ function addStrip(sheet, ids, { breaks = [], x0 = 0 } = {}) {
   };
   sheet.animations.push(anim);
   return anim;
+}
+
+// Turns a floating strip animation into an "accepted" one: gives it its own
+// layer group (with animationId set) attached to the sheet's layer tree, and
+// points anim.layerGroupId at it -- this is what stripLayersOf() requires to
+// return a non-null layer list, switching handlers from metadata-only to
+// pixel-carrying.
+function acceptStrip(sheet, anim) {
+  const group = createGroupNode(anim.name, { animationId: anim.id });
+  const layer = createLayerNode('Layer 1', sheet.width, sheet.height);
+  group.children.push(layer);
+  sheet.layerTree.children.push(group);
+  anim.layerGroupId = group.id;
+  return layer;
 }
 
 function reset(project) {
@@ -91,6 +107,28 @@ test('insertStripFrame inserts a blank frame at the boundary and shifts the tail
   assert.equal(sheet.frames.find(f => f.id === 'b').x, 16);
 });
 
+test('insertStripFrame on an accepted strip carries the tail pixels and undo restores them', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  const anim = addStrip(sheet, ['a', 'b']);
+  const layer = acceptStrip(sheet, anim);
+  setPixel(layer.bitmap, 17, 1, [255, 0, 0, 255]); // inside frame b (x:16-31)
+
+  insertStripFrame(services, 'sheet1', 'an1', 0, 1);
+
+  const inserted = sheet.frames[2];
+  assert.equal(inserted.x, 16);
+  assert.equal(sheet.frames.find(f => f.id === 'b').x, 32);
+  assert.deepEqual(getPixel(layer.bitmap, 33, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 17, 1), [0, 0, 0, 0]);
+
+  services.history.undo();
+  assert.deepEqual(getPixel(layer.bitmap, 17, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 33, 1), [0, 0, 0, 0]);
+});
+
 test('insertStripFrame refuses (no history entry) when one more frame width would overflow the sheet', () => {
   const project = makeProject({ width: 32 });
   const services = makeServices(project);
@@ -141,6 +179,27 @@ test('resizeStripSegment shrinks from the dragged end and undo restores the remo
   assert.deepEqual(frameIds(anim), ['a', 'b', 'c', 'd']);
 });
 
+test('resizeStripSegment shrink on an accepted strip clears the removed frames\' pixels and undo restores them', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  const anim = addStrip(sheet, ['a', 'b', 'c', 'd']);
+  const layer = acceptStrip(sheet, anim);
+  setPixel(layer.bitmap, 33, 1, [255, 0, 0, 255]); // inside frame c (x:32-47)
+  setPixel(layer.bitmap, 49, 1, [0, 255, 0, 255]); // inside frame d (x:48-63)
+
+  resizeStripSegment(services, 'sheet1', 'an1', 0, 'right', 2);
+
+  assert.deepEqual(sheet.frames.map(f => f.id), ['a', 'b']);
+  assert.deepEqual(getPixel(layer.bitmap, 33, 1), [0, 0, 0, 0]);
+  assert.deepEqual(getPixel(layer.bitmap, 49, 1), [0, 0, 0, 0]);
+
+  services.history.undo();
+  assert.deepEqual(getPixel(layer.bitmap, 33, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 49, 1), [0, 255, 0, 255]);
+});
+
 test('resizeStripSegment with an unchanged count is a no-op with no history entry', () => {
   const project = makeProject();
   const services = makeServices(project);
@@ -170,6 +229,27 @@ test('removeStripMember deletes the frame and closes the gap by shifting the tai
   assert.equal(sheet.frames.find(f => f.id === 'c').x, 32);
 });
 
+test('removeStripMember on an accepted strip carries the tail pixels and undo restores them', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  const anim = addStrip(sheet, ['a', 'b', 'c']);
+  const layer = acceptStrip(sheet, anim);
+  setPixel(layer.bitmap, 33, 1, [255, 0, 0, 255]); // inside frame c (x:32-47)
+
+  removeStripMember(services, 'sheet1', 'an1', 'b');
+
+  assert.deepEqual(sheet.frames.map(f => f.id), ['a', 'c']);
+  assert.equal(sheet.frames.find(f => f.id === 'c').x, 16);
+  assert.deepEqual(getPixel(layer.bitmap, 17, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 33, 1), [0, 0, 0, 0]);
+
+  services.history.undo();
+  assert.deepEqual(getPixel(layer.bitmap, 33, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 17, 1), [0, 0, 0, 0]);
+});
+
 test('mergeStripSegments fuses two segments of one animation and repositions the dragged members', () => {
   const project = makeProject({ width: 128 });
   const services = makeServices(project);
@@ -188,6 +268,27 @@ test('mergeStripSegments fuses two segments of one animation and repositions the
   services.history.undo();
   assert.deepEqual(anim.breaks, [1]);
   assert.equal(sheet.frames.find(f => f.id === 'a').x, 0);
+});
+
+test("mergeStripSegments on an accepted strip carries the dragged member's pixels and undo restores them", () => {
+  const project = makeProject({ width: 128 });
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  const anim = addStrip(sheet, ['a', 'b'], { breaks: [1] });
+  sheet.frames.find(f => f.id === 'b').x = 40;
+  const layer = acceptStrip(sheet, anim);
+  setPixel(layer.bitmap, 1, 1, [255, 0, 0, 255]); // inside frame a (x:0-15)
+
+  mergeStripSegments(services, 'sheet1', 'an1', 0, 'an1', 1, 'before', 24, 0);
+
+  assert.equal(sheet.frames.find(f => f.id === 'a').x, 24);
+  assert.deepEqual(getPixel(layer.bitmap, 25, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 1, 1), [0, 0, 0, 0]);
+
+  services.history.undo();
+  assert.deepEqual(getPixel(layer.bitmap, 1, 1), [255, 0, 0, 255]);
+  assert.deepEqual(getPixel(layer.bitmap, 25, 1), [0, 0, 0, 0]);
 });
 
 test('newStripFromFrame promotes a standalone frame into a strip and renames it', () => {
