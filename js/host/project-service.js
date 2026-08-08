@@ -18,4 +18,15 @@ export class ProjectService {
 
   markDirty() { this.#store.markDirty(true); }
   markSaved() { this.#store.markDirty(false); }
+
+  mutate(reason, mutateFn) {
+    if (typeof mutateFn !== 'function') throw new TypeError('ProjectService.mutate requires a mutation callback');
+    if (!this.#store.getState().project.model) throw new Error('Cannot mutate: no project is loaded');
+    let result;
+    this.#store.transaction(reason, state => {
+      result = mutateFn(state.project.model);
+      state.project.dirty = true;
+    });
+    return result;
+  }
 }
