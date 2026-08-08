@@ -88,6 +88,16 @@ test('mode command modules do not access browser UI globals', async () => {
   }
 });
 
+test('map command modules do not access browser UI globals', async () => {
+  for (const file of [
+    join(root, 'js/modes/maps/application/commands/map-paint-commands.js'),
+    join(root, 'js/modes/maps/application/commands/map-layer-commands.js'),
+  ]) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
+  }
+});
+
 test('application-layer code (js/host, excluding workbench, and any mode application/ folders) never touches DOM or Canvas rendering', async () => {
   // Matches concrete DOM/Canvas API surface, not the word "document"/"window" used
   // as an ordinary identifier (this file's own domain vocabulary is "documents").
