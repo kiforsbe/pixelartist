@@ -1,5 +1,12 @@
 # PixelArtist Extensible Editor Architecture
 
+> **Superseded 2026-08-08** by
+> [2026-08-08-ddd-target-architecture-design.md](2026-08-08-ddd-target-architecture-design.md).
+> The host/registries/modes/features shape below remains (largely already
+> built). The **Migration Sequence** section's incremental,
+> no-big-bang stance is explicitly replaced by a per-mode big-bang rewrite —
+> see the newer doc for rationale.
+
 ## Summary
 
 PixelArtist will be refactored incrementally into a browser-native editor
