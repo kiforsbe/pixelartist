@@ -98,6 +98,18 @@ test('map command modules do not access browser UI globals', async () => {
   }
 });
 
+test('sprite command modules do not access browser UI globals', async () => {
+  for (const file of [
+    join(root, 'js/modes/sprites/application/commands/frame-commands.js'),
+    join(root, 'js/modes/sprites/application/commands/strip-commands.js'),
+    join(root, 'js/modes/sprites/application/commands/frame-metadata-commands.js'),
+    join(root, 'js/modes/sprites/application/commands/animation-commands.js'),
+  ]) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
+  }
+});
+
 test('application-layer code (js/host, excluding workbench, and any mode application/ folders) never touches DOM or Canvas rendering', async () => {
   // Matches concrete DOM/Canvas API surface, not the word "document"/"window" used
   // as an ordinary identifier (this file's own domain vocabulary is "documents").
