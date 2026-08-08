@@ -7,7 +7,6 @@
 // file only dispatches by id — shared UI must never import a mode's command
 // handlers directly. Delete this file once both remaining callers dispatch
 // for themselves.
-import { activeSheet } from '../../app/state.js';
 import { getEditorHost } from '../../host/runtime.js';
 
 // Context is pinned to 'sprites' rather than the live state.mode: both of
