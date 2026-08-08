@@ -200,6 +200,62 @@ test('resizeStripSegment shrink on an accepted strip clears the removed frames\'
   assert.deepEqual(getPixel(layer.bitmap, 49, 1), [0, 255, 0, 255]);
 });
 
+test('resizeStripSegment grows on the left side, prepending frames in descending x with correct left-to-right entry order', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  const anim = addStrip(sheet, ['a', 'b'], { x0: 32 });
+
+  resizeStripSegment(services, 'sheet1', 'an1', 0, 'left', 4);
+
+  assert.equal(sheet.frames.length, 4);
+  assert.equal(anim.frames.length, 4);
+  // Creation order in sheet.frames: original a, b, then new frames appended
+  // as they're created, nearest-to-run first (x=16, then x=0).
+  assert.deepEqual(sheet.frames.slice(2).map(f => f.x), [16, 0]);
+  // Entry order in anim.frames must read left-to-right by x, not reversed.
+  const byX = frameIds(anim).map(id => sheet.frames.find(f => f.id === id).x);
+  assert.deepEqual(byX, [0, 16, 32, 48]);
+  assert.deepEqual(anim.frames.map(e => e.duration), [100, 100, 100, 100]);
+
+  services.history.undo();
+  assert.equal(sheet.frames.length, 2);
+  assert.equal(anim.frames.length, 2);
+  assert.deepEqual(frameIds(anim), ['a', 'b']);
+});
+
+test('resizeStripSegment clamps grow past the sheet edge to what fits, rather than placing frames off-sheet', () => {
+  const project = makeProject({ width: 32 });
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  const anim = addStrip(sheet, ['a']);
+
+  resizeStripSegment(services, 'sheet1', 'an1', 0, 'right', 5);
+
+  assert.equal(sheet.frames.length, 2);
+  assert.equal(anim.frames.length, 2);
+  assert.equal(sheet.frames[1].x, 16);
+  assert.ok(sheet.frames.every(f => f.x + f.w <= sheet.width));
+
+  services.history.undo();
+  assert.equal(sheet.frames.length, 1);
+});
+
+test('resizeStripSegment grow with zero room left on the sheet is a no-op with no history entry', () => {
+  const project = makeProject({ width: 16 });
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  addStrip(sheet, ['a']);
+
+  resizeStripSegment(services, 'sheet1', 'an1', 0, 'right', 3);
+
+  assert.equal(sheet.frames.length, 1);
+  assert.equal(services.history.canUndo(), false);
+});
+
 test('resizeStripSegment with an unchanged count is a no-op with no history entry', () => {
   const project = makeProject();
   const services = makeServices(project);
@@ -314,6 +370,68 @@ test('newStripFromFrame promotes a standalone frame into a strip and renames it'
   assert.equal(sheet.animations.length, 0);
   assert.equal(sheet.frames.length, 1);
   assert.equal(sheet.frames[0].name, 'frame_0');
+});
+
+test('newStripFromFrame promotes a standalone frame growing to the left, in ascending x order with the original frame last', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  sheet.frames.push({ id: 'f1', name: 'frame_0', x: 32, y: 0, w: 16, h: 16, pivotX: 0, pivotY: 0 });
+
+  newStripFromFrame(services, 'sheet1', 'f1', 'left', 3);
+
+  assert.equal(sheet.animations.length, 1);
+  const anim = sheet.animations[0];
+  assert.equal(anim.name, 'strip_0');
+  assert.equal(sheet.frames.length, 3);
+  // Creation order in sheet.frames: original f1 unchanged, then new frames
+  // appended as they're created, nearest-to-original first (x=16, then x=0).
+  assert.deepEqual(sheet.frames.map(f => f.x), [32, 16, 0]);
+  // Entry order must read ascending left-to-right by x, and end with the
+  // original promoted frame (not start with it -- new frames were unshifted
+  // ahead of it, one per iteration).
+  const ids = frameIds(anim);
+  const byX = ids.map(id => sheet.frames.find(f => f.id === id).x);
+  assert.deepEqual(byX, [0, 16, 32]);
+  assert.equal(ids[ids.length - 1], 'f1');
+  assert.equal(state.selectedAnimationId, anim.id);
+
+  services.history.undo();
+  assert.equal(sheet.animations.length, 0);
+  assert.equal(sheet.frames.length, 1);
+  assert.equal(sheet.frames[0].name, 'frame_0');
+});
+
+test('newStripFromFrame clamps grow past the sheet edge to what fits, rather than placing frames off-sheet', () => {
+  const project = makeProject({ width: 32 });
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  sheet.frames.push({ id: 'f1', name: 'frame_0', x: 16, y: 0, w: 16, h: 16, pivotX: 0, pivotY: 0 });
+
+  newStripFromFrame(services, 'sheet1', 'f1', 'left', 5);
+
+  assert.equal(sheet.frames.length, 2);
+  const anim = sheet.animations[0];
+  assert.equal(anim.frames.length, 2);
+  assert.ok(sheet.frames.every(f => f.x >= 0));
+
+  services.history.undo();
+  assert.equal(sheet.frames.length, 1);
+});
+
+test('newStripFromFrame grow with zero room left on the sheet is a no-op with no history entry', () => {
+  const project = makeProject({ width: 16 });
+  const services = makeServices(project);
+  reset(project);
+  const sheet = project.sheets[0];
+  sheet.frames.push({ id: 'f1', name: 'frame_0', x: 0, y: 0, w: 16, h: 16, pivotX: 0, pivotY: 0 });
+
+  newStripFromFrame(services, 'sheet1', 'f1', 'right', 3);
+
+  assert.equal(sheet.animations.length, 0);
+  assert.equal(services.history.canUndo(), false);
 });
 
 test('newStripFromFrame is a no-op with no history entry when the count would add nothing', () => {
