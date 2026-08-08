@@ -346,10 +346,10 @@ git commit -m "feat(maps): move brush-pick state into application layer"
 - Test: `tests/map-paint-commands.test.mjs`
 
 **Interfaces:**
-- Consumes: Task 1's `findSheet`, `terrainAt`, `terrainResolution`; `js/host/project-service.js`'s `ProjectService.mutate(reason, mutateFn)` (Phase 0); `js/host/history-service.js`'s `HistoryService.execute(command)`; `js/core/palettes.js`'s `newId`; `js/core/model.js`'s `refreshMapBounds`; `js/app/state.js`'s `markDirty`.
+- Consumes: Task 1's `findSheet`, `terrainAt`, `terrainResolution`; `js/host/project-service.js`'s `ProjectService.mutate(reason, mutateFn)` and its read-only `.project` getter (both Phase 0); `js/host/history-service.js`'s `HistoryService.execute(command)`; `js/core/palettes.js`'s `newId`; `js/core/model.js`'s `refreshMapBounds`; `js/app/state.js`'s `markDirty`.
 - Produces: `paintMapTile(services, mapId, layerId, sheetId, tileId, at)`, `eraseMapTile(services, mapId, layerId, at)`, `paintMapTerrain(services, mapId, layerId, sheetId, terrainSetId, at)`, `eraseMapTerrain(services, mapId, layerId, sheetId, terrainSetId, at)`, `paintMapSprite(services, mapId, layerId, sheetId, kind, assetId, at)`, `eraseMapSprite(services, mapId, layerId, itemId)`, `moveMapItem(services, mapId, layerId, itemId, before, after)`, `deleteMapItem(services, mapId, layerId, itemId)`. `services` is `{ projects, history }` (the `EditorHost.services` subset). Each function returns nothing meaningful for paint/erase (mirrors current behavior — callers already have the ids they need) except where noted.
 
-Each handler: (1) locates the map inside the live `project` passed to the mutate callback (never captures a stale reference), (2) builds a `{label, do, undo}` command whose `do`/`undo` each re-enter `projects.mutate()` so every history step gets a fresh host transaction + dirty flag, (3) calls `history.execute(command)`, (4) calls legacy `markDirty()` for the title-bar/unsaved-changes guard (per Global Constraints).
+Each handler: (1) locates the map inside the live `project` passed to the mutate callback (never captures a stale reference), (2) builds a `{label, do, undo}` command whose `do`/`undo` each re-enter `projects.mutate()` so every history step gets a fresh host transaction + dirty flag, (3) calls `history.execute(command)`, (4) calls legacy `markDirty()` for the title-bar/unsaved-changes guard (per Global Constraints). The erase/delete handlers (`eraseMapTile`, `eraseMapTerrain`, `eraseMapSprite`, `deleteMapItem`) look up the target item **once, synchronously, via `services.projects.project`** before building the command, and close over that found object in `do`/`undo` — mirroring `js/modes/tiles/tile-sheet-commands.js`'s `deleteTile` exactly. They never stash the removed item as a property on `layer`/`map` (e.g. no `layer.__erasedTile`): that would leave dangling `__`-prefixed bookkeeping fields permanently attached to the persisted project model any time an erase/delete is never undone, which would then get serialized into save files.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -522,16 +522,12 @@ export function paintMapTile(services, mapId, layerId, sheetId, tileId, at) {
 }
 
 export function eraseMapTile(services, mapId, layerId, at) {
+  const layer = findLayer(findMap(services.projects.project, mapId), layerId);
+  const found = layer?.tiles.find(t => t.x === at.x && t.y === at.y);
+  if (!found) return;
   runCommand(services, mapId, 'erase map tile',
-    (map, project) => {
-      const layer = findLayer(map, layerId);
-      const found = layer.tiles.find(t => t.x === at.x && t.y === at.y);
-      if (found) { layer.__erasedTile = found; layer.tiles = layer.tiles.filter(t => t !== found); }
-    },
-    map => {
-      const layer = findLayer(map, layerId);
-      if (layer.__erasedTile) { layer.tiles.push(layer.__erasedTile); delete layer.__erasedTile; }
-    });
+    map => { const layer = findLayer(map, layerId); layer.tiles = layer.tiles.filter(t => t.id !== found.id); },
+    map => { const layer = findLayer(map, layerId); if (!layer.tiles.some(t => t.id === found.id)) layer.tiles.push(found); });
 }
 
 export function paintMapTerrain(services, mapId, layerId, sheetId, terrainSetId, at) {
@@ -545,16 +541,15 @@ export function paintMapTerrain(services, mapId, layerId, sheetId, terrainSetId,
 }
 
 export function eraseMapTerrain(services, mapId, layerId, sheetId, terrainSetId, at) {
+  const project = services.projects.project;
+  const layer = findLayer(findMap(project, mapId), layerId);
+  const sheet = findSheet(project, sheetId);
+  const terrain = sheet?.terrainSets.find(t => t.id === terrainSetId);
+  const found = layer && sheet && terrain ? terrainAt(layer, sheet, terrain, at.x, at.y) : null;
+  if (!found) return;
   runCommand(services, mapId, 'erase map terrain',
-    (map, project) => {
-      const layer = findLayer(map, layerId), sheet = findSheet(project, sheetId), terrain = sheet.terrainSets.find(t => t.id === terrainSetId);
-      const found = terrainAt(layer, sheet, terrain, at.x, at.y);
-      if (found) { layer.__erasedTerrain = found; layer.terrain = layer.terrain.filter(t => t !== found); }
-    },
-    map => {
-      const layer = findLayer(map, layerId);
-      if (layer.__erasedTerrain) { layer.terrain.push(layer.__erasedTerrain); delete layer.__erasedTerrain; }
-    });
+    map => { const layer = findLayer(map, layerId); layer.terrain = layer.terrain.filter(t => t.id !== found.id); },
+    map => { const layer = findLayer(map, layerId); if (!layer.terrain.some(t => t.id === found.id)) layer.terrain.push(found); });
 }
 
 export function paintMapSprite(services, mapId, layerId, sheetId, kind, assetId, at) {
@@ -565,22 +560,18 @@ export function paintMapSprite(services, mapId, layerId, sheetId, kind, assetId,
 }
 
 export function eraseMapSprite(services, mapId, layerId, itemId) {
+  const layer = findLayer(findMap(services.projects.project, mapId), layerId);
+  const found = layer?.sprites.find(s => s.id === itemId);
+  if (!found) return;
   runCommand(services, mapId, 'erase map sprite',
-    map => {
-      const layer = findLayer(map, layerId);
-      const found = layer.sprites.find(s => s.id === itemId);
-      if (found) { layer.__erasedSprite = found; layer.sprites = layer.sprites.filter(s => s !== found); }
-    },
-    map => {
-      const layer = findLayer(map, layerId);
-      if (layer.__erasedSprite) { layer.sprites.push(layer.__erasedSprite); delete layer.__erasedSprite; }
-    });
+    map => { const layer = findLayer(map, layerId); layer.sprites = layer.sprites.filter(s => s.id !== found.id); },
+    map => { const layer = findLayer(map, layerId); if (!layer.sprites.some(s => s.id === found.id)) layer.sprites.push(found); });
 }
 
-function findItemCollection(layer, itemId) {
-  if (layer.tiles?.some(i => i.id === itemId)) return layer.tiles;
-  if (layer.terrain?.some(i => i.id === itemId)) return layer.terrain;
-  if (layer.sprites?.some(i => i.id === itemId)) return layer.sprites;
+function findItemCollectionKey(layer, itemId) {
+  if (layer.tiles?.some(i => i.id === itemId)) return 'tiles';
+  if (layer.terrain?.some(i => i.id === itemId)) return 'terrain';
+  if (layer.sprites?.some(i => i.id === itemId)) return 'sprites';
   return null;
 }
 
@@ -588,28 +579,26 @@ export function moveMapItem(services, mapId, layerId, itemId, before, after) {
   runCommand(services, mapId, 'move map item',
     map => {
       const layer = findLayer(map, layerId);
-      const item = findItemCollection(layer, itemId)?.find(i => i.id === itemId);
+      const key = findItemCollectionKey(layer, itemId);
+      const item = key && layer[key].find(i => i.id === itemId);
       if (item) Object.assign(item, after);
     },
     map => {
       const layer = findLayer(map, layerId);
-      const item = findItemCollection(layer, itemId)?.find(i => i.id === itemId);
+      const key = findItemCollectionKey(layer, itemId);
+      const item = key && layer[key].find(i => i.id === itemId);
       if (item) Object.assign(item, before);
     });
 }
 
 export function deleteMapItem(services, mapId, layerId, itemId) {
+  const layer = findLayer(findMap(services.projects.project, mapId), layerId);
+  const key = layer ? findItemCollectionKey(layer, itemId) : null;
+  const found = key ? layer[key].find(i => i.id === itemId) : null;
+  if (!found) return;
   runCommand(services, mapId, 'delete map item',
-    map => {
-      const layer = findLayer(map, layerId);
-      const collection = findItemCollection(layer, itemId);
-      const item = collection?.find(i => i.id === itemId);
-      if (item) { layer.__deletedItem = { collection, item }; collection.splice(collection.indexOf(item), 1); }
-    },
-    map => {
-      const layer = findLayer(map, layerId);
-      if (layer.__deletedItem) { layer.__deletedItem.collection.push(layer.__deletedItem.item); delete layer.__deletedItem; }
-    });
+    map => { const layer = findLayer(map, layerId); layer[key] = layer[key].filter(i => i.id !== itemId); },
+    map => { const layer = findLayer(map, layerId); if (!layer[key].some(i => i.id === itemId)) layer[key].push(found); });
 }
 ```
 
@@ -634,10 +623,10 @@ git commit -m "feat(maps): add Command Handlers for map content edits"
 - Test: `tests/map-layer-commands.test.mjs`
 
 **Interfaces:**
-- Consumes: `js/core/model.js`'s `createMapLayer`, `refreshMapBounds`; `js/host/project-service.js`/`history-service.js`; `js/app/state.js`'s `markDirty`.
+- Consumes: `js/core/model.js`'s `createMapLayer`, `refreshMapBounds`; `js/host/project-service.js`'s `ProjectService.mutate` and its read-only `.project` getter, `js/host/history-service.js`; `js/app/state.js`'s `markDirty`.
 - Produces: `addMapLayer(services, mapId, type)` → returns the created layer's id (matches current non-undoable behavior — see note below), `deleteMapLayer(services, mapId, layerId)` (undoable, matches current behavior).
 
-`addMapLayer` is intentionally **not** wrapped in undo history, preserving today's exact behavior in `js/ui/panels.js`'s `doAddLayer`/`doAddGroup` (neither currently pushes a command for map-layer creation). `deleteMapLayer` **is** undoable, matching today's `doDelete`.
+`addMapLayer` is intentionally **not** wrapped in undo history, preserving today's exact behavior in `js/ui/panels.js`'s `doAddLayer`/`doAddGroup` (neither currently pushes a command for map-layer creation). `deleteMapLayer` **is** undoable, matching today's `doDelete`. Like Task 3's erase/delete handlers, `deleteMapLayer` looks up the target layer once via `services.projects.project` and closes over it for `do`/`undo`, instead of stashing it on `map` (e.g. no `map.__deletedLayer`) — keeps command-undo bookkeeping out of the persisted project model.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -718,22 +707,20 @@ export function addMapLayer(services, mapId, type) {
 }
 
 export function deleteMapLayer(services, mapId, layerId) {
+  const map = findMap(services.projects.project, mapId);
+  const layer = map?.layers.find(l => l.id === layerId);
+  if (!layer) return;
+  const index = map.layers.indexOf(layer);
   const command = {
     label: 'delete map layer',
     do: () => services.projects.mutate('delete map layer', project => {
       const map = findMap(project, mapId);
-      const layer = map.layers.find(l => l.id === layerId);
-      if (!layer) return;
-      map.__deletedLayer = { layer, index: map.layers.indexOf(layer) };
-      map.layers.splice(map.layers.indexOf(layer), 1);
+      map.layers = map.layers.filter(l => l.id !== layerId);
       refreshMapBounds(project, map);
     }),
     undo: () => services.projects.mutate('delete map layer', project => {
       const map = findMap(project, mapId);
-      if (map.__deletedLayer) {
-        map.layers.splice(map.__deletedLayer.index, 0, map.__deletedLayer.layer);
-        delete map.__deletedLayer;
-      }
+      if (!map.layers.some(l => l.id === layerId)) map.layers.splice(index, 0, layer);
       refreshMapBounds(project, map);
     }),
   };
@@ -1925,7 +1912,7 @@ Per project convention, pointer-drag interactions are not simulated in Playwrigh
 
 **Spec coverage:** Every requirement from the user's "pull in the extra files now" decision is covered — `js/modes/maps` fully split onto application/presentation (Tasks 1-8), `activeMapLayerId`/`selectedMapItemId` migrated to `SelectionService` (Tasks 6, 9-11), `js/ui/panels.js`'s map-layer code redirected (Task 9), `js/ui/previewpanel.js`'s `map-content` listener replaced with a host-native subscription (Task 12), dirty-tracking addressed via the dual-write convention already established in Phase 0/tiles (Global Constraints, Task 3-4).
 
-**Placeholder scan:** No TBD/TODO markers. Task 8 contains two explicit "confirm against the current file before implementing" call-outs (the exact `onPaint` wiring mechanism and `preview.js`'s exact export contract) — these are flagged as such because they depend on code outside this plan's investigation scope (`js/features/workbench/`), not because the task is incomplete; the implementer must resolve them by reading the named files before writing that task's final code, exactly as instructed inline.
+**Placeholder scan:** No TBD/TODO markers. Task 8's `contributions.js`/`preview.js` wiring and Tasks 3-4's erase/delete Command Handlers were each verified/corrected against the real current files before finalizing this plan (see the quoted "current file" blocks inline) — every task below contains complete, final code, not a stub to be resolved at implementation time.
 
 **Type/signature consistency:** `services` (`{projects, history}`) is used identically across Tasks 3, 4, 6, 9. `mapDocument`/`{kind:'map', id}` shape matches `legacy-state-adapter.js`'s existing convention (confirmed via investigation). `mapBrushState`/`asset` field names (`tileKind`, `tileSheetId`, `tileId`, `terrainSheetId`, `terrainSetId`, `spriteSheetId`, `spriteKind`, `spriteId`) match the original `mapAsset` object exactly, used consistently in Tasks 5-7.
 
