@@ -1,0 +1,78 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  snapValue, snapPoint, rectBetween, snapRect, frameAt, stripMembers,
+  clampMoveDelta, stripResizeCount, resizeGhostRect,
+} from '../js/modes/sprites/application/frame-geometry.js';
+
+test('snapValue passes values through when snapping is off and rounds when on', () => {
+  assert.equal(snapValue(13, { snap: false, gridSize: 8 }), 13);
+  assert.equal(snapValue(13, { snap: true, gridSize: 8 }), 16);
+  assert.equal(snapValue(11, { snap: true, gridSize: 8 }), 8);
+  // gridSize below 1 is clamped to 1 (a 0 grid would divide by zero)
+  assert.equal(snapValue(13, { snap: true, gridSize: 0 }), 13);
+  assert.equal(snapValue(13, undefined), 13);
+});
+
+test('snapPoint snaps both axes with the same options', () => {
+  assert.deepEqual(snapPoint(13, 3, { snap: true, gridSize: 8 }), { x: 16, y: 0 });
+});
+
+test('rectBetween treats points as pixel indices when inclusive, as edges otherwise', () => {
+  assert.deepEqual(rectBetween(2, 3, 5, 9, true), { x: 2, y: 3, w: 4, h: 7 });
+  assert.deepEqual(rectBetween(5, 9, 2, 3, true), { x: 2, y: 3, w: 4, h: 7 });
+  assert.deepEqual(rectBetween(2, 3, 5, 9, false), { x: 2, y: 3, w: 3, h: 6 });
+  // degenerate non-inclusive rects are floored to 1x1, never 0
+  assert.deepEqual(rectBetween(4, 4, 4, 4, false), { x: 4, y: 4, w: 1, h: 1 });
+});
+
+test('snapRect snaps both corners and keeps at least 1x1', () => {
+  const rect = { x: 3, y: 3, w: 10, h: 10 };
+  assert.equal(snapRect(rect, { snap: false, gridSize: 8 }), rect);
+  assert.deepEqual(snapRect(rect, { snap: true, gridSize: 8 }), { x: 0, y: 0, w: 16, h: 16 });
+  assert.deepEqual(snapRect({ x: 1, y: 1, w: 1, h: 1 }, { snap: true, gridSize: 8 }), { x: 0, y: 0, w: 1, h: 1 });
+});
+
+test('frameAt returns the topmost frame containing a point, else null', () => {
+  const under = { id: 'a', x: 0, y: 0, w: 16, h: 16 };
+  const over = { id: 'b', x: 8, y: 8, w: 16, h: 16 };
+  const sheet = { frames: [under, over] };
+  assert.equal(frameAt(sheet, 10, 10), over);
+  assert.equal(frameAt(sheet, 2, 2), under);
+  assert.equal(frameAt(sheet, 16, 0), null);
+  assert.equal(frameAt(sheet, 100, 100), null);
+});
+
+test('stripMembers resolves an animation entry list to frame objects, skipping dangling ids', () => {
+  const f0 = { id: 'f0' }, f1 = { id: 'f1' };
+  const sheet = { frames: [f0, f1] };
+  const animation = { frames: [{ frameId: 'f0' }, { frameId: 'gone' }, { frameId: 'f1' }] };
+  assert.deepEqual(stripMembers(sheet, animation), [f0, f1]);
+});
+
+test('clampMoveDelta keeps the whole bounding box on-sheet', () => {
+  const sheet = { width: 64, height: 64 };
+  const bbox = { x: 8, y: 8, w: 16, h: 16 };
+  assert.deepEqual(clampMoveDelta(sheet, bbox, { dx: 4, dy: 4 }), { dx: 4, dy: 4 });
+  assert.deepEqual(clampMoveDelta(sheet, bbox, { dx: -100, dy: -100 }), { dx: -8, dy: -8 });
+  assert.deepEqual(clampMoveDelta(sheet, bbox, { dx: 100, dy: 100 }), { dx: 40, dy: 40 });
+});
+
+test('stripResizeCount converts pointer travel into a member count, floored at 1 and capped by the sheet', () => {
+  const sheet = { width: 64, height: 64 };
+  const drag = { side: 'right', fw: 16, bbox: { x: 0, y: 0, w: 32, h: 16 }, count0: 2 };
+  assert.equal(stripResizeCount(sheet, drag, 32), 2);
+  assert.equal(stripResizeCount(sheet, drag, 48), 3);
+  assert.equal(stripResizeCount(sheet, drag, 0), 1);
+  // capped: only 4 frames of width 16 fit from x=0 in a 64px sheet
+  assert.equal(stripResizeCount(sheet, drag, 1000), 4);
+  const left = { side: 'left', fw: 16, bbox: { x: 32, y: 0, w: 32, h: 16 }, count0: 2 };
+  assert.equal(stripResizeCount(sheet, left, 16), 3);
+  assert.equal(stripResizeCount(sheet, left, -1000), 4);
+});
+
+test('resizeGhostRect grows from the dragged end and keeps the opposite edge fixed', () => {
+  const bbox = { x: 32, y: 8, w: 32, h: 16 };
+  assert.deepEqual(resizeGhostRect({ side: 'right', fw: 16, count: 4, bbox }), { x: 32, y: 8, w: 64, h: 16 });
+  assert.deepEqual(resizeGhostRect({ side: 'left', fw: 16, count: 4, bbox }), { x: 0, y: 8, w: 64, h: 16 });
+});
