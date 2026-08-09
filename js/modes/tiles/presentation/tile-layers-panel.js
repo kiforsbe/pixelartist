@@ -1,6 +1,8 @@
-import { state, on, activeSheet } from '../../app/state.js';
-import { commitAddTileLayer, commitRemoveTileLayer } from './tile-layer-commands.js';
-import { mountReactivePanel } from '../../components/panel-mount.js';
+import { state, on, activeSheet } from '../../../app/state.js';
+import { getEditorHost } from '../../../host/runtime.js';
+import { mountReactivePanel } from '../../../components/panel-mount.js';
+
+function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
 
 export function mountTileLayersPanel(element, { showVisibility = false, showOpacity = false } = {}) {
   const panel = document.createElement('div');
@@ -29,7 +31,7 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
     if (!sheet) return;
     const name = prompt('Layer name?');
     if (!name) return;
-    commitAddTileLayer(sheet, name);
+    dispatch('tiles.addTileLayer', { sheetId: sheet.id, name });
     selectedName = name;
   });
 
@@ -41,7 +43,7 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
   deleteButton.addEventListener('click', () => {
     const sheet = activeSheet();
     if (!sheet || selectedName == null) return;
-    commitRemoveTileLayer(sheet, selectedName);
+    dispatch('tiles.removeTileLayer', { sheetId: sheet.id, name: selectedName });
     selectedName = null;
   });
 
@@ -73,7 +75,6 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
       nameElement.textContent = name;
       row.appendChild(nameElement);
 
-      // Reserved until tile layers gain persisted visibility and opacity.
       void showVisibility;
       void showOpacity;
       list.appendChild(row);

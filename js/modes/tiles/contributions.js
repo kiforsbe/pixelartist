@@ -2,9 +2,9 @@ import {
   registerTileTool, bindTileTool, drawTileChrome,
 } from './presentation/tile-tool-presenter.js';
 import { registerAutotilePaintTool, bindAutotilePaintTool } from './autotile-paint-controller.js';
-import { mountTilePanel } from './tile-panel.js';
+import { mountTilePanel } from './presentation/tile-panel.js';
 import { mountAutotilesPanel } from './autotiles-panel.js';
-import { mountTileLayersPanel } from './tile-layers-panel.js';
+import { mountTileLayersPanel } from './presentation/tile-layers-panel.js';
 import { mountTileEditor } from '../../ui/tileeditor.js';
 import { renderTilePreview } from './preview.js';
 import { getEditorHost } from '../../host/runtime.js';

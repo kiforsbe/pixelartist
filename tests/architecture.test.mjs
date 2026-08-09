@@ -79,9 +79,9 @@ test('mode pointer controllers do not import contextual panels or terrain UI', a
 
 test('mode command modules do not access browser UI globals', async () => {
   for (const file of [
-    join(root, 'js/modes/tiles/tile-sheet-commands.js'),
+    join(root, 'js/modes/tiles/application/commands/tile-sheet-commands.js'),
     join(root, 'js/modes/tiles/terrain-set-commands.js'),
-    join(root, 'js/modes/tiles/tile-layer-commands.js'),
+    join(root, 'js/modes/tiles/application/commands/tile-layer-commands.js'),
   ]) {
     const source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);

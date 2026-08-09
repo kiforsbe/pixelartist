@@ -1,17 +1,17 @@
-import { state, on, emit, activeSheet } from '../../app/state.js';
+import { state, on, activeSheet } from '../../../app/state.js';
+import { getEditorHost } from '../../../host/runtime.js';
 import {
   buildAddTerrainSetDialog,
   terrainSetNameField,
   terrainSetLayerField,
   terrainSetDeleteButton,
   syncSelectedTerrainSetFromTile,
-} from './terrain-set-controller.js';
-import {
-  commitTileName, commitGridCellField, commitTileSize, commitTileLayer,
-  openTileEditor, commitDetachTile, commitDeleteGrid,
-} from './tile-sheet-commands.js';
+} from '../terrain-set-controller.js';
+import { openTileEditor } from './tile-tool-presenter.js';
 import { buildTagsField } from './tile-tags-field.js';
-import { mountReactivePanel } from '../../components/panel-mount.js';
+import { mountReactivePanel } from '../../../components/panel-mount.js';
+
+function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
 
 function sizeField(labelText, value, onCommit) {
   const label = document.createElement('label');
@@ -110,20 +110,20 @@ export function mountTilePanel(element) {
     nameInput.title = terrainSet
       ? 'Optional alias for this tile. This is separate from the terrain set name below.'
       : 'Optional alias for this tile; unnamed tiles use their sheet index.';
-    nameInput.addEventListener('change', () => commitTileName(tile, nameInput.value.trim()));
+    nameInput.addEventListener('change', () => dispatch('tiles.renameTile', { sheetId: sheet.id, tileId: tile.id, name: nameInput.value.trim() }));
     nameField.appendChild(nameInput);
 
     const fields = document.createElement('div');
     fields.className = 'frame-fields';
     if (grid) {
       fields.append(
-        sizeField('W', grid.cellW, value => commitGridCellField(sheet, grid, 'cellW', value)),
-        sizeField('H', grid.cellH, value => commitGridCellField(sheet, grid, 'cellH', value)),
+        sizeField('W', grid.cellW, value => dispatch('tiles.setGridCellField', { sheetId: sheet.id, gridId: grid.id, key: 'cellW', value })),
+        sizeField('H', grid.cellH, value => dispatch('tiles.setGridCellField', { sheetId: sheet.id, gridId: grid.id, key: 'cellH', value })),
       );
     } else {
       fields.append(
-        sizeField('W', tile.w, value => commitTileSize(sheet, tile, 'w', value)),
-        sizeField('H', tile.h, value => commitTileSize(sheet, tile, 'h', value)),
+        sizeField('W', tile.w, value => dispatch('tiles.setTileSize', { sheetId: sheet.id, tileId: tile.id, key: 'w', value })),
+        sizeField('H', tile.h, value => dispatch('tiles.setTileSize', { sheetId: sheet.id, tileId: tile.id, key: 'h', value })),
       );
     }
 
@@ -146,7 +146,7 @@ export function mountTilePanel(element) {
       }
       layerSelect.value = tile.layer ?? '';
       layerSelect.title = 'Tile Layer for this tile';
-      layerSelect.addEventListener('change', () => commitTileLayer(tile, layerSelect.value));
+      layerSelect.addEventListener('change', () => dispatch('tiles.setTileLayer', { sheetId: sheet.id, tileId: tile.id, layer: layerSelect.value }));
       layerField.appendChild(layerSelect);
       fields.appendChild(layerField);
     }
@@ -166,18 +166,18 @@ export function mountTilePanel(element) {
       detachButton.className = 'btn-icon-md';
       detachButton.textContent = '⏏';
       detachButton.title = 'Detach from grid';
-      detachButton.addEventListener('click', () => commitDetachTile(tile));
+      detachButton.addEventListener('click', () => dispatch('tiles.detachTile', { sheetId: sheet.id, tileId: tile.id }));
       const deleteGridButton = document.createElement('button');
       deleteGridButton.type = 'button';
       deleteGridButton.className = 'btn-icon-md';
       deleteGridButton.textContent = '🗑';
       deleteGridButton.title = 'Delete grid';
-      deleteGridButton.addEventListener('click', () => commitDeleteGrid(sheet, grid));
+      deleteGridButton.addEventListener('click', () => dispatch('tiles.deleteGrid', { sheetId: sheet.id, gridId: grid.id }));
       actions.append(detachButton, deleteGridButton);
     }
     if (terrainSet) actions.appendChild(terrainSetDeleteButton(sheet, terrainSet));
 
-    selectionRow.append(nameField, fields, buildTagsField(tile), actions);
+    selectionRow.append(nameField, fields, buildTagsField(sheet, tile), actions);
   }
 
   function syncSelection() {

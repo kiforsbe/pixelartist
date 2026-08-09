@@ -1,8 +1,11 @@
-import { commitTileTags } from './tile-sheet-commands.js';
+import { state } from '../../../app/state.js';
+import { getEditorHost } from '../../../host/runtime.js';
+
+function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
 
 let focusPending = false;
 
-export function buildTagsField(tile) {
+export function buildTagsField(sheet, tile) {
   const wrapper = document.createElement('div');
   wrapper.className = 'tag-field';
   const label = document.createElement('span');
@@ -14,7 +17,7 @@ export function buildTagsField(tile) {
   const tags = (tile.tags ?? []).slice();
   const commit = next => {
     focusPending = true;
-    commitTileTags(tile, next.join(','));
+    dispatch('tiles.setTileTags', { sheetId: sheet.id, tileId: tile.id, tagsText: next.join(',') });
   };
 
   const entry = document.createElement('input');
