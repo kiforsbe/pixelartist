@@ -276,9 +276,15 @@ mode the autotiles panel belongs to:
 - `tile-raster-service.js` (64 lines) — caches a flattened-sheet canvas +
   per-tile thumbnails, invalidated via `invalidateTileRaster()`.
 
-**Sprites mode** mirrors this shape (`sprite-sheet-controller.js`,
-`frame-panel.js`, reusing `ui/animpanel.js`/`ui/timeline.js`/
-`ui/frameeditor.js`). **Maps mode**: `map-editor.js`, `map-panels.js`.
+**Sprites mode** follows the same Application/Presentation split (see
+`js/modes/sprites/application/` and `js/modes/sprites/presentation/`):
+`frame-tool-presenter.js` + `frame-chrome-geometry.js`/`frame-geometry.js`/
+`frame-pixel-motion.js`/`frame-tool-state.js` (frame/strip tool),
+`frames-panel.js`, `timeline-presenter.js` + `timeline-playback.js`
+(Timeline dock), `animations-panel.js`, and `frame-editor-presenter.js` +
+`onion-skin.js`/`frame-navigation.js` (frame editor + onion skin), backed by
+Command Handlers under `application/commands/`. **Maps mode**: `map-editor.js`,
+`map-panels.js`.
 
 ## Features (`js/features/`)
 

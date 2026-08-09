@@ -2,8 +2,8 @@
 import { registerFrameTool, bindFrameTool, drawStripChrome } from './presentation/frame-tool-presenter.js';
 import { mountFramesPanel } from './presentation/frames-panel.js';
 import { mountAnimationsPanel } from './presentation/animations-panel.js';
+import { mountFrameEditor } from './presentation/frame-editor-presenter.js';
 import { mountTimeline } from './presentation/timeline-presenter.js';
-import { mountFrameEditor } from '../../ui/frameeditor.js';
 import { renderSpritePreview } from './preview.js';
 import { getEditorHost } from '../../host/runtime.js';
 import {
