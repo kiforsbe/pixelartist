@@ -242,11 +242,11 @@ Every mode has the same file shape: `index.js` (the definition above),
 remove}`), `contributions.js` (registers previews/tools/panels/views),
 plus mode-specific controllers.
 
-**Tiles mode** (`js/modes/tiles/`, 16 files, ~2430 lines) — this is the
-mode the autotiles panel belongs to. It has partially migrated to the
-Application/Presentation split (see the Sprites/Maps note below): the tile
-sheet/grid tool and its commands have moved; the autotile painter and
-terrain-set editor have not yet (planned for sub-phases 3b/3c):
+**Tiles mode** (`js/modes/tiles/`) — this is the mode the autotiles panel
+belongs to. It has partially migrated to the Application/Presentation split
+(see the Sprites/Maps note below): the tile sheet/grid tool and the Blob-47
+autotile painter have moved; the terrain-set editor has not yet (planned
+for sub-phase 3c):
 
 - `contributions.js` registers: a preview provider (`preview.js`); one
   tools contribution whose `createController` wires
@@ -277,9 +277,25 @@ terrain-set editor have not yet (planned for sub-phases 3b/3c):
   the Tiles/Tile-Layers side panels and the shared tag-editing field.
 - `presentation/tile-raster-cache.js` (35 lines) — caches a flattened-sheet
   canvas + per-tile thumbnails, invalidated via `invalidateTileRaster()`.
-- `autotile-paint-controller.js` (484 lines) — the Blob-47 autotile
-  painter tool. **Not yet migrated** — stays on the old (legacy,
-  object-capture command style) pattern pending Phase 3b.
+- `application/commands/autotile-paint-commands.js` — Command Handlers
+  for the Blob-47 terrain painter: `prepareTerrainPaint`,
+  `paintTerrainStroke`, `resolveAutotilePaintConflict`. Resolve-by-id,
+  registered by id in `contributions.js`. Wraps `core/terrainsets.js`'s
+  pure `assignSlot` directly — no dependency on the still-legacy
+  `terrain-set-commands.js`.
+- `application/geometry/autotile-geometry.js` — pure paint-grid/cell/mask
+  helpers (`terrainPaintGrid`, `paintTileAt`, `paintCellAt`,
+  `strokePaintMask`, `planTerrainPaintCells`, `describeMask`), no DOM or
+  state access. `core/blob47.js`'s Blob-47 bitmask/canonicalization
+  algorithm itself remains untouched, already pure Domain code.
+- `presentation/autotile-paint-presenter.js` — the autotile paint tool's
+  Humble Object: pointer/stroke routing, conflict resolution, and all
+  Canvas overlay/preview rendering (including the Blob-47 artwork
+  reference strip). Dispatches Commands by id; never imports
+  `application/commands/` directly (test-enforced).
+- `presentation/blob47-coverage-dialog.js` — the standalone Blob-47
+  coverage-review `<dialog>`, split out of the painter so the Presenter
+  doesn't also own an unrelated `document.createElement` side-panel.
 - `terrain-set-controller.js` (545 lines) — terrain-set slot editor UI
   (tile picker dialog, layout presets), used by `autotiles-panel.js`.
   **Not yet migrated** — pending Phase 3c.

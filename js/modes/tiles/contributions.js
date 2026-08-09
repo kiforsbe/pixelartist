@@ -1,7 +1,7 @@
 import {
   registerTileTool, bindTileTool, drawTileChrome,
 } from './presentation/tile-tool-presenter.js';
-import { registerAutotilePaintTool, bindAutotilePaintTool } from './autotile-paint-controller.js';
+import { registerAutotilePaintTool, bindAutotilePaintTool } from './presentation/autotile-paint-presenter.js';
 import { mountTilePanel } from './presentation/tile-panel.js';
 import { mountAutotilesPanel } from './autotiles-panel.js';
 import { mountTileLayersPanel } from './presentation/tile-layers-panel.js';
@@ -14,6 +14,9 @@ import {
   detachTile, setTileLayer, renameTile, setTileTags, setTileSize,
 } from './application/commands/tile-sheet-commands.js';
 import { addTileLayer, removeTileLayer } from './application/commands/tile-layer-commands.js';
+import {
+  prepareTerrainPaint, paintTerrainStroke, resolveAutotilePaintConflict,
+} from './application/commands/autotile-paint-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
 
@@ -38,6 +41,9 @@ function registerTileCommands(api) {
   api.commands.register({ id: 'tiles.setTileSize', when: whenTiles, execute: (_c, { sheetId, tileId, key, value }) => setTileSize(services(), sheetId, tileId, key, value) });
   api.commands.register({ id: 'tiles.addTileLayer', when: whenTiles, execute: (_c, { sheetId, name }) => addTileLayer(services(), sheetId, name) });
   api.commands.register({ id: 'tiles.removeTileLayer', when: whenTiles, execute: (_c, { sheetId, name }) => removeTileLayer(services(), sheetId, name) });
+  api.commands.register({ id: 'tiles.prepareTerrainPaint', when: whenTiles, execute: (_c, { sheetId, terrainSetId }) => prepareTerrainPaint(services(), sheetId, terrainSetId) });
+  api.commands.register({ id: 'tiles.paintTerrainStroke', when: whenTiles, execute: (_c, { sheetId, terrainSetId, strokeMasks }) => paintTerrainStroke(services(), sheetId, terrainSetId, strokeMasks) });
+  api.commands.register({ id: 'tiles.resolveAutotilePaintConflict', when: whenTiles, execute: (_c, { sheetId, terrainSetId, tileId, blobIndex }) => resolveAutotilePaintConflict(services(), sheetId, terrainSetId, tileId, blobIndex) });
 }
 
 export function registerTileContributions(api) {

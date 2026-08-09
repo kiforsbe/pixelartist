@@ -21,8 +21,8 @@ import {
 import {
   getAutotilePaintSession, setAutotilePaintBrush,
   startAutotilePaint, stopAutotilePaint, useAutotilePaintConflict,
-  openBlob47Coverage,
-} from './autotile-paint-controller.js';
+} from './presentation/autotile-paint-presenter.js';
+import { openBlob47Coverage } from './presentation/blob47-coverage-dialog.js';
 import { addGrid, createTile } from './application/commands/tile-sheet-commands.js';
 import {
   commitAddTerrainSet, commitDeleteTerrainSet, commitRenameTerrainSet,

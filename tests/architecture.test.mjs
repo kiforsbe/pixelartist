@@ -62,7 +62,7 @@ test('mode canvas controllers do not own contribution panels', async () => {
   for (const file of [
     join(root, 'js/modes/sprites/presentation/frame-tool-presenter.js'),
     join(root, 'js/modes/tiles/presentation/tile-tool-presenter.js'),
-    join(root, 'js/modes/tiles/autotile-paint-controller.js'),
+    join(root, 'js/modes/tiles/presentation/autotile-paint-presenter.js'),
   ]) {
     const source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /export function mount[A-Za-z]+Panel\s*\(/, file);
@@ -82,6 +82,7 @@ test('mode command modules do not access browser UI globals', async () => {
     join(root, 'js/modes/tiles/application/commands/tile-sheet-commands.js'),
     join(root, 'js/modes/tiles/terrain-set-commands.js'),
     join(root, 'js/modes/tiles/application/commands/tile-layer-commands.js'),
+    join(root, 'js/modes/tiles/application/commands/autotile-paint-commands.js'),
   ]) {
     const source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
