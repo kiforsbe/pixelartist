@@ -132,7 +132,7 @@ export function mountFrameEditor(hostEl) {
   const backInput = document.createElement('input');
   backInput.type = 'number'; backInput.min = '0'; backInput.max = '8'; backInput.title = 'Frames back';
   // Base color for every "back" (past) ghost step; a step's own color wins
-  // when set via the ⚙ per-step dialog below (see stepColor()).
+  // when set via the ⚙ per-step dialog below (see resolveStepColor()).
   const backColorInput = document.createElement('input');
   backColorInput.type = 'color';
   backColorInput.title = 'Back (past) ghost color';
@@ -506,7 +506,7 @@ export function mountFrameEditor(hostEl) {
   // Per-step overrides now live on the Onion Steps page of the Project
   // Settings dialog (main.js owns that dialog) rather than a dedicated
   // dialog here -- state.onion.stepColors is still exactly what gets read
-  // (stepColor() above) and written there; this button just opens Project
+  // (resolveStepColor() above) and written there; this button just opens Project
   // Settings pre-flipped to that page. main.js's 'project' listener above
   // (see refresh()) already re-syncs this toolbar and re-renders the view
   // whenever markDirty() fires, so no direct callback wiring is needed here.
