@@ -14,6 +14,10 @@ function dispatch(id, args) {
   return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
 }
 
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
+
 function numericField(labelText, value, { step, onCommit }) {
   const label = document.createElement('label');
   label.className = 'frame-field';
@@ -47,8 +51,10 @@ export function mountFramesPanel(element) {
   breakApartButton.title = 'Break apart';
   breakApartButton.addEventListener('click', () => {
     const sheet = activeSheet();
-    if (!sheet || !state.selectedFrameId) return;
-    const strip = stripForFrame(sheet, state.selectedFrameId);
+    if (!sheet) return;
+    const frameId = getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null;
+    if (!frameId) return;
+    const strip = stripForFrame(sheet, frameId);
     if (strip) dispatch('sprites.breakApartStrip', { sheetId: sheet.id, animationId: strip.id });
   });
 
@@ -150,7 +156,8 @@ export function mountFramesPanel(element) {
     panel.hidden = false;
     list.innerHTML = '';
     const sheet = activeSheet();
-    const frame = sheet?.frames.find(candidate => candidate.id === state.selectedFrameId) ?? null;
+    const selectedFrameId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null) : null;
+    const frame = sheet?.frames.find(candidate => candidate.id === selectedFrameId) ?? null;
     if (!sheet) return;
     if (!frame) {
       const hint = document.createElement('div');

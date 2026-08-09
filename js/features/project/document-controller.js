@@ -19,7 +19,14 @@ export function mountDocumentController({ editorHost, workbench }) {
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
     return !!(el.closest && el.closest('dialog[open]'));
   }
-  
+  function sheetDocument(sheet) {
+    return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+  }
+  function seedSheetSelection(sheet, layerId) {
+    if (!sheet) return;
+    editorHost.selections.set(sheet.kind === 'sprite' ? { layerId, frameId: null, animationId: null } : { layerId }, sheetDocument(sheet));
+  }
+
   // ---- element refs ----
   const tabSprites = document.getElementById('tab-sprites');
   const tabTiles = document.getElementById('tab-tiles');
@@ -58,13 +65,12 @@ export function mountDocumentController({ editorHost, workbench }) {
     const kind = mode === 'sprites' ? 'sprite' : 'tile';
     const sheet = state.project?.sheets.find(s => s.kind === kind) ?? null;
     state.activeSheetId = sheet ? sheet.id : null;
-    state.activeLayerId = sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null;
-    // Selections (frame/animation/tile) are per-sheet; a stale id surviving an
-    // active-sheet change lets e.g. timeline's "Add selected frame" insert one
-    // sheet's frameId into another sheet's animation (blank timeline cell,
-    // `"frame": null` on export). Clear on every path that reassigns activeSheetId.
-    state.selectedFrameId = null;
-    state.selectedAnimationId = null;
+    // Selections (layer/frame/animation/tile) are per-sheet; a stale id
+    // surviving an active-sheet change lets e.g. timeline's "Add selected
+    // frame" insert one sheet's frameId into another sheet's animation
+    // (blank timeline cell, `"frame": null` on export). Reseed on every path
+    // that reassigns activeSheetId.
+    seedSheetSelection(sheet, sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null);
     state.selectedTileId = null;
     state.view = 'sheet';
     // frame/tile tools are mode-exclusive (their palette buttons hide via
@@ -132,10 +138,8 @@ export function mountDocumentController({ editorHost, workbench }) {
     const sheet = state.project?.sheets.find(s => s.id === sheetSelect.value);
     if (!sheet) return;
     state.activeSheetId = sheet.id;
-    state.activeLayerId = sheetLayers(sheet)[0]?.id ?? null;
-    // See switchMode's comment above: selections are per-sheet, clear them here too.
-    state.selectedFrameId = null;
-    state.selectedAnimationId = null;
+    // See switchMode's comment above: selections are per-sheet, reseed here too.
+    seedSheetSelection(sheet, sheetLayers(sheet)[0]?.id ?? null);
     state.selectedTileId = null;
     state.view = 'sheet';
     emit('view');
@@ -150,17 +154,16 @@ export function mountDocumentController({ editorHost, workbench }) {
   function commitAddSheet(sheet) {
     const project = state.project;
     const prevActiveSheetId = state.activeSheetId;
-    const prevActiveLayerId = state.activeLayerId;
+    const prevSheet = activeSheet();
+    const prevActiveLayerId = prevSheet ? (editorHost.selections.get(sheetDocument(prevSheet))?.layerId ?? null) : null;
     const insertIndex = project.sheets.indexOf(sheet);
     const cmd = {
       label: 'new sheet',
       do() {
         if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
         state.activeSheetId = sheet.id;
-        state.activeLayerId = sheetLayers(sheet)[0]?.id ?? null;
-        // See switchMode's comment above: selections are per-sheet, clear them too.
-        state.selectedFrameId = null;
-        state.selectedAnimationId = null;
+        // See switchMode's comment above: selections are per-sheet, reseed them too.
+        seedSheetSelection(sheet, sheetLayers(sheet)[0]?.id ?? null);
         state.selectedTileId = null;
         state.view = 'sheet';
         emit('view');
@@ -169,9 +172,7 @@ export function mountDocumentController({ editorHost, workbench }) {
         const i = project.sheets.indexOf(sheet);
         if (i !== -1) project.sheets.splice(i, 1);
         state.activeSheetId = prevActiveSheetId;
-        state.activeLayerId = prevActiveLayerId;
-        state.selectedFrameId = null;
-        state.selectedAnimationId = null;
+        if (prevSheet) seedSheetSelection(prevSheet, prevActiveLayerId);
         state.selectedTileId = null;
         state.view = 'sheet';
         emit('view');
@@ -336,8 +337,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     if (index === -1) return;
     const wasActive = state.activeSheetId === sheet.id;
     const prev = {
-      activeSheetId: state.activeSheetId, activeLayerId: state.activeLayerId,
-      selectedFrameId: state.selectedFrameId, selectedAnimationId: state.selectedAnimationId,
+      activeSheetId: state.activeSheetId,
       selectedTileId: state.selectedTileId, selectedTerrainSetId: state.selectedTerrainSetId,
       editingFrameId: state.editingFrameId, editingTileId: state.editingTileId,
       view: state.view, floating: state.floating,
@@ -351,9 +351,7 @@ export function mountDocumentController({ editorHost, workbench }) {
           const siblings = project.sheets.filter(s => s.kind === sheet.kind);
           const next = siblings[Math.min(index, siblings.length - 1)] ?? null;
           state.activeSheetId = next ? next.id : null;
-          state.activeLayerId = next ? (sheetLayers(next)[0]?.id ?? null) : null;
-          state.selectedFrameId = null;
-          state.selectedAnimationId = null;
+          seedSheetSelection(next, next ? (sheetLayers(next)[0]?.id ?? null) : null);
           state.selectedTileId = null;
           state.selectedTerrainSetId = null;
           state.editingFrameId = null;

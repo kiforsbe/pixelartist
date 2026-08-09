@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
+import { SelectionService } from '../js/host/selection-service.js';
 import { CommandStack } from '../js/core/commands.js';
 import { state } from '../js/app/state.js';
 import {
@@ -14,7 +15,7 @@ function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
   const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store) };
 }
 
 function makeProject() {
@@ -41,7 +42,6 @@ function reset(project) {
   state.dirty = false;
   state.project = project;
   state.activeSheetId = 'sheet1';
-  state.selectedAnimationId = null;
 }
 
 test('newAnimation names by animation count, selects it when the sheet is active, and undo/redo restore the same object at the same index', () => {
@@ -50,16 +50,17 @@ test('newAnimation names by animation count, selects it when the sheet is active
   reset(project);
   const sheet = project.sheets[0];
 
+  const doc = { kind: 'sprite-sheet', id: 'sheet1' };
   newAnimation(services, 'sheet1');
   assert.equal(sheet.animations.length, 2);
   const created = sheet.animations[1];
   assert.equal(created.name, 'anim_1');
-  assert.equal(state.selectedAnimationId, created.id);
+  assert.equal(services.selections.get(doc)?.animationId, created.id);
   assert.equal(state.dirty, true);
 
   services.history.undo();
   assert.equal(sheet.animations.length, 1);
-  assert.equal(state.selectedAnimationId, null);
+  assert.equal(services.selections.get(doc)?.animationId, null);
 
   services.history.redo();
   assert.equal(sheet.animations.length, 2);
@@ -72,22 +73,23 @@ test('deleteAnimation removes the animation and tears down its layer group; undo
   const services = makeServices(project);
   reset(project);
   const sheet = project.sheets[0];
+  const doc = { kind: 'sprite-sheet', id: 'sheet1' };
   const group = { id: 'g1', type: 'group', name: 'walk', animationId: 'an1', open: true, children: [] };
   sheet.layerTree.children.push(group);
   sheet.animations[0].layerGroupId = 'g1';
-  state.selectedAnimationId = 'an1';
+  services.selections.set({ animationId: 'an1' }, doc);
 
   deleteAnimation(services, 'sheet1', 'an1');
   assert.equal(sheet.animations.length, 0);
   assert.equal(sheet.layerTree.children.length, 0);
-  assert.equal(state.selectedAnimationId, null);
+  assert.equal(services.selections.get(doc)?.animationId, null);
 
   services.history.undo();
   assert.equal(sheet.animations.length, 1);
   assert.equal(sheet.animations[0].id, 'an1');
   assert.equal(sheet.animations[0].layerGroupId, 'g1');
   assert.equal(sheet.layerTree.children[0].id, 'g1');
-  assert.equal(state.selectedAnimationId, 'an1');
+  assert.equal(services.selections.get(doc)?.animationId, 'an1');
 });
 
 test('renameAnimation renames and is undoable; no-ops (no history entry) when the name is unchanged', () => {

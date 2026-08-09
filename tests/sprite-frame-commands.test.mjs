@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
+import { SelectionService } from '../js/host/selection-service.js';
 import { CommandStack } from '../js/core/commands.js';
 import { createBitmap, setPixel, getPixel } from '../js/core/pixels.js';
 import { createLayerNode, createGroupNode } from '../js/core/model.js';
@@ -16,7 +17,7 @@ function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
   const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), stack };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store), stack };
 }
 
 function makeProject() {
@@ -28,7 +29,7 @@ function makeProject() {
   return { version: 6, name: 'test', settings: { durationMs: 100 }, sheets: [sheet], maps: [], palettes: [], activePaletteId: null };
 }
 
-function reset() { state.commands = new CommandStack(); state.dirty = false; state.selectedFrameId = null; }
+function reset() { state.commands = new CommandStack(); state.dirty = false; }
 
 test('createFrame adds a frame, selects it, marks dirty, and is undoable/redoable with a stable id', () => {
   const project = makeProject();
@@ -43,18 +44,19 @@ test('createFrame adds a frame, selects it, marks dirty, and is undoable/redoabl
     { x: sheet.frames[0].x, y: sheet.frames[0].y, w: sheet.frames[0].w, h: sheet.frames[0].h },
     { x: 4, y: 8, w: 16, h: 16 });
   const id = sheet.frames[0].id;
-  assert.equal(state.selectedFrameId, id);
+  const doc = { kind: 'sprite-sheet', id: 'sheet1' };
+  assert.equal(services.selections.get(doc)?.frameId, id);
   assert.equal(services.store.getState().project.dirty, true);
   assert.equal(state.dirty, true);
 
   services.history.undo();
   assert.equal(sheet.frames.length, 0);
-  assert.equal(state.selectedFrameId, null);
+  assert.equal(services.selections.get(doc)?.frameId, null);
 
   services.history.redo();
   assert.equal(sheet.frames.length, 1);
   assert.equal(sheet.frames[0].id, id);
-  assert.equal(state.selectedFrameId, id);
+  assert.equal(services.selections.get(doc)?.frameId, id);
 });
 
 test('deleteFrame with an unknown id is a no-op that pushes nothing onto history', () => {

@@ -4,7 +4,12 @@
 // active during onOverlay), never baked into sheet bitmaps or exports.
 
 import { state, activeSheet } from '../app/state.js';
+import { getEditorHost } from '../host/runtime.js';
 import { classifySlots } from '../core/blob47.js';
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 
 const FRAME_STROKE = '#4f8cff';
 const FRAME_FILL = 'rgba(79,140,255,.15)';
@@ -60,11 +65,12 @@ function isFloatingFrame(sheet, frame) {
 function drawSpriteOverlays(view, ctx, sheet) {
   const frames = sheet.frames;
   if (!frames.length) return;
+  const selectedFrameId = getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null;
 
   if (state.overlays.labels) {
     ctx.save();
     frames.forEach((f) => {
-      const selected = f.id === state.selectedFrameId;
+      const selected = f.id === selectedFrameId;
       const floating = isFloatingFrame(sheet, f);
       const p0 = view.imageToScreen(f.x, f.y);
       const p1 = view.imageToScreen(f.x + f.w, f.y + f.h);

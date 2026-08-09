@@ -40,11 +40,16 @@ import { copyRegion } from '../../../core/pixels.js';
 import { runAction } from '../../../app/actions.js';
 import { computeOnionGhosts, resolveStepColor, traceOutline } from '../application/onion-skin.js';
 import { computeNeighborFrame } from '../application/frame-navigation.js';
+import { getEditorHost } from '../../../host/runtime.js';
 
 function isTypingTarget(el) {
   if (!el) return false;
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
   return !!(el.closest && el.closest('dialog[open]'));
+}
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
 export function mountFrameEditor(hostEl) {
@@ -329,7 +334,8 @@ export function mountFrameEditor(hostEl) {
   }
 
   function paintOnion(ctx, sheet, f) {
-    const anim = sheet.animations.find(a => a.id === state.selectedAnimationId);
+    const animationId = getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null;
+    const anim = sheet.animations.find(a => a.id === animationId);
     const ghosts = computeOnionGhosts(anim, f.id, state.onion);
     if (!ghosts.length) return;
     const bmp = getFlatBitmap(sheet);
@@ -371,7 +377,8 @@ export function mountFrameEditor(hostEl) {
     const sheet = activeSheet();
     const f = currentFrame();
     if (!sheet || !f) return null;
-    const anim = sheet.animations.find(a => a.id === state.selectedAnimationId) ?? null;
+    const animationId = getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null;
+    const anim = sheet.animations.find(a => a.id === animationId) ?? null;
     return computeNeighborFrame(sheet, f, anim, dir);
   }
 

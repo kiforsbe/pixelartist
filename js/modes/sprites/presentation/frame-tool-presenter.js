@@ -56,6 +56,16 @@ function dispatch(id, args) {
   return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
 }
 
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
+function sheetSelection(sheet) {
+  return getEditorHost().selections.get(sheetDocument(sheet)) ?? {};
+}
+function setSheetSelection(sheet, patch) {
+  getEditorHost().selections.set({ ...sheetSelection(sheet), ...patch }, sheetDocument(sheet));
+}
+
 // ------------------------------------------------------------- pointer
 
 function handleDown(ev, view) {
@@ -65,7 +75,7 @@ function handleDown(ev, view) {
   if (state.tool === 'frametool') {
     // Chrome is always visible for the selected segment, so hit-test it
     // directly at the down position — no dependence on hover state.
-    const sel = selectedSegment(sheet, state.selectedFrameId);
+    const sel = selectedSegment(sheet, sheetSelection(sheet).frameId ?? null);
     const g = sel && chromeGeometry(toScreen, sheet, sel.anim, sel.run);
     const part = g && hitChrome(g, ev.sx, ev.sy);
     if (part?.type === 'grip') {
@@ -98,14 +108,14 @@ function handleDown(ev, view) {
     drag = null;
     state.editingFrameId = clickHit.id;
     const owner = sheet.animations.find(a => a.frames.some(af => af.frameId === clickHit.id)) ?? null;
-    state.selectedAnimationId = owner ? owner.id : null;
+    setSheetSelection(sheet, { animationId: owner ? owner.id : null });
     state.view = 'frame';
     emit('view');
     emit('selection');
     return;
   }
   lastClick = clickHit ? { frameId: clickHit.id, t: now } : null;
-  const selected = sheet.frames.find(f => f.id === state.selectedFrameId) || null;
+  const selected = sheet.frames.find(f => f.id === sheetSelection(sheet).frameId) || null;
   // Intact-strip members have no resize handles: skip hit detection entirely
   // rather than just refusing the resulting drag, so a pointer-down on a
   // handle-shaped spot falls through to the move/create checks below.
@@ -143,10 +153,10 @@ function handleDown(ev, view) {
     // and layers panel never keep a stale animation highlighted.
     const owner = sheet.animations.find(a => a.frames.some(af => af.frameId === hit.id)) ?? null;
     const ownerId = owner ? owner.id : null;
-    const frameChanged = state.selectedFrameId !== hit.id;
-    const animChanged = state.selectedAnimationId !== ownerId;
-    if (frameChanged) state.selectedFrameId = hit.id;
-    if (animChanged) state.selectedAnimationId = ownerId;
+    const current = sheetSelection(sheet);
+    const frameChanged = current.frameId !== hit.id;
+    const animChanged = current.animationId !== ownerId;
+    if (frameChanged || animChanged) setSheetSelection(sheet, { frameId: hit.id, animationId: ownerId });
     if (frameChanged || animChanged) emit('selection');
     // If `hit` belongs to an intact strip, the drag targets every member of
     // the grabbed SEGMENT together (move-as-unit); otherwise just the frame.
@@ -161,9 +171,9 @@ function handleDown(ev, view) {
     view.requestRender();
     return;
   }
-  if (state.selectedFrameId !== null || state.selectedAnimationId !== null) {
-    state.selectedFrameId = null;
-    state.selectedAnimationId = null;
+  const cleared = sheetSelection(sheet);
+  if (cleared.frameId != null || cleared.animationId != null) {
+    setSheetSelection(sheet, { frameId: null, animationId: null });
     emit('selection');
   }
   drag = { kind: 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
@@ -242,12 +252,12 @@ function updateHover(ev, view) {
   const sheet = activeSheet();
   if (sheet && state.mode === 'sprites' && state.tool === 'frametool' && !drag) {
     const toScreen = projector(view);
-    const sel = selectedSegment(sheet, state.selectedFrameId);
+    const sel = selectedSegment(sheet, sheetSelection(sheet).frameId ?? null);
     if (sel) {
       const g = chromeGeometry(toScreen, sheet, sel.anim, sel.run);
       if (g) next = hitChrome(g, ev.sx, ev.sy);
     } else {
-      const selectedFrame = sheet.frames.find(f => f.id === state.selectedFrameId);
+      const selectedFrame = sheet.frames.find(f => f.id === sheetSelection(sheet).frameId);
       if (selectedFrame && !stripForFrame(sheet, selectedFrame.id))
         next = hitGrip(standaloneGripGeometry(toScreen, selectedFrame).grips, ev.sx, ev.sy);
     }
@@ -310,10 +320,12 @@ export function registerFrameTool() {
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (state.tool !== 'frametool' || state.mode !== 'sprites') return;
     const sheet = activeSheet();
-    if (!sheet || !state.selectedFrameId) return;
-    const strip = stripForFrame(sheet, state.selectedFrameId);
-    if (strip) dispatch('sprites.removeStripMember', { sheetId: sheet.id, animationId: strip.id, frameId: state.selectedFrameId });
-    else dispatch('sprites.deleteFrame', { sheetId: sheet.id, frameId: state.selectedFrameId });
+    if (!sheet) return;
+    const frameId = sheetSelection(sheet).frameId ?? null;
+    if (!frameId) return;
+    const strip = stripForFrame(sheet, frameId);
+    if (strip) dispatch('sprites.removeStripMember', { sheetId: sheet.id, animationId: strip.id, frameId });
+    else dispatch('sprites.deleteFrame', { sheetId: sheet.id, frameId });
   });
 
   // Accepts whichever animation is currently selected in the timeline dock,
@@ -326,8 +338,10 @@ export function registerFrameTool() {
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (state.tool !== 'frametool' || state.mode !== 'sprites') return;
     const sheet = activeSheet();
-    if (!sheet || !state.selectedAnimationId) return;
-    const anim = sheet.animations.find(a => a.id === state.selectedAnimationId);
+    if (!sheet) return;
+    const animationId = sheetSelection(sheet).animationId ?? null;
+    if (!animationId) return;
+    const anim = sheet.animations.find(a => a.id === animationId);
     if (anim && !anim.layerGroupId) dispatch('sprites.acceptAnimation', { sheetId: sheet.id, animationId: anim.id });
   });
 }
@@ -341,8 +355,9 @@ function drawFrameToolGhost(ctx, view) {
 
 export function drawStripChrome(ctx, view) {
   if (state.mode !== 'sprites') return;
-  paintStripChrome(ctx, view, activeSheet(), {
-    tool: state.tool, drag, hover, selectedFrameId: state.selectedFrameId,
+  const sheet = activeSheet();
+  paintStripChrome(ctx, view, sheet, {
+    tool: state.tool, drag, hover, selectedFrameId: sheet ? (sheetSelection(sheet).frameId ?? null) : null,
   });
 }
 

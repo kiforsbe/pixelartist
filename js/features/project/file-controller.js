@@ -1,4 +1,5 @@
 import { state, on, emit, activeSheet, activeMap, setProject, newDefaultProject, AUTOTEST, confirmOrAuto } from '../../app/state.js';
+import { getEditorHost } from '../../host/runtime.js';
 import * as io from '../../app/io.js';
 import { flattenSheet } from '../../core/model.js';
 import { buildFramesJson, buildTilesJson, buildMapJson } from '../../app/exports.js';
@@ -21,6 +22,10 @@ import { markDefaultAction } from '../../ui/dialogs.js';
 
 function isCancel(error) {
   return error?.name === 'AbortError' || error?.message === 'cancelled';
+}
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
 export function mountFileController() {
@@ -152,7 +157,8 @@ export function mountFileController() {
   // are static, registered once like every other export action here.
   function runOnSelectedAnimation(format) {
     const sheet = activeSheet();
-    const anim = sheet?.animations.find(a => a.id === state.selectedAnimationId);
+    const animationId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null) : null;
+    const anim = sheet?.animations.find(a => a.id === animationId);
     if (sheet && anim) exportAnimationsAs(sheet, anim.id, format);
   }
   defineAction('document.exportAnimation.gif', { label: 'GIF', run: () => runOnSelectedAnimation('gif') });
@@ -165,7 +171,10 @@ export function mountFileController() {
       { action: 'document.exportAnimation.spritesheet' },
       { action: 'document.exportAnimation.sequence' },
     ],
-    isEnabled: () => activeSheet()?.kind === 'sprite' && !!state.selectedAnimationId,
+    isEnabled: () => {
+      const sheet = activeSheet();
+      return sheet?.kind === 'sprite' && !!getEditorHost().selections.get(sheetDocument(sheet))?.animationId;
+    },
   });
   
   // project.settings.exportColorMode === 'total': cap export quantization at

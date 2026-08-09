@@ -28,10 +28,17 @@ export function syncLegacyStateToHost(host, legacyState) {
         state.session.selectionsByDocument[key] = { layerId: map?.layers[0]?.id ?? null, mapItemId: null };
       }
     } else if (reference) {
-      state.session.selectionsByDocument[`${reference.kind}:${reference.id}`] = {
-        layerId: legacyState.activeLayerId,
-        frameId: legacyState.selectedFrameId,
-        animationId: legacyState.selectedAnimationId,
+      // Sprites/tiles layer+frame+animation selection is host-authoritative
+      // (SelectionService is the sole writer now, from command handlers and
+      // presentation files). Only seed a default the first time this
+      // document is seen this session -- mirrors the maps branch above.
+      // legacyState.selectedTileId/selectedTerrainSetId stay legacy-owned
+      // (out of scope for this migration) and are refreshed unconditionally,
+      // same as before.
+      const key = `${reference.kind}:${reference.id}`;
+      const existing = state.session.selectionsByDocument[key];
+      state.session.selectionsByDocument[key] = {
+        ...(existing ?? { layerId: legacyState.activeLayerId, frameId: legacyState.selectedFrameId, animationId: legacyState.selectedAnimationId }),
         tileId: legacyState.selectedTileId,
         terrainSetId: legacyState.selectedTerrainSetId,
       };

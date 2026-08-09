@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
+import { SelectionService } from '../js/host/selection-service.js';
 import { CommandStack } from '../js/core/commands.js';
 import { setPixel, getPixel } from '../js/core/pixels.js';
 import { createLayerNode, createGroupNode } from '../js/core/model.js';
@@ -16,7 +17,7 @@ function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
   const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store) };
 }
 
 function makeProject({ width = 64, height = 64 } = {}) {
@@ -59,8 +60,6 @@ function reset(project) {
   state.dirty = false;
   state.project = project;
   state.activeSheetId = 'sheet1';
-  state.selectedFrameId = null;
-  state.selectedAnimationId = null;
 }
 
 const frameIds = anim => anim.frames.map(entry => entry.frameId);
@@ -99,7 +98,7 @@ test('insertStripFrame inserts a blank frame at the boundary and shifts the tail
   assert.deepEqual(frameIds(anim), ['a', inserted.id, 'b']);
   assert.equal(anim.frames[1].duration, 100);
   assert.equal(sheet.frames.find(f => f.id === 'b').x, 32);
-  assert.equal(state.selectedFrameId, inserted.id);
+  assert.equal(services.selections.get({ kind: 'sprite-sheet', id: 'sheet1' })?.frameId, inserted.id);
 
   services.history.undo();
   assert.equal(sheet.frames.length, 2);
@@ -319,7 +318,7 @@ test('mergeStripSegments fuses two segments of one animation and repositions the
   assert.deepEqual(frameIds(anim), ['a', 'b']);
   assert.deepEqual(anim.breaks, []);
   assert.equal(sheet.frames.find(f => f.id === 'a').x, 24);
-  assert.equal(state.selectedAnimationId, 'an1');
+  assert.equal(services.selections.get({ kind: 'sprite-sheet', id: 'sheet1' })?.animationId, 'an1');
 
   services.history.undo();
   assert.deepEqual(anim.breaks, [1]);
@@ -364,7 +363,7 @@ test('newStripFromFrame promotes a standalone frame into a strip and renames it'
   assert.deepEqual(sheet.frames.map(f => f.name), ['strip_0_0', 'strip_0_1', 'strip_0_2']);
   assert.deepEqual(sheet.frames.map(f => f.x), [0, 16, 32]);
   assert.deepEqual(frameIds(anim), ['f1', sheet.frames[1].id, sheet.frames[2].id]);
-  assert.equal(state.selectedAnimationId, anim.id);
+  assert.equal(services.selections.get({ kind: 'sprite-sheet', id: 'sheet1' })?.animationId, anim.id);
 
   services.history.undo();
   assert.equal(sheet.animations.length, 0);
@@ -395,7 +394,7 @@ test('newStripFromFrame promotes a standalone frame growing to the left, in asce
   const byX = ids.map(id => sheet.frames.find(f => f.id === id).x);
   assert.deepEqual(byX, [0, 16, 32]);
   assert.equal(ids[ids.length - 1], 'f1');
-  assert.equal(state.selectedAnimationId, anim.id);
+  assert.equal(services.selections.get({ kind: 'sprite-sheet', id: 'sheet1' })?.animationId, anim.id);
 
   services.history.undo();
   assert.equal(sheet.animations.length, 0);

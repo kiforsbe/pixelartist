@@ -12,6 +12,7 @@
 // by main.js listening on 'history' the same way.
 
 import { state, on, emit, activeSheet, activeLayer, markDirty } from '../app/state.js';
+import { getEditorHost } from '../host/runtime.js';
 import {
   cloneBitmap, drawLine, drawRect, drawEllipse, floodFill, softFloodFill,
   copyRegion, blitRegion, fillRegion, getPixel,
@@ -26,6 +27,10 @@ import { commitAcceptAnimation } from '../features/animations/commands.js';
 import { stripForFrame as stripOf } from '../domain/sprites/strips.js';
 import { HANDLES_ALL, handlePoint, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../core/resizeAnchor.js';
 import { drawRectDims, drawAngleLabel } from './dimlabels.js';
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 
 export const TOOLS = [
   { id: 'pencil', icon: '✏️', key: 'b', isAvailable: () => state.mode !== 'maps' },
@@ -424,8 +429,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   // when nothing is selected/already accepted.
   function acceptFloatingContextIfAny() {
     const sheet = activeSheet();
-    if (!sheet || !state.selectedAnimationId) return;
-    const anim = sheet.animations.find(a => a.id === state.selectedAnimationId);
+    if (!sheet) return;
+    const animationId = getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null;
+    if (!animationId) return;
+    const anim = sheet.animations.find(a => a.id === animationId);
     if (anim && !anim.layerGroupId) commitAcceptAnimation(sheet, anim);
   }
 

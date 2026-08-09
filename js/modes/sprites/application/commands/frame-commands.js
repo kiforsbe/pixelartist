@@ -1,11 +1,15 @@
 import { addFrame, removeFrame } from '../../../../core/model.js';
 import { sliceGrid } from '../../../../core/slicing.js';
 import { blitRegion } from '../../../../core/pixels.js';
-import { state, emit, markDirty } from '../../../../app/state.js';
+import { emit, markDirty } from '../../../../app/state.js';
 import { stripLayersOf, buildMovePatches } from '../frame-pixel-motion.js';
 
 export function findSpriteSheet(project, sheetId) {
   return project?.sheets.find(sheet => sheet.id === sheetId) ?? null;
+}
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
 // Every history step re-enters projects.mutate() so the host store gets a
@@ -24,17 +28,18 @@ export function runSheetCommand(services, sheetId, label, apply, revert) {
 export function createFrame(services, sheetId, rect) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   if (!sheet) return;
+  const doc = sheetDocument(sheet);
   const name = `frame_${sheet.frames.length}`;
   let created = null;
   runSheetCommand(services, sheetId, 'add frame',
     target => {
       if (!created) created = addFrame(target, { name, x: rect.x, y: rect.y, w: rect.w, h: rect.h });
       else if (!target.frames.includes(created)) target.frames.push(created);
-      state.selectedFrameId = created.id;
+      services.selections.set({ ...services.selections.get(doc), frameId: created.id }, doc);
     },
     target => {
       target.frames = target.frames.filter(f => f !== created);
-      if (state.selectedFrameId === created.id) state.selectedFrameId = null;
+      if (services.selections.get(doc)?.frameId === created.id) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     });
   emit('selection');
 }
@@ -44,20 +49,21 @@ export function deleteFrame(services, sheetId, frameId) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   const frame = sheet?.frames.find(f => f.id === frameId);
   if (!frame) return;
+  const doc = sheetDocument(sheet);
   const idx = sheet.frames.indexOf(frame);
   // removeFrame rewrites EVERY animation's entries/breaks, so undo needs a
   // snapshot of all of them, not just the ones referencing this frame.
   const animSnapshots = sheet.animations.map(a => ({ anim: a, frames: a.frames.slice(), breaks: (a.breaks ?? []).slice() }));
-  const wasSelected = state.selectedFrameId === frameId;
+  const wasSelected = services.selections.get(doc)?.frameId === frameId;
   runSheetCommand(services, sheetId, 'delete frame',
     target => {
       removeFrame(target, frame.id);
-      if (state.selectedFrameId === frame.id) state.selectedFrameId = null;
+      if (services.selections.get(doc)?.frameId === frame.id) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     },
     target => {
       target.frames.splice(Math.min(idx, target.frames.length), 0, frame);
       for (const snap of animSnapshots) { snap.anim.frames = snap.frames.slice(); snap.anim.breaks = snap.breaks.slice(); }
-      if (wasSelected) state.selectedFrameId = frame.id;
+      if (wasSelected) services.selections.set({ ...services.selections.get(doc), frameId: frame.id }, doc);
     });
   emit('selection');
 }

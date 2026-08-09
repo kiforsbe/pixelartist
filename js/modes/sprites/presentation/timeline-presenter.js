@@ -29,6 +29,10 @@ function dispatch(id, args) {
   return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
 }
 
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
+
 // Thumbnail size tracks the dock's height (see the resize handle in
 // mountTimeline) so a taller panel actually redraws sharper thumbnails
 // instead of just CSS-stretching a fixed 64px bitmap.
@@ -200,10 +204,19 @@ export function mountTimeline(el) {
   }
   function invalidateFlat() { flatSheet = null; flatBmp = null; }
 
+  function currentSelection() {
+    const sheet = activeSheet();
+    return sheet ? (getEditorHost().selections.get(sheetDocument(sheet)) ?? {}) : {};
+  }
+  function setSelection(patch) {
+    const sheet = activeSheet();
+    if (sheet) getEditorHost().selections.set({ ...currentSelection(), ...patch }, sheetDocument(sheet));
+  }
+
   function currentAnim() {
     const sheet = activeSheet();
     if (!sheet) return null;
-    return sheet.animations.find(a => a.id === state.selectedAnimationId) ?? null;
+    return sheet.animations.find(a => a.id === currentSelection().animationId) ?? null;
   }
 
   function stopPlaying() {
@@ -284,7 +297,7 @@ export function mountTimeline(el) {
   // ---- header controls ----
   animSelect.addEventListener('change', () => {
     const sheet = activeSheet();
-    state.selectedAnimationId = animSelect.value || null;
+    const animationId = animSelect.value || null;
     stopPlaying();
     position = 0; acc = 0;
     // Keep the active layer inside whatever context is now on screen -- see
@@ -296,8 +309,10 @@ export function mountTimeline(el) {
     // treated everywhere else -- so an in-context layer stays active rather
     // than being forced back to a root layer.
     if (sheet) {
-      const layers = contextLayers(sheet, state.selectedAnimationId);
-      if (!layers.some(l => l.id === state.activeLayerId)) state.activeLayerId = layers[0]?.id ?? null;
+      const layers = contextLayers(sheet, animationId);
+      const layerId = currentSelection().layerId ?? null;
+      const nextLayerId = layers.some(l => l.id === layerId) ? layerId : (layers[0]?.id ?? null);
+      setSelection({ animationId, layerId: nextLayerId });
     }
     render();
     emit('selection');
@@ -335,8 +350,9 @@ export function mountTimeline(el) {
   btnAddFrame.addEventListener('click', () => {
     const sheet = activeSheet();
     const anim = currentAnim();
-    if (!sheet || !anim || !state.selectedFrameId) return;
-    dispatch('sprites.addAnimationFrame', { sheetId: sheet.id, animationId: anim.id, frameId: state.selectedFrameId });
+    const frameId = currentSelection().frameId ?? null;
+    if (!sheet || !anim || !frameId) return;
+    dispatch('sprites.addAnimationFrame', { sheetId: sheet.id, animationId: anim.id, frameId });
   });
 
   btnBreakApart.addEventListener('click', () => {
@@ -411,8 +427,8 @@ export function mountTimeline(el) {
       // sprite-sheet highlight follow along with a single click. It also
       // opens the frame editor directly on that frame (previously required
       // a double-click) -- one click both selects and jumps in.
-      if (frame && state.selectedFrameId !== frame.id) {
-        state.selectedFrameId = frame.id;
+      if (frame && currentSelection().frameId !== frame.id) {
+        setSelection({ frameId: frame.id });
         emit('selection');
       }
       if (frame) {
@@ -469,9 +485,10 @@ export function mountTimeline(el) {
     // a selection just because it's null, or "(none)" could never stick:
     // render() runs after every project/selection event, so forcing a pick
     // here would snap back to animations[0] on the very next render.
-    if (state.selectedAnimationId && !sheet.animations.find(a => a.id === state.selectedAnimationId))
-      state.selectedAnimationId = null;
-    animSelect.value = state.selectedAnimationId ?? '';
+    const selectedAnimationId = currentSelection().animationId ?? null;
+    if (selectedAnimationId && !sheet.animations.find(a => a.id === selectedAnimationId))
+      setSelection({ animationId: null });
+    animSelect.value = currentSelection().animationId ?? '';
   }
 
   function render() {
@@ -485,7 +502,7 @@ export function mountTimeline(el) {
 
     btnRenameAnim.disabled = !anim;
     btnDeleteAnim.disabled = !anim;
-    btnAddFrame.disabled = !anim || !state.selectedFrameId || !!anim.strip;
+    btnAddFrame.disabled = !anim || !currentSelection().frameId || !!anim.strip;
     btnBreakApart.hidden = !anim?.strip;
     const hasFrames = !!anim && anim.frames.length > 0;
     btnPlay.disabled = !hasFrames;

@@ -383,6 +383,9 @@ export function mountColorPanel(el) {
 
 // ------------------------------------------------------------- layers panel
 
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 export function mountLayersPanel(el) {
   resetBody(el, 'Layers');
 
@@ -398,16 +401,31 @@ export function mountLayersPanel(el) {
   btnRow.append(btnAddLayer, btnAddGroup, btnDelete, btnMerge);
   el.appendChild(btnRow);
 
+  function sheetSelection(sheet) {
+    return getEditorHost().selections.get(sheetDocument(sheet)) ?? {};
+  }
+  function setSheetSelection(sheet, patch) {
+    getEditorHost().selections.set({ ...sheetSelection(sheet), ...patch }, sheetDocument(sheet));
+  }
+  function currentLayerId() {
+    const sheet = activeSheet();
+    return sheet ? (sheetSelection(sheet).layerId ?? null) : null;
+  }
+  function currentAnimationId() {
+    const sheet = activeSheet();
+    return sheet ? (sheetSelection(sheet).animationId ?? null) : null;
+  }
+
   // Selected node can be a layer or a group. Active layer id is authoritative
   // for drawing; selected node id is authoritative for panel operations.
-  let selectedNodeId = state.activeLayerId;
+  let selectedNodeId = currentLayerId();
 
   // Tracks the last state.selectedAnimationId this panel itself agreed with
   // (either because it set it, or because it already resynced to it), so
   // renderList can tell "the timeline/sprite sheet changed the animation
   // selection out from under us" (needs a resync) apart from "the user just
   // clicked a plain layer/group in THIS panel" (must NOT be overwritten).
-  let lastSyncedAnimationId = state.selectedAnimationId;
+  let lastSyncedAnimationId = currentAnimationId();
 
   function targetGroupForInsert() {
     const sheet = activeSheet();
@@ -442,19 +460,19 @@ export function mountLayersPanel(el) {
     const group = targetGroupForInsert();
     if (!sheet || !group) return;
     const beforeChildren = group.children.slice();
-    const beforeActive = state.activeLayerId;
+    const beforeActive = currentLayerId();
     let newLayer = null;
     const cmd = {
       label: 'add layer',
       do() {
         if (!newLayer) newLayer = createLayerNode(`Layer ${countNodes(sheet, 'layer') + 1}`, sheet.width, sheet.height);
         if (!group.children.includes(newLayer)) group.children.push(newLayer);
-        state.activeLayerId = newLayer.id;
+        setSheetSelection(sheet, { layerId: newLayer.id });
         selectedNodeId = newLayer.id;
       },
       undo() {
         group.children = beforeChildren.slice();
-        state.activeLayerId = beforeActive;
+        setSheetSelection(sheet, { layerId: beforeActive });
         selectedNodeId = beforeActive;
       },
     };
@@ -474,7 +492,7 @@ export function mountLayersPanel(el) {
     const group = targetGroupForInsert();
     if (!sheet || !group) return;
     const beforeChildren = group.children.slice();
-    const beforeActive = state.activeLayerId;
+    const beforeActive = currentLayerId();
     let newGroup = null;
     const cmd = {
       label: 'add group',
@@ -482,12 +500,12 @@ export function mountLayersPanel(el) {
         if (!newGroup) newGroup = createGroupNode(`Group ${countNodes(sheet, 'group') + 1}`);
         if (!group.children.includes(newGroup)) group.children.push(newGroup);
         selectedNodeId = newGroup.id;
-        state.activeLayerId = null;
+        setSheetSelection(sheet, { layerId: null });
       },
       undo() {
         group.children = beforeChildren.slice();
         selectedNodeId = beforeChildren[beforeChildren.length - 1]?.id ?? null;
-        state.activeLayerId = beforeActive;
+        setSheetSelection(sheet, { layerId: beforeActive });
       },
     };
     state.commands.push(cmd);
@@ -521,7 +539,7 @@ export function mountLayersPanel(el) {
       if (flattenLayers(parent).length <= 1) { alert('Cannot delete the last layer in this group.'); return; }
       if (!confirmOrAuto(`Delete layer "${layer.name}"?`)) return;
       const beforeChildren = parent.children.slice();
-      const beforeActive = state.activeLayerId;
+      const beforeActive = currentLayerId();
       const idx = loc.index;
       const cmd = {
         label: 'delete layer',
@@ -529,12 +547,13 @@ export function mountLayersPanel(el) {
           parent.children = parent.children.filter(c => c.id !== layer.id);
           const all = sheetLayers(sheet);
           const fallback = all[Math.min(idx, all.length - 1)];
-          state.activeLayerId = fallback ? fallback.id : null;
-          selectedNodeId = state.activeLayerId;
+          const fallbackId = fallback ? fallback.id : null;
+          setSheetSelection(sheet, { layerId: fallbackId });
+          selectedNodeId = fallbackId;
         },
         undo() {
           parent.children = beforeChildren.slice();
-          state.activeLayerId = beforeActive;
+          setSheetSelection(sheet, { layerId: beforeActive });
           selectedNodeId = beforeActive;
         },
       };
@@ -564,17 +583,17 @@ export function mountLayersPanel(el) {
         if (!loc) return;
         const parent = loc.parent;
         const beforeChildren = parent.children.slice();
-        const beforeActive = state.activeLayerId;
+        const beforeActive = currentLayerId();
         const cmd = {
           label: 'delete group',
           do() {
             parent.children = parent.children.filter(c => c.id !== g.id);
-            selectedNodeId = state.activeLayerId;
+            selectedNodeId = beforeActive;
           },
           undo() {
             parent.children = beforeChildren.slice();
             selectedNodeId = g.id;
-            state.activeLayerId = beforeActive;
+            setSheetSelection(sheet, { layerId: beforeActive });
           },
         };
         state.commands.push(cmd);
@@ -593,25 +612,25 @@ export function mountLayersPanel(el) {
     if (dest.type !== 'layer') { alert('Cannot merge into a group.'); return; }
     const parent = loc.parent;
     const beforeChildren = parent.children.slice();
-    const beforeActive = state.activeLayerId;
+    const beforeActive = currentLayerId();
     const destBefore = cloneBitmap(dest.bitmap);
     mergeDown(sheet, layer.id);
     const destAfter = cloneBitmap(dest.bitmap);
     const afterChildren = parent.children.slice();
-    state.activeLayerId = dest.id;
     const afterActive = dest.id;
+    setSheetSelection(sheet, { layerId: afterActive });
     const cmd = {
       label: 'merge down',
       do() {
         blitRegion(dest.bitmap, destAfter, 0, 0);
         parent.children = afterChildren.slice();
-        state.activeLayerId = afterActive;
+        setSheetSelection(sheet, { layerId: afterActive });
         selectedNodeId = afterActive;
       },
       undo() {
         parent.children = beforeChildren.slice();
         blitRegion(dest.bitmap, destBefore, 0, 0);
-        state.activeLayerId = beforeActive;
+        setSheetSelection(sheet, { layerId: beforeActive });
         selectedNodeId = beforeActive;
       },
     };
@@ -869,9 +888,11 @@ export function mountLayersPanel(el) {
   // the layer-row equivalent.
   function selectGroupNode(group) {
     selectedNodeId = group.id;
-    state.activeLayerId = null;
+    const sheet = activeSheet();
     const animId = group.animationId ?? null;
-    if (state.selectedAnimationId !== animId) { state.selectedAnimationId = animId; emit('selection'); }
+    const changed = currentAnimationId() !== animId;
+    if (sheet) setSheetSelection(sheet, { layerId: null, animationId: animId });
+    if (changed) emit('selection');
     lastSyncedAnimationId = animId;
   }
 
@@ -880,11 +901,12 @@ export function mountLayersPanel(el) {
   // selectGroupNode above.
   function selectLayerNode(layer) {
     const sheet = activeSheet();
-    state.activeLayerId = layer.id;
     selectedNodeId = layer.id;
     const ctx = sheet ? layerAnimationContext(sheet, layer) : null;
     const animId = ctx?.anim.id ?? null;
-    if (state.selectedAnimationId !== animId) { state.selectedAnimationId = animId; emit('selection'); }
+    const changed = currentAnimationId() !== animId;
+    if (sheet) setSheetSelection(sheet, { layerId: layer.id, animationId: animId });
+    if (changed) emit('selection');
     lastSyncedAnimationId = animId;
   }
 
@@ -943,7 +965,7 @@ export function mountLayersPanel(el) {
   function renderLayer(layer, depth) {
     const sheet = activeSheet();
     const row = document.createElement('div');
-    row.className = 'layer-row layer-leaf' + (layer.id === state.activeLayerId ? ' active' : '');
+    row.className = 'layer-row layer-leaf' + (layer.id === currentLayerId() ? ' active' : '');
     row.style.paddingLeft = (4 + depth * 14) + 'px';
     row.draggable = true;
     row.dataset.nodeId = layer.id;
@@ -952,7 +974,7 @@ export function mountLayersPanel(el) {
     row.addEventListener('dragend', onRowDragEnd);
     row.addEventListener('click', () => { selectLayerNode(layer); renderList(); });
     row.addEventListener('keydown', (e) => {
-      if (layer.id !== state.activeLayerId) return;
+      if (layer.id !== currentLayerId()) return;
       if (e.key === 'ArrowUp') { e.preventDefault(); doMove(layer, 1); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); doMove(layer, -1); }
     });
@@ -1056,13 +1078,14 @@ export function mountLayersPanel(el) {
   // in that case (lastSyncedAnimationId is kept current by selectGroupNode/
   // selectLayerNode).
   function syncFromAnimationSelection(sheet) {
-    if (state.selectedAnimationId === lastSyncedAnimationId) return;
-    lastSyncedAnimationId = state.selectedAnimationId;
-    if (state.selectedAnimationId) {
-      const group = animationGroup(sheet, state.selectedAnimationId);
-      if (group) { selectedNodeId = group.id; state.activeLayerId = null; return; }
+    const animId = currentAnimationId();
+    if (animId === lastSyncedAnimationId) return;
+    lastSyncedAnimationId = animId;
+    if (animId) {
+      const group = animationGroup(sheet, animId);
+      if (group) { selectedNodeId = group.id; setSheetSelection(sheet, { layerId: null }); return; }
     }
-    selectedNodeId = state.activeLayerId;
+    selectedNodeId = currentLayerId();
   }
 
   function renderList() {
@@ -1079,7 +1102,7 @@ export function mountLayersPanel(el) {
     if (!sheet) return;
     syncFromAnimationSelection(sheet);
     if (selectedNodeId && !findNode(sheet.layerTree, selectedNodeId)) {
-      selectedNodeId = state.activeLayerId;
+      selectedNodeId = currentLayerId();
     }
     for (let i = sheet.layerTree.children.length - 1; i >= 0; i--) {
       renderNode(sheet.layerTree.children[i], 0);

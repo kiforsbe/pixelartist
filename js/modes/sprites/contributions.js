@@ -24,7 +24,7 @@ import {
   addAnimationFrame, removeAnimationFrame, reorderAnimationFrame, setAnimationFrameDuration, setAnimationFrameStep,
 } from './application/commands/animation-frame-commands.js';
 
-function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
+function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history, selections: host.selections }; }
 
 // Registered by id so presentation/ (the Presenter, the slice dialog, the
 // Frames panel) and shared UI (js/features/animations/commands.js's façade)

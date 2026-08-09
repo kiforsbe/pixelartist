@@ -1,6 +1,10 @@
 import { acceptAnimation as acceptAnimationOnSheet } from '../../../../core/model.js';
-import { state, emit, activeSheet } from '../../../../app/state.js';
+import { emit, activeSheet } from '../../../../app/state.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 
 function findAnimation(services, sheetId, animationId) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
@@ -26,7 +30,8 @@ export function acceptAnimation(services, sheetId, animationId) {
   const { sheet, animation } = findAnimation(services, sheetId, animationId);
   if (!sheet || !animation) return;
   if (animation.layerGroupId) return;
-  const beforeActiveLayerId = state.activeLayerId;
+  const doc = sheetDocument(sheet);
+  const beforeActiveLayerId = services.selections.get(doc)?.layerId ?? null;
   const group = acceptAnimationOnSheet(sheet, animation);
   const animationLayerId = group.children[0].id;
   const groupIndex = sheet.layerTree.children.indexOf(group);
@@ -37,12 +42,12 @@ export function acceptAnimation(services, sheetId, animationId) {
       if (!target.layerTree.children.includes(group)) {
         target.layerTree.children.splice(Math.min(groupIndex, target.layerTree.children.length), 0, group);
       }
-      if (target === activeSheet()) state.activeLayerId = animationLayerId;
+      if (target === activeSheet()) services.selections.set({ ...services.selections.get(doc), layerId: animationLayerId }, doc);
     },
     target => {
       animation.layerGroupId = null;
       target.layerTree.children = target.layerTree.children.filter(child => child !== group);
-      if (state.activeLayerId === animationLayerId) state.activeLayerId = beforeActiveLayerId;
+      if (services.selections.get(doc)?.layerId === animationLayerId) services.selections.set({ ...services.selections.get(doc), layerId: beforeActiveLayerId }, doc);
     });
   emit('selection');
 }

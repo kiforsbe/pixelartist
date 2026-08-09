@@ -1,11 +1,16 @@
 import { CommandStack } from '../core/commands.js';
 import { createProject, createSheet, DEFAULT_SETTINGS, defaultOnionSettings, findLayer, findNode, sheetLayers, contextLayers as modelContextLayers, flattenLayers, layerAnimationContext, resolvePixelSnapperPalette } from '../core/model.js';
 import { snapPixels } from '../core/pixelSnapper.js';
+import { getEditorHost } from '../host/runtime.js';
 
 // Test mode (?autotest): automated browser sessions suppress modal dialogs
 // (beforeunload guard, autosave-restore prompt, confirm() gates auto-accept).
 export const AUTOTEST = typeof location !== 'undefined' ? new URLSearchParams(location.search).has('autotest') : false;
 export const confirmOrAuto = (msg) => AUTOTEST || (typeof confirm !== 'undefined' ? confirm(msg) : false);
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 
 export const state = {
   project: null,
@@ -56,7 +61,10 @@ export function activeMap() {
 }
 export function activeLayer() {
   const sheet = activeSheet();
-  return sheet ? findLayer(sheet.layerTree, state.activeLayerId) : null;
+  if (!sheet) return null;
+  const host = getEditorHost();
+  const layerId = host ? (host.selections.get(sheetDocument(sheet))?.layerId ?? null) : state.activeLayerId;
+  return findLayer(sheet.layerTree, layerId);
 }
 // Layers visible/editable in the current context. When an animation is
 // selected, operations that would otherwise affect "all layers" are scoped to
@@ -64,7 +72,9 @@ export function activeLayer() {
 export function currentContextLayers() {
   const sheet = activeSheet();
   if (!sheet) return [];
-  return modelContextLayers(sheet, state.selectedAnimationId);
+  const host = getEditorHost();
+  const animationId = host ? (host.selections.get(sheetDocument(sheet))?.animationId ?? null) : state.selectedAnimationId;
+  return modelContextLayers(sheet, animationId);
 }
 // Layers to sweep for an "all layers" operation (Alt+cut/copy, Alt+drag-
 // marquee-move) anchored to the CURRENTLY ACTIVE LAYER's own tree position,
@@ -118,7 +128,8 @@ export function setProject(project) {
   const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
   const sheet = project.sheets.find(s => s.kind === kind) ?? null;
   state.activeSheetId = sheet ? sheet.id : null;
-  state.activeLayerId = sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null;
+  const host = getEditorHost();
+  if (sheet && host) host.selections.set({ layerId: sheetLayers(sheet)[0]?.id ?? null }, sheetDocument(sheet));
   const map = project.maps?.[0] ?? null;
   state.activeMapId = map?.id ?? null;
   state.commands.clear();

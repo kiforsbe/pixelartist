@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
+import { SelectionService } from '../js/host/selection-service.js';
 import { CommandStack } from '../js/core/commands.js';
 import { state } from '../js/app/state.js';
 import { breakApartStrip, acceptAnimation } from '../js/modes/sprites/application/commands/animation-commands.js';
@@ -11,7 +12,7 @@ function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
   const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store) };
 }
 
 function makeProject() {
@@ -32,7 +33,6 @@ function reset(project) {
   state.dirty = false;
   state.project = project;
   state.activeSheetId = 'sheet1';
-  state.activeLayerId = null;
 }
 
 test('breakApartStrip clears the strip flag and its breaks, and undo restores both', () => {
@@ -58,17 +58,18 @@ test('acceptAnimation gives a floating animation its own layer group and undo de
   const sheet = project.sheets[0];
   const anim = sheet.animations[0];
 
+  const doc = { kind: 'sprite-sheet', id: 'sheet1' };
   acceptAnimation(services, 'sheet1', 'an1');
   assert.equal(sheet.layerTree.children.length, 1);
   const group = sheet.layerTree.children[0];
   assert.equal(anim.layerGroupId, group.id);
   assert.equal(group.animationId, 'an1');
-  assert.equal(state.activeLayerId, group.children[0].id);
+  assert.equal(services.selections.get(doc)?.layerId, group.children[0].id);
 
   services.history.undo();
   assert.equal(anim.layerGroupId, null);
   assert.equal(sheet.layerTree.children.length, 0);
-  assert.equal(state.activeLayerId, null);
+  assert.equal(services.selections.get(doc)?.layerId, null);
 
   services.history.redo();
   assert.equal(anim.layerGroupId, group.id);

@@ -5,9 +5,13 @@ import {
   insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks,
 } from '../../../../core/strips.js';
 import { frameBounds } from '../../../../domain/sprites/frames.js';
-import { state, emit, activeSheet, currentContextLayers } from '../../../../app/state.js';
+import { emit, activeSheet, currentContextLayers } from '../../../../app/state.js';
 import { stripLayersOf, buildMovePatches } from '../frame-pixel-motion.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 
 function resolve(services, sheetId, animationId, runIndex) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
@@ -27,6 +31,7 @@ function defaultDuration(services) {
 export function insertStripFrame(services, sheetId, animationId, runIndex, k) {
   const { sheet, anim, run } = resolve(services, sheetId, animationId, runIndex);
   if (!sheet || !anim || !run) return;
+  const doc = sheetDocument(sheet);
   const members = segmentMembers(sheet, anim, run);
   if (!members.length) return;
   const fw = members[0].w, fh = members[0].h;
@@ -66,7 +71,7 @@ export function insertStripFrame(services, sheetId, animationId, runIndex, k) {
       target.frames = afterSheetFrames.slice();
       anim.frames = afterEntries.map(e => ({ ...e }));
       anim.breaks = afterBreaks.slice();
-      state.selectedFrameId = frame.id;
+      services.selections.set({ ...services.selections.get(doc), frameId: frame.id }, doc);
     },
     target => {
       if (mv) {
@@ -76,7 +81,7 @@ export function insertStripFrame(services, sheetId, animationId, runIndex, k) {
       target.frames = beforeSheetFrames.slice();
       anim.frames = beforeEntries.map(e => ({ ...e }));
       anim.breaks = beforeBreaks.slice();
-      if (state.selectedFrameId === frame.id) state.selectedFrameId = null;
+      if (services.selections.get(doc)?.frameId === frame.id) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     });
   emit('selection');
 }
@@ -105,6 +110,7 @@ export function splitStrip(services, sheetId, animationId, index) {
 export function resizeStripSegment(services, sheetId, animationId, runIndex, side, count) {
   const { sheet, anim, run } = resolve(services, sheetId, animationId, runIndex);
   if (!sheet || !anim || !run) return;
+  const doc = sheetDocument(sheet);
   const members = segmentMembers(sheet, anim, run);
   if (!members.length) return;
   const count0 = members.length;
@@ -127,7 +133,7 @@ export function resizeStripSegment(services, sheetId, animationId, runIndex, sid
   const beforeSheetFrames = sheet.frames.slice();
   const beforeEntries = anim.frames.map(e => ({ ...e }));
   const beforeBreaks = (anim.breaks ?? []).slice();
-  const beforeSelected = state.selectedFrameId;
+  const beforeSelected = services.selections.get(doc)?.frameId ?? null;
   const neighbor = side === 'right' ? anim.frames[run.end - 1] : anim.frames[run.start];
   const duration = neighbor?.duration ?? defaultDuration(services);
 
@@ -158,7 +164,7 @@ export function resizeStripSegment(services, sheetId, animationId, runIndex, sid
       const r = removeEntry(anim.frames, anim.breaks, index);
       anim.frames = r.entries;
       anim.breaks = r.breaks;
-      if (state.selectedFrameId === frameId) state.selectedFrameId = null;
+      if (services.selections.get(doc)?.frameId === frameId) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     }
     if (layer) for (const p of clearPatches) blitRegion(layer.bitmap, createBitmap(fw, fh), p.x, p.y);
   }
@@ -166,21 +172,21 @@ export function resizeStripSegment(services, sheetId, animationId, runIndex, sid
   const afterSheetFrames = sheet.frames.slice();
   const afterEntries = anim.frames.map(e => ({ ...e }));
   const afterBreaks = anim.breaks.slice();
-  const afterSelected = state.selectedFrameId;
+  const afterSelected = services.selections.get(doc)?.frameId ?? null;
 
   runSheetCommand(services, sheetId, 'resize strip',
     target => {
       target.frames = afterSheetFrames.slice();
       anim.frames = afterEntries.map(e => ({ ...e }));
       anim.breaks = afterBreaks.slice();
-      state.selectedFrameId = afterSelected;
+      services.selections.set({ ...services.selections.get(doc), frameId: afterSelected }, doc);
       if (layer) for (const p of clearPatches) blitRegion(layer.bitmap, createBitmap(fw, fh), p.x, p.y);
     },
     target => {
       target.frames = beforeSheetFrames.slice();
       anim.frames = beforeEntries.map(e => ({ ...e }));
       anim.breaks = beforeBreaks.slice();
-      state.selectedFrameId = beforeSelected;
+      services.selections.set({ ...services.selections.get(doc), frameId: beforeSelected }, doc);
       if (layer) for (const p of clearPatches) blitRegion(layer.bitmap, p.before, p.x, p.y);
     });
   emit('selection');
@@ -192,6 +198,7 @@ export function resizeStripSegment(services, sheetId, animationId, runIndex, sid
 export function removeStripMember(services, sheetId, animationId, frameId) {
   const { sheet, anim } = resolve(services, sheetId, animationId, null);
   if (!sheet || !anim) return;
+  const doc = sheetDocument(sheet);
   const run = segmentOfFrame(anim, frameId);
   if (!run) return;
   const members = segmentMembers(sheet, anim, run);
@@ -201,7 +208,7 @@ export function removeStripMember(services, sheetId, animationId, frameId) {
 
   const beforeSheetFrames = sheet.frames.slice();
   const beforeAnims = sheet.animations.map(a => ({ anim: a, frames: a.frames.map(e => ({ ...e })), breaks: (a.breaks ?? []).slice() }));
-  const wasSelected = state.selectedFrameId === frameId;
+  const wasSelected = services.selections.get(doc)?.frameId === frameId;
 
   const tail = members.slice(k + 1);
   // ASSUMES sheetId === state.activeSheetId -- currentContextLayers() reads
@@ -221,7 +228,7 @@ export function removeStripMember(services, sheetId, animationId, frameId) {
       }
       target.frames = afterSheetFrames.slice();
       for (const s of afterAnims) { s.anim.frames = s.frames.map(e => ({ ...e })); s.anim.breaks = s.breaks.slice(); }
-      if (state.selectedFrameId === frameId) state.selectedFrameId = null;
+      if (services.selections.get(doc)?.frameId === frameId) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     },
     target => {
       if (mv) {
@@ -230,7 +237,7 @@ export function removeStripMember(services, sheetId, animationId, frameId) {
       }
       target.frames = beforeSheetFrames.slice();
       for (const s of beforeAnims) { s.anim.frames = s.frames.map(e => ({ ...e })); s.anim.breaks = s.breaks.slice(); }
-      if (wasSelected) state.selectedFrameId = frameId;
+      if (wasSelected) services.selections.set({ ...services.selections.get(doc), frameId }, doc);
     });
   emit('selection');
 }
@@ -242,6 +249,7 @@ export function mergeStripSegments(services, sheetId, animationId, runIndex, tar
   const { sheet, anim: srcAnim, run: srcRun } = resolve(services, sheetId, animationId, runIndex);
   const { anim: dstAnim, run: dstRun } = resolve(services, sheetId, targetAnimationId, targetRunIndex);
   if (!sheet || !srcAnim || !dstAnim || !srcRun || !dstRun) return;
+  const doc = sheetDocument(sheet);
   const members = segmentMembers(sheet, srcAnim, srcRun);
   if (!members.length) return;
   const sameAnim = srcAnim === dstAnim;
@@ -249,7 +257,7 @@ export function mergeStripSegments(services, sheetId, animationId, runIndex, tar
     srcFrames: srcAnim.frames.map(e => ({ ...e })), srcBreaks: (srcAnim.breaks ?? []).slice(),
     dstFrames: dstAnim.frames.map(e => ({ ...e })), dstBreaks: (dstAnim.breaks ?? []).slice(),
     animations: sheet.animations.slice(),
-    selectedAnimationId: state.selectedAnimationId,
+    selectedAnimationId: services.selections.get(doc)?.animationId ?? null,
   };
   // findSnap only ever offers same-strip targets now (cross-animation
   // merging is disabled), so this is always same-strip pixel motion when the
@@ -286,7 +294,7 @@ export function mergeStripSegments(services, sheetId, animationId, runIndex, tar
       srcAnim.frames = after.srcFrames.map(e => ({ ...e })); srcAnim.breaks = after.srcBreaks.slice();
       dstAnim.frames = after.dstFrames.map(e => ({ ...e })); dstAnim.breaks = after.dstBreaks.slice();
       target.animations = after.animations.slice();
-      state.selectedAnimationId = dstAnim.id;
+      services.selections.set({ ...services.selections.get(doc), animationId: dstAnim.id }, doc);
     },
     target => {
       if (mv) {
@@ -298,7 +306,7 @@ export function mergeStripSegments(services, sheetId, animationId, runIndex, tar
       srcAnim.frames = before.srcFrames.map(e => ({ ...e })); srcAnim.breaks = before.srcBreaks.slice();
       dstAnim.frames = before.dstFrames.map(e => ({ ...e })); dstAnim.breaks = before.dstBreaks.slice();
       target.animations = before.animations.slice();
-      state.selectedAnimationId = before.selectedAnimationId;
+      services.selections.set({ ...services.selections.get(doc), animationId: before.selectedAnimationId }, doc);
     });
   emit('selection');
 }
@@ -312,6 +320,7 @@ export function newStripFromFrame(services, sheetId, frameId, side, count) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   const frame = sheet?.frames.find(f => f.id === frameId);
   if (!sheet || !frame) return;
+  const doc = sheetDocument(sheet);
   let extra = count - 1;
   if (extra <= 0) return;
   const fw = frame.w, fh = frame.h;
@@ -328,7 +337,7 @@ export function newStripFromFrame(services, sheetId, frameId, side, count) {
   const beforeSheetFrames = sheet.frames.slice();
   const beforeAnimations = sheet.animations.slice();
   const beforeFrameName = frame.name;
-  const beforeSelectedAnimationId = state.selectedAnimationId;
+  const beforeSelectedAnimationId = services.selections.get(doc)?.animationId ?? null;
 
   const anim = addAnimation(sheet, name, true, services.projects.project?.settings);
   frame.name = `${name}_0`;
@@ -354,16 +363,14 @@ export function newStripFromFrame(services, sheetId, frameId, side, count) {
       anim.frames = afterAnimFrames.map(e => ({ ...e }));
       frame.name = afterFrameName;
       if (target === activeSheet()) {
-        state.selectedFrameId = frameId;
-        state.selectedAnimationId = animId;
+        services.selections.set({ ...services.selections.get(doc), frameId, animationId: animId }, doc);
       }
     },
     target => {
       target.frames = beforeSheetFrames.slice();
       target.animations = beforeAnimations.slice();
       frame.name = beforeFrameName;
-      state.selectedFrameId = frameId;
-      state.selectedAnimationId = beforeSelectedAnimationId;
+      services.selections.set({ ...services.selections.get(doc), frameId, animationId: beforeSelectedAnimationId }, doc);
     });
   emit('selection');
 }

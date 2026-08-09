@@ -17,6 +17,10 @@ function dispatch(id, args) {
   return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
 }
 
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
+
 export function mountAnimationsPanel(el) {
   el.innerHTML = '';
   const h3 = document.createElement('h3');
@@ -86,7 +90,8 @@ export function mountAnimationsPanel(el) {
     if (state.mode !== 'sprites') { el.hidden = true; return; }
     el.hidden = false;
     const sheet = activeSheet();
-    currentAnim = sheet?.animations.find(a => a.id === state.selectedAnimationId) ?? null;
+    const animationId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null) : null;
+    currentAnim = sheet?.animations.find(a => a.id === animationId) ?? null;
     hint.hidden = !!currentAnim;
     body.hidden = !currentAnim;
     if (!currentAnim) return;

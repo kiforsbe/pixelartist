@@ -1,7 +1,11 @@
 // js/modes/sprites/application/commands/animation-lifecycle-commands.js
 import { addAnimation, renameAnimation as renameAnimationOnSheet, findParent } from '../../../../core/model.js';
-import { state, activeSheet } from '../../../../app/state.js';
+import { activeSheet } from '../../../../app/state.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
+
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 
 // A new animation starts FLOATING (see addAnimation/acceptAnimation in
 // core/model.js) -- no layer group until accepted, and it has zero frames at
@@ -12,6 +16,7 @@ import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 export function newAnimation(services, sheetId) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   if (!sheet) return;
+  const doc = sheetDocument(sheet);
   const name = `anim_${sheet.animations.length}`;
   let anim = null;
   let idx = -1;
@@ -19,12 +24,12 @@ export function newAnimation(services, sheetId) {
     target => {
       if (!anim) { anim = addAnimation(target, name, false, services.projects.project?.settings); idx = target.animations.indexOf(anim); }
       else if (!target.animations.includes(anim)) target.animations.splice(Math.min(idx, target.animations.length), 0, anim);
-      if (target === activeSheet()) state.selectedAnimationId = anim.id;
+      if (target === activeSheet()) services.selections.set({ ...services.selections.get(doc), animationId: anim.id }, doc);
     },
     target => {
       idx = target.animations.indexOf(anim);
       target.animations = target.animations.filter(a => a !== anim);
-      if (state.selectedAnimationId === anim.id) state.selectedAnimationId = null;
+      if (services.selections.get(doc)?.animationId === anim.id) services.selections.set({ ...services.selections.get(doc), animationId: null }, doc);
     });
 }
 
@@ -35,8 +40,9 @@ export function deleteAnimation(services, sheetId, animationId) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   const anim = sheet?.animations.find(a => a.id === animationId);
   if (!anim) return;
+  const doc = sheetDocument(sheet);
   const idx = sheet.animations.indexOf(anim);
-  const wasSelected = state.selectedAnimationId === animationId;
+  const wasSelected = services.selections.get(doc)?.animationId === animationId;
   const groupLoc = anim.layerGroupId ? findParent(sheet.layerTree, anim.layerGroupId) : null;
   const group = groupLoc ? groupLoc.parent.children[groupLoc.index] : null;
   const groupParent = groupLoc ? groupLoc.parent : null;
@@ -46,13 +52,13 @@ export function deleteAnimation(services, sheetId, animationId) {
       target.animations = target.animations.filter(a => a.id !== animationId);
       if (groupParent) groupParent.children = groupParent.children.filter(c => c.id !== anim.layerGroupId);
       anim.layerGroupId = null;
-      if (state.selectedAnimationId === animationId) state.selectedAnimationId = null;
+      if (services.selections.get(doc)?.animationId === animationId) services.selections.set({ ...services.selections.get(doc), animationId: null }, doc);
     },
     target => {
       target.animations.splice(Math.min(idx, target.animations.length), 0, anim);
       if (groupParent) groupParent.children.splice(Math.min(groupIdx, groupParent.children.length), 0, group);
       anim.layerGroupId = group.id;
-      if (wasSelected) state.selectedAnimationId = animationId;
+      if (wasSelected) services.selections.set({ ...services.selections.get(doc), animationId }, doc);
     });
 }
 

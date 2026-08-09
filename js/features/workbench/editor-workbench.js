@@ -20,6 +20,9 @@ function isTypingTarget(el) {
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
   return !!(el.closest && el.closest('dialog[open]'));
 }
+function sheetDocument(sheet) {
+  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
 
 export function mountEditorWorkbench() {
   const editorHost = getEditorHost();
@@ -195,8 +198,9 @@ export function mountEditorWorkbench() {
     const ctx = layerAnimationContext(sheet, activeLayer());
     if (!ctx?.anim.strip) return whole;
     const { anim } = ctx;
+    const selectedFrameId = editorHost.selections.get(sheetDocument(sheet))?.frameId ?? null;
     let run = (x != null && y != null) ? segmentOfPoint(sheet, anim, x, y)
-      : state.selectedFrameId ? segmentOfFrame(anim, state.selectedFrameId) : null;
+      : selectedFrameId ? segmentOfFrame(anim, selectedFrameId) : null;
     if (!run && x == null && y == null) run = segmentsOf(anim)[0] ?? null;
     return run ? segmentBounds(sheet, anim, run) : { x: 0, y: 0, w: 0, h: 0 };
   }
