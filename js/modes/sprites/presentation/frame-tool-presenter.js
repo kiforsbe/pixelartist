@@ -330,7 +330,7 @@ export function registerFrameTool() {
 
   // Accepts whichever animation is currently selected in the timeline dock,
   // if it's still floating -- works for plain animations too, not just
-  // strips, since it keys off state.selectedAnimationId rather than the
+  // strips, since it keys off the selected animation rather than the
   // selected frame (a plain animation's frames aren't reliably discoverable
   // via stripForFrame(), which requires strip: true).
   window.addEventListener('keydown', (e) => {

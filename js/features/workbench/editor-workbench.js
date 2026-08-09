@@ -178,7 +178,7 @@ export function mountEditorWorkbench() {
   // undo/redo can touch pixels, layer structure, or both — repaint on every change.
   on('history', () => { invalidateScratch(); refreshCanvasView(); });
   // frame/tile selection changed (no pixel or structural change) — cheap repaint
-  // so the label-overlay highlight tracks state.selectedFrameId immediately.
+  // so the label-overlay highlight tracks the selected frame immediately.
   on('selection', () => canvasView.requestRender());
   
   // The sheet view's paint/float/paste target: normally the whole sheet, but

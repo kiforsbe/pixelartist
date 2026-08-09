@@ -38,7 +38,7 @@ export function syncLegacyStateToHost(host, legacyState) {
       const key = `${reference.kind}:${reference.id}`;
       const existing = state.session.selectionsByDocument[key];
       state.session.selectionsByDocument[key] = {
-        ...(existing ?? { layerId: legacyState.activeLayerId, frameId: legacyState.selectedFrameId, animationId: legacyState.selectedAnimationId }),
+        ...(existing ?? { layerId: null, frameId: null, animationId: null }),
         tileId: legacyState.selectedTileId,
         terrainSetId: legacyState.selectedTerrainSetId,
       };

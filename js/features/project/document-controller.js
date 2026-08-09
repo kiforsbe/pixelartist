@@ -58,7 +58,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     if (mode === 'maps') {
       const map = state.project?.maps?.[0] ?? null;
       state.activeMapId = map?.id ?? null;
-      state.activeSheetId = null; state.activeLayerId = null; state.view = 'map';
+      state.activeSheetId = null; state.view = 'map';
       if (!['select', 'move', 'maptile', 'mapsprite'].includes(state.tool)) { state.tool = 'select'; emit('tool'); }
       emit('view'); workbench.focusMap(); return;
     }

@@ -1,6 +1,6 @@
 // Sidebar panel for the currently-SELECTED ANIMATION (as opposed to
 // frames.js's Frames panel, which is scoped to the selected frame/strip's
-// geometry). Follows the timeline's selection (state.selectedAnimationId),
+// geometry). Follows the timeline's selection (via SelectionService),
 // so it stays populated even when the Frames panel shows "no frame
 // selected". Mirrors the mount/render-on-emit pattern every other panel
 // uses (see frames.js's mountFramesPanel). See

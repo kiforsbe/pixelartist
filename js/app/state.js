@@ -80,7 +80,7 @@ export function currentContextLayers() {
 }
 // Layers to sweep for an "all layers" operation (Alt+cut/copy, Alt+drag-
 // marquee-move) anchored to the CURRENTLY ACTIVE LAYER's own tree position,
-// not state.selectedAnimationId -- so it never disagrees with what's
+// not the selected animation -- so it never disagrees with what's
 // actually selected in the layers panel. Narrows to just that layer's own
 // animation group (strip or plain) when it's nested under one; otherwise the
 // whole sheet, same as currentContextLayers()'s root fallback. See

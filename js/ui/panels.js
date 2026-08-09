@@ -420,7 +420,7 @@ export function mountLayersPanel(el) {
   // for drawing; selected node id is authoritative for panel operations.
   let selectedNodeId = currentLayerId();
 
-  // Tracks the last state.selectedAnimationId this panel itself agreed with
+  // Tracks the last selected animation (per SelectionService) this panel itself agreed with
   // (either because it set it, or because it already resynced to it), so
   // renderList can tell "the timeline/sprite sheet changed the animation
   // selection out from under us" (needs a resync) apart from "the user just
@@ -1070,7 +1070,7 @@ export function mountLayersPanel(el) {
     else renderLayer(node, depth);
   }
 
-  // If state.selectedAnimationId changed since this panel last agreed with
+  // If the selected animation (per SelectionService) changed since this panel last agreed with
   // it, the change came from elsewhere (timeline dropdown, sprite sheet
   // click) -- follow it by highlighting the matching group (or falling back
   // to the active layer when it's cleared to "(none)"). A change this panel

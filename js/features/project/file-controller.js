@@ -152,8 +152,8 @@ export function mountFileController() {
       }
     }
   }
-  // Operates on state.selectedAnimationId (the animation currently selected
-  // in the Animation panel/timeline) -- not a picker, so these three formats
+  // Operates on the currently selected animation (via SelectionService,
+  // the one selected in the Animation panel/timeline) -- not a picker, so these three formats
   // are static, registered once like every other export action here.
   function runOnSelectedAnimation(format) {
     const sheet = activeSheet();

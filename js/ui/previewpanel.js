@@ -7,7 +7,7 @@
 // setPreviewBitmap() at rAF rate, since it already tracks position/timing in
 // its own closure and re-deriving that here on every event would just be
 // redundant work. This module's own render() only handles the non-animation
-// cases and explicitly steps aside (see the `state.selectedAnimationId` check)
+// cases and explicitly steps aside (see the selected-animation check)
 // whenever timeline.js is the one driving the canvas.
 //
 // Zoom mirrors CanvasView's table-stepped scheme (js/core/zoom.js): wheel or

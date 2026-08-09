@@ -425,7 +425,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   // active layer to write into, so drawing "just works" without the user
   // needing to explicitly accept first (Enter key, frames.js's
   // registerFrameTool). No-ops for read-only tools (eyedropper doesn't call
-  // this), tile mode (state.selectedAnimationId isn't used there), or
+  // this), tile mode (animation selection isn't used there), or
   // when nothing is selected/already accepted.
   function acceptFloatingContextIfAny() {
     const sheet = activeSheet();

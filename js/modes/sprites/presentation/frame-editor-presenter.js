@@ -389,7 +389,7 @@ export function mountFrameEditor(hostEl) {
   // different timeline cell) — NOT on every cosmetic 'view' event (overlay
   // toggles, etc.) or every pixel edit, so drawing never resets zoom/pan.
   // A different frame can belong to a different animation, i.e. a different
-  // layer group (currentContextLayers() scopes to state.selectedAnimationId)
+  // layer group (currentContextLayers() scopes to the selected animation)
   // -- the flat-bitmap cache below is keyed only on the SHEET reference and
   // a dirty flag toggled by project/history/pixels events, none of which
   // fire on a plain frame switch (double-click, Prev/Next), so without this
