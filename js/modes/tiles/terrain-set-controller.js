@@ -17,7 +17,7 @@ import {
 import {
   getTileSheetCanvas as getFlatCanvas,
   tileThumbnailUrl as tileThumbnailURL,
-} from './tile-raster-service.js';
+} from './presentation/tile-raster-cache.js';
 import {
   getAutotilePaintSession, setAutotilePaintBrush,
   startAutotilePaint, stopAutotilePaint, useAutotilePaintConflict,

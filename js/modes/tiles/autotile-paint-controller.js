@@ -7,7 +7,7 @@ import {
 } from '../../core/blob47.js';
 import { BLOB47_8X6_RAW, terrainNeighborPreviewCells } from '../../core/blob47templates.js';
 import { registerTool } from '../../ui/tools.js';
-import { getTileSheetCanvas as getFlatCanvas } from './tile-raster-service.js';
+import { getTileSheetCanvas as getFlatCanvas } from './presentation/tile-raster-cache.js';
 
 function describeMask(mask) {
   const names = {

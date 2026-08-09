@@ -1,6 +1,6 @@
-import { state } from '../../app/state.js';
-import { flattenSheet } from '../../core/model.js';
-import { createRasterCache } from '../../components/canvas/raster-cache.js';
+import { state } from '../../../app/state.js';
+import { flattenSheet } from '../../../core/model.js';
+import { createRasterCache } from '../../../components/canvas/raster-cache.js';
 
 const cache = createRasterCache();
 const thumbnails = new Map();

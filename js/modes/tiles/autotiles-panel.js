@@ -1,5 +1,5 @@
 import { state, on, activeSheet } from '../../app/state.js';
-import { invalidateTileRaster } from './tile-raster-service.js';
+import { invalidateTileRaster } from './presentation/tile-raster-cache.js';
 import {
   buildTilePickerDialog, renderTerrainSetEditor, syncSelectedTerrainSetFromTile,
 } from './terrain-set-controller.js';
