@@ -1,6 +1,7 @@
 import {
   state, emit, activeSheet, activeLayer, markDirty, confirmOrAuto,
 } from '../../app/state.js';
+import { getEditorHost } from '../../host/runtime.js';
 import { copyRegion, blitRegion, scaleBitmap } from '../../core/pixels.js';
 import { makePixelPatch } from '../../core/commands.js';
 import { decodePng } from '../../app/pngcodec.js';
@@ -22,12 +23,14 @@ import {
   startAutotilePaint, stopAutotilePaint, useAutotilePaintConflict,
   openBlob47Coverage,
 } from './autotile-paint-controller.js';
-import { commitAddGrid, commitCreateTile } from './tile-sheet-commands.js';
+import { addGrid, createTile } from './application/commands/tile-sheet-commands.js';
 import {
   commitAddTerrainSet, commitDeleteTerrainSet, commitRenameTerrainSet,
   commitAssignSlot, commitClearSlot, commitSetSymmetry,
   commitApplyLayoutPreset, commitSetTerrainSetLayer,
 } from './terrain-set-commands.js';
+
+function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
 
 // Groups the 47 canonical blob indices by how many of the 8 bits are set
 // in their representative mask (the "staircase" layout: isolated alone,
@@ -295,7 +298,7 @@ export function buildAddTerrainSetDialog() {
     const presetValue = $('#ats-layout').value;
     if (presetValue !== '') {
       const preset = presets[Number(presetValue)];
-      const { tiles } = commitAddGrid(sheet, { x: 0, y: 0, cellW: tileW, cellH: tileH, cols: preset.cols, rows: preset.rows });
+      const { tiles } = addGrid(services(), sheet.id, { x: 0, y: 0, cellW: tileW, cellH: tileH, cols: preset.cols, rows: preset.rows });
       const sourceTiles = tiles.slice().sort((a, b) => (a.gridRow - b.gridRow) || (a.gridCol - b.gridCol));
       commitApplyLayoutPreset(sheet, terrainSet, preset, sourceTiles, preset.cols);
       const seededMode = preset.name.includes('8×6') ? 'grid8x6' : preset.name.includes('7×7') ? 'grid7x7' : null;
@@ -308,7 +311,7 @@ export function buildAddTerrainSetDialog() {
       // least one referencing tile. A terrain set with zero tiles is what
       // pruneEmptyTerrainSets treats as garbage once any tile/grid deletion
       // elsewhere names it as a candidate.
-      commitCreateTile(sheet, { x: 0, y: 0, w: tileW, h: tileH });
+      createTile(services(), sheet.id, { x: 0, y: 0, w: tileW, h: tileH });
       const created = sheet.tiles.find(t => t.id === state.selectedTileId);
       if (created) commitAssignSlot(sheet, terrainSet, 0, created);
     }
