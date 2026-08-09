@@ -158,7 +158,7 @@ test('setTileLayer, renameTile, setTileTags each round-trip through undo', () =>
 test('setTileSize detaches from a mismatched terrain set as part of the mutation, and undo restores it', () => {
   resetLegacy();
   const tile = makeTile({ w: 16, terrainSetId: 'ts1', blobIndex: 3 });
-  const sheet = makeSheet({ tiles: [tile], terrainSets: [{ id: 'ts1', tileW: 16, tileH: 8 }] });
+  const sheet = makeSheet({ tiles: [tile], terrainSets: [{ id: 'ts1', tileW: 16, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }] });
   const services = makeServices(makeProject(sheet));
 
   setTileSize(services, 'sheet1', 't1', 'w', 24);
@@ -176,7 +176,7 @@ test('addGrid creates a grid+tiles and undo removes them; deleteGrid reverses it
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
-  const grid = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
+  const { grid } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
   assert.equal(sheet.tileGrids.length, 1);
   assert.equal(sheet.tiles.length, 2);
 
@@ -198,7 +198,7 @@ test('moveGrid offsets every owned tile via relayout, and undoes', () => {
   resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
-  const grid = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
+  const { grid } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
 
   moveGrid(services, 'sheet1', grid.id, 4, 0);
   assert.equal(grid.x, 4);
@@ -213,7 +213,7 @@ test('setGridCellField resizes owned tiles via relayout, and undo restores their
   resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
-  const grid = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
+  const { grid } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
   const beforeW = sheet.tiles[0].w;
 
   setGridCellField(services, 'sheet1', grid.id, 'cellW', 16);
@@ -229,7 +229,7 @@ test('detachTile clears grid ownership and undo restores it', () => {
   resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
-  const grid = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 1, rows: 1 });
+  const { grid } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 1, rows: 1 });
   const tileId = sheet.tiles[0].id;
 
   detachTile(services, 'sheet1', tileId);
