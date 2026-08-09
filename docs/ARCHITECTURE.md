@@ -242,39 +242,61 @@ Every mode has the same file shape: `index.js` (the definition above),
 remove}`), `contributions.js` (registers previews/tools/panels/views),
 plus mode-specific controllers.
 
-**Tiles mode** (`js/modes/tiles/`, ~15 files, ~2760 lines) — this is the
-mode the autotiles panel belongs to:
+**Tiles mode** (`js/modes/tiles/`, 16 files, ~2430 lines) — this is the
+mode the autotiles panel belongs to. It has partially migrated to the
+Application/Presentation split (see the Sprites/Maps note below): the tile
+sheet/grid tool and its commands have moved; the autotile painter and
+terrain-set editor have not yet (planned for sub-phases 3b/3c):
 
 - `contributions.js` registers: a preview provider (`preview.js`); one
   tools contribution whose `createController` wires
   `registerTileTool()`/`registerAutotilePaintTool()` and returns
   `{decorateOverlay}` to layer tile chrome onto the shared canvas; three
   panels gated `when: keys => keys.modeId === 'tiles'` — `tiles.tiles` →
-  `#panel-context` (`tile-panel.js`), `tiles.autotiles` →
+  `#panel-context` (`presentation/tile-panel.js`), `tiles.autotiles` →
   `#panel-autotiles` (`autotiles-panel.js`), `tiles.layers` →
-  `#panel-tilelayers` (`tile-layers-panel.js`); two views —
+  `#panel-tilelayers` (`presentation/tile-layers-panel.js`); two views —
   `tiles.sheet` (shared canvas) and `tiles.tile` (per-tile zoomed editor,
   `ui/tileeditor.js`).
-- `tile-editor-controller.js` (542 lines) — pointer/geometry for the tile
-  tool: create/resize/move tiles, grid ownership.
-- `autotile-paint-controller.js` (511 lines) — the Blob-47 autotile
-  painter tool.
-- `terrain-set-controller.js` (587 lines) — terrain-set slot editor UI
+- `application/commands/tile-sheet-commands.js` (299 lines) and
+  `tile-layer-commands.js` (32 lines) — Command Handlers, resolve their
+  sheet by id each call (no captured object references across undo/redo),
+  registered by id in `contributions.js`. A test asserts these never touch
+  `document/window/alert/confirm/prompt` directly.
+- `application/geometry/tile-geometry.js` (79 lines) — pure hit-testing/
+  resize math (tile/handle hit-testing, grid bounds, ghost-grid layout) for
+  the tile tool, no DOM or state access.
+- `presentation/tile-tool-presenter.js` (375 lines) — the tile tool's
+  Humble Object: pointer routing and overlay rendering for create/resize/
+  move of tiles and grid ownership. Dispatches Commands by id through
+  `CommandRegistry`; never imports `application/commands/` directly
+  (test-enforced), and never imports the contextual panels or terrain UI
+  (also test-enforced).
+- `presentation/tile-panel.js` (173 lines), `tile-layers-panel.js`
+  (71 lines), `tile-tags-field.js` (69 lines) — panel mount functions for
+  the Tiles/Tile-Layers side panels and the shared tag-editing field.
+- `presentation/tile-raster-cache.js` (35 lines) — caches a flattened-sheet
+  canvas + per-tile thumbnails, invalidated via `invalidateTileRaster()`.
+- `autotile-paint-controller.js` (484 lines) — the Blob-47 autotile
+  painter tool. **Not yet migrated** — stays on the old (legacy,
+  object-capture command style) pattern pending Phase 3b.
+- `terrain-set-controller.js` (545 lines) — terrain-set slot editor UI
   (tile picker dialog, layout presets), used by `autotiles-panel.js`.
-- `autotiles-panel.js` (78 lines) — a thin **panel mount function**: builds
+  **Not yet migrated** — pending Phase 3c.
+- `autotiles-panel.js` (48 lines) — a thin **panel mount function**: builds
   the tile-picker dialog + editor container, delegates rendering to
   `terrain-set-controller.js`, subscribes to legacy
   `on('project'|'history'|'pixels'|'view'|'selection', ...)` events to
   schedule `queueMicrotask`-debounced re-renders, and syncs
   `state.selectedTerrainSetId` from `state.selectedTileId`.
-- Commands split by concern (per "Separate tile commands and terrain
-  features"): `tile-sheet-commands.js` (357 lines), `terrain-set-commands.js`
-  (132 lines), `tile-layer-commands.js` (37 lines) — each pushes
-  `{do, undo}` entries onto the legacy `CommandStack` around
-  `core/terrainsets.js`/`core/model.js` mutations. A test asserts these
-  never touch `document/window/alert/confirm/prompt` directly.
-- `tile-raster-service.js` (64 lines) — caches a flattened-sheet canvas +
-  per-tile thumbnails, invalidated via `invalidateTileRaster()`.
+- `terrain-set-commands.js` (123 lines) — terrain-set command handlers.
+  **Not yet migrated** — still uses the old object-capture command style
+  (closures that memoize created/mutated objects directly, rather than
+  resolve-by-id), pending Phase 3c. Its call sites (e.g.
+  `terrain-set-controller.js`) capture tile objects returned from
+  `tile-sheet-commands.js` by reference and mutate them directly, so the
+  migrated tile commands must preserve object identity across undo/redo
+  for those references to stay valid.
 
 **Sprites mode** follows the same Application/Presentation split (see
 `js/modes/sprites/application/` and `js/modes/sprites/presentation/`):
@@ -362,7 +384,7 @@ touching real data.
 
 Consumers cache their own flattened canvas, invalidated on legacy
 `'project'`/`'pixels'`/`'history'` events: `editor-workbench.js` (main
-canvas), `modes/tiles/tile-raster-service.js` (tile sheet + thumbnails),
+canvas), `modes/tiles/presentation/tile-raster-cache.js` (tile sheet + thumbnails),
 `modes/{sprites,tiles}/preview.js` (Preview panel).
 
 **`sheet.layerTree` and `sheet.layers` are two unrelated fields that
@@ -376,7 +398,8 @@ common trap when reading this code:
 - `sheet.layers` — a flat array of plain strings, tile-only (`null` on
   sprite sheets). Arbitrary "layer name" tags (e.g. "Ground", "Decor")
   used to categorize individual `tile` objects (`tile.layer = name`),
-  managed entirely by `tile-layer-commands.js` + `tile-layers-panel.js`.
+  managed entirely by `application/commands/tile-layer-commands.js` +
+  `presentation/tile-layers-panel.js`.
   Has nothing to do with pixel compositing.
 
 `model.js` documents the history: *"A sheet now stores its layers inside a

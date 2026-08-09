@@ -101,7 +101,7 @@ test('resizeTile applies and undoes a full rect change', () => {
   assert.deepEqual({ w: tile.w, h: tile.h }, { w: 8, h: 8 });
 });
 
-test('createTile adds a tile, selects it, and undo removes + deselects', () => {
+test('createTile adds a tile, selects it, and undo removes + deselects; redo restores the same object identity', () => {
   resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
@@ -109,6 +109,11 @@ test('createTile adds a tile, selects it, and undo removes + deselects', () => {
   createTile(services, 'sheet1', { x: 2, y: 2, w: 8, h: 8 });
   assert.equal(sheet.tiles.length, 1);
   assert.equal(state.selectedTileId, sheet.tiles[0].id);
+  const created = sheet.tiles[0];
+  // Simulate an external reference holder (e.g. terrain-set-commands.js's
+  // commitAssignSlot, which captures a tile object by reference and mutates
+  // it directly) so a fresh-object regression on redo would be caught here.
+  created.terrainSetId = 'ts1';
 
   services.history.undo();
   assert.equal(sheet.tiles.length, 0);
@@ -116,6 +121,8 @@ test('createTile adds a tile, selects it, and undo removes + deselects', () => {
 
   services.history.redo();
   assert.equal(sheet.tiles.length, 1);
+  assert.equal(sheet.tiles[0], created, 'redo must reuse the same tile object, not a fresh one, so external references stay valid');
+  assert.equal(sheet.tiles[0].terrainSetId, 'ts1');
 });
 
 test('deleteTile removes a standalone tile and is undoable, refusing grid-owned tiles', () => {
@@ -134,6 +141,22 @@ test('deleteTile removes a standalone tile and is undoable, refusing grid-owned 
 
   services.history.undo();
   assert.equal(sheet.tiles.length, 2);
+});
+
+test('deleteTile restores selectedTerrainSetId on undo when pruning clears it', () => {
+  resetLegacy();
+  const tile = makeTile({ id: 's1', terrainSetId: 'ts1' });
+  const sheet = makeSheet({ tiles: [tile], terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }] });
+  const services = makeServices(makeProject(sheet));
+  state.selectedTerrainSetId = 'ts1';
+
+  deleteTile(services, 'sheet1', 's1');
+  assert.equal(sheet.terrainSets.length, 0, 'the now-empty terrain set is pruned');
+  assert.equal(state.selectedTerrainSetId, null);
+
+  services.history.undo();
+  assert.equal(sheet.terrainSets.length, 1);
+  assert.equal(state.selectedTerrainSetId, 'ts1');
 });
 
 test('setTileLayer, renameTile, setTileTags each round-trip through undo', () => {
@@ -194,6 +217,24 @@ test('addGrid creates a grid+tiles and undo removes them; deleteGrid reverses it
   assert.equal(sheet.tiles.length, 2);
 });
 
+test('deleteGrid restores selectedTileId/selectedTerrainSetId on undo when it clears them', () => {
+  resetLegacy();
+  const sheet = makeSheet({ terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }] });
+  const services = makeServices(makeProject(sheet));
+  const { grid, tiles } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 1, rows: 1 });
+  tiles[0].terrainSetId = 'ts1';
+  state.selectedTileId = tiles[0].id;
+  state.selectedTerrainSetId = 'ts1';
+
+  deleteGrid(services, 'sheet1', grid.id);
+  assert.equal(state.selectedTileId, null);
+  assert.equal(state.selectedTerrainSetId, null, 'terrain set was pruned since its only tile was deleted with the grid');
+
+  services.history.undo();
+  assert.equal(state.selectedTileId, tiles[0].id);
+  assert.equal(state.selectedTerrainSetId, 'ts1');
+});
+
 test('moveGrid offsets every owned tile via relayout, and undoes', () => {
   resetLegacy();
   const sheet = makeSheet();
@@ -250,11 +291,14 @@ test('growTileIntoGrid converts a standalone tile into a 1-cell grid and selects
   assert.equal(sheet.tiles.length, 2);
   const grid = sheet.tileGrids[0];
 
+  state.selectedTileId = 'some-other-id'; // simulate a prior selection unrelated to this grid
   resizeGridAxis(services, 'sheet1', grid.id, 'cols', 'end', 1);
   assert.equal(sheet.tileGrids.length, 0, 'collapses back to a single standalone tile');
   assert.equal(sheet.tiles.length, 1);
+  assert.notEqual(state.selectedTileId, 'some-other-id', 'collapse selects the survivor tile');
 
   services.history.undo();
   assert.equal(sheet.tileGrids.length, 1);
   assert.equal(sheet.tiles.length, 2);
+  assert.equal(state.selectedTileId, 'some-other-id', 'undo restores whatever was selected before the collapse');
 });

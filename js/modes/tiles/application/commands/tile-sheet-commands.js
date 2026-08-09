@@ -107,14 +107,16 @@ export function resizeTile(services, sheetId, tileId, before, after) {
 
 export function createTile(services, sheetId, rect) {
   const id = newId('ti');
+  let created = null;
   runCommand(services, sheetId, 'add tile',
     sheet => {
       if (!findTile(sheet, id)) {
-        sheet.tiles.push({
+        created ??= {
           id, x: rect.x, y: rect.y, w: rect.w, h: rect.h, name: undefined, gridId: null,
           gridCol: undefined, gridRow: undefined, neighbors: undefined, terrainSetId: undefined,
           blobIndex: undefined, layer: undefined, tags: undefined,
-        });
+        };
+        sheet.tiles.push(created);
       }
       state.selectedTileId = id;
     },
@@ -133,13 +135,15 @@ export function deleteTile(services, sheetId, tileId) {
   const tile = findTile(sheet, tileId);
   if (!tile || tile.gridId != null) return;
   const wasSelected = state.selectedTileId === tileId;
+  const beforeSelectedTerrainSetId = state.selectedTerrainSetId;
   const candidateTerrainSetId = tile.terrainSetId ?? null;
   const beforeTiles = sheet.tiles.slice();
   const beforeSets = sheet.terrainSets.slice();
   sheet.tiles = sheet.tiles.filter(t => t !== tile);
   scrubTileReferences(sheet, tile.id);
   const prunedIds = candidateTerrainSetId != null ? pruneEmptyTerrainSets(sheet, [candidateTerrainSetId]) : [];
-  if (prunedIds.includes(state.selectedTerrainSetId)) state.selectedTerrainSetId = null;
+  const terrainSetCleared = prunedIds.includes(state.selectedTerrainSetId);
+  if (terrainSetCleared) state.selectedTerrainSetId = null;
   if (state.selectedTileId === tileId) state.selectedTileId = null;
   const afterTiles = sheet.tiles.slice();
   const afterSets = sheet.terrainSets.slice();
@@ -148,11 +152,13 @@ export function deleteTile(services, sheetId, tileId) {
       sheet.tiles = afterTiles.slice();
       sheet.terrainSets = afterSets.slice();
       if (state.selectedTileId === tileId) state.selectedTileId = null;
+      if (terrainSetCleared) state.selectedTerrainSetId = null;
     },
     sheet => {
       sheet.tiles = beforeTiles.slice();
       sheet.terrainSets = beforeSets.slice();
       if (wasSelected) state.selectedTileId = tileId;
+      if (terrainSetCleared) state.selectedTerrainSetId = beforeSelectedTerrainSetId;
     });
   emit('selection');
 }
