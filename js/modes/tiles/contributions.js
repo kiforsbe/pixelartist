@@ -1,6 +1,6 @@
 import {
   registerTileTool, bindTileTool, drawTileChrome,
-} from './tile-editor-controller.js';
+} from './presentation/tile-tool-presenter.js';
 import { registerAutotilePaintTool, bindAutotilePaintTool } from './autotile-paint-controller.js';
 import { mountTilePanel } from './tile-panel.js';
 import { mountAutotilesPanel } from './autotiles-panel.js';
