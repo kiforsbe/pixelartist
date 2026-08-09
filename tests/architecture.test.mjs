@@ -61,7 +61,7 @@ test('shared preview delegates rendering to mode providers', async () => {
 test('mode canvas controllers do not own contribution panels', async () => {
   for (const file of [
     join(root, 'js/modes/sprites/presentation/frame-tool-presenter.js'),
-    join(root, 'js/modes/tiles/tile-editor-controller.js'),
+    join(root, 'js/modes/tiles/presentation/tile-tool-presenter.js'),
     join(root, 'js/modes/tiles/autotile-paint-controller.js'),
   ]) {
     const source = await readFile(file, 'utf8');
@@ -73,7 +73,7 @@ test('mode pointer controllers do not import contextual panels or terrain UI', a
   const spriteController = await readFile(join(root, 'js/modes/sprites/presentation/frame-tool-presenter.js'), 'utf8');
   assert.doesNotMatch(spriteController, /frames?-panel/);
 
-  const tileController = await readFile(join(root, 'js/modes/tiles/tile-editor-controller.js'), 'utf8');
+  const tileController = await readFile(join(root, 'js/modes/tiles/presentation/tile-tool-presenter.js'), 'utf8');
   assert.doesNotMatch(tileController, /(?:tile-panel|autotiles-panel|tile-layers-panel|terrain-set-controller|tile-tags-field)/);
 });
 

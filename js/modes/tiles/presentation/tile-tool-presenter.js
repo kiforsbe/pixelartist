@@ -20,7 +20,7 @@ function dispatch(id, args) { return getEditorHost().registries.commands.execute
 
 // Not a project-mutating command (no undo entry) -- pure UI navigation state
 // on the legacy `state` object. Shared by this file's double-click handler
-// and presentation/tile-panel.js's Edit button.
+// and the Tiles properties panel's Edit button.
 export function openTileEditor(tileId) {
   state.editingTileId = tileId;
   state.view = 'tile';
