@@ -2,6 +2,8 @@
 // data it needs as explicit parameters (no legacy `state`, no CanvasView, no
 // module-level singletons), so it unit-tests with plain object literals.
 
+export { rectBetween } from '../../../core/rect.js';
+
 export function snapValue(value, options) {
   if (!options?.snap) return value;
   const g = Math.max(1, options.gridSize);
@@ -10,17 +12,6 @@ export function snapValue(value, options) {
 
 export function snapPoint(x, y, options) {
   return { x: snapValue(x, options), y: snapValue(y, options) };
-}
-
-// Normalizes two points into a rect. `inclusive` treats both points as pixel
-// indices (create-drag, matches the select-tool marquee convention: w =
-// |dx|+1); non-inclusive treats them as rect EDGE coordinates (resize, since
-// frame corners already live in that space: f.x, f.x+f.w, ...).
-export function rectBetween(ax, ay, bx, by, inclusive) {
-  const x0 = Math.min(ax, bx), x1 = Math.max(ax, bx);
-  const y0 = Math.min(ay, by), y1 = Math.max(ay, by);
-  if (inclusive) return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-  return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
 }
 
 export function snapRect(rect, options) {

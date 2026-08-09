@@ -2,9 +2,10 @@
 import { flattenSheet, effectiveDuration, refreshMapBounds, DEFAULT_MAP_BOUNDS } from '../../../core/model.js';
 import { findSheet, snap, selectedTile, selectedTerrain, selectedSprite, itemSize, terrainResolution, MAP_ORIGIN } from '../application/map-geometry.js';
 import { mapBrushState as asset } from '../application/map-brush-state.js';
+import { createRasterCache } from '../../../components/canvas/raster-cache.js';
 
 let playing = false, playStarted = 0;
-let flatCache = new Map();
+let rasterCaches = new Map(); // sheet.id -> RasterCache
 let mapPreviewCanvas = null;
 
 export function focusMapCanvas(view) {
@@ -21,18 +22,18 @@ export function focusMapCanvas(view) {
   requestAnimationFrame(center);
 }
 
+// `project` is unused directly -- cache invalidation is driven by the
+// explicit clearMapRasterCache() call on the 'project' event (see
+// map-panel.js), not by comparing project identity here. Kept as a
+// parameter so call sites read the same as before.
 export function flatCanvas(sheet, project) {
   if (!sheet) return null;
-  const cached = flatCache.get(sheet.id);
-  if (cached?.width === sheet.width && cached?.height === sheet.height && cached.gen === project) return cached.canvas;
-  const bmp = flattenSheet(sheet);
-  const canvas = document.createElement('canvas'); canvas.width = bmp.width; canvas.height = bmp.height;
-  canvas.getContext('2d').putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
-  flatCache.set(sheet.id, { canvas, width: sheet.width, height: sheet.height, gen: project });
-  return canvas;
+  let cache = rasterCaches.get(sheet.id);
+  if (!cache) { cache = createRasterCache(); rasterCaches.set(sheet.id, cache); }
+  return cache.getCanvas(sheet, flattenSheet);
 }
 
-export function clearMapRasterCache() { flatCache.clear(); }
+export function clearMapRasterCache() { rasterCaches.clear(); }
 export function isMapPlaying() { return playing; }
 export function toggleMapPlayback(onChange) {
   playing = !playing;

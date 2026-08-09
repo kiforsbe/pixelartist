@@ -2,6 +2,7 @@ import { addFrame, removeFrame } from '../../../../core/model.js';
 import { sliceGrid } from '../../../../core/slicing.js';
 import { blitRegion } from '../../../../core/pixels.js';
 import { emit, markDirty } from '../../../../app/state.js';
+import { runEntityCommand } from '../../../../host/command-helpers.js';
 import { stripLayersOf, buildMovePatches } from '../frame-pixel-motion.js';
 
 export function findSpriteSheet(project, sheetId) {
@@ -12,16 +13,10 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
-// Every history step re-enters projects.mutate() so the host store gets a
-// fresh transaction + dirty flag on do AND undo; markDirty() keeps the legacy
-// title-bar/unsaved-changes guard in sync until Phase 4 unifies them.
+// markDirty() keeps the legacy title-bar/unsaved-changes guard in sync with
+// every do/undo until Phase 4 unifies the two state stores.
 export function runSheetCommand(services, sheetId, label, apply, revert) {
-  const command = {
-    label,
-    do: () => services.projects.mutate(label, project => apply(findSpriteSheet(project, sheetId), project)),
-    undo: () => services.projects.mutate(label, project => revert(findSpriteSheet(project, sheetId), project)),
-  };
-  services.history.execute(command);
+  runEntityCommand(services, label, project => findSpriteSheet(project, sheetId), apply, revert);
   markDirty();
 }
 

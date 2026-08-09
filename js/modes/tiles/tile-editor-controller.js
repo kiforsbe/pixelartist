@@ -3,19 +3,16 @@
 import { state, on, emit, activeSheet } from '../../app/state.js';
 import { registerTool } from '../../ui/tools.js';
 import { gridCellRect, ownedTiles } from '../../core/tilegrids.js';
+import { rectBetween } from '../../core/rect.js';
 import { HANDLES_CORNER, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../core/resizeAnchor.js';
+import { isTypingTarget } from '../../components/dom-utils.js';
+import { bindDragCancelGuard } from '../../components/canvas/drag-cancel-guard.js';
 import { drawRectDims, drawChainDims } from '../../ui/dimlabels.js';
 import {
   commitSwapTile, commitMoveTile, commitMoveStandaloneTile, commitResizeTile,
   commitCreateTile, deleteTile, commitMoveGrid, commitGrowTileIntoGrid,
   commitResizeGridAxis, openTileEditor,
 } from './tile-sheet-commands.js';
-
-function isTypingTarget(element) {
-  if (!element) return false;
-  if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.isContentEditable) return true;
-  return !!element.closest?.('dialog[open]');
-}
 
 // ------------------------------------------------------------- geometry
 
@@ -25,18 +22,6 @@ function tileAt(sheet, x, y) {
     if (x >= t.x && y >= t.y && x < t.x + t.w && y < t.y + t.h) return t;
   }
   return null;
-}
-
-// Inclusive rect (create-drag: both points are pixel indices, w = |dx|+1)
-// vs. non-inclusive (resize: points are rect EDGE coords). Duplicated from
-// frames.js's private helper of the same name/shape — small enough, and
-// this codebase already duplicates isTypingTarget the same way across
-// tileeditor.js/tilemode.js/frames.js.
-function rectBetween(ax, ay, bx, by, inclusive) {
-  const x0 = Math.min(ax, bx), x1 = Math.max(ax, bx);
-  const y0 = Math.min(ay, by), y1 = Math.max(ay, by);
-  if (inclusive) return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
-  return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
 }
 
 const HANDLE_SCREEN_PX = 6;
@@ -537,6 +522,10 @@ export function bindTileTool(view) {
     drawTileToolGhost(ctx, view);
   };
 
-  on('project', () => { if (drag) { drag = null; lastClick = null; view.requestRender(); } });
-  on('tool', () => { if (state.tool !== 'tiletool' && drag) { drag = null; view.requestRender(); } });
+  bindDragCancelGuard(on, {
+    isToolActive: () => state.tool === 'tiletool',
+    hasDrag: () => !!drag,
+    cancel: () => { drag = null; lastClick = null; },
+    requestRender: () => view.requestRender(),
+  });
 }

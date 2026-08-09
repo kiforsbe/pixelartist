@@ -20,6 +20,8 @@ import { copyRegion } from '../../../core/pixels.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { advancePlayback } from '../application/timeline-playback.js';
 import { setPreviewBitmap } from '../../../ui/previewpanel.js';
+import { createRasterCache } from '../../../components/canvas/raster-cache.js';
+import { mountReactivePanel } from '../../../components/panel-mount.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly -- this file lives under presentation/, and
@@ -196,13 +198,11 @@ export function mountTimeline(el) {
   // render() (triggered by project/history/view/selection) and reused by the
   // rAF tick loop / scrub clicks that happen between full renders, so playback
   // doesn't re-flatten the whole sheet every frame.
-  let flatSheet = null;
-  let flatBmp = null;
+  const flatCache = createRasterCache();
   function getFlat(sheet) {
-    if (flatSheet !== sheet || !flatBmp) { flatBmp = flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id); flatSheet = sheet; }
-    return flatBmp;
+    return flatCache.getBitmap(sheet, s => flattenSheetLayers(currentContextLayers(), s.width, s.height, state.floating, s.id));
   }
-  function invalidateFlat() { flatSheet = null; flatBmp = null; }
+  function invalidateFlat() { flatCache.invalidate(); }
 
   function currentSelection() {
     const sheet = activeSheet();
@@ -520,19 +520,5 @@ export function mountTimeline(el) {
     renderPreview();
   }
 
-  let renderQueued = false;
-  function scheduleRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    queueMicrotask(() => { renderQueued = false; render(); });
-  }
-
-  const subscriptions = [
-    on('project', scheduleRender),
-    on('history', scheduleRender),
-    on('view', scheduleRender),
-    on('selection', scheduleRender),
-  ];
-  render();
-  return { dispose() { stopPlaying(); subscriptions.forEach(dispose => dispose()); } };
+  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render, { onDispose: stopPlaying });
 }

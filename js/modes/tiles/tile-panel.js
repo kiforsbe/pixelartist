@@ -11,6 +11,7 @@ import {
   openTileEditor, commitDetachTile, commitDeleteGrid,
 } from './tile-sheet-commands.js';
 import { buildTagsField } from './tile-tags-field.js';
+import { mountReactivePanel } from '../../components/panel-mount.js';
 
 function sizeField(labelText, value, onCommit) {
   const label = document.createElement('label');
@@ -179,31 +180,11 @@ export function mountTilePanel(element) {
     selectionRow.append(nameField, fields, buildTagsField(tile), actions);
   }
 
-  let renderQueued = false;
-  function scheduleRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    queueMicrotask(() => {
-      renderQueued = false;
-      render();
-    });
-  }
-
   function syncSelection() {
     const sheet = activeSheet();
     if (sheet) syncSelectedTerrainSetFromTile(sheet.tiles.find(tile => tile.id === state.selectedTileId));
   }
 
-  const subscriptions = [
-    on('project', scheduleRender),
-    on('history', scheduleRender),
-    on('view', scheduleRender),
-    on('selection', () => {
-      syncSelection();
-      scheduleRender();
-    }),
-  ];
   syncSelection();
-  render();
-  return { dispose() { subscriptions.forEach(dispose => dispose()); } };
+  return mountReactivePanel(on, ['project', 'history', 'view', ['selection', syncSelection]], render);
 }

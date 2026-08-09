@@ -1,17 +1,17 @@
-import { createMapLayer, refreshMapBounds } from '../../../../core/model.js';
-import { markDirty } from '../../../../app/state.js';
+import { createMapLayer } from '../../../../core/model.js';
+import { runCommand } from './map-paint-commands.js';
 
 function findMap(project, mapId) { return project.maps.find(m => m.id === mapId) ?? null; }
 
 export function addMapLayer(services, mapId, type) {
-  let createdId = null;
-  services.projects.mutate('add map layer', project => {
-    const map = findMap(project, mapId);
-    const layer = createMapLayer(map, { type });
-    createdId = layer.id;
-  });
-  markDirty();
-  return createdId;
+  let created = null;
+  runCommand(services, mapId, 'add map layer',
+    map => {
+      if (!created) created = createMapLayer(map, { type });
+      else if (!map.layers.includes(created)) map.layers.push(created);
+    },
+    map => { map.layers = map.layers.filter(l => l !== created); });
+  return created?.id ?? null;
 }
 
 export function deleteMapLayer(services, mapId, layerId) {
@@ -19,19 +19,7 @@ export function deleteMapLayer(services, mapId, layerId) {
   const layer = map?.layers.find(l => l.id === layerId);
   if (!layer) return;
   const index = map.layers.indexOf(layer);
-  const command = {
-    label: 'delete map layer',
-    do: () => services.projects.mutate('delete map layer', project => {
-      const map = findMap(project, mapId);
-      map.layers = map.layers.filter(l => l.id !== layerId);
-      refreshMapBounds(project, map);
-    }),
-    undo: () => services.projects.mutate('delete map layer', project => {
-      const map = findMap(project, mapId);
-      if (!map.layers.some(l => l.id === layerId)) map.layers.splice(index, 0, layer);
-      refreshMapBounds(project, map);
-    }),
-  };
-  services.history.execute(command);
-  markDirty();
+  runCommand(services, mapId, 'delete map layer',
+    map => { map.layers = map.layers.filter(l => l.id !== layerId); },
+    map => { if (!map.layers.some(l => l.id === layerId)) map.layers.splice(index, 0, layer); });
 }

@@ -3,25 +3,15 @@ import { findSheet, terrainAt, terrainResolution } from '../map-geometry.js';
 import { refreshMapBounds } from '../../../../core/model.js';
 import { newId } from '../../../../core/palettes.js';
 import { markDirty } from '../../../../app/state.js';
+import { runEntityCommand } from '../../../../host/command-helpers.js';
 
 function findMap(project, mapId) { return project.maps.find(m => m.id === mapId) ?? null; }
 function findLayer(map, layerId) { return map?.layers.find(l => l.id === layerId) ?? null; }
 
-function runCommand(services, mapId, label, apply, revert) {
-  const command = {
-    label,
-    do: () => services.projects.mutate(label, project => {
-      const map = findMap(project, mapId);
-      apply(map, project);
-      refreshMapBounds(project, map);
-    }),
-    undo: () => services.projects.mutate(label, project => {
-      const map = findMap(project, mapId);
-      revert(map, project);
-      refreshMapBounds(project, map);
-    }),
-  };
-  services.history.execute(command);
+export function runCommand(services, mapId, label, apply, revert) {
+  runEntityCommand(services, label, project => findMap(project, mapId), apply, revert, {
+    after: (project, map) => refreshMapBounds(project, map),
+  });
   markDirty();
 }
 

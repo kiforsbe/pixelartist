@@ -10,6 +10,7 @@
 // so it must run after bindDrawing() has installed its own.
 import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { isTypingTarget } from '../../../components/dom-utils.js';
 import { registerTool } from '../../../ui/tools.js';
 import { isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../../core/resizeAnchor.js';
 import { segmentOfFrame, segmentMembers } from '../../../core/strips.js';
@@ -24,6 +25,7 @@ import {
 } from '../application/frame-chrome-geometry.js';
 import { paintFrameToolGhost, paintStripChrome } from './frame-overlay-renderer.js';
 import { buildSliceDialog, setSlicePreviewView, slicePreviewOptions } from './slice-grid-dialog.js';
+import { bindDragCancelGuard } from '../../../components/canvas/drag-cancel-guard.js';
 
 // In-progress drag state (create/move/resize/stripresize), module-scoped like
 // ui/tools.js's `selection`/`stroke` — there is only ever one frame-tool drag
@@ -37,12 +39,6 @@ let hover = null;
 // palette can render its options row); the button just defers to whatever's
 // there.
 let sliceDialogApi = null;
-
-function isTypingTarget(el) {
-  if (!el) return false;
-  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
-  return !!(el.closest && el.closest('dialog[open]'));
-}
 
 // Sheet-space -> screen-space projector handed to the Application layer's
 // chrome geometry, so it never has to know about CanvasView.
@@ -380,6 +376,10 @@ export function bindFrameTool(view) {
     drawFrameToolGhost(ctx, view);
   };
 
-  on('project', () => { if (drag) { drag = null; view.requestRender(); } });
-  on('tool', () => { if (state.tool !== 'frametool' && drag) { drag = null; view.requestRender(); } });
+  bindDragCancelGuard(on, {
+    isToolActive: () => state.tool === 'frametool',
+    hasDrag: () => !!drag,
+    cancel: () => { drag = null; },
+    requestRender: () => view.requestRender(),
+  });
 }

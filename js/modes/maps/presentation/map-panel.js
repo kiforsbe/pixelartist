@@ -2,6 +2,7 @@ import { state, on, emit, activeMap, markDirty } from '../../../app/state.js';
 import {
   clearMapRasterCache, isMapPlaying, toggleMapPlayback,
 } from './map-renderer.js';
+import { mountReactivePanel } from '../../../components/panel-mount.js';
 
 export function mountMapPanel(container) {
   const render = () => {
@@ -32,8 +33,5 @@ export function mountMapPanel(container) {
     }
     container.append(snapRow);
   };
-  on('view', render);
-  on('project', () => { clearMapRasterCache(); render(); });
-  on('selection', render);
-  render();
+  return mountReactivePanel(on, ['view', ['project', clearMapRasterCache], 'selection'], render);
 }

@@ -1,5 +1,6 @@
 import { state, on, activeSheet } from '../../app/state.js';
 import { commitAddTileLayer, commitRemoveTileLayer } from './tile-layer-commands.js';
+import { mountReactivePanel } from '../../components/panel-mount.js';
 
 export function mountTileLayersPanel(element, { showVisibility = false, showOpacity = false } = {}) {
   const panel = document.createElement('div');
@@ -79,22 +80,5 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
     }
   }
 
-  let renderQueued = false;
-  function scheduleRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    queueMicrotask(() => {
-      renderQueued = false;
-      render();
-    });
-  }
-
-  const subscriptions = [
-    on('project', scheduleRender),
-    on('history', scheduleRender),
-    on('view', scheduleRender),
-    on('selection', scheduleRender),
-  ];
-  render();
-  return { dispose() { subscriptions.forEach(dispose => dispose()); } };
+  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render);
 }

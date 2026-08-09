@@ -11,6 +11,8 @@ import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../core/
 import { decodePng } from '../app/pngcodec.js';
 import { exportPngBlob } from '../app/io.js';
 
+export { isTypingTarget } from '../components/dom-utils.js';
+
 const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, setSelection, getTargetRect}
 let floatCtx = null;     // { viewKind, targetRect } frozen at float creation (frame-editor confinement)
 let clipboard = null;    // { srcRect, layers: [{layerId, buffer}], allLayers }
@@ -28,12 +30,6 @@ export function currentEditRegion() {
 function activeView() { return views.get(state.view) ?? null; }
 function sheetById(id) { return state.project?.sheets.find(s => s.id === id) ?? null; }
 function layerIn(sheet, layerId) { return findLayer(sheet.layerTree, layerId); }
-
-export function isTypingTarget(el) {
-  if (!el) return false;
-  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
-  return !!(el.closest && el.closest('dialog[open]'));
-}
 
 function rectIntersect(a, b) {
   const x0 = Math.max(a.x, b.x), y0 = Math.max(a.y, b.y);

@@ -6,18 +6,11 @@ import { commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } fr
 import { defineAction, runAction, bindAction } from '../../app/actions.js';
 import { markDefaultAction } from '../../ui/dialogs.js';
 import { syncLegacyStateToHost } from './legacy-state-adapter.js';
+import { isTypingTarget } from '../../components/dom-utils.js';
 
 export function mountDocumentController({ editorHost, workbench }) {
   function isCancel(e) {
     return e?.name === 'AbortError' || e?.message === 'cancelled';
-  }
-  
-  // Same gating pattern used by tools.js/frames.js/frameeditor.js/tileeditor.js:
-  // ignore shortcuts while the user is typing in a field or a dialog is open.
-  function isTypingTarget(el) {
-    if (!el) return false;
-    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
-    return !!(el.closest && el.closest('dialog[open]'));
   }
   function sheetDocument(sheet) {
     return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };

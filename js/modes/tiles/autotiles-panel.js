@@ -3,6 +3,7 @@ import { invalidateTileRaster } from './tile-raster-service.js';
 import {
   buildTilePickerDialog, renderTerrainSetEditor, syncSelectedTerrainSetFromTile,
 } from './terrain-set-controller.js';
+import { mountReactivePanel } from '../../components/panel-mount.js';
 
 export function mountAutotilesPanel(element) {
   const panel = document.createElement('div');
@@ -43,36 +44,12 @@ export function mountAutotilesPanel(element) {
     if (sheet) syncSelectedTerrainSetFromTile(sheet.tiles.find(tile => tile.id === state.selectedTileId));
   }
 
-  let renderQueued = false;
-  function scheduleRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    queueMicrotask(() => {
-      renderQueued = false;
-      render();
-    });
-  }
-
-  const subscriptions = [
-    on('project', () => {
-      invalidateTileRaster();
-      scheduleRender();
-    }),
-    on('history', () => {
-      invalidateTileRaster();
-      scheduleRender();
-    }),
-    on('pixels', () => {
-      invalidateTileRaster();
-      scheduleRender();
-    }),
-    on('view', scheduleRender),
-    on('selection', () => {
-      syncSelection();
-      scheduleRender();
-    }),
-  ];
   syncSelection();
-  render();
-  return { dispose() { subscriptions.forEach(dispose => dispose()); } };
+  return mountReactivePanel(on, [
+    ['project', invalidateTileRaster],
+    ['history', invalidateTileRaster],
+    ['pixels', invalidateTileRaster],
+    'view',
+    ['selection', syncSelection],
+  ], render);
 }

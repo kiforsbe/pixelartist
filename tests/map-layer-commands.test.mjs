@@ -32,6 +32,22 @@ test('addMapLayer creates a layer of the given type and marks the project dirty'
   assert.equal(state.dirty, true);
 });
 
+test('addMapLayer is undoable, and redo restores the same layer object at the same id', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  const layerId = addMapLayer(services, 'map1', 'sprite');
+  assert.equal(services.history.canUndo(), true);
+
+  services.history.undo();
+  assert.equal(project.maps[0].layers.length, 1);
+
+  services.history.redo();
+  assert.equal(project.maps[0].layers.length, 2);
+  assert.equal(project.maps[0].layers[1].id, layerId);
+});
+
 test('deleteMapLayer removes a layer and is undoable', () => {
   const project = makeProject();
   const services = makeServices(project);

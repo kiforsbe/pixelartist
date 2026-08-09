@@ -14,12 +14,8 @@ import { defineAction } from '../../app/actions.js';
 import { getEditorHost } from '../../host/runtime.js';
 import { PanelManager } from '../../host/workbench/panel-manager.js';
 import { findWorkbenchRegions } from '../../host/workbench/layout.js';
+import { isTypingTarget } from '../../components/dom-utils.js';
 
-function isTypingTarget(el) {
-  if (!el) return false;
-  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
-  return !!(el.closest && el.closest('dialog[open]'));
-}
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }

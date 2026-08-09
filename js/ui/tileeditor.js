@@ -45,12 +45,8 @@ import { flattenSheet } from '../core/model.js';
 import { getPreset, setSlot, resolveNeighborGrid } from '../core/neighbors.js';
 import { terrainNeighborPreviewCells } from '../core/blob47templates.js';
 import { markDefaultAction } from './dialogs.js';
-
-function isTypingTarget(el) {
-  if (!el) return false;
-  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
-  return !!(el.closest && el.closest('dialog[open]'));
-}
+import { isTypingTarget } from '../components/dom-utils.js';
+import { createRasterCache } from '../components/canvas/raster-cache.js';
 
 // Mirrors neighbors.js's private DIR_BY_DELTA table (not exported there) —
 // used here only to figure out which slot a clicked cell belongs to.
@@ -150,38 +146,13 @@ export function mountTileEditor(hostEl) {
 
   bindDrawing(view, getTargetRect, mapPoint, 'tile');
 
-  // ---- flattened-sheet cache (scratch canvas), mirrors frameeditor.js's
-  // pattern. Invalidated on 'pixels'/'project'/'history'; rebuilt lazily on
-  // next paint — this is what makes the neighbor preview live while drawing.
-  let flatSheetRef = null;
-  let flatBitmap = null;
-  let flatDirty = true;
-  function invalidateFlat() { flatDirty = true; }
-  function getFlatBitmap(sheet) {
-    if (flatDirty || flatSheetRef !== sheet || !flatBitmap) {
-      flatBitmap = flattenSheet(sheet, state.floating);
-      flatSheetRef = sheet;
-      flatDirty = false;
-    }
-    return flatBitmap;
-  }
-  let flatCanvas = null;
-  let flatCanvasSrc = null;
-  function getFlatCanvas(sheet) {
-    const bmp = getFlatBitmap(sheet);
-    if (flatCanvasSrc !== bmp) {
-      if (!flatCanvas || flatCanvas.width !== bmp.width || flatCanvas.height !== bmp.height) {
-        flatCanvas = document.createElement('canvas');
-        flatCanvas.width = bmp.width;
-        flatCanvas.height = bmp.height;
-      }
-      const c = flatCanvas.getContext('2d');
-      c.imageSmoothingEnabled = false;
-      c.putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
-      flatCanvasSrc = bmp;
-    }
-    return flatCanvas;
-  }
+  // ---- flattened-sheet cache (scratch canvas), shared with frameeditor.js's
+  // identical pattern via raster-cache.js. Invalidated on 'pixels'/'project'/
+  // 'history'; rebuilt lazily on next paint — this is what makes the
+  // neighbor preview live while drawing.
+  const flatCache = createRasterCache();
+  function invalidateFlat() { flatCache.invalidate(); }
+  function getFlatCanvas(sheet) { return flatCache.getCanvas(sheet, s => flattenSheet(s, state.floating)); }
 
   // Draws `tile`'s current flattened pixels into the neighbor-grid cell at
   // (dx, dy) (tile units relative to center, 0,0 = center), applying flip

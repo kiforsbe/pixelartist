@@ -8,6 +8,7 @@
 import { state, on, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { buildBaseDurationControl } from '../../../ui/baseDurationControl.js';
+import { mountReactivePanel } from '../../../components/panel-mount.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly -- this file lives under presentation/, and
@@ -100,19 +101,5 @@ export function mountAnimationsPanel(el) {
     durationControl.refresh();
   }
 
-  let renderQueued = false;
-  function scheduleRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    queueMicrotask(() => { renderQueued = false; render(); });
-  }
-
-  const subscriptions = [
-    on('project', scheduleRender),
-    on('history', scheduleRender),
-    on('view', scheduleRender),
-    on('selection', scheduleRender),
-  ];
-  render();
-  return { dispose() { subscriptions.forEach(dispose => dispose()); } };
+  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render);
 }

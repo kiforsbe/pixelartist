@@ -5,6 +5,7 @@ import { segmentsOf } from '../../../core/strips.js';
 import { stripForFrame } from '../../../domain/sprites/strips.js';
 import { frameBounds } from '../../../domain/sprites/frames.js';
 import { stripMembers } from '../application/frame-geometry.js';
+import { mountReactivePanel } from '../../../components/panel-mount.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly — this panel lives under presentation/, and
@@ -171,22 +172,5 @@ export function mountFramesPanel(element) {
     else renderFrameDetail(sheet, frame);
   }
 
-  let renderQueued = false;
-  function scheduleRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    queueMicrotask(() => {
-      renderQueued = false;
-      render();
-    });
-  }
-
-  const subscriptions = [
-    on('project', scheduleRender),
-    on('history', scheduleRender),
-    on('view', scheduleRender),
-    on('selection', scheduleRender),
-  ];
-  render();
-  return { dispose() { subscriptions.forEach(dispose => dispose()); } };
+  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render);
 }

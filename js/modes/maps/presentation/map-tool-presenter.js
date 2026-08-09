@@ -1,7 +1,9 @@
 // js/modes/maps/presentation/map-tool-presenter.js
-import { state, emit, activeMap, markDirty } from '../../../app/state.js';
+import { state, on, emit, activeMap, markDirty } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { registerTool } from '../../../ui/tools.js';
+import { isTypingTarget } from '../../../components/dom-utils.js';
+import { bindDragCancelGuard } from '../../../components/canvas/drag-cancel-guard.js';
 import {
   mapXY, snap, selectedTile, selectedTerrain, selectedSprite, itemSize,
   hitMapItem, brushSpacing, strokeSamples, claimStrokeCell,
@@ -115,8 +117,23 @@ export function bindMapMode(view) {
       if (before.x !== after.x || before.y !== after.y) dispatch('maps.moveItem', { mapId: map.id, layerId: activeLayer.id, itemId: item.id, before, after });
     }
   };
+
+  bindDragCancelGuard(on, {
+    isToolActive: () => state.tool === 'move',
+    hasDrag: () => !!drag,
+    cancel: () => { drag = null; },
+    requestRender: () => view.requestRender(),
+  });
+  bindDragCancelGuard(on, {
+    isToolActive: () => state.tool === 'maptile' || state.tool === 'mapsprite',
+    hasDrag: () => !!brushStroke,
+    cancel: () => { brushStroke = null; },
+    requestRender: () => view.requestRender(),
+  });
+
   document.addEventListener('keydown', e => {
     if (state.mode !== 'maps' || e.key !== 'Delete') return;
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     const map = activeMap(); if (!map) return;
     const selection = currentSelection(map);
     if (!selection.mapItemId) return;

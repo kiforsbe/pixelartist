@@ -41,12 +41,8 @@ import { runAction } from '../../../app/actions.js';
 import { computeOnionGhosts, resolveStepColor, traceOutline } from '../application/onion-skin.js';
 import { computeNeighborFrame } from '../application/frame-navigation.js';
 import { getEditorHost } from '../../../host/runtime.js';
-
-function isTypingTarget(el) {
-  if (!el) return false;
-  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
-  return !!(el.closest && el.closest('dialog[open]'));
-}
+import { isTypingTarget } from '../../../components/dom-utils.js';
+import { createRasterCache } from '../../../components/canvas/raster-cache.js';
 
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
@@ -226,37 +222,13 @@ export function mountFrameEditor(hostEl) {
 
   bindDrawing(view, getTargetRect, mapPoint, 'frame');
 
-  // ---- flattened-sheet cache (scratch canvas), mirrors main.js's pattern.
+  // ---- flattened-sheet cache (scratch canvas), shared via raster-cache.js.
   // Invalidated on 'pixels'/'project'/'history'; rebuilt lazily on next paint.
-  let flatSheetRef = null;
-  let flatBitmap = null;
-  let flatDirty = true;
-  function invalidateFlat() { flatDirty = true; }
-  function getFlatBitmap(sheet) {
-    if (flatDirty || flatSheetRef !== sheet || !flatBitmap) {
-      flatBitmap = flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id);
-      flatSheetRef = sheet;
-      flatDirty = false;
-    }
-    return flatBitmap;
-  }
-  let flatCanvas = null;
-  let flatCanvasSrc = null;
-  function getFlatCanvas(sheet) {
-    const bmp = getFlatBitmap(sheet);
-    if (flatCanvasSrc !== bmp) {
-      if (!flatCanvas || flatCanvas.width !== bmp.width || flatCanvas.height !== bmp.height) {
-        flatCanvas = document.createElement('canvas');
-        flatCanvas.width = bmp.width;
-        flatCanvas.height = bmp.height;
-      }
-      const c = flatCanvas.getContext('2d');
-      c.imageSmoothingEnabled = false;
-      c.putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
-      flatCanvasSrc = bmp;
-    }
-    return flatCanvas;
-  }
+  const flatCache = createRasterCache();
+  function invalidateFlat() { flatCache.invalidate(); }
+  function flattenCurrentSheet(sheet) { return flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id); }
+  function getFlatBitmap(sheet) { return flatCache.getBitmap(sheet, flattenCurrentSheet); }
+  function getFlatCanvas(sheet) { return flatCache.getCanvas(sheet, flattenCurrentSheet); }
 
   // ---- ghost scratch cache (onion skin) ----
   // drawGhost() used to allocate + tint a fresh canvas on every call; with up
