@@ -123,9 +123,10 @@ is a pass condition for the whole run, not just the final step.
 26. [A] Drag-reorder two cells in the strip; undo restores original
     order.
 27. [A] Clicking a timeline cell once: scrubs the preview playhead to it,
-    sets `state.selectedFrameId` to its frame (so the Frames panel and the
-    sprite-sheet highlight follow), AND opens the frame editor on that
-    frame directly — no double-click needed.
+    sets the active sheet's selected frame (via SelectionService — check
+    with `getEditorHost().selections.get({ kind: 'sprite-sheet', id })`,
+    so the Frames panel and the sprite-sheet highlight follow), AND opens
+    the frame editor on that frame directly — no double-click needed.
 28. [A] Edit a cell's duration number input; undo restores the prior
     value.
 29. [A] Toggle "Preview Loop"; Play (▶) advances the Preview panel's canvas
@@ -136,9 +137,11 @@ is a pass condition for the whole run, not just the final step.
     (checked via `browser_evaluate`, not visually).
 29b. [A] The Preview panel is general-purpose, not animation-only: with no
     animation selected, selecting/editing a frame (sprites) or a tile
-    (tile mode) shows it there instead — verify by setting
-    `state.selectedFrameId`/`state.selectedTileId` and checking the
-    panel's canvas updates. Its own `−`/`+`/Fit controls (bottom-right
+    (tile mode) shows it there instead — verify by setting the sprite
+    sheet's selected frame via `getEditorHost().selections.set({ frameId },
+    { kind: 'sprite-sheet', id })` (or `state.selectedTileId` for tile
+    mode, still legacy) and checking the panel's canvas updates. Its own
+    `−`/`+`/Fit controls (bottom-right
     overlay on the canvas) and mouse wheel step zoom through the same
     table as the main canvas (`js/core/zoom.js`); Fit is the default and
     snaps to contain the content, `−`/`+`/wheel switch to a manual step
@@ -170,7 +173,8 @@ is a pass condition for the whole run, not just the final step.
     Selecting something with no owning animation (a plain layer/group, a
     standalone frame, or empty canvas space) clears the animation selection
     to "(none)" in all three rather than leaving a stale one selected
-    (verify via `state.selectedAnimationId`, not just visually).
+    (verify via `getEditorHost().selections.get({ kind: 'sprite-sheet', id
+    }).animationId`, not just visually).
 
 ## 7. Frame editor
 
@@ -572,8 +576,9 @@ is a pass condition for the whole run, not just the final step.
     above each frame boundary and "✂" split call-outs below each interior
     boundary; hovering a part highlights it; clicking "+" inserts a blank
     frame there (pixel-carrying tail shift), one undo step. Chrome only
-    ever appears for the segment containing `state.selectedFrameId` —
-    a non-selected strip shows no chrome until a member of it is clicked.
+    ever appears for the segment containing the active sheet's selected
+    frame (per SelectionService) — a non-selected strip shows no chrome
+    until a member of it is clicked.
 91. [A] Clicking "✂" between two frames of a segment adds a break (a
     dashed separator appears once the two halves are no longer touching);
     one undo step.

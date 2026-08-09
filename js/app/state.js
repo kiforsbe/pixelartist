@@ -19,11 +19,13 @@ export const state = {
   mode: 'sprites',            // 'sprites' | 'tiles' | 'maps'
   view: 'sheet',              // 'sheet' | 'frame' | 'tile'  (focused editors)
   activeSheetId: null,        // per current mode
+  // activeLayerId is written only by tests (see activeLayer()'s null-host
+  // fallback below) -- production code goes through SelectionService
+  // exclusively once a host is configured.
   activeLayerId: null,
   tool: 'pencil',
   brushSize: 1,
   primary: [0, 0, 0, 255], secondary: [255, 255, 255, 255],
-  selectedFrameId: null, selectedAnimationId: null,
   selectedTileId: null,       // tile tool selection (tile mode)
   selectedTerrainSetId: null, // which terrain set's slot editor is open in the panel
   activeMapId: null,
