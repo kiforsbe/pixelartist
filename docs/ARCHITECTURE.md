@@ -244,8 +244,7 @@ plus mode-specific controllers.
 
 **Tiles mode** (`js/modes/tiles/`) — this is the mode the autotiles panel
 belongs to. It has fully migrated to the Application/Presentation split
-(see the Sprites/Maps note below), except for two deliberate exceptions:
-the legacy `js/ui/tileeditor.js` absorption planned for sub-phase 3d, and
+(see the Sprites/Maps note below), except for one deliberate exception:
 `terrain-preset-art.js` (below), which by design sits outside both layers:
 
 - `contributions.js` registers: a preview provider (`preview.js`); one
@@ -257,7 +256,7 @@ the legacy `js/ui/tileeditor.js` absorption planned for sub-phase 3d, and
   `#panel-autotiles` (`presentation/terrain-set-panel.js`), `tiles.layers` →
   `#panel-tilelayers` (`presentation/tile-layers-panel.js`); two views —
   `tiles.sheet` (shared canvas) and `tiles.tile` (per-tile zoomed editor,
-  `ui/tileeditor.js`).
+  `presentation/tile-editor-presenter.js`).
 - `application/commands/tile-sheet-commands.js` (299 lines) and
   `tile-layer-commands.js` (32 lines) — Command Handlers, resolve their
   sheet by id each call (no captured object references across undo/redo),
@@ -305,11 +304,14 @@ the legacy `js/ui/tileeditor.js` absorption planned for sub-phase 3d, and
   `assignSlot`/`applyLayoutPreset` via the shared
   `terrain-slot-snapshot.js` helper below.
 - `application/commands/terrain-slot-snapshot.js` — `captureTerrainSlotState`/
-  `restoreTerrainSlotState`, shared by `terrain-set-commands.js` and
-  `autotile-paint-commands.js`'s `resolveAutotilePaintConflict`. Captures
-  every terrain set's `slots` plus every tile's back-reference fields, since
-  `assignSlot` can mutate a *different* terrain set's slots when the tile
-  being assigned already belongs to one.
+  `restoreTerrainSlotState`, shared by `terrain-set-commands.js`,
+  `autotile-paint-commands.js`'s `resolveAutotilePaintConflict`, and (since
+  3d) `tile-sheet-commands.js`'s `deleteTile`/`deleteGrid`/`resizeGridAxis`.
+  Captures every terrain set's `slots` plus every tile's back-reference
+  fields (`terrainSetId`/`blobIndex`/`duplicateOf`/`neighbors`) — both
+  `assignSlot` and `core/model.js`'s `scrubTileReferences` can mutate a
+  terrain set or tile other than the one a caller is directly acting on, so
+  the snapshot always covers the whole sheet.
 - `application/geometry/terrain-set-geometry.js` — pure view-arrangement
   helpers (`blobStaircaseGroups`, `gridFromRawTemplate`,
   `slotGroupsForViewMode`) for the terrain-set editor's cosmetic slot
@@ -338,6 +340,19 @@ the legacy `js/ui/tileeditor.js` absorption planned for sub-phase 3d, and
   test pins the exact set of non-application/presentation mode files
   allowed to import `core/commands.js` to this one file — not an
   accidental layering gap.
+- `application/commands/tile-editor-commands.js` — one resolve-by-id
+  Command Handler, `setTileNeighborSlot`, for the tile editor's manual
+  neighbor-slot dialog. Registered by id in `contributions.js`.
+- `application/geometry/tile-editor-geometry.js` — pure offset/hit-testing
+  math for the tile editor's neighbor grid (`computeOffset`,
+  `mapEditorPoint`, `cellAt`, `insideCenter`, `dirForCell`), no DOM or state
+  access.
+- `presentation/tile-editor-presenter.js` — the tile editor's Humble
+  Object: a second `CanvasView` showing a zoomed, single-tile view with a
+  live neighbor preview (redrawn from the same flattened-sheet cache
+  pattern as `tile-raster-cache.js`) and the neighbor-slot config dialog.
+  Dispatches Commands by id; never imports `application/commands/` directly
+  (test-enforced).
 
 **Sprites mode** follows the same Application/Presentation split (see
 `js/modes/sprites/application/` and `js/modes/sprites/presentation/`):

@@ -84,6 +84,7 @@ test('mode command modules do not access browser UI globals', async () => {
     join(root, 'js/modes/tiles/application/commands/terrain-slot-snapshot.js'),
     join(root, 'js/modes/tiles/application/commands/tile-layer-commands.js'),
     join(root, 'js/modes/tiles/application/commands/autotile-paint-commands.js'),
+    join(root, 'js/modes/tiles/application/commands/tile-editor-commands.js'),
   ]) {
     const source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
