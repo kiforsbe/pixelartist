@@ -110,9 +110,10 @@ test('createTile adds a tile, selects it, and undo removes + deselects; redo res
   assert.equal(sheet.tiles.length, 1);
   assert.equal(state.selectedTileId, sheet.tiles[0].id);
   const created = sheet.tiles[0];
-  // Simulate an external reference holder (e.g. terrain-set-commands.js's
-  // commitAssignSlot, which captures a tile object by reference and mutates
-  // it directly) so a fresh-object regression on redo would be caught here.
+  // Simulate an external reference holder (a caller that captured a tile
+  // object by reference and mutates it directly, the way this codebase's
+  // pre-migration command files used to) so a fresh-object regression on
+  // redo would be caught here.
   created.terrainSetId = 'ts1';
 
   services.history.undo();

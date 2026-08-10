@@ -6,7 +6,7 @@ import {
   terrainSetLayerField,
   terrainSetDeleteButton,
   syncSelectedTerrainSetFromTile,
-} from '../terrain-set-controller.js';
+} from './terrain-set-editor.js';
 import { openTileEditor } from './tile-tool-presenter.js';
 import { buildTagsField } from './tile-tags-field.js';
 import { mountReactivePanel } from '../../../components/panel-mount.js';

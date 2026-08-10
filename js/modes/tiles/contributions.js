@@ -3,7 +3,7 @@ import {
 } from './presentation/tile-tool-presenter.js';
 import { registerAutotilePaintTool, bindAutotilePaintTool } from './presentation/autotile-paint-presenter.js';
 import { mountTilePanel } from './presentation/tile-panel.js';
-import { mountAutotilesPanel } from './autotiles-panel.js';
+import { mountAutotilesPanel } from './presentation/terrain-set-panel.js';
 import { mountTileLayersPanel } from './presentation/tile-layers-panel.js';
 import { mountTileEditor } from '../../ui/tileeditor.js';
 import { renderTilePreview } from './preview.js';
@@ -17,6 +17,10 @@ import { addTileLayer, removeTileLayer } from './application/commands/tile-layer
 import {
   prepareTerrainPaint, paintTerrainStroke, resolveAutotilePaintConflict,
 } from './application/commands/autotile-paint-commands.js';
+import {
+  createTerrainSet, deleteTerrainSet, renameTerrainSet, assignTerrainSlot,
+  clearTerrainSlot, setTerrainSymmetry, applyTerrainLayoutPreset, setTerrainSetLayer,
+} from './application/commands/terrain-set-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
 
@@ -44,6 +48,14 @@ function registerTileCommands(api) {
   api.commands.register({ id: 'tiles.prepareTerrainPaint', when: whenTiles, execute: (_c, { sheetId, terrainSetId }) => prepareTerrainPaint(services(), sheetId, terrainSetId) });
   api.commands.register({ id: 'tiles.paintTerrainStroke', when: whenTiles, execute: (_c, { sheetId, terrainSetId, strokeMasks }) => paintTerrainStroke(services(), sheetId, terrainSetId, strokeMasks) });
   api.commands.register({ id: 'tiles.resolveAutotilePaintConflict', when: whenTiles, execute: (_c, { sheetId, terrainSetId, tileId, blobIndex }) => resolveAutotilePaintConflict(services(), sheetId, terrainSetId, tileId, blobIndex) });
+  api.commands.register({ id: 'tiles.createTerrainSet', when: whenTiles, execute: (_c, { sheetId, opts }) => createTerrainSet(services(), sheetId, opts) });
+  api.commands.register({ id: 'tiles.deleteTerrainSet', when: whenTiles, execute: (_c, { sheetId, terrainSetId }) => deleteTerrainSet(services(), sheetId, terrainSetId) });
+  api.commands.register({ id: 'tiles.renameTerrainSet', when: whenTiles, execute: (_c, { sheetId, terrainSetId, name }) => renameTerrainSet(services(), sheetId, terrainSetId, name) });
+  api.commands.register({ id: 'tiles.assignTerrainSlot', when: whenTiles, execute: (_c, { sheetId, terrainSetId, blobIndex, tileId }) => assignTerrainSlot(services(), sheetId, terrainSetId, blobIndex, tileId) });
+  api.commands.register({ id: 'tiles.clearTerrainSlot', when: whenTiles, execute: (_c, { sheetId, terrainSetId, blobIndex, tileId }) => clearTerrainSlot(services(), sheetId, terrainSetId, blobIndex, tileId) });
+  api.commands.register({ id: 'tiles.setTerrainSymmetry', when: whenTiles, execute: (_c, { sheetId, terrainSetId, key, value }) => setTerrainSymmetry(services(), sheetId, terrainSetId, key, value) });
+  api.commands.register({ id: 'tiles.applyTerrainLayoutPreset', when: whenTiles, execute: (_c, { sheetId, terrainSetId, preset, sourceTileIds, cols }) => applyTerrainLayoutPreset(services(), sheetId, terrainSetId, preset, sourceTileIds, cols) });
+  api.commands.register({ id: 'tiles.setTerrainSetLayer', when: whenTiles, execute: (_c, { sheetId, terrainSetId, layer }) => setTerrainSetLayer(services(), sheetId, terrainSetId, layer) });
 }
 
 export function registerTileContributions(api) {

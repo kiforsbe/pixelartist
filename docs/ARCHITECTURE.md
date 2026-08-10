@@ -243,10 +243,9 @@ remove}`), `contributions.js` (registers previews/tools/panels/views),
 plus mode-specific controllers.
 
 **Tiles mode** (`js/modes/tiles/`) — this is the mode the autotiles panel
-belongs to. It has partially migrated to the Application/Presentation split
-(see the Sprites/Maps note below): the tile sheet/grid tool and the Blob-47
-autotile painter have moved; the terrain-set editor has not yet (planned
-for sub-phase 3c):
+belongs to. It has fully migrated to the Application/Presentation split
+(see the Sprites/Maps note below), except for the legacy `js/ui/tileeditor.js`
+absorption planned for sub-phase 3d:
 
 - `contributions.js` registers: a preview provider (`preview.js`); one
   tools contribution whose `createController` wires
@@ -254,7 +253,7 @@ for sub-phase 3c):
   `{decorateOverlay}` to layer tile chrome onto the shared canvas; three
   panels gated `when: keys => keys.modeId === 'tiles'` — `tiles.tiles` →
   `#panel-context` (`presentation/tile-panel.js`), `tiles.autotiles` →
-  `#panel-autotiles` (`autotiles-panel.js`), `tiles.layers` →
+  `#panel-autotiles` (`presentation/terrain-set-panel.js`), `tiles.layers` →
   `#panel-tilelayers` (`presentation/tile-layers-panel.js`); two views —
   `tiles.sheet` (shared canvas) and `tiles.tile` (per-tile zoomed editor,
   `ui/tileeditor.js`).
@@ -281,8 +280,8 @@ for sub-phase 3c):
   for the Blob-47 terrain painter: `prepareTerrainPaint`,
   `paintTerrainStroke`, `resolveAutotilePaintConflict`. Resolve-by-id,
   registered by id in `contributions.js`. Wraps `core/terrainsets.js`'s
-  pure `assignSlot` directly — no dependency on the still-legacy
-  `terrain-set-commands.js`.
+  pure `assignSlot` directly, via the shared `terrain-slot-snapshot.js`
+  helper also used by `terrain-set-commands.js`.
 - `application/geometry/autotile-geometry.js` — pure paint-grid/cell/mask
   helpers (`terrainPaintGrid`, `paintTileAt`, `paintCellAt`,
   `strokePaintMask`, `planTerrainPaintCells`, `describeMask`), no DOM or
@@ -296,23 +295,35 @@ for sub-phase 3c):
 - `presentation/blob47-coverage-dialog.js` — the standalone Blob-47
   coverage-review `<dialog>`, split out of the painter so the Presenter
   doesn't also own an unrelated `document.createElement` side-panel.
-- `terrain-set-controller.js` (545 lines) — terrain-set slot editor UI
-  (tile picker dialog, layout presets), used by `autotiles-panel.js`.
-  **Not yet migrated** — pending Phase 3c.
-- `autotiles-panel.js` (48 lines) — a thin **panel mount function**: builds
-  the tile-picker dialog + editor container, delegates rendering to
-  `terrain-set-controller.js`, subscribes to legacy
+- `application/commands/terrain-set-commands.js` — Command Handlers for
+  terrain-set CRUD and slot assignment: `createTerrainSet`,
+  `deleteTerrainSet`, `renameTerrainSet`, `assignTerrainSlot`,
+  `clearTerrainSlot`, `setTerrainSymmetry`, `applyTerrainLayoutPreset`,
+  `setTerrainSetLayer`. Resolve-by-id, registered by id in
+  `contributions.js`. Wraps `core/terrainsets.js`'s pure
+  `assignSlot`/`applyLayoutPreset` via the shared
+  `terrain-slot-snapshot.js` helper below.
+- `application/commands/terrain-slot-snapshot.js` — `captureTerrainSlotState`/
+  `restoreTerrainSlotState`, shared by `terrain-set-commands.js` and
+  `autotile-paint-commands.js`'s `resolveAutotilePaintConflict`. Captures
+  every terrain set's `slots` plus every tile's back-reference fields, since
+  `assignSlot` can mutate a *different* terrain set's slots when the tile
+  being assigned already belongs to one.
+- `application/geometry/terrain-set-geometry.js` — pure view-arrangement
+  helpers (`blobStaircaseGroups`, `gridFromRawTemplate`,
+  `slotGroupsForViewMode`) for the terrain-set editor's cosmetic slot
+  layout, no DOM or state access.
+- `presentation/terrain-set-editor.js` — the terrain-set editor's dialogs
+  (add-terrain-set, tile-picker) and `renderTerrainSetEditor`, plus the
+  Name/Layer/Delete field helpers shared with `tile-panel.js`. Dispatches
+  Commands by id; never imports `application/commands/` directly
+  (test-enforced).
+- `presentation/terrain-set-panel.js` — a thin **panel mount function**:
+  builds the tile-picker dialog + editor container, delegates rendering to
+  `terrain-set-editor.js`, subscribes to legacy
   `on('project'|'history'|'pixels'|'view'|'selection', ...)` events to
   schedule `queueMicrotask`-debounced re-renders, and syncs
   `state.selectedTerrainSetId` from `state.selectedTileId`.
-- `terrain-set-commands.js` (123 lines) — terrain-set command handlers.
-  **Not yet migrated** — still uses the old object-capture command style
-  (closures that memoize created/mutated objects directly, rather than
-  resolve-by-id), pending Phase 3c. Its call sites (e.g.
-  `terrain-set-controller.js`) capture tile objects returned from
-  `tile-sheet-commands.js` by reference and mutate them directly, so the
-  migrated tile commands must preserve object identity across undo/redo
-  for those references to stay valid.
 
 **Sprites mode** follows the same Application/Presentation split (see
 `js/modes/sprites/application/` and `js/modes/sprites/presentation/`):
@@ -530,7 +541,7 @@ path from the old flat `layers[]` to `layerTree`).
 No component framework — plain DOM manipulation, organized as **mount
 functions**: `mountXxxPanel(element)` builds DOM once, wires `on(event,
 fn)` subscriptions for legacy-state-driven re-renders (often
-microtask-debounced, as in `autotiles-panel.js`), and returns
+microtask-debounced, as in `presentation/terrain-set-panel.js`), and returns
 `{dispose()}`. Uniform across `js/ui/*.js` and `js/modes/*/*.js`.
 
 The one shared primitive is `js/components/panels/panel-frame.js`'s

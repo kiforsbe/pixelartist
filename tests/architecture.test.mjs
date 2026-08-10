@@ -74,13 +74,14 @@ test('mode pointer controllers do not import contextual panels or terrain UI', a
   assert.doesNotMatch(spriteController, /frames?-panel/);
 
   const tileController = await readFile(join(root, 'js/modes/tiles/presentation/tile-tool-presenter.js'), 'utf8');
-  assert.doesNotMatch(tileController, /(?:tile-panel|autotiles-panel|tile-layers-panel|terrain-set-controller|tile-tags-field)/);
+  assert.doesNotMatch(tileController, /(?:tile-panel|terrain-set-panel|tile-layers-panel|terrain-set-editor|tile-tags-field)/);
 });
 
 test('mode command modules do not access browser UI globals', async () => {
   for (const file of [
     join(root, 'js/modes/tiles/application/commands/tile-sheet-commands.js'),
-    join(root, 'js/modes/tiles/terrain-set-commands.js'),
+    join(root, 'js/modes/tiles/application/commands/terrain-set-commands.js'),
+    join(root, 'js/modes/tiles/application/commands/terrain-slot-snapshot.js'),
     join(root, 'js/modes/tiles/application/commands/tile-layer-commands.js'),
     join(root, 'js/modes/tiles/application/commands/autotile-paint-commands.js'),
   ]) {
