@@ -1,5 +1,6 @@
 // js/modes/tiles/application/commands/autotile-paint-commands.js
 import { runCommand } from './tile-sheet-commands.js';
+import { captureTerrainSlotState, restoreTerrainSlotState } from './terrain-slot-snapshot.js';
 import { newId } from '../../../../core/palettes.js';
 import { assignSlot } from '../../../../core/terrainsets.js';
 import { blobIndexFromPaintMask } from '../../../../core/blob47.js';
@@ -92,30 +93,12 @@ export function resolveAutotilePaintConflict(services, sheetId, terrainSetId, ti
   const tile = sheet.tiles.find(t => t.id === tileId);
   if (!terrainSet || !tile) return;
 
-  const beforeSlots = { ...terrainSet.slots };
-  const beforeTiles = sheet.tiles.map(t => ({ id: t.id, terrainSetId: t.terrainSetId, blobIndex: t.blobIndex, duplicateOf: t.duplicateOf }));
-
+  const before = captureTerrainSlotState(sheet);
   assignSlot(sheet, terrainSet, blobIndex, tile);
   tile.duplicateOf = undefined;
-
-  const afterSlots = { ...terrainSet.slots };
-  const afterTiles = sheet.tiles.map(t => ({ id: t.id, terrainSetId: t.terrainSetId, blobIndex: t.blobIndex, duplicateOf: t.duplicateOf }));
+  const after = captureTerrainSlotState(sheet);
 
   runCommand(services, sheetId, 'replace autotile terrain art',
-    sheet => {
-      const terrainSet = sheet.terrainSets.find(ts => ts.id === terrainSetId);
-      terrainSet.slots = { ...afterSlots };
-      for (const entry of afterTiles) {
-        const t = sheet.tiles.find(x => x.id === entry.id);
-        if (t) Object.assign(t, { terrainSetId: entry.terrainSetId, blobIndex: entry.blobIndex, duplicateOf: entry.duplicateOf });
-      }
-    },
-    sheet => {
-      const terrainSet = sheet.terrainSets.find(ts => ts.id === terrainSetId);
-      terrainSet.slots = { ...beforeSlots };
-      for (const entry of beforeTiles) {
-        const t = sheet.tiles.find(x => x.id === entry.id);
-        if (t) Object.assign(t, { terrainSetId: entry.terrainSetId, blobIndex: entry.blobIndex, duplicateOf: entry.duplicateOf });
-      }
-    });
+    sheet => restoreTerrainSlotState(sheet, after),
+    sheet => restoreTerrainSlotState(sheet, before));
 }
