@@ -72,12 +72,12 @@ export function paintTerrainStroke(services, sheetId, terrainSetId, strokeMasks)
       sheet => {
         const terrainSet = sheet.terrainSets.find(ts => ts.id === terrainSetId);
         terrainSet.slots = { ...afterSlots };
-        for (const [id, next] of afterTiles) Object.assign(sheet.tiles.find(t => t.id === id), next);
+        for (const [id, next] of afterTiles) { const t = sheet.tiles.find(x => x.id === id); if (t) Object.assign(t, next); }
       },
       sheet => {
         const terrainSet = sheet.terrainSets.find(ts => ts.id === terrainSetId);
         terrainSet.slots = { ...beforeSlots };
-        for (const [id, prev] of beforeTiles) Object.assign(sheet.tiles.find(t => t.id === id), prev);
+        for (const [id, prev] of beforeTiles) { const t = sheet.tiles.find(x => x.id === id); if (t) Object.assign(t, prev); }
       });
   }
   return { conflicts };

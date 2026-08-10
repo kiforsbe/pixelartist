@@ -5,7 +5,7 @@ import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
 import { createBitmap } from '../js/core/pixels.js';
-import { blobIndexFromPaintMask } from '../js/core/blob47.js';
+import { blobIndexFromPaintMask, NEIGHBOR_BITS } from '../js/core/blob47.js';
 import {
   prepareTerrainPaint, paintTerrainStroke, resolveAutotilePaintConflict,
 } from '../js/modes/tiles/application/commands/autotile-paint-commands.js';
@@ -136,4 +136,108 @@ test('resolveAutotilePaintConflict reassigns a slot from its previous occupant a
   assert.equal(a.blobIndex, isolatedBlobIndex);
   assert.equal(b.terrainSetId, undefined);
   assert.equal(b.duplicateOf, 'a', 'undo restores the original duplicateOf marker');
+});
+
+test('REDO: prepareTerrainPaint round-trips and preserves tile identity', () => {
+  const terrainSet = makeTerrainSet();
+  const sheet = makeSheet({ terrainSets: [terrainSet] });
+  const services = makeServices(makeProject(sheet));
+
+  prepareTerrainPaint(services, 'sheet1', 'ts1');
+  const idsAfterDo = sheet.tiles.map(t => t.id);
+  const objsAfterDo = sheet.tiles.slice();
+
+  services.history.undo();
+  assert.equal(sheet.tiles.length, 0);
+  assert.equal(services.history.canRedo(), true);
+
+  services.history.redo();
+  assert.deepEqual(sheet.tiles.map(t => t.id), idsAfterDo, 'redo restores the same tile ids');
+  assert.ok(sheet.tiles.every((t, i) => t === objsAfterDo[i]), 'redo restores the SAME tile object instances');
+});
+
+test('REDO: paintTerrainStroke round-trips slots and tile back-references', () => {
+  const terrainSet = makeTerrainSet();
+  const tile = makeTile({ id: 't1' });
+  const sheet = makeSheet({ tiles: [tile], terrainSets: [terrainSet] });
+  const services = makeServices(makeProject(sheet));
+
+  paintTerrainStroke(services, 'sheet1', 'ts1', new Map([['t1', 0]]));
+  services.history.undo();
+  assert.equal(tile.terrainSetId, undefined);
+
+  services.history.redo();
+  assert.equal(tile.terrainSetId, 'ts1');
+  assert.equal(tile.blobIndex, isolatedBlobIndex);
+  assert.equal(terrainSet.slots[isolatedBlobIndex], 't1');
+});
+
+test('REDO: resolveAutotilePaintConflict round-trips both occupants', () => {
+  const terrainSet = makeTerrainSet({ slots: { [isolatedBlobIndex]: 'a' } });
+  const a = makeTile({ id: 'a', terrainSetId: 'ts1', blobIndex: isolatedBlobIndex });
+  const b = makeTile({ id: 'b', x: 8, duplicateOf: 'a' });
+  const sheet = makeSheet({ tiles: [a, b], terrainSets: [terrainSet] });
+  const services = makeServices(makeProject(sheet));
+
+  resolveAutotilePaintConflict(services, 'sheet1', 'ts1', 'b', isolatedBlobIndex);
+  services.history.undo();
+  assert.equal(terrainSet.slots[isolatedBlobIndex], 'a');
+
+  services.history.redo();
+  assert.equal(terrainSet.slots[isolatedBlobIndex], 'b');
+  assert.equal(b.terrainSetId, 'ts1');
+  assert.equal(b.duplicateOf, undefined);
+  assert.equal(a.terrainSetId, undefined);
+  assert.equal(a.blobIndex, undefined);
+});
+
+test('REDO: full stack prepare -> paint -> resolve, undo x3 then redo x3', () => {
+  const terrainSet = makeTerrainSet();
+  const sheet = makeSheet({ terrainSets: [terrainSet] });
+  const services = makeServices(makeProject(sheet));
+
+  prepareTerrainPaint(services, 'sheet1', 'ts1');
+  const [t0, t1] = sheet.tiles;
+  paintTerrainStroke(services, 'sheet1', 'ts1', new Map([[t0.id, 0]]));
+  const { conflicts } = paintTerrainStroke(services, 'sheet1', 'ts1', new Map([[t1.id, 0]]));
+  assert.equal(conflicts.get(t1.id), isolatedBlobIndex, 'second paint conflicts');
+  resolveAutotilePaintConflict(services, 'sheet1', 'ts1', t1.id, isolatedBlobIndex);
+  const finalSlots = { ...sheet.terrainSets[0].slots };
+  assert.equal(finalSlots[isolatedBlobIndex], t1.id);
+
+  // The conflicted stroke produced no history entry, so 3 undos empty the sheet.
+  services.history.undo();
+  services.history.undo();
+  assert.equal(services.history.canUndo(), true);
+  services.history.undo();
+  assert.equal(sheet.tiles.length, 0, 'all the way back to empty');
+  assert.equal(services.history.canUndo(), false);
+
+  services.history.redo();
+  services.history.redo();
+  services.history.redo();
+  assert.equal(sheet.tiles.length, 2);
+  assert.deepEqual(sheet.terrainSets[0].slots, finalSlots, 'slots identical after full redo');
+  assert.equal(sheet.tiles.find(t => t.id === t1.id).terrainSetId, 'ts1');
+  assert.equal(sheet.tiles.find(t => t.id === t0.id).terrainSetId, undefined);
+});
+
+test('REDO: repeated undo/redo thrash stays stable', () => {
+  const terrainSet = makeTerrainSet();
+  const sheet = makeSheet({ terrainSets: [terrainSet] });
+  const services = makeServices(makeProject(sheet));
+
+  prepareTerrainPaint(services, 'sheet1', 'ts1');
+  const t0 = sheet.tiles[0];
+  paintTerrainStroke(services, 'sheet1', 'ts1', new Map([[t0.id, NEIGHBOR_BITS.N]]));
+  const snapshot = () => JSON.stringify({
+    slots: sheet.terrainSets[0].slots,
+    tiles: sheet.tiles.map(t => [t.id, t.terrainSetId, t.blobIndex]),
+  });
+  const before = snapshot();
+  for (let i = 0; i < 5; i++) {
+    services.history.undo(); services.history.undo();
+    services.history.redo(); services.history.redo();
+  }
+  assert.equal(snapshot(), before);
 });
