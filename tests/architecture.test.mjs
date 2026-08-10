@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/(?:[A-Za-z]:)/, value => value.slice(1));
 
@@ -139,4 +139,19 @@ test('presentation-layer mode code dispatches commands by id only, never imports
     assert.doesNotMatch(source, /from\s+['"][^'"]*application[\\/]commands[\\/]/, file);
     assert.doesNotMatch(source, /from\s+['"][^'"]*core[\\/]commands\.js['"]/, file);
   }
+});
+
+test('only the tracked terrain-preset-art.js exception imports core/commands.js from outside application/presentation', async () => {
+  const modeFiles = (await jsFiles(join(root, 'js/modes')))
+    .filter(file => !file.includes(`${sep}application${sep}`) && !file.includes(`${sep}presentation${sep}`));
+
+  const offenders = [];
+  for (const file of modeFiles) {
+    const source = await readFile(file, 'utf8');
+    if (/from\s+['"][^'"]*core[\\/]commands\.js['"]/.test(source)) {
+      offenders.push(relative(root, file).split(sep).join('/'));
+    }
+  }
+
+  assert.deepEqual(offenders, ['js/modes/tiles/terrain-preset-art.js']);
 });

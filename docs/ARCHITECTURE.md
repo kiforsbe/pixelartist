@@ -244,8 +244,9 @@ plus mode-specific controllers.
 
 **Tiles mode** (`js/modes/tiles/`) — this is the mode the autotiles panel
 belongs to. It has fully migrated to the Application/Presentation split
-(see the Sprites/Maps note below), except for the legacy `js/ui/tileeditor.js`
-absorption planned for sub-phase 3d:
+(see the Sprites/Maps note below), except for two deliberate exceptions:
+the legacy `js/ui/tileeditor.js` absorption planned for sub-phase 3d, and
+`terrain-preset-art.js` (below), which by design sits outside both layers:
 
 - `contributions.js` registers: a preview provider (`preview.js`); one
   tools contribution whose `createController` wires
@@ -324,6 +325,19 @@ absorption planned for sub-phase 3d:
   `on('project'|'history'|'pixels'|'view'|'selection', ...)` events to
   schedule `queueMicrotask`-debounced re-renders, and syncs
   `state.selectedTerrainSetId` from `state.selectedTileId`.
+- `terrain-preset-art.js` — **outside both `application/` and
+  `presentation/`**, deliberately. Contains `importPresetArtOntoLayer`,
+  which paints a terrain-set preset's reference art onto the active layer
+  when a new terrain set is created from that preset. Pushes a raw
+  pixel-patch undo entry directly via `core/commands.js`'s `makePixelPatch`
+  (the same still-legacy, cross-mode-shared paint-commit idiom
+  `js/ui/tools.js` uses elsewhere), which is exactly why it can't live in
+  `presentation/`: `tests/architecture.test.mjs`'s presentation-layer scan
+  forbids importing `core/commands.js` from anywhere under `presentation/`.
+  This is now an enforced, tracked exception — a dedicated architecture
+  test pins the exact set of non-application/presentation mode files
+  allowed to import `core/commands.js` to this one file — not an
+  accidental layering gap.
 
 **Sprites mode** follows the same Application/Presentation split (see
 `js/modes/sprites/application/` and `js/modes/sprites/presentation/`):

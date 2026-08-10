@@ -40,6 +40,7 @@ export function deleteTerrainSet(services, sheetId, terrainSetId) {
 export function renameTerrainSet(services, sheetId, terrainSetId, name) {
   const sheet = findSheet(services.projects.project, sheetId);
   const terrainSet = findTerrainSet(sheet, terrainSetId);
+  if (!terrainSet) return;
   const before = terrainSet.name;
   const after = name.trim() || before;
   if (before === after) return;
@@ -91,6 +92,7 @@ export function clearTerrainSlot(services, sheetId, terrainSetId, blobIndex, til
 export function setTerrainSymmetry(services, sheetId, terrainSetId, key, value) {
   const sheet = findSheet(services.projects.project, sheetId);
   const terrainSet = findTerrainSet(sheet, terrainSetId);
+  if (!terrainSet) return;
   if (terrainSet.symmetry[key] === value) return;
   const before = terrainSet.symmetry[key];
   runCommand(services, sheetId, `set terrain symmetry ${key}`,
@@ -116,6 +118,7 @@ export function applyTerrainLayoutPreset(services, sheetId, terrainSetId, preset
 export function setTerrainSetLayer(services, sheetId, terrainSetId, layer) {
   const sheet = findSheet(services.projects.project, sheetId);
   const terrainSet = findTerrainSet(sheet, terrainSetId);
+  if (!terrainSet) return;
   const after = layer || null;
   if (terrainSet.layer === after) return;
   const before = terrainSet.layer;

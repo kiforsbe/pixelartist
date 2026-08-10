@@ -102,6 +102,13 @@ test('renameTerrainSet is a no-op with no history entry for a blank name', () =>
   assert.equal(services.history.canUndo(), false);
 });
 
+test('renameTerrainSet is a silent no-op when the terrainSetId does not resolve', () => {
+  const sheet = makeSheet({ terrainSets: [] });
+  const services = makeServices(makeProject(sheet));
+  assert.doesNotThrow(() => renameTerrainSet(services, 'sheet1', 'nonexistent', 'New Name'));
+  assert.equal(services.history.canUndo(), false);
+});
+
 test('assignTerrainSlot assigns a tile into a slot and undoes/redoes', () => {
   const terrainSet = makeTerrainSet();
   const tile = makeTile({ id: 't1' });
@@ -203,6 +210,13 @@ test('setTerrainSymmetry is a no-op with no history entry when the value is unch
   assert.equal(services.history.canUndo(), false);
 });
 
+test('setTerrainSymmetry is a silent no-op when the terrainSetId does not resolve', () => {
+  const sheet = makeSheet({ terrainSets: [] });
+  const services = makeServices(makeProject(sheet));
+  assert.doesNotThrow(() => setTerrainSymmetry(services, 'sheet1', 'nonexistent', 'flip', true));
+  assert.equal(services.history.canUndo(), false);
+});
+
 test('applyTerrainLayoutPreset assigns slots from a preset and undoes/redoes', () => {
   const terrainSet = makeTerrainSet();
   const a = makeTile({ id: 'a', x: 0, y: 0 });
@@ -242,4 +256,11 @@ test('setTerrainSetLayer sets the layer and undoes/redoes', () => {
 
   services.history.redo();
   assert.equal(terrainSet.layer, 'Terrain');
+});
+
+test('setTerrainSetLayer is a silent no-op when the terrainSetId does not resolve', () => {
+  const sheet = makeSheet({ terrainSets: [] });
+  const services = makeServices(makeProject(sheet));
+  assert.doesNotThrow(() => setTerrainSetLayer(services, 'sheet1', 'nonexistent', 'Terrain'));
+  assert.equal(services.history.canUndo(), false);
 });
