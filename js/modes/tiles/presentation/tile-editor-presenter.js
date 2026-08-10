@@ -1,69 +1,60 @@
+// js/modes/tiles/presentation/tile-editor-presenter.js
+//
 // Tile editor: a focused, zoomed-in view of a single tile with a live
-// neighbor preview driven by a per-tile "neighbor preset" (js/core/neighbors.js).
-// Task 18 — the signature tile feature.
+// neighbor preview driven by a per-tile "neighbor preset" (core/neighbors.js).
 //
-// Architecturally this is frameeditor.js's sibling: a SECOND CanvasView,
-// mounted once at boot into its own absolutely-positioned child of
-// #canvas-host, shown/hidden rather than created/destroyed (CanvasView has
-// no teardown and installs window-level key listeners).
+// Architecturally this is frameeditor.js's sibling (see sprites mode's
+// frame-editor-presenter.js): a SECOND CanvasView, mounted once at boot into
+// its own absolutely-positioned child of #canvas-host, shown/hidden rather
+// than created/destroyed (CanvasView has no teardown and installs
+// window-level key listeners).
 //
-// Coordinate mapping mirrors frameeditor.js's, with the editor's content
-// space being a (2*radius+1) x (2*radius+1) grid of tiles (in tile-sized
-// units) rather than a single frame:
+// Coordinate mapping mirrors frame-editor-presenter.js's, with the editor's
+// content space being a (2*radius+1) x (2*radius+1) grid of tiles (in
+// tile-sized units) rather than a single frame:
 //   - Content size = (2*radius+1)*tileW x (2*radius+1)*tileH. The CENTER
 //     tile (the one actually being edited) occupies editor-local
 //     [radius*tw, radius*tw+tw) x [radius*th, radius*th+th).
 //   - mapPoint(x, y) shifts editor-local pointer coords into sheet-global
-//     layer-bitmap coords: sheetX = x + r.x - radius*tw (r = centerRect(),
-//     the center tile's own rect). getTargetRect() returns r itself, so
-//     tools.js's target clipping (Task 13) guarantees strokes can only ever
-//     affect the center tile's pixels no matter how far a drag strays into
+//     layer-bitmap coords via application/geometry/tile-editor-geometry.js's
+//     pure offset math. getTargetRect() returns the center tile's own rect,
+//     so tools.js's target clipping guarantees strokes can only ever affect
+//     the center tile's pixels no matter how far a drag strays into
 //     neighbor cells.
-//   - view.imageToScreen is overridden the same way frameeditor.js does it:
-//     tools.js's marquee selection is stored in sheet-global coords (because
-//     of mapPoint), so overlays need to map sheet-global -> screen by
-//     inverting the same offset used by mapPoint.
+//   - view.imageToScreen is overridden the same way frame-editor-presenter.js
+//     does it: tools.js's marquee selection is stored in sheet-global coords
+//     (because of mapPoint), so overlays need to map sheet-global -> screen
+//     by inverting the same offset used by mapPoint.
 //
-// Neighbor cells are NOT separately-edited bitmaps — they are the CURRENT
+// Neighbor cells are NOT separately-edited bitmaps -- they are the CURRENT
 // pixels of whichever tile resolveNeighborGrid() resolves each cell to,
 // redrawn from a flattened-sheet scratch cache every paint (same cache
-// pattern as frameeditor.js's getFlatCanvas, invalidated on pixels/project/
-// history), which is what makes the preview live while drawing.
+// pattern as tile-raster-cache.js), which is what makes the preview live
+// while drawing.
 //
 // Slot clicks (configuring what a neighbor cell shows) vs. drawing strokes
 // are routed by geometry alone: a pointerdown INSIDE the center rect starts
-// a normal tool stroke (delegated to bindDrawing's onPointer, wrapped);
-// a pointerdown OUTSIDE the center rect (anywhere else in the content) is a
+// a normal tool stroke (delegated to bindDrawing's onPointer, wrapped); a
+// pointerdown OUTSIDE the center rect (anywhere else in the content) is a
 // candidate slot click, resolved on pointerup only if the up event lands on
-// the same sign-direction cell as the down event (i.e. no drag) — see
-// wrapPointer() below.
+// the same sign-direction cell as the down event (i.e. no drag) -- see
+// wrapped view.onPointer below.
 
-import { state, on, emit, activeSheet, markDirty } from '../app/state.js';
-import { CanvasView } from './canvasview.js';
-import { bindDrawing } from './tools.js';
-import { flattenSheet } from '../core/model.js';
-import { getPreset, setSlot, resolveNeighborGrid } from '../core/neighbors.js';
-import { terrainNeighborPreviewCells } from '../core/blob47templates.js';
-import { markDefaultAction } from './dialogs.js';
-import { isTypingTarget } from '../components/dom-utils.js';
-import { createRasterCache } from '../components/canvas/raster-cache.js';
+import { state, on, emit, activeSheet } from '../../../app/state.js';
+import { getEditorHost } from '../../../host/runtime.js';
+import { CanvasView } from '../../../ui/canvasview.js';
+import { bindDrawing } from '../../../ui/tools.js';
+import { flattenSheet } from '../../../core/model.js';
+import { getPreset, resolveNeighborGrid } from '../../../core/neighbors.js';
+import { terrainNeighborPreviewCells } from '../../../core/blob47templates.js';
+import { markDefaultAction } from '../../../ui/dialogs.js';
+import { isTypingTarget } from '../../../components/dom-utils.js';
+import { createRasterCache } from '../../../components/canvas/raster-cache.js';
+import {
+  dirForCell, DIR_LABELS, computeOffset, mapEditorPoint, cellAt, insideCenter,
+} from '../application/geometry/tile-editor-geometry.js';
 
-// Mirrors neighbors.js's private DIR_BY_DELTA table (not exported there) —
-// used here only to figure out which slot a clicked cell belongs to.
-const DIR_BY_SIGN = {
-  '-1,-1': 'nw', '0,-1': 'n', '1,-1': 'ne',
-  '-1,0': 'w', '1,0': 'e',
-  '-1,1': 'sw', '0,1': 's', '1,1': 'se',
-};
-function dirForCell(dx, dy) {
-  return DIR_BY_SIGN[`${Math.sign(dx)},${Math.sign(dy)}`];
-}
-
-const DIR_LABELS = {
-  nw: 'Northwest', n: 'North', ne: 'Northeast',
-  w: 'West', e: 'East',
-  sw: 'Southwest', s: 'South', se: 'Southeast',
-};
+function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
 
 export function mountTileEditor(hostEl) {
   const container = document.createElement('div');
@@ -121,9 +112,8 @@ export function mountTileEditor(hostEl) {
 
   function offset() {
     const t = currentTile();
-    const r = centerRect();
-    if (!t || !r) return { x: 0, y: 0 };
-    return { x: r.x - radius * t.w, y: r.y - radius * t.h };
+    if (!t) return { x: 0, y: 0 };
+    return computeOffset(t, radius);
   }
 
   // See module comment: overlays (marquee selection) are stored in
@@ -140,16 +130,15 @@ export function mountTileEditor(hostEl) {
   }
 
   function mapPoint(x, y) {
-    const off = offset();
-    return { x: x + off.x, y: y + off.y };
+    return mapEditorPoint(offset(), x, y);
   }
 
   bindDrawing(view, getTargetRect, mapPoint, 'tile');
 
-  // ---- flattened-sheet cache (scratch canvas), shared with frameeditor.js's
-  // identical pattern via raster-cache.js. Invalidated on 'pixels'/'project'/
-  // 'history'; rebuilt lazily on next paint — this is what makes the
-  // neighbor preview live while drawing.
+  // ---- flattened-sheet cache (scratch canvas), shared with
+  // sprites mode's identical pattern via raster-cache.js. Invalidated on
+  // 'pixels'/'project'/'history'; rebuilt lazily on next paint -- this is
+  // what makes the neighbor preview live while drawing.
   const flatCache = createRasterCache();
   function invalidateFlat() { flatCache.invalidate(); }
   function getFlatCanvas(sheet) { return flatCache.getCanvas(sheet, s => flattenSheet(s, state.floating)); }
@@ -159,10 +148,10 @@ export function mountTileEditor(hostEl) {
   // and (for terrain-set symmetry-derived slots) rotation around that
   // cell's own bounds -- same transform order as tilemode.js's
   // tileThumbnailURL, so a slot previews identically here and in the
-  // Autotiles panel. tw/th are the CENTER tile's own size — a
+  // Autotiles panel. tw/th are the CENTER tile's own size -- a
   // differently-sized neighbor's source rect is stretched into it (an
-  // accepted, minor visual quirk for mixed-size neighbors; Phase B's terrain
-  // sets are the real fix, since a terrain set requires uniform tile size).
+  // accepted, minor visual quirk for mixed-size neighbors; terrain sets are
+  // the real fix, since a terrain set requires uniform tile size).
   function drawTileCell(ctx, flatCanvasEl, tile, dx, dy, flipH, flipV, tw, th, rotate = 0) {
     const destX = (dx + radius) * tw;
     const destY = (dy + radius) * th;
@@ -271,46 +260,29 @@ export function mountTileEditor(hostEl) {
     dlg.showModal();
   }
 
-  function commitSlot(tile, dir, slot) {
-    const before = tile.neighbors ? structuredClone(tile.neighbors) : null;
-    state.commands.push({
-      label: 'edit tile neighbor slot',
-      do() { setSlot(tile, dir, slot); },
-      undo() { tile.neighbors = before ? structuredClone(before) : undefined; },
-    });
-    markDirty();
-  }
-
   markDefaultAction(dlg, teOk);
   teCancel.addEventListener('click', () => dlg.close());
   teOk.addEventListener('click', () => {
     const t = currentTile();
-    if (!t || !dialogDir) { dlg.close(); return; }
+    const sheet = activeSheet();
+    if (!t || !sheet || !dialogDir) { dlg.close(); return; }
     const mode = teModeRadios.find(r => r.checked)?.value ?? 'same';
     const tileId = mode === 'tile' ? teTileSelect.value : null;
     const slot = { mode, tileId, flipH: teFlipH.checked, flipV: teFlipV.checked };
-    commitSlot(t, dialogDir, slot);
+    dispatch('tiles.setTileNeighborSlot', { sheetId: sheet.id, tileId: t.id, dir: dialogDir, slot });
     dlg.close();
   });
 
   // ---- pointer routing: drawing (inside center rect) vs. slot click ----
 
-  // Editor-local cell lookup: returns {dx, dy} (tile units, 0,0 excluded —
-  // that's the center) or null when (x, y) is outside the content grid.
-  function cellAt(x, y) {
+  function cellAtPoint(x, y) {
     const t = currentTile();
-    if (!t) return null;
-    if (x < 0 || y < 0 || x >= view.width || y >= view.height) return null;
-    const dx = Math.floor(x / t.w) - radius;
-    const dy = Math.floor(y / t.h) - radius;
-    if (dx === 0 && dy === 0) return null;
-    return { dx, dy };
+    return t ? cellAt(t, radius, view.width, view.height, x, y) : null;
   }
 
-  function insideCenter(x, y) {
+  function insideCenterPoint(x, y) {
     const t = currentTile();
-    if (!t) return false;
-    return x >= radius * t.w && x < radius * t.w + t.w && y >= radius * t.h && y < radius * t.h + t.h;
+    return t ? insideCenter(t, radius, x, y) : false;
   }
 
   const toolPointer = view.onPointer;
@@ -319,13 +291,13 @@ export function mountTileEditor(hostEl) {
 
   view.onPointer = (ev) => {
     if (ev.type === 'down') {
-      if (insideCenter(ev.x, ev.y)) {
+      if (insideCenterPoint(ev.x, ev.y)) {
         drawingActive = true;
         pendingClickDir = null;
         toolPointer(ev);
       } else {
         drawingActive = false;
-        const cell = cellAt(ev.x, ev.y);
+        const cell = cellAtPoint(ev.x, ev.y);
         pendingClickDir = cell ? dirForCell(cell.dx, cell.dy) : null;
       }
       return;
@@ -336,7 +308,7 @@ export function mountTileEditor(hostEl) {
       return;
     }
     if (ev.type === 'up' && pendingClickDir) {
-      const cell = cellAt(ev.x, ev.y);
+      const cell = cellAtPoint(ev.x, ev.y);
       const upDir = cell ? dirForCell(cell.dx, cell.dy) : null;
       if (upDir && upDir === pendingClickDir) openSlotDialog(pendingClickDir);
       pendingClickDir = null;

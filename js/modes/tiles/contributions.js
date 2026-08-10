@@ -5,7 +5,7 @@ import { registerAutotilePaintTool, bindAutotilePaintTool } from './presentation
 import { mountTilePanel } from './presentation/tile-panel.js';
 import { mountAutotilesPanel } from './presentation/terrain-set-panel.js';
 import { mountTileLayersPanel } from './presentation/tile-layers-panel.js';
-import { mountTileEditor } from '../../ui/tileeditor.js';
+import { mountTileEditor } from './presentation/tile-editor-presenter.js';
 import { renderTilePreview } from './preview.js';
 import { getEditorHost } from '../../host/runtime.js';
 import {
