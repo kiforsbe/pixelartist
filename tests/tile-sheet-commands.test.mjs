@@ -303,3 +303,77 @@ test('growTileIntoGrid converts a standalone tile into a 1-cell grid and selects
   assert.equal(sheet.tiles.length, 2);
   assert.equal(state.selectedTileId, 'some-other-id', 'undo restores whatever was selected before the collapse');
 });
+
+test('deleteTile restores a surviving terrain set\'s slots map and other tiles\' neighbor overrides on undo', () => {
+  resetLegacy();
+  const victim = makeTile({ id: 'victim', terrainSetId: 'ts1', blobIndex: 5 });
+  const survivor = makeTile({ id: 'survivor', terrainSetId: 'ts1', blobIndex: 6 });
+  const watcher = makeTile({ id: 'watcher', neighbors: { e: { mode: 'tile', tileId: 'victim', flipH: false, flipV: false } } });
+  const sheet = makeSheet({
+    tiles: [victim, survivor, watcher],
+    terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: { 5: 'victim', 6: 'survivor' }, symmetry: { flip: false, rotate: false } }],
+  });
+  const services = makeServices(makeProject(sheet));
+
+  deleteTile(services, 'sheet1', 'victim');
+  assert.equal(sheet.terrainSets.length, 1, 'terrain set survives -- "survivor" still occupies it');
+  assert.deepEqual(sheet.terrainSets[0].slots, { 6: 'survivor' }, 'the victim\'s slot entry is scrubbed');
+  assert.deepEqual(watcher.neighbors.e, { mode: 'empty', tileId: null, flipH: false, flipV: false }, 'the watching tile\'s manual neighbor override is scrubbed');
+
+  services.history.undo();
+  assert.deepEqual(sheet.terrainSets[0].slots, { 5: 'victim', 6: 'survivor' }, 'undo restores the scrubbed slot entry');
+  assert.deepEqual(watcher.neighbors.e, { mode: 'tile', tileId: 'victim', flipH: false, flipV: false }, 'undo restores the scrubbed neighbor override');
+
+  services.history.redo();
+  assert.deepEqual(sheet.terrainSets[0].slots, { 6: 'survivor' }, 'redo re-applies the scrub');
+});
+
+test('deleteGrid restores a surviving terrain set\'s slots map on undo', () => {
+  resetLegacy();
+  const sheet = makeSheet({
+    terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }],
+  });
+  const services = makeServices(makeProject(sheet));
+  const { grid, tiles } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 1, rows: 1 });
+  const gridTile = tiles[0];
+  gridTile.terrainSetId = 'ts1';
+  gridTile.blobIndex = 3;
+  const outsider = makeTile({ id: 'outsider', terrainSetId: 'ts1', blobIndex: 4 });
+  sheet.tiles.push(outsider);
+  sheet.terrainSets[0].slots = { 3: gridTile.id, 4: 'outsider' };
+
+  deleteGrid(services, 'sheet1', grid.id);
+  assert.equal(sheet.terrainSets.length, 1, 'terrain set survives -- "outsider" still occupies it');
+  assert.deepEqual(sheet.terrainSets[0].slots, { 4: 'outsider' });
+
+  services.history.undo();
+  assert.deepEqual(sheet.terrainSets[0].slots, { 3: gridTile.id, 4: 'outsider' }, 'undo restores the grid tile\'s scrubbed slot entry');
+
+  services.history.redo();
+  assert.deepEqual(sheet.terrainSets[0].slots, { 4: 'outsider' });
+});
+
+test('resizeGridAxis shrink restores a surviving terrain set\'s slots map on undo', () => {
+  resetLegacy();
+  const sheet = makeSheet({
+    terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }],
+  });
+  const services = makeServices(makeProject(sheet));
+  const { grid, tiles } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 3, rows: 1 });
+  const kept = tiles[0];
+  const dropped = tiles[2];
+  kept.terrainSetId = 'ts1'; kept.blobIndex = 2;
+  dropped.terrainSetId = 'ts1'; dropped.blobIndex = 1;
+  sheet.terrainSets[0].slots = { 1: dropped.id, 2: kept.id };
+
+  resizeGridAxis(services, 'sheet1', grid.id, 'cols', 'end', 2);
+  assert.equal(sheet.tiles.length, 2, 'the third column tile is dropped');
+  assert.deepEqual(sheet.terrainSets[0].slots, { 2: kept.id }, 'the dropped tile\'s slot entry is scrubbed');
+
+  services.history.undo();
+  assert.equal(sheet.tiles.length, 3);
+  assert.deepEqual(sheet.terrainSets[0].slots, { 1: dropped.id, 2: kept.id }, 'undo restores the scrubbed slot entry');
+
+  services.history.redo();
+  assert.deepEqual(sheet.terrainSets[0].slots, { 2: kept.id });
+});

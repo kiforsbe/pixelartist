@@ -9,6 +9,7 @@ import {
 } from '../../../../core/tilegrids.js';
 import { newId } from '../../../../core/palettes.js';
 import { pruneEmptyTerrainSets, detachFromTerrainSetIfMismatched } from '../../../../core/terrainsets.js';
+import { captureTerrainSlotState, restoreTerrainSlotState } from './terrain-slot-snapshot.js';
 import { runEntityCommand } from '../../../../host/command-helpers.js';
 
 function findSheet(project, sheetId) { return project.sheets.find(s => s.id === sheetId) ?? null; }
@@ -139,6 +140,7 @@ export function deleteTile(services, sheetId, tileId) {
   const candidateTerrainSetId = tile.terrainSetId ?? null;
   const beforeTiles = sheet.tiles.slice();
   const beforeSets = sheet.terrainSets.slice();
+  const beforeSlotState = captureTerrainSlotState(sheet);
   sheet.tiles = sheet.tiles.filter(t => t !== tile);
   scrubTileReferences(sheet, tile.id);
   const prunedIds = candidateTerrainSetId != null ? pruneEmptyTerrainSets(sheet, [candidateTerrainSetId]) : [];
@@ -147,16 +149,19 @@ export function deleteTile(services, sheetId, tileId) {
   if (state.selectedTileId === tileId) state.selectedTileId = null;
   const afterTiles = sheet.tiles.slice();
   const afterSets = sheet.terrainSets.slice();
+  const afterSlotState = captureTerrainSlotState(sheet);
   runCommand(services, sheetId, 'delete tile',
     sheet => {
       sheet.tiles = afterTiles.slice();
       sheet.terrainSets = afterSets.slice();
+      restoreTerrainSlotState(sheet, afterSlotState);
       if (state.selectedTileId === tileId) state.selectedTileId = null;
       if (terrainSetCleared) state.selectedTerrainSetId = null;
     },
     sheet => {
       sheet.tiles = beforeTiles.slice();
       sheet.terrainSets = beforeSets.slice();
+      restoreTerrainSlotState(sheet, beforeSlotState);
       if (wasSelected) state.selectedTileId = tileId;
       if (terrainSetCleared) state.selectedTerrainSetId = beforeSelectedTerrainSetId;
     });
@@ -191,15 +196,25 @@ export function resizeGridAxis(services, sheetId, gridId, axis, side, count) {
   const grid = findGrid(sheet, gridId);
   const beforeGrids = sheet.tileGrids.slice();
   const beforeTiles = sheet.tiles.slice();
+  const beforeSlotState = captureTerrainSlotState(sheet);
   const beforeSelectedTileId = state.selectedTileId;
   coreResizeGridAxis(sheet, grid, axis, side, count);
   let survivorId = null;
   if (grid.cols === 1 && grid.rows === 1) survivorId = collapseGridToTile(sheet, grid).id;
   const afterGrids = sheet.tileGrids.slice();
   const afterTiles = sheet.tiles.slice();
+  const afterSlotState = captureTerrainSlotState(sheet);
   runCommand(services, sheetId, 'resize grid',
-    sheet => { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); if (survivorId) state.selectedTileId = survivorId; },
-    sheet => { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); if (survivorId) state.selectedTileId = beforeSelectedTileId; });
+    sheet => {
+      sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice();
+      restoreTerrainSlotState(sheet, afterSlotState);
+      if (survivorId) state.selectedTileId = survivorId;
+    },
+    sheet => {
+      sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice();
+      restoreTerrainSlotState(sheet, beforeSlotState);
+      if (survivorId) state.selectedTileId = beforeSelectedTileId;
+    });
   if (survivorId) emit('selection');
 }
 
@@ -222,6 +237,7 @@ export function deleteGrid(services, sheetId, gridId) {
   const beforeGrids = sheet.tileGrids.slice();
   const beforeTiles = sheet.tiles.slice();
   const beforeSets = sheet.terrainSets.slice();
+  const beforeSlotState = captureTerrainSlotState(sheet);
   const beforeSelectedTileId = state.selectedTileId;
   const beforeSelectedTerrainSetId = state.selectedTerrainSetId;
   const candidateTerrainSetIds = [...new Set(ownedTiles(sheet, grid.id).map(t => t.terrainSetId).filter(id => id != null))];
@@ -234,14 +250,17 @@ export function deleteGrid(services, sheetId, gridId) {
   const afterGrids = sheet.tileGrids.slice();
   const afterTiles = sheet.tiles.slice();
   const afterSets = sheet.terrainSets.slice();
+  const afterSlotState = captureTerrainSlotState(sheet);
   runCommand(services, sheetId, 'delete grid',
     sheet => {
       sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); sheet.terrainSets = afterSets.slice();
+      restoreTerrainSlotState(sheet, afterSlotState);
       if (terrainSetCleared) state.selectedTerrainSetId = null;
       if (tileCleared) state.selectedTileId = null;
     },
     sheet => {
       sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); sheet.terrainSets = beforeSets.slice();
+      restoreTerrainSlotState(sheet, beforeSlotState);
       if (terrainSetCleared) state.selectedTerrainSetId = beforeSelectedTerrainSetId;
       if (tileCleared) state.selectedTileId = beforeSelectedTileId;
     });
