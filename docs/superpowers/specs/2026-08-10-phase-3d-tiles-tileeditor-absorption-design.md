@@ -39,24 +39,33 @@ migration series (same reasoning as 3c's `terrain-preset-art.js` boundary).
 
 `deleteTile`, `deleteGrid`, and `resizeGridAxis` in `tile-sheet-commands.js`
 all eventually call `core/model.js`'s `scrubTileReferences`, which mutates
-surviving terrain sets' `slots` maps and clears affected tiles'
-`terrainSetId`/`blobIndex`/`duplicateOf` **in place**. `deleteTile` and
-`deleteGrid` currently snapshot `beforeSets = sheet.terrainSets.slice()`
-before calling `scrubTileReferences` — but `.slice()` is a shallow array
-copy: `beforeSets` and the live `sheet.terrainSets` array contain the exact
-same terrain-set *objects*, so once `scrubTileReferences` mutates a set's
-`.slots` in place, `beforeSets` was never actually protected — undo restores
-an array of the same, already-mutated objects. `resizeGridAxis` doesn't even
-snapshot `terrainSets` at all today, despite its shrink path
+**in place**: surviving terrain sets' `slots` maps, the deleted tile's
+former slot-occupant fields on other tiles (`terrainSetId`/`blobIndex`/
+`duplicateOf`), and — a second, related effect the original 3c review
+finding didn't name — any *other* tile's manual neighbor-slot override
+(`tile.neighbors[dir]`) that pointed at the now-removed tile, which gets
+reset to `{mode:'empty', tileId:null}`. `deleteTile` and `deleteGrid`
+currently snapshot `beforeSets = sheet.terrainSets.slice()` before calling
+`scrubTileReferences` — but `.slice()` is a shallow array copy: `beforeSets`
+and the live `sheet.terrainSets` array contain the exact same terrain-set
+*objects*, so once `scrubTileReferences` mutates a set's `.slots` in place,
+`beforeSets` was never actually protected — undo restores an array of the
+same, already-mutated objects. The same shallow-copy problem applies to
+`beforeTiles = sheet.tiles.slice()`: it doesn't protect a surviving tile's
+`.neighbors` object from being mutated in place either. `resizeGridAxis`
+doesn't even snapshot `terrainSets` at all today, despite its shrink path
 (`core/tilegrids.js`'s `resizeGridAxis`) also calling `scrubTileReferences`
 on every dropped tile.
 
 Fix: replace each function's `terrainSets`-array snapshot with
 `captureTerrainSlotState(sheet)` / `restoreTerrainSlotState(sheet, snapshot)`
-from `js/modes/tiles/application/commands/terrain-slot-snapshot.js` (already
-shipped in 3c, purpose-built for exactly this — it deep-copies each terrain
-set's `slots` object plus every tile's `terrainSetId`/`blobIndex`/
-`duplicateOf`). `resizeGridAxis` gains a snapshot it didn't have before;
+from `js/modes/tiles/application/commands/terrain-slot-snapshot.js` (shipped
+in 3c for `assignSlot`/`applyLayoutPreset`'s analogous wide-blast-radius
+mutations), **widened** in this sub-phase to also capture/restore each
+tile's `.neighbors` (a `structuredClone`, matching the `undefined`-safe
+clone already used for `.neighbors` elsewhere in `tile-sheet-commands.js`),
+since `scrubTileReferences` is a second mutator with the same shape of
+problem. `resizeGridAxis` gains a snapshot it didn't have before;
 `deleteTile`/`deleteGrid` swap their existing (broken) snapshot for the real
 one. No behavior changes outside undo/redo correctness — the array-level
 `sheet.terrainSets = afterSets.slice()`/`beforeSets.slice()` assignments stay
@@ -71,6 +80,8 @@ js/modes/tiles/
     commands/
       tile-sheet-commands.js       — MODIFIED: deleteTile/deleteGrid/
                                        resizeGridAxis use the shared snapshot
+      terrain-slot-snapshot.js     — MODIFIED: capture/restore widened to
+                                       also cover tile.neighbors
       tile-editor-commands.js      — NEW: 1 resolve-by-id Command Handler
     geometry/
       tile-editor-geometry.js      — NEW: pure hit-testing/offset math
@@ -165,7 +176,9 @@ lifecycle):
   '../../../host/runtime.js'`;
   `function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }`
   — verbatim from `tile-tool-presenter.js:19`/`terrain-set-editor.js:20`):
-  `dispatch('tiles.setTileNeighborSlot', [sheet.id, t.id, dialogDir, slot])`.
+  `dispatch('tiles.setTileNeighborSlot', { sheetId: sheet.id, tileId: t.id, dir: dialogDir, slot })`
+  (a single named-keys object, matching every other `dispatch()` call site
+  in this codebase — not a positional array).
 - Pointer routing (`cellAt`/`insideCenter`/`dirForCell` call sites, 296-345)
   — verbatim except calling the geometry module's pure functions with
   explicit tile/radius/content-size args instead of the old closures.
@@ -208,7 +221,9 @@ bug fix: `deleteTile`, `deleteGrid`, and `resizeGridAxis` (shrink path) each
 get an undo-then-assert-slots-map-intact case, reproducing the exact repro
 3c's final review used (delete a tile that's an explicit terrain-set slot
 occupant, undo, assert the slot still lists it and `duplicateOf` is
-preserved).
+preserved) — one of these three also covers the widened `.neighbors` case
+(a surviving tile has a manual neighbor slot pointing at the deleted tile;
+undo must restore that slot, not just leave it `{mode:'empty'}`).
 
 No direct unit tests for `tile-editor-geometry.js`, matching 3a/3b/3c's
 precedent for pure geometry modules — coverage comes indirectly from the
