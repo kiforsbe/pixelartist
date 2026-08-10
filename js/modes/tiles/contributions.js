@@ -21,6 +21,7 @@ import {
   createTerrainSet, deleteTerrainSet, renameTerrainSet, assignTerrainSlot,
   clearTerrainSlot, setTerrainSymmetry, applyTerrainLayoutPreset, setTerrainSetLayer,
 } from './application/commands/terrain-set-commands.js';
+import { setTileNeighborSlot } from './application/commands/tile-editor-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
 
@@ -56,6 +57,7 @@ function registerTileCommands(api) {
   api.commands.register({ id: 'tiles.setTerrainSymmetry', when: whenTiles, execute: (_c, { sheetId, terrainSetId, key, value }) => setTerrainSymmetry(services(), sheetId, terrainSetId, key, value) });
   api.commands.register({ id: 'tiles.applyTerrainLayoutPreset', when: whenTiles, execute: (_c, { sheetId, terrainSetId, preset, sourceTileIds, cols }) => applyTerrainLayoutPreset(services(), sheetId, terrainSetId, preset, sourceTileIds, cols) });
   api.commands.register({ id: 'tiles.setTerrainSetLayer', when: whenTiles, execute: (_c, { sheetId, terrainSetId, layer }) => setTerrainSetLayer(services(), sheetId, terrainSetId, layer) });
+  api.commands.register({ id: 'tiles.setTileNeighborSlot', when: whenTiles, execute: (_c, { sheetId, tileId, dir, slot }) => setTileNeighborSlot(services(), sheetId, tileId, dir, slot) });
 }
 
 export function registerTileContributions(api) {
