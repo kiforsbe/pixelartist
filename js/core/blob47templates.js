@@ -70,7 +70,7 @@ export const BUILTIN_LAYOUT_PRESETS = [
 
 // ---------------------------------------------------------------- neighbor preview
 //
-// The tile editor's live neighbor preview (js/ui/tileeditor.js) needs, for a
+// The tile editor's live neighbor preview (presentation/tile-editor-presenter.js) needs, for a
 // terrain-set tile with a given blobIndex, a PLAUSIBLE blobIndex for each
 // directly-connected neighbor direction -- not just "the same tile again".
 // There's no way to derive that from pure bitmask math alone (a center

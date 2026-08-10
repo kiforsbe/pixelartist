@@ -46,7 +46,7 @@ test('modes never import sibling modes', async () => {
 
 test('shared workbench composes mode registries without concrete mode UI imports', async () => {
   const source = await readFile(join(root, 'js/features/workbench/editor-workbench.js'), 'utf8');
-  assert.doesNotMatch(source, /ui\/(?:frames|tilemode|mapmode|frameeditor|tileeditor)\.js/);
+  assert.doesNotMatch(source, /from\s+['"][^'"]*modes[\\/]/);
   assert.match(source, /registries\.tools\.list/);
   assert.match(source, /new PanelManager/);
   assert.match(source, /registries\.views\.list/);

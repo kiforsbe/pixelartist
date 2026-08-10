@@ -179,8 +179,9 @@ dialog.dlg-scrolls[open] > .dlg-body { overflow-y: auto; flex: 1 1 auto; min-hei
 .row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
 /* Windows-standard dialog button row: right-aligned, affirmative action
    (OK/Create/...) before Cancel -- applied to every dialog's footer row on
-   top of .row, both static (index.html) and dynamically-built (tilemode.js,
-   tileeditor.js, frames.js, panels.js). */
+   top of .row, both static (index.html) and dynamically-built
+   (tile-tool-presenter.js, tile-editor-presenter.js, frames-panel.js,
+   panels.js). */
 .dlg-actions { justify-content: flex-end; margin-top: 10px; }
 .dlg-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 8px; align-items: center; margin-bottom: 10px; }
 /* An element can carry both `.dlg-grid` (sets its own `display`) and the
