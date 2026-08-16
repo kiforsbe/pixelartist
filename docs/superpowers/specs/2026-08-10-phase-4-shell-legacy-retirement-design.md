@@ -17,8 +17,8 @@ import `state.js` despite those modes being nominally "done" — moves onto
 `EditorStore.subscribe()` and host services. `js/app/state.js`,
 `legacy-state-adapter.js`, and `js/app/main.js` are deleted. `js/ui`'s 10
 shared Presentation widgets relocate into the existing `js/components/`
-library. `js/app`'s 8 state-free utility/codec files relocate under
-`js/core`.
+library. `js/app`'s 8 state-free utility/codec files relocate by DDD
+layer.
 
 ## Scope correction vs. the original roadmap
 
@@ -37,12 +37,282 @@ and finishing the mode cleanup the earlier phases left behind, plus a
 
 - No user-facing behavior change — every mode must work identically
   after this phase, same as prior phases.
-- Not a rewrite of `js/core`/`js/domain` (Domain layer, unaffected).
+- Not a rewrite of `js/core`/`js/domain` (Domain layer, unaffected
+  beyond receiving the relocated files described below).
 - Phase 5's `sheet.layers` → `sheet.tileLayerNames` rename stays a
   separate, later, unblocked piece of work.
 - `project.json` save/load format is unaffected — no version bump.
 
-## Target architecture: state field mapping
+---
+
+## Current state (as of 2026-08-10, HEAD `ffb5232`)
+
+This section documents the exact as-is mechanics the rest of this design
+replaces — pulled from source, not summarized from memory, so the plan
+that follows this design can cite it directly.
+
+### `EditorStore`'s actual current shape and API
+
+`js/host/editor-store.js`:
+
+```js
+function createEditorState(initial = {}) {
+  return {
+    project: { model: null, dirty: false, ...initial.project },
+    session: {
+      activeModeId: null, activeDocument: null, activeDocumentByMode: {},
+      activeViewId: null, activeToolId: null, selectionsByDocument: {},
+      ...initial.session,
+    },
+    interaction: { ...initial.interaction },
+    workspace: { focusedSurfaceId: null, ...initial.workspace },
+  };
+}
+```
+
+API surface: `getState()` (returns the live mutable state, no
+cloning/freezing), `transaction(reason, mutate)` (reentrant,
+depth-counted, batches notification to one flush per outermost
+transaction), `setProject(model, {dirty, reason})`, `markDirty(dirty)`,
+`updateSession(patch, reason)` (shallow `Object.assign` into
+`session`), `setSelection(document, selection)`, `getSelection(document)`,
+`subscribe(selector, listener, {equals, signal, fireImmediately})`.
+
+**Sharp edge that matters for the Foundation group:** `setSelection`
+*replaces* the entire per-document selection object
+(`state.session.selectionsByDocument[key] = {...(selection ?? {})}`) —
+it does not merge. Any command handler or presenter that starts writing
+`selectedTileId`/`selectedTerrainSetId`/`editingFrameId`/`editingTileId`
+into this map must read-modify-write (spread the existing entry first),
+or it will silently clobber the `layerId`/`frameId`/`animationId` fields
+`SelectionService` already owns there. `legacy-state-adapter.js` (below)
+already does this correctly today — its pattern is the one to carry
+forward, not `setSelection`'s own replace-only default.
+
+### `legacy-state-adapter.js` — the one-way sync it performs
+
+`js/features/project/legacy-state-adapter.js` (54 lines) — condensed
+below to its control flow and exact semantics; branch bodies are
+described in comments rather than transcribed verbatim, since the
+literal per-mode branching is not itself load-bearing for this design:
+
+```js
+export function syncLegacyStateToHost(host, legacyState) {
+  if (!host) return;
+  const modeId = legacyState.mode;
+  if (host.activeModeId !== modeId && host.registries.modes.get(modeId)) host.activateMode(modeId);
+  if (host.store.getState().project.model !== legacyState.project ||
+      host.store.getState().project.dirty !== !!legacyState.dirty) {
+    host.store.setProject(legacyState.project, { dirty: !!legacyState.dirty, reason: 'legacy-project' });
+  }
+  const reference = modeId === 'maps'
+    ? (legacyState.activeMapId ? { kind: 'map', id: legacyState.activeMapId } : null)
+    : (legacyState.activeSheetId ? { kind: modeId === 'sprites' ? 'sprite-sheet' : 'tile-sheet', id: legacyState.activeSheetId } : null);
+  host.documents.setActive(reference, { modeId, allowMissing: true });
+  host.store.transaction('legacy-session', state => {
+    state.session.activeViewId = /* mapped from legacyState.view */ ...;
+    state.session.activeToolId = legacyState.tool;
+    if (reference && modeId === 'maps') {
+      // first-seen-only seed of layerId/mapItemId — SelectionService owns
+      // writes after that; an unconditional overwrite would clobber them.
+    } else if (reference) {
+      // layerId/frameId/animationId: first-seen-only seed, same reason.
+      // tileId/terrainSetId: refreshed UNCONDITIONALLY every sync, since
+      // those two fields are still legacy-owned (state.selectedTileId /
+      // state.selectedTerrainSetId), not yet SelectionService-authoritative.
+    }
+  });
+  host.contextKeys.update({ modeId, documentKind: reference?.kind,
+    viewId: host.store.getState().session.activeViewId, toolId: legacyState.tool,
+    hasDocument: !!reference });
+}
+```
+
+Four things flow one-way, legacy → host, every time it runs: (1) active
+mode, via `host.activateMode()`; (2) the project model pointer + dirty
+flag; (3) the active document reference, via `host.documents.setActive()`;
+(4) `contextKeys` (used for command `when` clauses). Nothing flows
+host → legacy — this works today only because the fields Command
+Handlers already write through the store (`selectionsByDocument`'s
+`layerId`/`frameId`/`animationId`/`mapItemId`) are fields `state.js`'s
+own `activeLayer()`/`currentContextLayers()` helpers already read via
+`getEditorHost().selections.get(...)` instead of `state.*` when a host
+exists — the split is bridged in that direction inside the domain-helper
+layer, not this adapter.
+
+**Trigger:** wired reactively inside `document-controller.js`
+(`js/features/project/document-controller.js:91-97`):
+
+```js
+const syncEditorHost = () => syncLegacyStateToHost(editorHost, state);
+on('project', syncEditorHost);
+on('view', syncEditorHost);
+on('selection', syncEditorHost);
+on('tool', syncEditorHost);
+on('history', syncEditorHost);
+syncEditorHost();
+```
+
+Not scheduled or polled — it fires synchronously inside the legacy event
+bus's `emit()` dispatch. The whole mechanism disappears the moment
+`document-controller.js` stops emitting/listening on these five legacy
+events, which is exactly what the Shell rewrite group does — but that
+means the Shell group must have a replacement trigger in place for all
+four things this adapter currently drives *before* it can be deleted.
+
+### Bootstrap / import graph, current
+
+Actual entry point is `js/bootstrap.js` (loaded from `index.html`'s only
+`<script type="module">` tag) — **not** `js/app/main.js`, which is a
+lazily dynamic-imported sub-step:
+
+```js
+// js/bootstrap.js
+import { EditorHost } from './host/editor-host.js';
+import { state as legacyState } from './app/state.js';
+// ...platform adapters, 3 modes...
+
+export const editorHost = new EditorHost({
+  historyStack: legacyState.commands,   // <- CommandStack comes FROM state.js
+  preferences: new BrowserPreferences(),
+  platform: { files: new BrowserFileSystem(), autosave: new BrowserAutosave(),
+              clipboard: new BrowserClipboard(), imageCodec: new BrowserImageCodec() },
+});
+editorHost.registerMode(spriteMode);
+editorHost.registerMode(tileMode);
+editorHost.registerMode(mapMode);
+editorHost.start('sprites');
+setEditorHost(editorHost);
+
+import('./app/main.js');   // "compatibility composition root", per its own comment
+```
+
+```js
+// js/app/main.js — the whole file
+const editorHost = getEditorHost();
+const workbench = mountEditorWorkbench();          // features/workbench
+mountFilterController(workbench);                  // features/transforms
+mountProjectController();                           // features/project
+mountDocumentController({ editorHost, workbench }); // features/project
+mountApplicationMenu();                              // features/shell
+mountFileController();                               // features/project
+```
+
+`EditorHost` and all 3 modes are fully constructed and activated *before*
+`state.js`'s module singleton does anything beyond supplying the initial
+`CommandStack` — mode registration doesn't depend on the shell being
+mounted. `tests/architecture.test.mjs` already caps `main.js` at ≤30
+lines, and its own comment ("prevents new code from importing the legacy
+root") signals the intended end-state: `bootstrap.js` absorbs the 6
+`mount*` calls directly and `main.js`/the dynamic-import indirection is
+deleted outright.
+
+### Full list of currently-legacy-coupled files
+
+**Mode files importing `js/app/state.js`** (29 total):
+
+| Mode | Files |
+|---|---|
+| maps (6) | `contributions.js`, `application/commands/map-paint-commands.js`, `presentation/map-assets-panel.js`, `presentation/map-panel.js`, `presentation/map-tool-presenter.js`, `preview.js` |
+| sprites (11) | `application/commands/animation-commands.js`, `application/commands/animation-lifecycle-commands.js`, `application/commands/frame-commands.js`, `application/commands/strip-commands.js`, `presentation/animations-panel.js`, `presentation/frame-editor-presenter.js`, `presentation/frame-tool-presenter.js`, `presentation/frames-panel.js`, `presentation/slice-grid-dialog.js`, `presentation/timeline-presenter.js`, `preview.js` |
+| tiles (12) | `application/commands/tile-sheet-commands.js`, `presentation/autotile-paint-presenter.js`, `presentation/terrain-set-editor.js`, `presentation/terrain-set-panel.js`, `presentation/tile-editor-presenter.js`, `presentation/tile-layers-panel.js`, `presentation/tile-panel.js`, `presentation/tile-raster-cache.js`, `presentation/tile-tags-field.js`, `presentation/tile-tool-presenter.js`, `preview.js`, `terrain-preset-art.js` |
+
+**Files importing `js/ui/*`** (16, shell + modes):
+
+Shell (6): `document-controller.js`, `file-controller.js`,
+`project-controller.js`, `filter-controller.js`, `menu-controller.js`,
+`editor-workbench.js`.
+Modes (10): `maps/presentation/map-tool-presenter.js`;
+`sprites/presentation/{animations-panel,frame-editor-presenter,
+frame-overlay-renderer,frame-tool-presenter,slice-grid-dialog,
+timeline-presenter}.js`; `tiles/presentation/{autotile-paint-presenter,
+terrain-set-editor,tile-editor-presenter,tile-tool-presenter}.js`.
+
+Note some files appear in both lists (e.g. `frame-editor-presenter.js`,
+`tile-tool-presenter.js`) — they need both kinds of cleanup.
+
+---
+
+## Target architecture
+
+### Diagram: data flow, before vs. after
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Legacy as Legacy state.js<br/>(mutable object + on/emit)
+    participant Adapter as legacy-state-adapter.js<br/>(one-way sync)
+    participant Store as EditorStore
+    participant Modern as Modern consumer<br/>(host-aware presenter/panel)
+
+    Note over User,Modern: BEFORE — today
+    User->>Legacy: interaction (shell or partially-migrated mode file)
+    Legacy->>Legacy: mutate state.*, emit('project'|'view'|...)
+    Legacy->>Adapter: on(event) fires syncLegacyStateToHost(host, state)
+    Adapter->>Store: setProject() / documents.setActive() / transaction()
+    Store-->>Modern: subscribe() notifies (only for the fields the adapter forwarded)
+    Note over Legacy,Store: one-way only — Store never writes back to Legacy
+
+    Note over User,Modern: AFTER — Phase 4 target
+    User->>Modern: interaction (any shell or mode file, no legacy left)
+    Modern->>Store: dispatch Command -> Command Handler -> store.transaction()
+    Store-->>Modern: subscribe() notifies every interested consumer directly
+    Note over Legacy,Adapter: both deleted — no intermediate hop, no one-way gap
+```
+
+### Diagram: target class shape
+
+```mermaid
+classDiagram
+    class EditorStore {
+        -state
+        +getState()
+        +transaction(reason, mutate)
+        +subscribe(selector, listener, opts)
+    }
+    class ProjectService {
+        +project
+        +dirty
+        +replace(model, reason)
+        +mutate(reason, fn)
+        +markDirty(dirty)
+    }
+    class DocumentService {
+        +active
+        +setActive(reference, opts)
+    }
+    class SelectionService {
+        +get(document)
+        +set(document, selection)
+    }
+    class HistoryService {
+        -commandStack: CommandStack
+        +execute(id, context, args)
+        +undo()
+        +redo()
+    }
+    class ShellController {
+        <<Presentation>>
+        +mount()
+    }
+    class ModePresenter {
+        <<Presentation>>
+        +mount()
+    }
+
+    EditorStore <.. ProjectService : reads/writes via transaction()
+    EditorStore <.. DocumentService : reads/writes via transaction()
+    EditorStore <.. SelectionService : reads/writes via setSelection()/getSelection()
+    HistoryService --> EditorStore : mutates through Command Handlers
+    ShellController ..> EditorStore : subscribe(selector)
+    ShellController ..> ProjectService : replace()/mutate()
+    ModePresenter ..> EditorStore : subscribe(selector)
+    ModePresenter ..> HistoryService : execute(id, ...) — dispatch only
+
+    note for HistoryService "Constructs its own CommandStack.\nbootstrap.js no longer injects\nlegacyState.commands."
+```
+
+### State field mapping
 
 | Current `state.js` field/helper | Destination |
 |---|---|
@@ -53,7 +323,7 @@ and finishing the mode cleanup the earlier phases left behind, plus a
 | `activeSheetId` / `activeMapId` | Derived from `host.documents.active` |
 | `activeLayerId` | Dropped — production already reads `host.selections`; this was a test-only fallback |
 | `tool` | `EditorStore.session.activeToolId` (already exists) |
-| `selectedTileId`, `selectedTerrainSetId`, `editingFrameId`, `editingTileId` | `EditorStore.session.selectionsByDocument` via `SelectionService` — extends the mechanism that already covers layer/frame/animation selection |
+| `selectedTileId`, `selectedTerrainSetId`, `editingFrameId`, `editingTileId` | `EditorStore.session.selectionsByDocument` via `SelectionService` — extends the mechanism that already covers layer/frame/animation selection; writers must read-modify-write (see the `setSelection` sharp edge above) |
 | `onion` | No new home needed — already an alias into `project.settings.onion`; consumers redirect to read `host.projects.project.settings.onion` directly |
 | `maybeSnapPixels()` | Becomes a plain function taking `(project, bitmap)` — already only reads `project.settings.pixelSnapper*` |
 | `overlays` (`{labels, sequences}`) | New `EditorStore.workspace` field — session-only, unpersisted display toggles |
@@ -63,7 +333,11 @@ and finishing the mode cleanup the earlier phases left behind, plus a
 | `commands` (the `CommandStack`) | Constructed inside `HistoryService`/`EditorHost` itself; `bootstrap.js` no longer hands it a pre-built stack |
 | `on()`/`emit()` bus | Fully retired — every consumer moves to `EditorStore.subscribe(selector, listener)` |
 
-## `js/ui/` → `js/components/` relocation
+---
+
+## File relocation
+
+### `js/ui/` → `js/components/`
 
 `js/components/` already exists (`canvas/`, `panels/`, `dom-utils.js`,
 `panel-mount.js`) — it is the Presentation-layer shared-library location
@@ -83,12 +357,12 @@ directory is created.
 | `dialogs.js` | `components/dialogs.js` | |
 | `menubar.js` | `components/menubar.js` | |
 
-## `js/app/`'s state-free files
+### `js/app/`'s state-free files, by actual DDD layer
 
 8 of 11 files have no coupling to `state.js` or the event bus — pure
-relocation, not rewrite. They split by actual DDD layer rather than
-moving as one block, since one of them does real I/O and doesn't belong
-where the rest do:
+relocation, not rewrite. They split by layer rather than moving as one
+block, since one of them does real I/O and doesn't belong where the rest
+do:
 
 - **`io.js`** does File System Access API calls directly (open/save
   pickers, packed/unpacked project bundle I/O) — that's Infrastructure,
@@ -108,6 +382,30 @@ where the rest do:
   `components/canvas/float-session.js`), so this location must stay
   importable from both `js/platform` and `js/components` — `js/core` is
   the one layer both of those are already allowed to depend on.
+
+### Diagram: relocation map
+
+```mermaid
+graph LR
+    subgraph before["Before"]
+        ui["js/ui/<br/>10 files"]
+        app["js/app/<br/>11 files"]
+    end
+
+    subgraph after["After"]
+        comp["js/components/<br/>(existing, extended)"]
+        core["js/core/export/<br/>js/core/pngcodec.js"]
+        plat["js/platform/browser/<br/>project-io.js"]
+        deleted["deleted:<br/>state.js, main.js,<br/>legacy-state-adapter.js"]
+    end
+
+    ui -->|"canvasview, dimlabels,<br/>overlays, floatsession,<br/>tools(split), panels(split),<br/>previewpanel, dialogs,<br/>menubar, baseDurationControl"| comp
+    app -->|"exports, animationExport,<br/>c99Export, platformExport,<br/>projectExport, tiledExport,<br/>pngcodec"| core
+    app -->|"io.js<br/>(does real File System Access I/O)"| plat
+    app -->|"state.js, main.js"| deleted
+```
+
+---
 
 ## Foundation group
 
@@ -132,8 +430,10 @@ since everything downstream depends on it:
    tile/terrain-set/frame/tile-editing selection**, not just
    layer/frame/animation — no schema change, since the per-document
    selection object is already freeform; mode command handlers/presenters
-   start writing the new keys directly, replacing the adapter's
-   first-seen-only seed workaround.
+   start writing the new keys directly (merging, per the `setSelection`
+   sharp edge documented above), replacing the adapter's
+   sometimes-first-seen/sometimes-unconditional seed logic with direct,
+   always-current writes.
 5. **New `EditorStore.workspace.overlays` field** (`{labels, sequences}`),
    using the workspace slice that already exists for `focusedSurfaceId`.
 
@@ -160,6 +460,32 @@ incremental per-file conversion because re-touching modes that are
 already "done" benefits from being treated as one coherent unit per mode,
 same as their original migration.
 
+### Diagram: group dependency order
+
+```mermaid
+graph TD
+    F["1. Foundation<br/>(host-side groundwork,<br/>no shell/mode changes)"]
+    C["2. js/ui -> js/components<br/>relocation"]
+    M["3a. Maps cleanup<br/>(6 files)"]
+    S["3b. Sprites cleanup<br/>(11 files)"]
+    T["3c. Tiles cleanup<br/>(12 files)"]
+    SH["4. Shell rewrite<br/>(6 controllers)"]
+    D["5. Final deletion<br/>(state.js, adapter, main.js,<br/>js/app, js/ui)"]
+
+    F --> C
+    C --> M --> S --> T
+    T --> SH
+    SH --> D
+
+    style C fill:#f66,stroke:#900,color:#fff
+    classDef risk fill:#f66,stroke:#900,color:#fff
+    class C risk
+```
+
+Group 2 (highlighted) carries the phase's biggest structural risk — see
+below — and gates every group after it, since maps/sprites/tiles/shell
+all currently import from `js/ui/`.
+
 ## Testing
 
 - Full suite (`npm test`) stays green after every group.
@@ -175,8 +501,8 @@ same as their original migration.
 
 ## Biggest structural risk
 
-The `js/ui` → `js/components` relocation group splits `tools.js`'s
-shared `bindDrawing` pointer-drag engine into
+The `js/ui` → `js/components` relocation group (group 2) splits
+`tools.js`'s shared `bindDrawing` pointer-drag engine into
 `components/canvas/drawing-engine.js`. Every drawing tool in every mode
 runs through that engine — a bug introduced there would not fail
 cleanly, it would silently propagate into every downstream group's work.
