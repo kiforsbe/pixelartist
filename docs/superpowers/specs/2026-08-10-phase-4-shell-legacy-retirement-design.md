@@ -440,6 +440,26 @@ since everything downstream depends on it:
 This group ships with its own test coverage before anything downstream
 depends on it — no shell/mode file changes happen in this group.
 
+> **Amendment (2026-08-17, after execution):** implementation plan
+> [2026-08-17-phase-4-group-1-foundation.md](../plans/2026-08-17-phase-4-group-1-foundation.md)
+> found items 1 and 2 above depend on shell call sites
+> (`document-controller.js`, `project-controller.js`,
+> `filter-controller.js`, `file-controller.js`) not touched until the
+> Shell rewrite group, so both were deferred there rather than attempted
+> here. Item 3 was attempted in its safe/additive form (host-primary
+> reads for `activeSheet()`/`activeMap()`, existing fallback kept) and
+> passed its own task review, but the group's final whole-branch review
+> caught two live regressions it introduced — a stale Layers panel after
+> a sheet switch, and "Export → Map JSON" going wrongly disabled outside
+> maps mode — both rooted in `session.activeDocument` being synced too
+> late and being kind-ambiguous relative to the legacy event pipeline in
+> `document-controller.js`. Item 3 was reverted and is **also** deferred
+> to the Shell rewrite group, for the same underlying reason as items 1
+> and 2: it isn't safe until the shell files that drive that sync are
+> themselves rewritten. What actually landed in Group 1: item 5
+> (`workspace.overlays`) and the merge-safe `SelectionService.patch()`
+> helper item 4 depends on — final HEAD `3f94cce`, 630/630 tests.
+
 ## Group sequence
 
 1. Foundation (above)
