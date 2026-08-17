@@ -2,6 +2,8 @@ import { state, on, emit, activeSheet, activeMap, setProject, newDefaultProject,
 import { getEditorHost } from '../../host/runtime.js';
 import * as io from '../../app/io.js';
 import { flattenSheet } from '../../core/model.js';
+import { copyRegion } from '../../core/pixels.js';
+import { commitFloatIfAny } from '../../components/canvas/float-session.js';
 import { buildFramesJson, buildTilesJson, buildMapJson } from '../../app/exports.js';
 import { buildTiledTsx } from '../../app/tiledExport.js';
 import { buildC99, MAX_COLORS } from '../../app/c99Export.js';
