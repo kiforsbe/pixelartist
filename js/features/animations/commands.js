@@ -1,8 +1,8 @@
 // js/features/animations/commands.js
-// Legacy façade: js/ui/tools.js still calls commitAcceptAnimation by import,
-// and js/ui/panels.js (the Layers panel) still calls commitDeleteAnimation by
-// import. The handlers themselves live in js/modes/sprites/application/
-// commands/{animation-commands,animation-lifecycle-commands}.js and are
+// Legacy façade: js/components/canvas/drawing-engine.js still calls
+// commitAcceptAnimation by import, and js/components/panels/layers-panel.js
+// still calls commitDeleteAnimation by import. The handlers themselves live
+// in js/modes/sprites/application/commands/{animation-commands,animation-lifecycle-commands}.js and are
 // registered as host Commands by js/modes/sprites/contributions.js, so this
 // file only dispatches by id — shared UI must never import a mode's command
 // handlers directly. Delete this file once both remaining callers dispatch

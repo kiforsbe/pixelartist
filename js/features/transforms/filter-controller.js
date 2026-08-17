@@ -5,7 +5,7 @@ import { medianCutPalette, resolveAlphaForQuantize } from '../../core/quantize.j
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
 import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../../core/checkerboard.js';
-import { rgbaToHex, hexToRgb } from '../../ui/panels.js';
+import { rgbaToHex, hexToRgb } from '../../components/color-utils.js';
 import { SYSTEM_PALETTES } from '../../core/systempalettes.js';
 import { previewWithOverride, refreshPreviewPanel } from '../../components/panels/preview-panel.js';
 import { defineAction } from '../../app/actions.js';
