@@ -5,13 +5,14 @@
 // every state change funnels through here so stepwise undo and auto-commit
 // stay consistent. This module must never import drawing-engine.js
 // (drawing-engine.js imports us).
-import { state, on, emit, activeSheet, activeLayer, markDirty, activeLayerScope, maybeSnapPixels } from '../../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, activeLayerScope, maybeSnapPixels } from '../../app/state.js';
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../../core/pixels.js';
 import { findLayer } from '../../core/model.js';
 import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../../core/floating.js';
 import { decodePng } from '../../app/pngcodec.js';
 import { exportPngBlob } from '../../app/io.js';
 import { isTypingTarget } from '../dom-utils.js';
+import { getEditorHost } from '../../host/runtime.js';
 
 export { isTypingTarget };
 
@@ -109,7 +110,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
   };
   const ctx = { viewKind: state.view, targetRect: { ...target } };
   const prevSelection = viewApi.getSelection();
-  state.commands.push({
+  getEditorHost().history.execute({
     label: 'float selection',
     do() {
       for (const { layerId } of captured) {
@@ -132,7 +133,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
       emit('pixels');
     },
   });
-  markDirty();
+  getEditorHost().projects.markDirty();
   return true;
 }
 
@@ -172,7 +173,7 @@ export function commitFloatIfAny() {
       }).filter(Boolean)
     : [];
   const sel = rect && !float.frameIds ? { ...rect } : null;
-  state.commands.push({
+  getEditorHost().history.execute({
     label: 'commit float',
     do() {
       for (const p of patches) blitRegion(p.layer.bitmap, p.after, rect.x, rect.y);
@@ -191,7 +192,7 @@ export function commitFloatIfAny() {
       emit('pixels');
     },
   });
-  markDirty();
+  getEditorHost().projects.markDirty();
 }
 
 export function cancelFloatIfAny() {
@@ -207,7 +208,7 @@ export function cancelFloatIfAny() {
     const f = sheet.frames.find(fr => fr.id === o.id);
     return f ? { frame: f, x: o.x, y: o.y } : null;
   }).filter(Boolean);
-  state.commands.push({
+  getEditorHost().history.execute({
     label: 'cancel float',
     do() {
       if (float.cut) for (const { layerId, buffer } of float.layers) {
@@ -233,7 +234,7 @@ export function cancelFloatIfAny() {
       emit('pixels');
     },
   });
-  markDirty();
+  getEditorHost().projects.markDirty();
 }
 
 // Frame-float rects track the float's integer translation live, so the frame
@@ -256,7 +257,7 @@ export function pushTransformCommand(before, after) {
   if (!float) return;
   if (before.tx === after.tx && before.ty === after.ty && before.sx === after.sx
     && before.sy === after.sy && before.rot === after.rot) return;
-  state.commands.push({
+  getEditorHost().history.execute({
     label: 'transform float',
     do() { float.transform = { ...after }; syncFrameFloat(); emit('pixels'); },
     undo() { float.transform = { ...before }; syncFrameFloat(); emit('pixels'); },
@@ -294,7 +295,7 @@ function clipboardCapture(allLayers, clearSource) {
   clipboard = { srcRect: { ...region }, layers: captured, allLayers };
   writeSystemClipboardImage(captured, region.w, region.h);
   if (!clearSource) return;
-  state.commands.push({
+  getEditorHost().history.execute({
     label: 'cut',
     do() {
       for (const { layerId } of captured) {
@@ -311,7 +312,7 @@ function clipboardCapture(allLayers, clearSource) {
       emit('pixels');
     },
   });
-  markDirty();
+  getEditorHost().projects.markDirty();
 }
 
 export function cutSelection(allLayers = false) { clipboardCapture(allLayers, true); }
@@ -332,7 +333,7 @@ function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
   // switch to the move tool BEFORE pushing: the on('tool') auto-commit hook
   // skips 'move', so the fresh float survives its own tool switch
   if (state.tool !== 'move') { state.tool = 'move'; emit('tool'); }
-  state.commands.push({
+  getEditorHost().history.execute({
     label: 'paste',
     do() {
       state.floating = float;
@@ -350,7 +351,7 @@ function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
   // paste can be the FIRST edit of a clean project — without this, the
   // beforeunload guard and autosave stay off until the float commits
   // (pushTransformCommand assumes dirty is already set at float creation).
-  markDirty();
+  getEditorHost().projects.markDirty();
 }
 
 export function pasteClipboard() {

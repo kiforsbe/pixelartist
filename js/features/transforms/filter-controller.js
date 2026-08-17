@@ -1,7 +1,8 @@
-import { state, on, emit, activeSheet, activeLayer, activeLayerScope, currentContextLayers, markDirty } from '../../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, activeLayerScope, currentContextLayers } from '../../app/state.js';
 import { MAX_PALETTE_COLORS } from '../../core/pixelSnapper.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../../core/pixels.js';
 import { commitFloatIfAny, currentEditRegion } from '../../components/canvas/float-session.js';
+import { getEditorHost } from '../../host/runtime.js';
 import { medianCutPalette, resolveAlphaForQuantize } from '../../core/quantize.js';
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
@@ -83,12 +84,12 @@ export function mountFilterController(workbench) {
     const result = computeQuantizePatches(mode, param, allLayers, preferOpaque);
     if (!result || !result.patches.length) return;
     const { region, patches } = result;
-    state.commands.push({
+    getEditorHost().history.execute({
       label: 'quantize to palette',
       do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
       undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
     });
-    markDirty();
+    getEditorHost().projects.markDirty();
   }
   
   const dlgQuantize = document.getElementById('dlg-quantize');
@@ -238,12 +239,12 @@ export function mountFilterController(workbench) {
     const result = computeChromaKeyPatches(params, allLayers);
     if (!result || !result.patches.length) return;
     const { region, patches } = result;
-    state.commands.push({
+    getEditorHost().history.execute({
       label: 'chroma key',
       do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
       undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
     });
-    markDirty();
+    getEditorHost().projects.markDirty();
   }
   
   const dlgChromaKey = document.getElementById('dlg-chromakey');
@@ -530,12 +531,12 @@ export function mountFilterController(workbench) {
     const result = computeCheckerboardPatches(params, allLayers);
     if (!result || !result.patches.length) return;
     const { region, patches } = result;
-    state.commands.push({
+    getEditorHost().history.execute({
       label: 'remove checkerboard',
       do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
       undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
     });
-    markDirty();
+    getEditorHost().projects.markDirty();
   }
   
   const dlgCheckerboard = document.getElementById('dlg-checkerboard');
