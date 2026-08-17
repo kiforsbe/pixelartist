@@ -77,12 +77,18 @@ export function mountFileController() {
   // against the wrong id for that one emit and leaving dependent panels
   // (e.g. the Layers panel) rendered empty with no later event to correct
   // them, since the second subscribe (activeDocument) doesn't itself emit.
+  // state.onion is included here too: it's a live alias into
+  // project.settings.onion, only ever re-pointed by legacy setProject()
+  // (also with zero remaining callers now). frame-editor-presenter.js reads/
+  // writes it at ~26 sites; without re-pointing it here it would silently
+  // keep referencing the previous project's onion settings after a switch.
   getEditorHost().store.subscribe(
     s => [s.project.model, s.session.activeDocument],
     ([project, doc]) => {
       state.project = project;
       state.activeSheetId = doc && doc.kind !== 'map' ? doc.id : null;
       state.activeMapId = doc && doc.kind === 'map' ? doc.id : null;
+      state.onion = project?.settings?.onion ?? state.onion;
       emit('project');
       emit('view');
     },
