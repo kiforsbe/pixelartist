@@ -1,6 +1,7 @@
 import { state, setProject, newDefaultProject, confirmOrAuto, markDirty } from '../../app/state.js';
 import { DEFAULT_SETTINGS } from '../../core/model.js';
 import { PLATFORMS } from '../../core/platforms.js';
+import { MAX_PALETTE_COLORS } from '../../core/pixelSnapper.js';
 import { buildBaseDurationControl } from '../../components/panels/base-duration-control.js';
 import { defineAction } from '../../app/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
