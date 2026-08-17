@@ -3,7 +3,7 @@
 import { state, on, emit, activeSheet, activeLayer, activeMap, markDirty, confirmOrAuto } from '../../app/state.js';
 import { commitDeleteAnimation } from '../../features/animations/commands.js';
 import { cloneBitmap, blitRegion } from '../../core/pixels.js';
-import { addLayer, addGroup, removeLayer, removeGroup, moveLayer, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, findLayer, createLayerNode, createGroupNode, createMapLayer, refreshMapBounds, moveNode, animationGroup, layerAnimationContext } from '../../core/model.js';
+import { addLayer, addGroup, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, createLayerNode, createGroupNode, moveNode, animationGroup, layerAnimationContext } from '../../core/model.js';
 import { compositeFloatOnLayer } from '../../core/floating.js';
 import { defineAction, bindAction } from '../../app/actions.js';
 import { getEditorHost } from '../../host/runtime.js';
