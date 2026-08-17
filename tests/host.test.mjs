@@ -92,7 +92,7 @@ test('EditorStore starts with a default overlays workspace field, mutable via tr
     state => state.workspace.overlays,
     value => { notified = value; },
   );
-  host.store.transaction('overlays', next => { next.workspace.overlays.sequences = false; });
+  host.store.transaction('overlays', next => { next.workspace.overlays = { ...next.workspace.overlays, sequences: false }; });
   assert.deepEqual(notified, { labels: true, sequences: false });
   dispose();
 });
