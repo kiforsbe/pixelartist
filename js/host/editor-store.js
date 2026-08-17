@@ -15,7 +15,7 @@ export function createEditorState(initial = {}) {
       ...(initial.session ?? {}),
     },
     interaction: { ...(initial.interaction ?? {}) },
-    workspace: { focusedSurfaceId: null, ...(initial.workspace ?? {}) },
+    workspace: { focusedSurfaceId: null, overlays: { labels: true, sequences: true }, ...(initial.workspace ?? {}) },
   };
 }
 
@@ -40,7 +40,31 @@ export class EditorStore {
     this.#depth++;
     if (reason) this.#pendingReasons.add(reason);
     try {
-      return mutate(this.#state);
+      // Wrap workspace in a proxy to detect mutations and replace modified objects
+      const wrappedState = new Proxy(this.#state, {
+        get: (target, prop) => {
+          if (prop === 'workspace') {
+            const workspace = target.workspace;
+            return new Proxy(workspace, {
+              get: (ws, wsProp) => {
+                if (wsProp === 'overlays') {
+                  return new Proxy(ws.overlays, {
+                    set: (overlays, overlayProp, value) => {
+                      overlays[overlayProp] = value;
+                      // Replace overlays object to trigger subscriptions
+                      ws.overlays = { ...ws.overlays };
+                      return true;
+                    }
+                  });
+                }
+                return ws[wsProp];
+              }
+            });
+          }
+          return target[prop];
+        }
+      });
+      return mutate(wrappedState);
     } finally {
       this.#depth--;
       if (this.#depth === 0) this.#flush();
