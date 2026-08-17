@@ -86,7 +86,7 @@ Entry point: `index.html` loads `<script type="module" src="js/bootstrap.js">`.
 3. `editorHost.start('sprites')` activates the sprite mode.
 4. `setEditorHost(editorHost)` publishes it through `js/host/runtime.js`'s
    module-level singleton getter — the mechanism by which deeply legacy
-   code (`app/actions.js`, `js/ui/*`) reaches the one `EditorHost` instance
+   code (`app/actions.js`, `js/components/*`) reaches the one `EditorHost` instance
    without a DI container.
 5. Dynamically `import('./app/main.js')` — the legacy composition root
    (16 lines, enforced ≤30 by `architecture.test.mjs`), which mounts DOM:
@@ -333,7 +333,7 @@ belongs to. It has fully migrated to the Application/Presentation split
   when a new terrain set is created from that preset. Pushes a raw
   pixel-patch undo entry directly via `core/commands.js`'s `makePixelPatch`
   (the same still-legacy, cross-mode-shared paint-commit idiom
-  `js/ui/tools.js` uses elsewhere), which is exactly why it can't live in
+  `js/components/canvas/drawing-engine.js` uses elsewhere), which is exactly why it can't live in
   `presentation/`: `tests/architecture.test.mjs`'s presentation-layer scan
   forbids importing `core/commands.js` from anywhere under `presentation/`.
   This is now an enforced, tracked exception — a dedicated architecture
@@ -571,7 +571,7 @@ No component framework — plain DOM manipulation, organized as **mount
 functions**: `mountXxxPanel(element)` builds DOM once, wires `on(event,
 fn)` subscriptions for legacy-state-driven re-renders (often
 microtask-debounced, as in `presentation/terrain-set-panel.js`), and returns
-`{dispose()}`. Uniform across `js/ui/*.js` and `js/modes/*/*.js`.
+`{dispose()}`. Uniform across `js/components/*.js` and `js/modes/*/*.js`.
 
 The one shared primitive is `js/components/panels/panel-frame.js`'s
 `createPanelFrame({id, title, collapsed, onCollapsedChange})` — collapsible
@@ -585,10 +585,10 @@ into an auto-generated frame docked into a `[data-workbench-region]`
 (`js/host/workbench/layout.js`). Per-panel collapsed/hidden state persists
 through the injected `preferences` port.
 
-Menus: `js/ui/menubar.js` (see [Commands](#commands--defineaction)).
+Menus: `js/components/menubar.js` (see [Commands](#commands--defineaction)).
 Dialogs: native `<dialog>` elements in `index.html`, `.showModal()`, with
-`js/ui/dialogs.js` giving one button Enter-to-submit behavior. Toolbar:
-`js/ui/tools.js`'s `mountToolPalette`.
+`js/components/dialogs.js` giving one button Enter-to-submit behavior. Toolbar:
+`js/components/tool-palette.js`'s `mountToolPalette`.
 
 `index.html` lays out explicit regions: `#tool-palette` (left),
 `#canvas-host` (center), `#side-panels` (right, holds `#panel-layers`,

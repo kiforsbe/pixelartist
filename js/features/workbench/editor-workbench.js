@@ -169,7 +169,7 @@ export function mountEditorWorkbench() {
   }
   on('project', () => { invalidateScratch(); refreshCanvasView(); });
   on('view', refreshCanvasView);
-  // 'pixels': lightweight bitmap-changed-mid-stroke signal from drawing-engine.js/panels.js
+  // 'pixels': lightweight bitmap-changed-mid-stroke signal from drawing-engine.js/layers-panel.js
   // (in-progress drawing preview, live opacity drag) — just re-flatten + repaint,
   // skip the heavier setContent/dirty-flag work that 'project' does.
   on('pixels', () => { invalidateScratch(); canvasView.requestRender(); });
