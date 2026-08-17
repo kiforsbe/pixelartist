@@ -1,9 +1,10 @@
 // Floating-selection session: owns state.floating's lifecycle (create /
 // transform / commit / cancel), the internal clipboard, and the global
 // keyboard bindings (Enter/Escape commit/cancel, Ctrl+X/C/V clipboard).
-// Pointer GESTURES (drag/scale/rotate) live in tools.js's move tool; every
-// state change funnels through here so stepwise undo and auto-commit stay
-// consistent. This module must never import tools.js (tools.js imports us).
+// Pointer GESTURES (drag/scale/rotate) live in drawing-engine.js's move tool;
+// every state change funnels through here so stepwise undo and auto-commit
+// stay consistent. This module must never import drawing-engine.js
+// (drawing-engine.js imports us).
 import { state, on, emit, activeSheet, activeLayer, markDirty, activeLayerScope, maybeSnapPixels } from '../../app/state.js';
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../../core/pixels.js';
 import { findLayer } from '../../core/model.js';

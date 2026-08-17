@@ -43,7 +43,7 @@
 import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { CanvasView } from '../../../components/canvas/canvas-view.js';
-import { bindDrawing } from '../../../ui/tools.js';
+import { bindDrawing } from '../../../components/canvas/drawing-engine.js';
 import { flattenSheet } from '../../../core/model.js';
 import { getPreset, resolveNeighborGrid } from '../../../core/neighbors.js';
 import { terrainNeighborPreviewCells } from '../../../core/blob47templates.js';

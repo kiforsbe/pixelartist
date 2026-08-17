@@ -6,7 +6,7 @@
 
 import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
-import { registerTool } from '../../../ui/tools.js';
+import { registerTool } from '../../../components/tool-palette.js';
 import { blobIndexToMask, blobIndexFromPaintMask, BLOB47_PAINT_CELLS } from '../../../core/blob47.js';
 import { BLOB47_8X6_RAW, terrainNeighborPreviewCells } from '../../../core/blob47templates.js';
 import { getTileSheetCanvas as getFlatCanvas } from './tile-raster-cache.js';

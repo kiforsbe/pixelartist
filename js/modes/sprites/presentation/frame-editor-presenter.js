@@ -33,7 +33,7 @@
 
 import { state, on, emit, activeSheet, currentContextLayers, markDirty } from '../../../app/state.js';
 import { CanvasView } from '../../../components/canvas/canvas-view.js';
-import { bindDrawing } from '../../../ui/tools.js';
+import { bindDrawing } from '../../../components/canvas/drawing-engine.js';
 import { commitFloatIfAny } from '../../../components/canvas/float-session.js';
 import { flattenSheetLayers } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';

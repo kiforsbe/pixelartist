@@ -1,7 +1,7 @@
 // js/modes/maps/presentation/map-tool-presenter.js
 import { state, on, emit, activeMap, markDirty } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
-import { registerTool } from '../../../ui/tools.js';
+import { registerTool } from '../../../components/tool-palette.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
 import { bindDragCancelGuard } from '../../../components/canvas/drag-cancel-guard.js';
 import {

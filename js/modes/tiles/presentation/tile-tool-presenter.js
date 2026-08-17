@@ -5,7 +5,7 @@
 
 import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
-import { registerTool } from '../../../ui/tools.js';
+import { registerTool } from '../../../components/tool-palette.js';
 import { gridCellRect, ownedTiles } from '../../../core/tilegrids.js';
 import { rectBetween } from '../../../core/rect.js';
 import { HANDLES_CORNER, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../../core/resizeAnchor.js';

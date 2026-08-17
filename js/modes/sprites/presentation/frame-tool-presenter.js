@@ -11,7 +11,7 @@
 import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
-import { registerTool } from '../../../ui/tools.js';
+import { registerTool } from '../../../components/tool-palette.js';
 import { isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../../core/resizeAnchor.js';
 import { segmentOfFrame, segmentMembers } from '../../../core/strips.js';
 import { frameBounds } from '../../../domain/sprites/frames.js';
