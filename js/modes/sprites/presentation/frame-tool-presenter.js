@@ -3,11 +3,11 @@
 // calls pure Application-layer geometry for every decision, dispatches
 // Commands BY ID, and delegates all drawing to frame-overlay-renderer.js.
 //
-// API shape mirrors ui/tools.js's split between "mount UI" and "bind a
-// CanvasView": registerFrameTool() adds the palette button + its tool-options
-// row (snap checkbox, grid size, slice button) and the Delete/Enter key
-// handlers; bindFrameTool(view) wraps the view's existing onPointer/onOverlay,
-// so it must run after bindDrawing() has installed its own.
+// API shape mirrors tool-palette.js/drawing-engine.js's split between "mount
+// UI" and "bind a CanvasView": registerFrameTool() adds the palette button +
+// its tool-options row (snap checkbox, grid size, slice button) and the
+// Delete/Enter key handlers; bindFrameTool(view) wraps the view's existing
+// onPointer/onOverlay, so it must run after bindDrawing() has installed its own.
 import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
@@ -28,7 +28,7 @@ import { buildSliceDialog, setSlicePreviewView, slicePreviewOptions } from './sl
 import { bindDragCancelGuard } from '../../../components/canvas/drag-cancel-guard.js';
 
 // In-progress drag state (create/move/resize/stripresize), module-scoped like
-// ui/tools.js's `selection`/`stroke` — there is only ever one frame-tool drag
+// drawing-engine.js's `selection`/`stroke` — there is only ever one frame-tool drag
 // at a time. `lastClick` is the previous pointerdown's { frameId, t } for
 // double-click detection; `hover` is the chrome part under the pointer.
 let drag = null;

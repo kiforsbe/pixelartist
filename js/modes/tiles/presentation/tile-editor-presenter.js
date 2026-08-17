@@ -18,11 +18,11 @@
 //   - mapPoint(x, y) shifts editor-local pointer coords into sheet-global
 //     layer-bitmap coords via application/geometry/tile-editor-geometry.js's
 //     pure offset math. getTargetRect() returns the center tile's own rect,
-//     so tools.js's target clipping guarantees strokes can only ever affect
+//     so drawing-engine.js's target clipping guarantees strokes can only ever affect
 //     the center tile's pixels no matter how far a drag strays into
 //     neighbor cells.
 //   - view.imageToScreen is overridden the same way frame-editor-presenter.js
-//     does it: tools.js's marquee selection is stored in sheet-global coords
+//     does it: drawing-engine.js's marquee selection is stored in sheet-global coords
 //     (because of mapPoint), so overlays need to map sheet-global -> screen
 //     by inverting the same offset used by mapPoint.
 //
@@ -117,7 +117,7 @@ export function mountTileEditor(hostEl) {
   }
 
   // See module comment: overlays (marquee selection) are stored in
-  // sheet-global coordinates by tools.js because of mapPoint below, so
+  // sheet-global coordinates by drawing-engine.js because of mapPoint below, so
   // imageToScreen needs to subtract the editor's offset before zoom/pan.
   view.imageToScreen = (x, y) => {
     const off = offset();

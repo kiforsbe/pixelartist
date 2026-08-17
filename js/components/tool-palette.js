@@ -49,8 +49,8 @@ function softFloodDistanceToSlider(value) {
 // ---------------------------------------------------------- external tools
 //
 // Small registration hook so other UI modules (frames.js's frame tool) can
-// add a button + an options row to the palette WITHOUT tools.js knowing
-// anything about them. `mountToolPalette(el)` is called once by main.js;
+// add a button + an options row to the palette without this module knowing
+// anything about them ahead of time. `mountToolPalette(el)` is called once by main.js;
 // `registerTool()` may be called any time after that (main.js calls it right
 // after mountToolPalette), so it must be able to append into an
 // already-rendered palette rather than requiring a remount (a remount would

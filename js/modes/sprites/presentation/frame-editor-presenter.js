@@ -13,12 +13,12 @@
 // pan/centerFit work in frame-sized units. But the layer bitmaps being edited
 // are sheet-global (the SAME bitmaps the sheet view edits). Two things bridge
 // that gap:
-//   1. `mapPoint(x, y)` passed to tools.js's bindDrawing() shifts every
+//   1. `mapPoint(x, y)` passed to drawing-engine.js's bindDrawing() shifts every
 //      pointer event's (x, y) from frame-local to sheet-global (+f.x, +f.y)
 //      BEFORE any tool logic runs, so strokes/fills/selection are computed in
 //      sheet-global space exactly like the sheet view (getTargetRect() below
 //      also returns a sheet-global rect, keeping the two consistent).
-//   2. Because selection/marquee state built by tools.js is therefore stored
+//   2. Because selection/marquee state built by drawing-engine.js is therefore stored
 //      in sheet-global coordinates, this view's own `imageToScreen` is
 //      overridden to subtract the frame offset before applying zoom/pan, so
 //      overlays (the select-tool marquee) drawn via view.imageToScreen still
@@ -196,7 +196,7 @@ export function mountFrameEditor(hostEl) {
   const view = new CanvasView(canvasHostDiv);
 
   // See module comment: overlays (marquee selection) are stored in
-  // sheet-global coordinates by tools.js because of mapPoint below, so
+  // sheet-global coordinates by drawing-engine.js because of mapPoint below, so
   // imageToScreen needs to subtract the frame offset before applying zoom/pan.
   view.imageToScreen = (x, y) => {
     const f = currentFrame();
