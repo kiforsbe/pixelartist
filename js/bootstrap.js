@@ -8,10 +8,14 @@ import { BrowserImageCodec } from './platform/browser/image-codec.js';
 import { spriteMode } from './modes/sprites/index.js';
 import { tileMode } from './modes/tiles/index.js';
 import { mapMode } from './modes/maps/index.js';
-import { state as legacyState } from './app/state.js';
+import { mountEditorWorkbench } from './features/workbench/editor-workbench.js';
+import { mountFilterController } from './features/transforms/filter-controller.js';
+import { mountProjectController } from './features/project/project-controller.js';
+import { mountDocumentController } from './features/project/document-controller.js';
+import { mountApplicationMenu } from './features/shell/menu-controller.js';
+import { mountFileController } from './features/project/file-controller.js';
 
 export const editorHost = new EditorHost({
-  historyStack: legacyState.commands,
   preferences: new BrowserPreferences(),
   platform: {
     files: new BrowserFileSystem(),
@@ -27,10 +31,9 @@ editorHost.registerMode(mapMode);
 editorHost.start('sprites');
 setEditorHost(editorHost);
 
-// main.js remains the compatibility composition root while features migrate
-// behind host contributions. Keeping this boundary explicit prevents new code
-// from importing the legacy root.
-import('./app/main.js').catch(error => {
-  console.error('PixelArtist failed to start', error);
-  throw error;
-});
+const workbench = mountEditorWorkbench();
+mountFilterController(workbench);
+mountProjectController();
+mountDocumentController({ editorHost, workbench });
+mountApplicationMenu();
+mountFileController();

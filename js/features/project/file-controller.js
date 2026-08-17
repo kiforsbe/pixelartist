@@ -39,15 +39,6 @@ export function mountFileController() {
   markDefaultAction(dlgExportProject, epExport);
   epCancel.addEventListener('click', () => dlgExportProject.close());
 
-  // One-way host->legacy dirty mirror: EditorStore's project.dirty is the
-  // real source of truth now that setProject() below no longer writes
-  // state.dirty, but state.dirty still has 3 readers in this file (the
-  // guards below). Task 5 removes this mirror once those readers are gone.
-  getEditorHost().store.subscribe(
-    s => s.project.dirty,
-    dirty => { state.dirty = dirty; },
-    { fireImmediately: true },
-  );
   // One-way host->legacy project/activeSheetId/activeMapId mirror: legacy
   // setProject() was the ONLY writer of state.project/activeSheetId/
   // activeMapId, and it has zero remaining callers project-wide after this
@@ -62,10 +53,11 @@ export function mountFileController() {
   // Also re-emits the legacy 'project'/'view' bus events (exactly what
   // setProject() itself used to do as its last step) -- many of those same
   // not-yet-migrated files (layers-panel.js, color-panel.js, drawing-
-  // engine.js, float-session.js, preview-panel.js, frame/tile-editor-
-  // presenter.js) refresh via `on('project', ...)`/`on('view', ...)`, not by
-  // re-reading state.project reactively, so setting the fields alone
-  // (without emitting) would update the data but leave the UI stale/blank.
+  // engine.js, preview-panel.js, frame/tile-editor-presenter.js) refresh via
+  // `on('project', ...)`/`on('view', ...)`, not by re-reading state.project
+  // reactively, so setting the fields alone (without emitting) would update
+  // the data but leave the UI stale/blank. float-session.js is no longer in
+  // this list as of Task 5 -- it subscribes to the host store directly now.
   // project.model and session.activeDocument are watched as ONE tuple
   // selector (matching the pattern editor-workbench.js already uses for its
   // own [project.model, activeViewId, activeDocument] subscribe) rather than
@@ -110,7 +102,7 @@ export function mountFileController() {
   defineAction('file.open', {
     label: 'Open',
     run: async () => {
-      if (state.dirty && !confirmOrAuto('Discard unsaved changes and open another project?')) return;
+      if (getEditorHost().projects.dirty && !confirmOrAuto('Discard unsaved changes and open another project?')) return;
       try {
         const { project, handle } = await io.openPacked();
         state.fileHandle = handle;
@@ -131,7 +123,7 @@ export function mountFileController() {
     try {
       state.fileHandle = await io.savePacked(state.project, state.fileHandle);
       state.saveMode = 'packed';
-      state.dirty = false;
+      getEditorHost().projects.markSaved();
       await io.clearAutosave().catch(() => {});
       emit('project');
     } catch (e) {
@@ -139,7 +131,7 @@ export function mountFileController() {
     }
   }
   defineAction('file.save', { label: 'Save', shortcut: 'Ctrl+S', run: doSave, isEnabled: () => !!state.project });
-  
+
   // ---- file: Save As ----
   async function doSaveAs() {
     commitFloatIfAny();
@@ -147,7 +139,7 @@ export function mountFileController() {
       state.fileHandle = await io.savePacked(state.project, null);
       state.dirHandle = null;
       state.saveMode = 'packed';
-      state.dirty = false;
+      getEditorHost().projects.markSaved();
       await io.clearAutosave().catch(() => {});
       emit('project');
     } catch (e) {
@@ -586,12 +578,12 @@ export function mountFileController() {
   
   // ---- beforeunload guard ----
   window.addEventListener('beforeunload', (e) => {
-    if (state.dirty && !AUTOTEST) { e.preventDefault(); e.returnValue = ''; }
+    if (getEditorHost().projects.dirty && !AUTOTEST) { e.preventDefault(); e.returnValue = ''; }
   });
   
   // ---- autosave ----
   setInterval(() => {
-    if (state.dirty && state.project && !state.floating) io.autosave(state.project).catch(() => {});
+    if (getEditorHost().projects.dirty && state.project && !state.floating) io.autosave(state.project).catch(() => {});
   }, 30000);
   
   // ---- boot ----

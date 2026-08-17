@@ -14,9 +14,35 @@ async function jsFiles(directory) {
   return nested.flat();
 }
 
-test('the browser composition root stays small', async () => {
-  const source = await readFile(join(root, 'js/app/main.js'), 'utf8');
-  assert.ok(source.split(/\r?\n/).length <= 30, 'main.js must remain a composition layer');
+test('nothing in the shell controllers imports the retired legacy setProject/markDirty writers', async () => {
+  // Deliberately does NOT ban `on`/`emit`: pixels/selection/tool/view events
+  // stay on the legacy bus in several of these files throughout this whole
+  // plan (editor-workbench.js's brushSize/colors/pixels/selection wiring,
+  // file-controller.js's/filter-controller.js's/float-session.js's own
+  // 'pixels' emits) -- banning those names would make this test fail against
+  // its own already-correct target state, not just the pre-migration one.
+  // setProject()/markDirty() are different: every call site converted to
+  // editorHost.setProject()/projects.markDirty() by Tasks 1-5, so these two
+  // imports have zero legitimate remaining uses in these 7 files.
+  const SHELL_FILES = [
+    'js/features/project/document-controller.js',
+    'js/features/project/file-controller.js',
+    'js/features/project/project-controller.js',
+    'js/features/transforms/filter-controller.js',
+    'js/features/shell/menu-controller.js',
+    'js/features/workbench/editor-workbench.js',
+    'js/components/canvas/float-session.js',
+  ];
+  const offenders = [];
+  for (const relPath of SHELL_FILES) {
+    const source = await readFile(join(root, relPath), 'utf8');
+    const importMatch = source.match(/import\s*\{([^}]*)\}\s*from\s*['"][^'"]*app\/state\.js['"]/);
+    if (!importMatch) continue;
+    const names = importMatch[1].split(',').map(n => n.trim()).filter(Boolean);
+    const banned = names.filter(n => ['setProject', 'markDirty'].includes(n));
+    if (banned.length) offenders.push(`${relPath}: ${banned.join(', ')}`);
+  }
+  assert.deepStrictEqual(offenders, [], `these shell files still import banned legacy state.js exports:\n${offenders.join('\n')}`);
 });
 
 test('pure core modules do not depend on application, UI, host, platform, or modes', async () => {

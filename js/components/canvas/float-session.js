@@ -5,7 +5,7 @@
 // every state change funnels through here so stepwise undo and auto-commit
 // stay consistent. This module must never import drawing-engine.js
 // (drawing-engine.js imports us).
-import { state, on, emit, activeSheet, activeLayer, activeLayerScope, maybeSnapPixels } from '../../app/state.js';
+import { state, emit, activeSheet, activeLayer, activeLayerScope, maybeSnapPixels } from '../../app/state.js';
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../../core/pixels.js';
 import { findLayer } from '../../core/model.js';
 import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../../core/floating.js';
@@ -330,8 +330,8 @@ function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
   };
   const ctx = { viewKind: state.view, targetRect: { ...target } };
   const prevSelection = viewApi.getSelection();
-  // switch to the move tool BEFORE pushing: the on('tool') auto-commit hook
-  // skips 'move', so the fresh float survives its own tool switch
+  // switch to the move tool BEFORE pushing: initFloatSession's activeToolId
+  // subscription skips 'move', so the fresh float survives its own tool switch
   if (state.tool !== 'move') { state.tool = 'move'; emit('tool'); }
   getEditorHost().history.execute({
     label: 'paste',
@@ -472,19 +472,18 @@ function onKeydown(e) {
 }
 
 export function initFloatSession() {
-  on('tool', () => { if (state.tool !== 'move') commitFloatIfAny(); });
-  on('view', () => {
-    if (!state.floating || !floatCtx) return;
-    if (state.activeSheetId !== state.floating.sheetId || state.view !== floatCtx.viewKind) commitFloatIfAny();
-  });
+  const editorHost = getEditorHost();
+  editorHost.store.subscribe(s => s.session.activeToolId, toolId => { if (toolId !== 'move') commitFloatIfAny(); });
+  editorHost.store.subscribe(
+    s => [s.session.activeDocument, s.session.activeViewId],
+    ([activeDocument, activeViewId]) => {
+      if (!state.floating || !floatCtx) return;
+      if (activeDocument?.id !== state.floating.sheetId || activeViewId !== floatCtx.viewKind) commitFloatIfAny();
+    },
+    { equals: (a, b) => a[0]?.id === b[0]?.id && a[1] === b[1] },
+  );
   // project REPLACEMENT (New/Open) drops the float without a command — the
   // command stack was cleared and the old bitmaps are gone
-  let lastProject = state.project;
-  on('project', () => {
-    if (state.project === lastProject) return;
-    lastProject = state.project;
-    state.floating = null;
-    floatCtx = null;
-  });
+  editorHost.store.subscribe(s => s.project.model, () => { state.floating = null; floatCtx = null; });
   window.addEventListener('keydown', onKeydown, true);
 }

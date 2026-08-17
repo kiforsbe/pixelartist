@@ -42,7 +42,7 @@ export function mountProjectController() {
   defineAction('file.new', {
     label: 'New',
     run: () => {
-      if (state.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
+      if (getEditorHost().projects.dirty && !confirmOrAuto('Discard unsaved changes and start a new project?')) return;
       npDurationValue = { durationMs: DEFAULT_SETTINGS.durationMs, baseFps: undefined, baseStep: undefined };
       npDurationControl.refresh();
       dlgNewProject.showModal();
