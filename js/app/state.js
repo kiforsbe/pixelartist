@@ -56,14 +56,10 @@ export function emit(event, payload) {
 // events used app-wide: 'project' (data mutated OR project replaced), 'view',
 // 'tool', 'history', 'selection', 'pixels', 'colors', 'brushSize', 'playhead'
 export function activeSheet() {
-  const host = getEditorHost();
-  const id = host ? (host.store.getState().session.activeDocument?.id ?? null) : state.activeSheetId;
-  return state.project?.sheets.find(s => s.id === id) ?? null;
+  return state.project?.sheets.find(s => s.id === state.activeSheetId) ?? null;
 }
 export function activeMap() {
-  const host = getEditorHost();
-  const id = host ? (host.store.getState().session.activeDocument?.id ?? null) : state.activeMapId;
-  return state.project?.maps?.find(m => m.id === id) ?? null;
+  return state.project?.maps?.find(m => m.id === state.activeMapId) ?? null;
 }
 export function activeLayer() {
   const sheet = activeSheet();
