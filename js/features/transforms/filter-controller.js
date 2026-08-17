@@ -1,6 +1,7 @@
-import { state, on, activeSheet, activeLayer, activeLayerScope, currentContextLayers, markDirty } from '../../app/state.js';
+import { state, on, emit, activeSheet, activeLayer, activeLayerScope, currentContextLayers, markDirty } from '../../app/state.js';
 import { MAX_PALETTE_COLORS } from '../../core/pixelSnapper.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../../core/pixels.js';
+import { commitFloatIfAny, currentEditRegion } from '../../components/canvas/float-session.js';
 import { medianCutPalette, resolveAlphaForQuantize } from '../../core/quantize.js';
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
