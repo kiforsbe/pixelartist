@@ -1,10 +1,11 @@
-import { state, setProject, newDefaultProject, confirmOrAuto, markDirty } from '../../app/state.js';
+import { state, newDefaultProject, confirmOrAuto } from '../../app/state.js';
 import { DEFAULT_SETTINGS } from '../../core/model.js';
 import { PLATFORMS } from '../../core/platforms.js';
 import { MAX_PALETTE_COLORS } from '../../core/pixelSnapper.js';
 import { buildBaseDurationControl } from '../../components/panels/base-duration-control.js';
 import { defineAction } from '../../app/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
+import { getEditorHost } from '../../host/runtime.js';
 
 // Shared field coercion for the New Project / Project Settings dialogs.
 function sheetDimField(el) {
@@ -70,7 +71,8 @@ export function mountProjectController() {
       ...(npDurationValue.baseFps != null ? { baseFps: npDurationValue.baseFps, baseStep: npDurationValue.baseStep } : {}),
     };
     state.fileHandle = null; state.dirHandle = null; state.saveMode = null;
-    setProject(newDefaultProject(settings));
+    getEditorHost().history.clear({ markDirty: false });
+    getEditorHost().setProject(newDefaultProject(settings), { dirty: false });
     dlgNewProject.close();
   });
   
@@ -308,7 +310,7 @@ export function mountProjectController() {
   const onionStepRows = buildOnionStepsGrid(psOnionGrid);
   
   function openProjectSettings(tab) {
-    const project = state.project;
+    const project = getEditorHost().projects.project;
     if (!project) return;
     const settings = project.settings;
     psName.value = project.name;
@@ -344,14 +346,15 @@ export function mountProjectController() {
     psFrameLock.resnap();
     psDurationValue = { durationMs: settings.durationMs, baseFps: settings.baseFps, baseStep: settings.baseStep };
     psDurationControl.refresh();
+    const onion = getEditorHost().projects.project.settings.onion;
     for (const r of onionStepRows) {
-      const backOverride = state.onion.stepColors.back[r.k];
+      const backOverride = onion.stepColors.back[r.k];
       r.backDefault.checked = backOverride == null;
-      r.backColor.value = backOverride ?? state.onion.backColor;
+      r.backColor.value = backOverride ?? onion.backColor;
       syncOnionStepActive(r.backDefault, r.backColor);
-      const aheadOverride = state.onion.stepColors.ahead[r.k];
+      const aheadOverride = onion.stepColors.ahead[r.k];
       r.aheadDefault.checked = aheadOverride == null;
-      r.aheadColor.value = aheadOverride ?? state.onion.aheadColor;
+      r.aheadColor.value = aheadOverride ?? onion.aheadColor;
       syncOnionStepActive(r.aheadDefault, r.aheadColor);
     }
     showProjectSettingsTab(tab);
@@ -361,16 +364,16 @@ export function mountProjectController() {
   defineAction('edit.projectSettings', {
     label: 'Project Settings…',
     run: () => openProjectSettings('general'),
-    isEnabled: () => !!state.project,
+    isEnabled: () => !!getEditorHost().projects.project,
   });
   defineAction('edit.onionStepColors', {
     label: 'Onion Step Colors…',
     run: () => openProjectSettings('onion'),
-    isEnabled: () => !!state.project,
+    isEnabled: () => !!getEditorHost().projects.project,
   });
   psCancel.addEventListener('click', () => dlgProjectSettings.close());
   psOk.addEventListener('click', () => {
-    const project = state.project;
+    const project = getEditorHost().projects.project;
     if (!project) { dlgProjectSettings.close(); return; }
     const name = psName.value.trim();
     if (!name) {
@@ -422,7 +425,7 @@ export function mountProjectController() {
       targetPlatform: psTargetPlatform.value,
       exportColorMode: psExportColorMode.value,
     };
-    state.commands.push({
+    getEditorHost().history.execute({
       label: 'edit project settings',
       do() { project.name = afterName; project.settings = { ...afterSettings }; },
       undo() { project.name = beforeName; project.settings = { ...beforeSettings }; },
@@ -436,8 +439,8 @@ export function mountProjectController() {
       if (!r.backDefault.checked) stepColors.back[r.k] = r.backColor.value;
       if (!r.aheadDefault.checked) stepColors.ahead[r.k] = r.aheadColor.value;
     }
-    state.onion.stepColors = stepColors;
-    markDirty();
+    getEditorHost().projects.project.settings.onion.stepColors = stepColors;
+    getEditorHost().projects.markDirty();
     dlgProjectSettings.close();
   });
 }

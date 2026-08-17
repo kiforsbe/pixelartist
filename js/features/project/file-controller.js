@@ -1,4 +1,4 @@
-import { state, on, emit, activeSheet, activeMap, setProject, newDefaultProject, AUTOTEST, confirmOrAuto } from '../../app/state.js';
+import { state, on, emit, activeSheet, activeMap, newDefaultProject, AUTOTEST, confirmOrAuto } from '../../app/state.js';
 import { getEditorHost } from '../../host/runtime.js';
 import * as io from '../../app/io.js';
 import { flattenSheet } from '../../core/model.js';
@@ -39,6 +39,16 @@ export function mountFileController() {
   markDefaultAction(dlgExportProject, epExport);
   epCancel.addEventListener('click', () => dlgExportProject.close());
 
+  // One-way host->legacy dirty mirror: EditorStore's project.dirty is the
+  // real source of truth now that setProject() below no longer writes
+  // state.dirty, but state.dirty still has 3 readers in this file (the
+  // guards below). Task 5 removes this mirror once those readers are gone.
+  getEditorHost().store.subscribe(
+    s => s.project.dirty,
+    dirty => { state.dirty = dirty; },
+    { fireImmediately: true },
+  );
+
   // ---- file: Open ----
   // Folder ("unpacked") projects are disabled for now (see io.saveUnpacked/
   // openUnpacked, kept but unwired) -- Open always goes straight to the
@@ -52,7 +62,8 @@ export function mountFileController() {
         state.fileHandle = handle;
         state.dirHandle = null;
         state.saveMode = handle ? 'packed' : null;
-        setProject(project);
+        getEditorHost().history.clear({ markDirty: false });
+        getEditorHost().setProject(project, { dirty: false });
       } catch (e) {
         if (isCancel(e)) return;
         alert(e.message);
@@ -537,10 +548,11 @@ export function mountFileController() {
     } catch (e) {
       restored = null;
     }
+    getEditorHost().history.clear({ markDirty: false });
     if (restored && confirm('An autosaved project was found. Restore it?')) {
-      setProject(restored);
+      getEditorHost().setProject(restored, { dirty: false });
     } else {
-      setProject(newDefaultProject());
+      getEditorHost().setProject(newDefaultProject(), { dirty: false });
     }
   })();
 }
