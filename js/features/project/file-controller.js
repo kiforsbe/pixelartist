@@ -48,6 +48,46 @@ export function mountFileController() {
     dirty => { state.dirty = dirty; },
     { fireImmediately: true },
   );
+  // One-way host->legacy project/activeSheetId/activeMapId mirror: legacy
+  // setProject() was the ONLY writer of state.project/activeSheetId/
+  // activeMapId, and it has zero remaining callers project-wide after this
+  // task. The ~29 not-yet-migrated files under js/modes/js/components (out
+  // of this task's scope) still read state.project/activeSheet()/
+  // activeMap() directly -- without this mirror they'd silently observe a
+  // permanently-null project after boot/New/Open. This mirror is NOT
+  // this-task-temporary like the dirty mirror above -- it stays alive until
+  // Group 3 (per-mode cleanup, scheduled after this plan) migrates those
+  // files off state.project/activeSheetId/activeMapId, at which point
+  // Group 3 removes it.
+  // Also re-emits the legacy 'project'/'view' bus events (exactly what
+  // setProject() itself used to do as its last step) -- many of those same
+  // not-yet-migrated files (layers-panel.js, color-panel.js, drawing-
+  // engine.js, float-session.js, preview-panel.js, frame/tile-editor-
+  // presenter.js) refresh via `on('project', ...)`/`on('view', ...)`, not by
+  // re-reading state.project reactively, so setting the fields alone
+  // (without emitting) would update the data but leave the UI stale/blank.
+  // project.model and session.activeDocument are watched as ONE tuple
+  // selector (matching the pattern editor-workbench.js already uses for its
+  // own [project.model, activeViewId, activeDocument] subscribe) rather than
+  // two separate subscribes: EditorHost.setProject() changes project.model
+  // and activeDocument in two separate store writes, so two independent
+  // subscribes would fire in two steps -- the first (project.model) would
+  // emit 'project' while state.activeSheetId/activeMapId still held the
+  // PREVIOUS project's value, making activeSheet()/activeMap() resolve
+  // against the wrong id for that one emit and leaving dependent panels
+  // (e.g. the Layers panel) rendered empty with no later event to correct
+  // them, since the second subscribe (activeDocument) doesn't itself emit.
+  getEditorHost().store.subscribe(
+    s => [s.project.model, s.session.activeDocument],
+    ([project, doc]) => {
+      state.project = project;
+      state.activeSheetId = doc && doc.kind !== 'map' ? doc.id : null;
+      state.activeMapId = doc && doc.kind === 'map' ? doc.id : null;
+      emit('project');
+      emit('view');
+    },
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1], fireImmediately: true },
+  );
 
   // ---- file: Open ----
   // Folder ("unpacked") projects are disabled for now (see io.saveUnpacked/
