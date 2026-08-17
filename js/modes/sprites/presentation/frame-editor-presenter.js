@@ -32,9 +32,9 @@
 // draw onion ghosts (which are pivot-aligned in that same frame-local frame).
 
 import { state, on, emit, activeSheet, currentContextLayers, markDirty } from '../../../app/state.js';
-import { CanvasView } from '../../../ui/canvasview.js';
+import { CanvasView } from '../../../components/canvas/canvas-view.js';
 import { bindDrawing } from '../../../ui/tools.js';
-import { commitFloatIfAny } from '../../../ui/floatsession.js';
+import { commitFloatIfAny } from '../../../components/canvas/float-session.js';
 import { flattenSheetLayers } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';
 import { runAction } from '../../../app/actions.js';

@@ -1,9 +1,9 @@
 import { state, setProject, newDefaultProject, confirmOrAuto, markDirty } from '../../app/state.js';
 import { DEFAULT_SETTINGS } from '../../core/model.js';
 import { PLATFORMS } from '../../core/platforms.js';
-import { buildBaseDurationControl } from '../../ui/baseDurationControl.js';
+import { buildBaseDurationControl } from '../../components/panels/base-duration-control.js';
 import { defineAction } from '../../app/actions.js';
-import { markDefaultAction } from '../../ui/dialogs.js';
+import { markDefaultAction } from '../../components/dialogs.js';
 
 // Shared field coercion for the New Project / Project Settings dialogs.
 function sheetDimField(el) {

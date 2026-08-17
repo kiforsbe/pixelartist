@@ -2,9 +2,9 @@ import { state, on, emit, activeSheet, activeMap, confirmOrAuto, markDirty, mayb
 import * as io from '../../app/io.js';
 import { decodePng } from '../../app/pngcodec.js';
 import { createSheet, createMap, removeSheet, sheetLayers } from '../../core/model.js';
-import { commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../../ui/floatsession.js';
+import { commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../../components/canvas/float-session.js';
 import { defineAction, runAction, bindAction } from '../../app/actions.js';
-import { markDefaultAction } from '../../ui/dialogs.js';
+import { markDefaultAction } from '../../components/dialogs.js';
 import { syncLegacyStateToHost } from './legacy-state-adapter.js';
 import { isTypingTarget } from '../../components/dom-utils.js';
 

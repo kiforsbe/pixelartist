@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutDimension } from '../js/ui/dimlabels.js';
+import { layoutDimension } from '../js/components/canvas/dim-labels.js';
 
 const A = { x: 100, y: 200 }, B = { x: 180, y: 200 }; // 80px horizontal span
 

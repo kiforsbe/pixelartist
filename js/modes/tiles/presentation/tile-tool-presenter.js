@@ -11,7 +11,7 @@ import { rectBetween } from '../../../core/rect.js';
 import { HANDLES_CORNER, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../../core/resizeAnchor.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
 import { bindDragCancelGuard } from '../../../components/canvas/drag-cancel-guard.js';
-import { drawRectDims, drawChainDims } from '../../../ui/dimlabels.js';
+import { drawRectDims, drawChainDims } from '../../../components/canvas/dim-labels.js';
 import {
   tileAt, hitHandle, hitGridHandle, gridBounds, tileGripGeometry, hitTileGrip, ghostGridFor,
 } from '../application/geometry/tile-geometry.js';

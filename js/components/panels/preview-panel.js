@@ -18,9 +18,9 @@
 // current fit zoom into a manual one so the drag has room to move the
 // content off-center.
 
-import { state, on } from '../app/state.js';
-import { stepZoom, snapFitZoom } from '../core/zoom.js';
-import { getEditorHost } from '../host/runtime.js';
+import { state, on } from '../../app/state.js';
+import { stepZoom, snapFitZoom } from '../../core/zoom.js';
+import { getEditorHost } from '../../host/runtime.js';
 
 // Module-level scratch canvas, mirroring timeline.js/panels.js's own copies
 // of this pattern -- reused across draws, resized only when the source

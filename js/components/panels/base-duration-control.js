@@ -5,7 +5,7 @@
 // converted, for reference. fps-primary additionally shows a "step" field
 // (animate on every Nth frame at this fps), inline on the same row as fps. See
 // docs/superpowers/specs/2026-07-19-animation-panel-design.md.
-import { fpsStepToMs, msToFps } from '../core/model.js';
+import { fpsStepToMs, msToFps } from '../../core/model.js';
 
 // getValue() -> { durationMs, baseFps, baseStep } (baseFps/baseStep may be
 //   undefined -- that's what makes ms the primary unit).

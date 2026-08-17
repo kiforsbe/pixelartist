@@ -2,7 +2,7 @@
 // zoom, space/middle-drag pan, and forwards other pointer activity to `onPointer`.
 // Used by the sheet view (Task 12) and, later, the frame editor and tile editor.
 
-import { stepZoom, snapFitZoom } from '../core/zoom.js';
+import { stepZoom, snapFitZoom } from '../../core/zoom.js';
 
 const CHECKER_SIZE = 8;
 const CHECKER_A = '#3a3a3f', CHECKER_B = '#454549';

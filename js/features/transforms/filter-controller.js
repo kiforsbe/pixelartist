@@ -7,9 +7,9 @@ import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/
 import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../../core/checkerboard.js';
 import { rgbaToHex, hexToRgb } from '../../ui/panels.js';
 import { SYSTEM_PALETTES } from '../../core/systempalettes.js';
-import { previewWithOverride, refreshPreviewPanel } from '../../ui/previewpanel.js';
+import { previewWithOverride, refreshPreviewPanel } from '../../components/panels/preview-panel.js';
 import { defineAction } from '../../app/actions.js';
-import { markDefaultAction, makeDialogMovable, centerDialog, closeOnEscape } from '../../ui/dialogs.js';
+import { markDefaultAction, makeDialogMovable, centerDialog, closeOnEscape } from '../../components/dialogs.js';
 
 export function mountFilterController(workbench) {
   // ---- shared filter-preview plumbing (chroma key + quantize) ----

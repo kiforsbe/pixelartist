@@ -2,7 +2,7 @@
 // pixel-snapper, src/lib.rs) -- detects the implicit pixel grid of a
 // downscaled-with-artifacts or photographed pixel-art image and snaps it
 // back to its true resolution. Used for pasted/imported images (see
-// js/app/main.js's document.importSheet and js/ui/floatsession.js's
+// js/app/main.js's document.importSheet and js/components/canvas/float-session.js's
 // pasteSystemImage), both DOM-free/pure like the rest of js/core/.
 //
 // Pipeline (mirrors process_image_common in the Rust source):

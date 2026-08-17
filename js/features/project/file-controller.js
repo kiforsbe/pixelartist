@@ -18,7 +18,7 @@ import { encodePng } from '../../app/pngcodec.js';
 import { zipWrite } from '../../core/zip.js';
 import { collectProjectExportEntries } from '../../app/projectExport.js';
 import { defineAction } from '../../app/actions.js';
-import { markDefaultAction } from '../../ui/dialogs.js';
+import { markDefaultAction } from '../../components/dialogs.js';
 
 function isCancel(error) {
   return error?.name === 'AbortError' || error?.message === 'cancelled';

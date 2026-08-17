@@ -8,7 +8,7 @@ import { compositeFloatOnLayer } from '../core/floating.js';
 import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../core/systempalettes.js';
 import { defineAction, bindAction } from '../app/actions.js';
-import { markDefaultAction } from './dialogs.js';
+import { markDefaultAction } from '../components/dialogs.js';
 import { getEditorHost } from '../host/runtime.js';
 
 export function rgbaToHex([r, g, b]) {

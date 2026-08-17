@@ -3,7 +3,7 @@ import {
   state, emit, activeSheet,
 } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
-import { markDefaultAction } from '../../../ui/dialogs.js';
+import { markDefaultAction } from '../../../components/dialogs.js';
 import { groupCellsByBlobIndex } from '../../../core/terrainsets.js';
 import { blobIndexToMask, resolveTerrainSlot, classifySlots, DIRECTION_OFFSETS } from '../../../core/blob47.js';
 import { BUILTIN_LAYOUT_PRESETS } from '../../../core/blob47templates.js';

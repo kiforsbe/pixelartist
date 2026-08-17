@@ -1,6 +1,6 @@
 import { defineAction } from '../../app/actions.js';
-import { markDefaultAction } from '../../ui/dialogs.js';
-import { mountMenuBar } from '../../ui/menubar.js';
+import { markDefaultAction } from '../../components/dialogs.js';
+import { mountMenuBar } from '../../components/menubar.js';
 
 export function mountApplicationMenu() {
   // ---- help ----

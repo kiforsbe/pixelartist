@@ -7,7 +7,7 @@
 // docs/superpowers/specs/2026-07-19-animation-panel-design.md.
 import { state, on, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
-import { buildBaseDurationControl } from '../../../ui/baseDurationControl.js';
+import { buildBaseDurationControl } from '../../../components/panels/base-duration-control.js';
 import { mountReactivePanel } from '../../../components/panel-mount.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from '../js/app/state.js';
-import { registerFloatView, currentEditRegion } from '../js/ui/floatsession.js';
+import { registerFloatView, currentEditRegion } from '../js/components/canvas/float-session.js';
 import { createProject, createSheet, sheetLayers } from '../js/core/model.js';
 
 function setupProject() {

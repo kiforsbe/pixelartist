@@ -74,7 +74,7 @@ button:hover { border-color: var(--accent); }
 button.active { background: var(--accent); color: #fff; }
 button:disabled { opacity: .4; cursor: default; }
 /* Windows-standard default dialog action: highlighted border + Enter
-   triggers it (see js/ui/dialogs.js's markDefaultAction). */
+   triggers it (see js/components/dialogs.js's markDefaultAction). */
 .btn-default { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); font-weight: 600; }
 .btn-default:hover { border-color: var(--accent); }
 input[type="text"], input[type="number"], select {

@@ -19,7 +19,7 @@ import { contextLayers, flattenSheetLayers, effectiveDuration } from '../../../c
 import { copyRegion } from '../../../core/pixels.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { advancePlayback } from '../application/timeline-playback.js';
-import { setPreviewBitmap } from '../../../ui/previewpanel.js';
+import { setPreviewBitmap } from '../../../components/panels/preview-panel.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
 import { mountReactivePanel } from '../../../components/panel-mount.js';
 

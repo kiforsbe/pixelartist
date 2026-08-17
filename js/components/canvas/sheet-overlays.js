@@ -3,9 +3,9 @@
 // rendering — drawn in SCREEN space (the CanvasView identity transform
 // active during onOverlay), never baked into sheet bitmaps or exports.
 
-import { state, activeSheet } from '../app/state.js';
-import { getEditorHost } from '../host/runtime.js';
-import { classifySlots } from '../core/blob47.js';
+import { state, activeSheet } from '../../app/state.js';
+import { getEditorHost } from '../../host/runtime.js';
+import { classifySlots } from '../../core/blob47.js';
 
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };

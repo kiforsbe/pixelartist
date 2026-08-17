@@ -4,14 +4,15 @@
 // Pointer GESTURES (drag/scale/rotate) live in tools.js's move tool; every
 // state change funnels through here so stepwise undo and auto-commit stay
 // consistent. This module must never import tools.js (tools.js imports us).
-import { state, on, emit, activeSheet, activeLayer, markDirty, activeLayerScope, maybeSnapPixels } from '../app/state.js';
-import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../core/pixels.js';
-import { findLayer } from '../core/model.js';
-import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../core/floating.js';
-import { decodePng } from '../app/pngcodec.js';
-import { exportPngBlob } from '../app/io.js';
+import { state, on, emit, activeSheet, activeLayer, markDirty, activeLayerScope, maybeSnapPixels } from '../../app/state.js';
+import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../../core/pixels.js';
+import { findLayer } from '../../core/model.js';
+import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../../core/floating.js';
+import { decodePng } from '../../app/pngcodec.js';
+import { exportPngBlob } from '../../app/io.js';
+import { isTypingTarget } from '../dom-utils.js';
 
-export { isTypingTarget } from '../components/dom-utils.js';
+export { isTypingTarget };
 
 const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, setSelection, getTargetRect}
 let floatCtx = null;     // { viewKind, targetRect } frozen at float creation (frame-editor confinement)

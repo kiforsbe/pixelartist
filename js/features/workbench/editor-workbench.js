@@ -4,12 +4,12 @@ import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../..
 import { copyRegion } from '../../core/pixels.js';
 import { colorFrequency } from '../../core/quantize.js';
 import { PLATFORMS, checkItemAgainstPlatform } from '../../core/platforms.js';
-import { CanvasView } from '../../ui/canvasview.js';
+import { CanvasView } from '../../components/canvas/canvas-view.js';
 import { mountToolPalette, bindDrawing } from '../../ui/tools.js';
 import { mountColorPanel, mountLayersPanel } from '../../ui/panels.js';
-import { drawSheetOverlays } from '../../ui/overlays.js';
-import { mountPreviewPanel } from '../../ui/previewpanel.js';
-import { initFloatSession } from '../../ui/floatsession.js';
+import { drawSheetOverlays } from '../../components/canvas/sheet-overlays.js';
+import { mountPreviewPanel } from '../../components/panels/preview-panel.js';
+import { initFloatSession } from '../../components/canvas/float-session.js';
 import { defineAction } from '../../app/actions.js';
 import { getEditorHost } from '../../host/runtime.js';
 import { PanelManager } from '../../host/workbench/panel-manager.js';

@@ -9,7 +9,7 @@ import { segmentsOf, segmentOfFrame, segmentMembers } from '../../../core/strips
 import { HANDLES_CORNER } from '../../../core/resizeAnchor.js';
 import { frameBounds } from '../../../domain/sprites/frames.js';
 import { stripForFrame } from '../../../domain/sprites/strips.js';
-import { drawRectDims, drawChainDims } from '../../../ui/dimlabels.js';
+import { drawRectDims, drawChainDims } from '../../../components/canvas/dim-labels.js';
 import { resizeGhostRect } from '../application/frame-geometry.js';
 import { chromeGeometry, standaloneGripGeometry, selectedSegment, CALLOUT_R } from '../application/frame-chrome-geometry.js';
 

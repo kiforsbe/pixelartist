@@ -1,7 +1,7 @@
 // js/modes/sprites/presentation/slice-grid-dialog.js
 import { state, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
-import { markDefaultAction } from '../../../ui/dialogs.js';
+import { markDefaultAction } from '../../../components/dialogs.js';
 
 // Live Slice-grid preview: the dialog's current values while it is open, else
 // null. The sheet view handle lets dialog input events trigger repaints.
