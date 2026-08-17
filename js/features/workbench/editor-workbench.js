@@ -52,20 +52,19 @@ export function mountEditorWorkbench() {
   // ---- overlay toggles ----
   defineAction('view.toggleLabels', {
     label: 'Show Labels',
-    run: () => { state.overlays.labels = !state.overlays.labels; emit('view'); },
-    isChecked: () => state.overlays.labels,
+    run: () => editorHost.store.transaction('overlays', s => { s.workspace.overlays.labels = !s.workspace.overlays.labels; }),
+    isChecked: () => editorHost.store.getState().workspace.overlays.labels,
   });
   defineAction('view.toggleSequences', {
     label: 'Show Sequences',
-    run: () => { state.overlays.sequences = !state.overlays.sequences; emit('view'); },
-    isChecked: () => state.overlays.sequences,
+    run: () => editorHost.store.transaction('overlays', s => { s.workspace.overlays.sequences = !s.workspace.overlays.sequences; }),
+    isChecked: () => editorHost.store.getState().workspace.overlays.sequences,
   });
-  
+
   // ---- status bar ----
-  function updateStatusTool() { statusTool.textContent = `Tool: ${state.tool}`; }
-  on('tool', updateStatusTool);
-  updateStatusTool();
-  
+  function updateStatusTool() { statusTool.textContent = `Tool: ${editorHost.store.getState().session.activeToolId}`; }
+  editorHost.store.subscribe(s => s.session.activeToolId, updateStatusTool, { fireImmediately: true });
+
   // Live per-item compatibility check against project.settings.targetPlatform
   // (js/core/platforms.js) -- only while a specific frame/tile is open in its
   // own editor (state.view 'frame'/'tile'), since that's the one item whose
@@ -73,17 +72,20 @@ export function mountEditorWorkbench() {
   // pixel/history/selection/project/view change; cheap enough at this app's
   // sheet sizes to just redo the flatten+color-scan rather than cache it.
   function updateStatusPlatform() {
-    const project = state.project;
+    const project = editorHost.projects.project;
     const sheet = activeSheet();
     const platformId = project?.settings?.targetPlatform ?? 'none';
+    const view = editorHost.store.getState().session.activeViewId;
+    const activeDoc = editorHost.store.getState().session.activeDocument;
+    const selection = activeDoc ? editorHost.selections.get(activeDoc) : null;
     const rect = platformId === 'none' || !sheet ? null
-      : state.view === 'frame' ? sheet.frames?.find(f => f.id === state.editingFrameId)
-      : state.view === 'tile' ? sheet.tiles?.find(t => t.id === state.editingTileId)
+      : view === 'sprites.frame' ? sheet.frames?.find(f => f.id === selection?.frameId)
+      : view === 'tiles.tile' ? sheet.tiles?.find(t => t.id === selection?.tileId)
       : null;
     if (!rect) { statusPlatform.textContent = ''; statusPlatform.title = ''; return; }
-  
+
     const bitmap = copyRegion(flattenSheet(sheet), rect.x, rect.y, rect.w, rect.h);
-    const kind = state.view === 'tile' ? 'tile' : 'sprite';
+    const kind = view === 'tiles.tile' ? 'tile' : 'sprite';
     const warnings = checkItemAgainstPlatform(platformId, { colors: colorFrequency([bitmap]), w: rect.w, h: rect.h, kind });
     const label = PLATFORMS[platformId].label;
     statusPlatform.textContent = warnings.length ? `${label} ⚠ ${warnings.length}` : `${label} ✓`;
@@ -91,11 +93,13 @@ export function mountEditorWorkbench() {
     statusPlatform.classList.toggle('status-platform-warn', warnings.length > 0);
   }
   on('pixels', updateStatusPlatform);
-  on('history', updateStatusPlatform);
   on('selection', updateStatusPlatform);
-  on('project', updateStatusPlatform);
-  on('view', updateStatusPlatform);
-  updateStatusPlatform();
+  editorHost.history.subscribe(updateStatusPlatform);
+  editorHost.store.subscribe(
+    s => [s.project.model, s.session.activeViewId, s.session.activeDocument],
+    updateStatusPlatform,
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2], fireImmediately: true },
+  );
   
   // ---- canvas view ----
   const canvasView = new CanvasView(canvasHost);
@@ -159,7 +163,7 @@ export function mountEditorWorkbench() {
   };
   
   function refreshCanvasView() {
-    const maps = state.mode === 'maps';
+    const maps = editorHost.store.getState().session.activeModeId === 'maps';
     canvasView.canvas.hidden = maps;
     mapCanvasHost.hidden = !maps;
     if (maps) { mapCanvasView.setContent({ width: 8192, height: 8192 }); mapCanvasView.requestRender(); return; }
@@ -167,14 +171,18 @@ export function mountEditorWorkbench() {
     if (sheet) canvasView.setContent({ width: sheet.width, height: sheet.height });
     canvasView.requestRender();
   }
-  on('project', () => { invalidateScratch(); refreshCanvasView(); });
-  on('view', refreshCanvasView);
+  editorHost.store.subscribe(
+    s => s.project.model,
+    () => { invalidateScratch(); refreshCanvasView(); },
+    { fireImmediately: true },
+  );
+  editorHost.store.subscribe(s => s.session.activeViewId, refreshCanvasView, { fireImmediately: true });
   // 'pixels': lightweight bitmap-changed-mid-stroke signal from drawing-engine.js/layers-panel.js
   // (in-progress drawing preview, live opacity drag) — just re-flatten + repaint,
-  // skip the heavier setContent/dirty-flag work that 'project' does.
+  // skip the heavier setContent/dirty-flag work that a project-model change does.
   on('pixels', () => { invalidateScratch(); canvasView.requestRender(); });
   // undo/redo can touch pixels, layer structure, or both — repaint on every change.
-  on('history', () => { invalidateScratch(); refreshCanvasView(); });
+  editorHost.history.subscribe(() => { invalidateScratch(); refreshCanvasView(); });
   // frame/tile selection changed (no pixel or structural change) — cheap repaint
   // so the label-overlay highlight tracks the selected frame immediately.
   on('selection', () => canvasView.requestRender());
@@ -228,19 +236,7 @@ export function mountEditorWorkbench() {
   });
   panelManager.setRegions(findWorkbenchRegions());
   panelManager.reconcile(contributionContext);
-  let panelReconcileQueued = false;
-  editorHost.contextKeys.subscribe(() => {
-    if (panelReconcileQueued) return;
-    panelReconcileQueued = true;
-    // Context keys change during host activation, before the transitional
-    // legacy-state listener has finished switching its active document.
-    // Reconcile at the transaction boundary so a newly mounted panel always
-    // observes the matching document kind.
-    queueMicrotask(() => {
-      panelReconcileQueued = false;
-      panelManager.reconcile(contributionContext);
-    });
-  });
+  editorHost.contextKeys.subscribe(() => panelManager.reconcile(contributionContext));
 
   const viewControllers = new Map();
   for (const definition of editorHost.registries.views.list()) {
@@ -252,7 +248,8 @@ export function mountEditorWorkbench() {
 
   // ---- view: zoom ----
   function activeCanvasView() {
-    return state.mode === 'maps' ? mapEditor.view : state.view === 'frame' ? frameEditor.view : state.view === 'tile' ? tileEditor.view : canvasView;
+    const s = editorHost.store.getState().session;
+    return s.activeModeId === 'maps' ? mapEditor.view : s.activeViewId === 'sprites.frame' ? frameEditor.view : s.activeViewId === 'tiles.tile' ? tileEditor.view : canvasView;
   }
   defineAction('view.zoomIn', { label: 'Zoom In', run: () => activeCanvasView().zoomIn() });
   defineAction('view.zoomOut', { label: 'Zoom Out', run: () => activeCanvasView().zoomOut() });
@@ -264,23 +261,23 @@ export function mountEditorWorkbench() {
   // view's <canvas> is hidden directly (its host, #canvas-host, is shared with
   // the frame/tile editors' own child containers) rather than tearing anything down.
   function applyView() {
-    if (state.view === 'sheet') {
+    const view = editorHost.store.getState().session.activeViewId;
+    if (view === 'sprites.sheet' || view === 'tiles.sheet' || view === 'maps.canvas') {
       canvasView.canvas.style.display = '';
       frameEditor.hide();
       tileEditor.hide();
-    } else if (state.view === 'frame') {
+    } else if (view === 'sprites.frame') {
       canvasView.canvas.style.display = 'none';
       frameEditor.show();
       tileEditor.hide();
     } else {
-      // 'tile'
+      // 'tiles.tile'
       canvasView.canvas.style.display = 'none';
       frameEditor.hide();
       tileEditor.show();
     }
   }
-  on('view', applyView);
-  applyView();
+  editorHost.store.subscribe(s => s.session.activeViewId, applyView, { fireImmediately: true });
   return Object.freeze({
     pushCanvasPreview,
     clearCanvasPreview,

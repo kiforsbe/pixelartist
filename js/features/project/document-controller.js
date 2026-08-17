@@ -1,11 +1,10 @@
-import { state, on, emit, activeSheet, activeMap, confirmOrAuto, markDirty, maybeSnapPixels } from '../../app/state.js';
+import { state, activeSheet, activeMap, confirmOrAuto, maybeSnapPixels } from '../../app/state.js';
 import * as io from '../../app/io.js';
 import { decodePng } from '../../app/pngcodec.js';
 import { createSheet, createMap, removeSheet, sheetLayers } from '../../core/model.js';
 import { commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../../components/canvas/float-session.js';
 import { defineAction, runAction, bindAction } from '../../app/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
-import { syncLegacyStateToHost } from './legacy-state-adapter.js';
 import { isTypingTarget } from '../../components/dom-utils.js';
 
 export function mountDocumentController({ editorHost, workbench }) {
@@ -42,37 +41,37 @@ export function mountDocumentController({ editorHost, workbench }) {
       editorHost.activateMode(mode);
       return;
     }
-    if (state.mode === mode) return;
-    const previousMode = state.mode;
-    state.mode = mode;
+    const previousMode = editorHost.store.getState().session.activeModeId;
+    if (previousMode === mode) return;
     tabSprites.classList.toggle('active', mode === 'sprites');
     tabTiles.classList.toggle('active', mode === 'tiles');
     tabMaps.classList.toggle('active', mode === 'maps');
     if (mode === 'maps') {
-      const map = state.project?.maps?.[0] ?? null;
-      state.activeMapId = map?.id ?? null;
-      state.activeSheetId = null; state.view = 'map';
-      if (!['select', 'move', 'maptile', 'mapsprite'].includes(state.tool)) { state.tool = 'select'; emit('tool'); }
-      emit('view'); workbench.focusMap(); return;
+      const map = editorHost.projects.project?.maps?.[0] ?? null;
+      editorHost.documents.setActive(map ? { kind: 'map', id: map.id } : null, { modeId: mode, allowMissing: true });
+      editorHost.store.updateSession({ activeViewId: 'maps.canvas' }, 'view');
+      const tool = editorHost.store.getState().session.activeToolId;
+      if (!['select', 'move', 'maptile', 'mapsprite'].includes(tool)) editorHost.store.updateSession({ activeToolId: 'select' }, 'tool');
+      workbench.focusMap();
+      return;
     }
     const kind = mode === 'sprites' ? 'sprite' : 'tile';
-    const sheet = state.project?.sheets.find(s => s.kind === kind) ?? null;
-    state.activeSheetId = sheet ? sheet.id : null;
+    const sheet = editorHost.projects.project?.sheets.find(s => s.kind === kind) ?? null;
+    editorHost.documents.setActive(sheet ? sheetDocument(sheet) : null, { modeId: mode, allowMissing: true });
     // Selections (layer/frame/animation/tile) are per-sheet; a stale id
     // surviving an active-sheet change lets e.g. timeline's "Add selected
     // frame" insert one sheet's frameId into another sheet's animation
     // (blank timeline cell, `"frame": null` on export). Reseed on every path
-    // that reassigns activeSheetId.
+    // that reassigns the active document.
     seedSheetSelection(sheet, sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null);
-    state.selectedTileId = null;
-    state.view = 'sheet';
+    editorHost.store.updateSession({ activeViewId: `${mode}.sheet` }, 'view');
     // frame/tile tools are mode-exclusive (their palette buttons hide via
     // isAvailable()); fall back to pencil so leaving their mode doesn't strand
     // pointer routing on a tool with nothing to dispatch to.
-    if (mode !== 'sprites' && state.tool === 'frametool') { state.tool = 'pencil'; emit('tool'); }
-    if (mode !== 'tiles' && state.tool === 'tiletool') { state.tool = 'pencil'; emit('tool'); }
-    if (mode !== 'maps' && ['maptile', 'mapsprite'].includes(state.tool)) { state.tool = 'pencil'; emit('tool'); }
-    emit('view');
+    const tool = editorHost.store.getState().session.activeToolId;
+    if (mode !== 'sprites' && tool === 'frametool') editorHost.store.updateSession({ activeToolId: 'pencil' }, 'tool');
+    if (mode !== 'tiles' && tool === 'tiletool') editorHost.store.updateSession({ activeToolId: 'pencil' }, 'tool');
+    if (mode !== 'maps' && ['maptile', 'mapsprite'].includes(tool)) editorHost.store.updateSession({ activeToolId: 'pencil' }, 'tool');
     // Maps uses a deliberately distant, centred infinite-workspace camera.
     // Returning to a finite sheet must recenter it; otherwise the sheet is
     // still rendered but entirely outside the viewport (as in the reported
@@ -84,29 +83,19 @@ export function mountDocumentController({ editorHost, workbench }) {
   tabTiles.addEventListener('click', () => switchMode('tiles'));
   tabMaps.addEventListener('click', () => switchMode('maps'));
   
-  // Transitional bridge: the host is authoritative for mode activation while
-  // legacy feature controllers still write the existing state object. Mirroring
-  // the remaining state into the new service store lets features migrate one at
-  // a time without maintaining two independent application states.
-  const syncEditorHost = () => syncLegacyStateToHost(editorHost, state);
-  on('project', syncEditorHost);
-  on('view', syncEditorHost);
-  on('selection', syncEditorHost);
-  on('tool', syncEditorHost);
-  on('history', syncEditorHost);
-  syncEditorHost();
-  
   // ---- sheet selector ----
   function refreshSheetSelect() {
-    if (state.mode === 'maps') {
-      const maps = state.project?.maps ?? [];
+    const mode = editorHost.store.getState().session.activeModeId;
+    const activeDoc = editorHost.store.getState().session.activeDocument;
+    if (mode === 'maps') {
+      const maps = editorHost.projects.project?.maps ?? [];
       sheetSelect.innerHTML = '';
       for (const m of maps) { const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.name; sheetSelect.appendChild(opt); }
-      sheetSelect.value = state.activeMapId ?? '';
+      sheetSelect.value = activeDoc?.kind === 'map' ? activeDoc.id : '';
       return;
     }
-    const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
-    const sheets = state.project?.sheets.filter(s => s.kind === kind) ?? [];
+    const kind = mode === 'sprites' ? 'sprite' : 'tile';
+    const sheets = editorHost.projects.project?.sheets.filter(s => s.kind === kind) ?? [];
     sheetSelect.innerHTML = '';
     for (const s of sheets) {
       const opt = document.createElement('option');
@@ -114,28 +103,28 @@ export function mountDocumentController({ editorHost, workbench }) {
       opt.textContent = s.name;
       sheetSelect.appendChild(opt);
     }
-    sheetSelect.value = state.activeSheetId ?? '';
+    sheetSelect.value = activeDoc ? activeDoc.id : '';
   }
-  let sheetSelectQueued = false;
-  function scheduleSheetSelectRefresh() {
-    if (sheetSelectQueued) return;
-    sheetSelectQueued = true;
-    queueMicrotask(() => { sheetSelectQueued = false; refreshSheetSelect(); });
-  }
-  on('project', scheduleSheetSelectRefresh);
-  on('view', scheduleSheetSelectRefresh);
-  refreshSheetSelect();
-  
+  editorHost.store.subscribe(
+    state => [state.project.model, state.session.activeModeId, state.session.activeDocument],
+    () => refreshSheetSelect(),
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2], fireImmediately: true },
+  );
+
   sheetSelect.addEventListener('change', () => {
-    if (state.mode === 'maps') { const map = state.project?.maps?.find(m => m.id === sheetSelect.value); if (!map) return; state.activeMapId = map.id; state.view = 'map'; emit('view'); workbench.focusMap(); return; }
-    const sheet = state.project?.sheets.find(s => s.id === sheetSelect.value);
+    const mode = editorHost.store.getState().session.activeModeId;
+    if (mode === 'maps') {
+      const map = editorHost.projects.project?.maps?.find(m => m.id === sheetSelect.value);
+      if (!map) return;
+      editorHost.documents.setActive({ kind: 'map', id: map.id }, { modeId: mode });
+      workbench.focusMap();
+      return;
+    }
+    const sheet = editorHost.projects.project?.sheets.find(s => s.id === sheetSelect.value);
     if (!sheet) return;
-    state.activeSheetId = sheet.id;
+    editorHost.documents.setActive(sheetDocument(sheet), { modeId: mode });
     // See switchMode's comment above: selections are per-sheet, reseed here too.
     seedSheetSelection(sheet, sheetLayers(sheet)[0]?.id ?? null);
-    state.selectedTileId = null;
-    state.view = 'sheet';
-    emit('view');
   });
   
   // ---- add-sheet command (shared by New Sheet dialog + Import) ----
@@ -145,59 +134,61 @@ export function mountDocumentController({ editorHost, workbench }) {
   // a command whose do()/undo() replay that structural change idempotently for
   // redo/undo.
   function commitAddSheet(sheet) {
-    const project = state.project;
-    const prevActiveSheetId = state.activeSheetId;
+    const project = editorHost.projects.project;
+    const prevDoc = editorHost.store.getState().session.activeDocument;
     const prevSheet = activeSheet();
     const prevActiveLayerId = prevSheet ? (editorHost.selections.get(sheetDocument(prevSheet))?.layerId ?? null) : null;
     const insertIndex = project.sheets.indexOf(sheet);
+    const mode = editorHost.store.getState().session.activeModeId;
     const cmd = {
       label: 'new sheet',
       do() {
         if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
-        state.activeSheetId = sheet.id;
+        editorHost.documents.setActive(sheetDocument(sheet), { modeId: mode });
         // See switchMode's comment above: selections are per-sheet, reseed them too.
         seedSheetSelection(sheet, sheetLayers(sheet)[0]?.id ?? null);
-        state.selectedTileId = null;
-        state.view = 'sheet';
-        emit('view');
       },
       undo() {
         const i = project.sheets.indexOf(sheet);
         if (i !== -1) project.sheets.splice(i, 1);
-        state.activeSheetId = prevActiveSheetId;
+        editorHost.documents.setActive(prevDoc, { modeId: mode, allowMissing: true });
         if (prevSheet) seedSheetSelection(prevSheet, prevActiveLayerId);
-        state.selectedTileId = null;
-        state.view = 'sheet';
-        emit('view');
       },
     };
-    state.commands.push(cmd);
-    markDirty();
-    emit('view');
+    editorHost.history.execute(cmd);
+    editorHost.projects.markDirty();
   }
   
   // ---- new sheet dialog ----
   defineAction('document.newSheet', {
     label: 'New Sheet',
     run: () => {
-      if (!state.project) return;
-      if (state.mode === 'maps') { const map = createMap(state.project, { name: `Map ${state.project.maps.length}`, gridW: state.project.settings.tileW, gridH: state.project.settings.tileH }); state.activeMapId = map.id; markDirty(); emit('view'); return; }
-      const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
-      const settings = state.project.settings;
-      const n = state.project.sheets.filter(s => s.kind === kind).length + 1;
+      const project = editorHost.projects.project;
+      if (!project) return;
+      const mode = editorHost.store.getState().session.activeModeId;
+      if (mode === 'maps') {
+        const map = createMap(project, { name: `Map ${project.maps.length}`, gridW: project.settings.tileW, gridH: project.settings.tileH });
+        editorHost.documents.setActive({ kind: 'map', id: map.id }, { modeId: mode });
+        editorHost.projects.markDirty();
+        return;
+      }
+      const kind = mode === 'sprites' ? 'sprite' : 'tile';
+      const settings = project.settings;
+      const n = project.sheets.filter(s => s.kind === kind).length + 1;
       nsName.value = `sheet_${n}`;
       nsW.value = kind === 'sprite' ? settings.spriteSheetW : settings.tileSheetW;
       nsH.value = kind === 'sprite' ? settings.spriteSheetH : settings.tileSheetH;
       dlgNewSheet.showModal();
     },
-    isEnabled: () => !!state.project,
+    isEnabled: () => !!editorHost.projects.project,
   });
   bindAction(btnNewSheet, 'document.newSheet');
   nsCancel.addEventListener('click', () => dlgNewSheet.close());
   nsCreate.addEventListener('click', () => {
-    if (!state.project) return;
-    const project = state.project;
-    const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+    const project = editorHost.projects.project;
+    if (!project) return;
+    const mode = editorHost.store.getState().session.activeModeId;
+    const kind = mode === 'sprites' ? 'sprite' : 'tile';
     const sheetDim = (el) => {
       const v = parseInt(el.value, 10);
       return (Number.isNaN(v) || v < 1) ? null : Math.min(4096, v);
@@ -219,7 +210,8 @@ export function mountDocumentController({ editorHost, workbench }) {
   defineAction('document.importSheet', {
     label: 'Import Sheet from Image',
     run: async () => {
-      if (!state.project || state.mode === 'maps') return;
+      const mode = editorHost.store.getState().session.activeModeId;
+      if (!editorHost.projects.project || mode === 'maps') return;
       let file;
       try {
         file = await io.pickImageFile();
@@ -241,8 +233,8 @@ export function mountDocumentController({ editorHost, workbench }) {
         return;
       }
       bitmap = maybeSnapPixels(bitmap);
-      const project = state.project;
-      const kind = state.mode === 'sprites' ? 'sprite' : 'tile';
+      const project = editorHost.projects.project;
+      const kind = mode === 'sprites' ? 'sprite' : 'tile';
       const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
       const sheet = createSheet(project, {
         name, width: bitmap.width, height: bitmap.height, kind,
@@ -250,7 +242,7 @@ export function mountDocumentController({ editorHost, workbench }) {
       sheetLayers(sheet)[0].bitmap = bitmap;
       commitAddSheet(sheet);
     },
-    isEnabled: () => !!state.project && state.mode !== 'maps',
+    isEnabled: () => !!editorHost.projects.project && editorHost.store.getState().session.activeModeId !== 'maps',
   });
   bindAction(btnImportSheet, 'document.importSheet');
   
@@ -266,14 +258,14 @@ export function mountDocumentController({ editorHost, workbench }) {
   defineAction('document.renameSheet', {
     label: 'Rename',
     run: () => {
-      renameTargetKind = state.mode === 'maps' ? 'map' : 'sheet';
+      renameTargetKind = editorHost.store.getState().session.activeModeId === 'maps' ? 'map' : 'sheet';
       renameTarget = renameTargetKind === 'map' ? activeMap() : activeSheet();
       if (!renameTarget) return;
       rsHeading.textContent = renameTargetKind === 'map' ? 'Rename Map' : 'Rename Sheet';
       rsName.value = renameTarget.name;
       dlgRenameSheet.showModal();
     },
-    isEnabled: () => state.mode === 'maps' ? !!activeMap() : !!activeSheet(),
+    isEnabled: () => editorHost.store.getState().session.activeModeId === 'maps' ? !!activeMap() : !!activeSheet(),
   });
   bindAction(btnRenameSheet, 'document.renameSheet');
   rsCancel.addEventListener('click', () => { renameTarget = null; dlgRenameSheet.close(); });
@@ -284,12 +276,10 @@ export function mountDocumentController({ editorHost, workbench }) {
     const v = rsName.value.trim();
     if (!v) { alert('Name cannot be empty.'); return; }
     const old = target.name, kind = renameTargetKind;
-    // markDirty() in both directions: its 'project' emit refreshes the sheet
-    // selector, which undo/redo would otherwise leave showing the stale name.
-    state.commands.push({
+    editorHost.history.execute({
       label: `rename ${kind}`,
-      do() { target.name = v; markDirty(); },
-      undo() { target.name = old; markDirty(); },
+      do() { target.name = v; editorHost.projects.markDirty(); },
+      undo() { target.name = old; editorHost.projects.markDirty(); },
     });
     renameTarget = null;
     dlgRenameSheet.close();
@@ -303,38 +293,35 @@ export function mountDocumentController({ editorHost, workbench }) {
   // floating selection.
   const btnDeleteSheet = document.getElementById('btn-delete-sheet');
   function commitDeleteMap(map) {
-    const project = state.project, index = project.maps.indexOf(map);
+    const project = editorHost.projects.project, index = project.maps.indexOf(map);
     if (index === -1) return;
-    const wasActive = state.activeMapId === map.id;
-    const prev = { activeMapId: state.activeMapId };
-    state.commands.push({
+    const activeDoc = editorHost.store.getState().session.activeDocument;
+    const wasActive = activeDoc?.kind === 'map' && activeDoc.id === map.id;
+    const mode = editorHost.store.getState().session.activeModeId;
+    editorHost.history.execute({
       label: 'delete map',
       do() {
         const current = project.maps.indexOf(map); if (current !== -1) project.maps.splice(current, 1);
         if (wasActive) {
           const next = project.maps[Math.min(index, project.maps.length - 1)] ?? null;
-          state.activeMapId = next?.id ?? null;
+          editorHost.documents.setActive(next ? { kind: 'map', id: next.id } : null, { modeId: mode, allowMissing: true });
         }
-        markDirty(); emit('view');
+        editorHost.projects.markDirty();
       },
       undo() {
         if (!project.maps.includes(map)) project.maps.splice(index, 0, map);
-        Object.assign(state, prev);
-        markDirty(); emit('view');
+        if (wasActive) editorHost.documents.setActive({ kind: 'map', id: map.id }, { modeId: mode });
+        editorHost.projects.markDirty();
       },
     });
   }
   function commitDeleteSheet(sheet) {
-    const project = state.project;
+    const project = editorHost.projects.project;
     const index = project.sheets.indexOf(sheet);
     if (index === -1) return;
-    const wasActive = state.activeSheetId === sheet.id;
-    const prev = {
-      activeSheetId: state.activeSheetId,
-      selectedTileId: state.selectedTileId, selectedTerrainSetId: state.selectedTerrainSetId,
-      editingFrameId: state.editingFrameId, editingTileId: state.editingTileId,
-      view: state.view, floating: state.floating,
-    };
+    const activeDoc = editorHost.store.getState().session.activeDocument;
+    const wasActive = activeDoc?.kind === sheetDocument(sheet).kind && activeDoc.id === sheet.id;
+    const mode = editorHost.store.getState().session.activeModeId;
     const cmd = {
       label: 'delete sheet',
       do() {
@@ -343,30 +330,24 @@ export function mountDocumentController({ editorHost, workbench }) {
         if (wasActive) {
           const siblings = project.sheets.filter(s => s.kind === sheet.kind);
           const next = siblings[Math.min(index, siblings.length - 1)] ?? null;
-          state.activeSheetId = next ? next.id : null;
-          seedSheetSelection(next, next ? (sheetLayers(next)[0]?.id ?? null) : null);
-          state.selectedTileId = null;
-          state.selectedTerrainSetId = null;
-          state.editingFrameId = null;
-          state.editingTileId = null;
-          state.view = 'sheet';
+          editorHost.documents.setActive(next ? sheetDocument(next) : null, { modeId: mode, allowMissing: true });
+          if (next) seedSheetSelection(next, next ? (sheetLayers(next)[0]?.id ?? null) : null);
         }
-        markDirty();
-        emit('view');
+        editorHost.projects.markDirty();
       },
       undo() {
         project.sheets.splice(index, 0, sheet);
-        Object.assign(state, prev);
-        markDirty();
-        emit('view');
+        if (wasActive) editorHost.documents.setActive(sheetDocument(sheet), { modeId: mode });
+        editorHost.projects.markDirty();
       },
     };
-    state.commands.push(cmd);
+    editorHost.history.execute(cmd);
   }
   defineAction('document.deleteSheet', {
     label: 'Delete',
     run: () => {
-      if (state.mode === 'maps') {
+      const mode = editorHost.store.getState().session.activeModeId;
+      if (mode === 'maps') {
         const map = activeMap(); if (!map) return;
         if (confirmOrAuto(`Delete map "${map.name}" and all of its layers and placements?`)) commitDeleteMap(map);
         return;
@@ -376,30 +357,31 @@ export function mountDocumentController({ editorHost, workbench }) {
       if (!confirmOrAuto(`Delete sheet "${sheet.name}" and everything in it (layers, frames, animations${sheet.kind === 'tile' ? ', tiles, autotile sets' : ''})?`)) return;
       commitDeleteSheet(sheet);
     },
-    isEnabled: () => state.mode === 'maps' ? !!activeMap() : !!activeSheet(),
+    isEnabled: () => editorHost.store.getState().session.activeModeId === 'maps' ? !!activeMap() : !!activeSheet(),
   });
   bindAction(btnDeleteSheet, 'document.deleteSheet');
   function refreshDocumentControlTitles() {
-    const maps = state.mode === 'maps';
+    const maps = editorHost.store.getState().session.activeModeId === 'maps';
     btnNewSheet.title = maps ? 'New map' : 'New sheet';
     btnRenameSheet.title = maps ? 'Rename map' : 'Rename sheet';
     btnDeleteSheet.title = maps ? 'Delete map' : 'Delete sheet';
   }
-  on('view', refreshDocumentControlTitles);
-  on('project', refreshDocumentControlTitles);
-  refreshDocumentControlTitles();
-  
+  editorHost.store.subscribe(
+    state => state.session.activeModeId,
+    () => refreshDocumentControlTitles(),
+    { fireImmediately: true },
+  );
+
   // ---- undo/redo ----
-  editorHost.history.subscribe(() => emit('history'));
   defineAction('edit.undo', {
     label: 'Undo', shortcut: 'Ctrl+Z',
-    run: () => state.commands.undo(),
-    isEnabled: () => state.commands.canUndo(),
+    run: () => editorHost.history.undo(),
+    isEnabled: () => editorHost.history.canUndo(),
   });
   defineAction('edit.redo', {
     label: 'Redo', shortcut: 'Ctrl+Y',
-    run: () => state.commands.redo(),
-    isEnabled: () => state.commands.canRedo(),
+    run: () => editorHost.history.redo(),
+    isEnabled: () => editorHost.history.canRedo(),
   });
   defineAction('edit.cut', { label: 'Cut', shortcut: 'Ctrl+X', run: () => cutSelection(false), isEnabled: hasSelection });
   defineAction('edit.copy', { label: 'Copy', shortcut: 'Ctrl+C', run: () => copySelection(false), isEnabled: hasSelection });
