@@ -58,6 +58,13 @@ test('shared preview delegates rendering to mode providers', async () => {
   assert.match(source, /registries\.previews\.list/);
 });
 
+test('nothing imports the retired js/ui directory', async () => {
+  for (const file of await jsFiles(join(root, 'js'))) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /from\s+['"][^'"]*[\\/]ui[\\/]/, file);
+  }
+});
+
 test('mode canvas controllers do not own contribution panels', async () => {
   for (const file of [
     join(root, 'js/modes/sprites/presentation/frame-tool-presenter.js'),
