@@ -191,6 +191,14 @@ export function mountEditorWorkbench() {
     { fireImmediately: true },
   );
   editorHost.store.subscribe(s => s.session.activeViewId, refreshCanvasView, { fireImmediately: true });
+  // Show Labels / Show Sequences: repaint directly off the host store rather than the
+  // legacy 'view' bus — file-controller.js's overlays mirror still emits 'view' for the
+  // benefit of not-yet-migrated files, but nothing in this file listens for it anymore.
+  editorHost.store.subscribe(
+    s => [s.workspace.overlays.labels, s.workspace.overlays.sequences],
+    () => canvasView.requestRender(),
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] },
+  );
   // 'pixels': lightweight bitmap-changed-mid-stroke signal from drawing-engine.js/layers-panel.js
   // (in-progress drawing preview, live opacity drag) — just re-flatten + repaint,
   // skip the heavier setContent/dirty-flag work that a project-model change does.
