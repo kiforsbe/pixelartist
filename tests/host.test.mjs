@@ -96,3 +96,23 @@ test('EditorStore starts with a default overlays workspace field, mutable via tr
   assert.deepEqual(notified, { labels: true, sequences: false });
   dispose();
 });
+
+test('SelectionService.patch merges into the existing selection; .set still replaces wholesale', () => {
+  const host = new EditorHost();
+  const document = { kind: 'sprite-sheet', id: 'sheet-1' };
+
+  host.selections.set({ layerId: 'layer-1', frameId: 'frame-1' }, document);
+  host.selections.patch({ frameId: 'frame-2' }, document);
+  assert.deepEqual(host.selections.get(document), { layerId: 'layer-1', frameId: 'frame-2' });
+
+  host.selections.set({ layerId: 'layer-9' }, document);
+  assert.deepEqual(host.selections.get(document), { layerId: 'layer-9' });
+});
+
+test('SelectionService.patch defaults to the active document, same as .get/.set', () => {
+  const host = new EditorHost();
+  host.store.transaction('test-setup', next => { next.session.activeDocument = { kind: 'sprite-sheet', id: 'active-sheet' }; });
+  host.selections.set({ layerId: 'layer-1' });
+  host.selections.patch({ tileId: 42 });
+  assert.deepEqual(host.selections.get({ kind: 'sprite-sheet', id: 'active-sheet' }), { layerId: 'layer-1', tileId: 42 });
+});
