@@ -15,7 +15,7 @@ export function createEditorState(initial = {}) {
       ...(initial.session ?? {}),
     },
     interaction: { ...(initial.interaction ?? {}) },
-    workspace: { focusedSurfaceId: null, ...(initial.workspace ?? {}) },
+    workspace: { focusedSurfaceId: null, overlays: { labels: true, sequences: true }, ...(initial.workspace ?? {}) },
   };
 }
 

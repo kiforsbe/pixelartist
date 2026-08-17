@@ -82,3 +82,17 @@ test('built-in-shaped map provider can coexist with sheet modes', () => {
   host.setProject(project);
   assert.deepEqual(host.store.getState().session.activeDocument, { kind: 'map', id: map.id });
 });
+
+test('EditorStore starts with a default overlays workspace field, mutable via transaction', () => {
+  const host = new EditorHost();
+  assert.deepEqual(host.store.getState().workspace.overlays, { labels: true, sequences: true });
+
+  let notified = null;
+  const dispose = host.store.subscribe(
+    state => state.workspace.overlays,
+    value => { notified = value; },
+  );
+  host.store.transaction('overlays', next => { next.workspace.overlays = { ...next.workspace.overlays, sequences: false }; });
+  assert.deepEqual(notified, { labels: true, sequences: false });
+  dispose();
+});
