@@ -278,8 +278,8 @@ export function mountDocumentController({ editorHost, workbench }) {
     const old = target.name, kind = renameTargetKind;
     editorHost.history.execute({
       label: `rename ${kind}`,
-      do() { target.name = v; editorHost.projects.markDirty(); },
-      undo() { target.name = old; editorHost.projects.markDirty(); },
+      do() { target.name = v; editorHost.projects.markDirty(); refreshSheetSelect(); },
+      undo() { target.name = old; editorHost.projects.markDirty(); refreshSheetSelect(); },
     });
     renameTarget = null;
     dlgRenameSheet.close();

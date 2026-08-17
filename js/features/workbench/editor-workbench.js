@@ -95,6 +95,17 @@ export function mountEditorWorkbench() {
   on('pixels', updateStatusPlatform);
   on('selection', updateStatusPlatform);
   editorHost.history.subscribe(updateStatusPlatform);
+  // tool-palette.js is not migrated yet (out of this task's scope) — it still
+  // writes state.tool + emit('tool') only. Mirror that one-way into
+  // session.activeToolId so switchMode's stale-tool fallback (document-
+  // controller.js) and updateStatusTool above observe the real active tool.
+  // Sync once immediately too: EditorStore's initial activeToolId (null)
+  // doesn't match state.tool's legacy default ('pencil') until the first
+  // 'tool' emit, which previously only happened via legacy-state-adapter's
+  // one-time sync call that this task's Step 2 removed.
+  const syncActiveTool = () => editorHost.store.updateSession({ activeToolId: state.tool }, 'tool');
+  on('tool', syncActiveTool);
+  syncActiveTool();
   editorHost.store.subscribe(
     s => [s.project.model, s.session.activeViewId, s.session.activeDocument],
     updateStatusPlatform,
