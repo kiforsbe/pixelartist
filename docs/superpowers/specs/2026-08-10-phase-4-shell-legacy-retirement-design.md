@@ -480,31 +480,65 @@ incremental per-file conversion because re-touching modes that are
 already "done" benefits from being treated as one coherent unit per mode,
 same as their original migration.
 
+> **Amendment (2026-08-17, before Group 3 started):** direct investigation
+> of all 29 legacy-coupled mode files (6 maps, 11 sprites, 12 tiles),
+> undertaken specifically to write Group 3a's (maps) implementation plan,
+> found Group 3 entirely blocked, not just harder than expected. Every one
+> of the 29 files has at least one usage in the category the Foundation
+> group's own amendment (above) already deferred to the Shell rewrite
+> group: reads of `state.project`/`state.mode`/`state.tool`/`activeSheet()`/
+> `activeMap()`/`activeLayer()` (needs Foundation item 2,
+> `EditorStore.project.model` becoming true sole owner), the `on()`/`emit()`
+> legacy event bus (only retires once `document-controller.js` stops using
+> it), or `markDirty()` (same sole-ownership dependency). Zero files are
+> independently migratable — a scoped-down "selections/overlays-only"
+> Group 3 was considered and has no standalone-file candidates either; the
+> handful of presenters that already read `getEditorHost().selections`
+> instead of raw `state.selectedX` (6 sprites files) had that migrated
+> during Groups 0-2 already, not as a remaining opportunity now. One file,
+> `js/modes/tiles/terrain-preset-art.js:56`, is coupled even tighter than
+> the rest — it pushes directly onto the legacy `state.commands` undo stack
+> instead of dispatching a Command Handler, already flagged out of scope by
+> its own code comment.
+>
+> **Execution order changes accordingly:** Foundation → `js/ui` relocation
+> → **Shell rewrite → per-mode cleanup** → final deletion. The group
+> numbers below are kept as originally assigned, for continuity with
+> existing plans/ledgers that already cite "Group 2," "Group 3," etc. by
+> number — only the *execution order* of Groups 3 and 4 swaps: Group 4
+> (Shell rewrite) runs next, Group 3 (per-mode cleanup, still maps → sprites
+> → tiles internally) runs after it once `EditorStore.project` is the real
+> sole owner and the legacy event bus is gone.
+
 ### Diagram: group dependency order
 
 ```mermaid
 graph TD
     F["1. Foundation<br/>(host-side groundwork,<br/>no shell/mode changes)"]
     C["2. js/ui -> js/components<br/>relocation"]
+    SH["4. Shell rewrite<br/>(6 controllers)"]
     M["3a. Maps cleanup<br/>(6 files)"]
     S["3b. Sprites cleanup<br/>(11 files)"]
     T["3c. Tiles cleanup<br/>(12 files)"]
-    SH["4. Shell rewrite<br/>(6 controllers)"]
     D["5. Final deletion<br/>(state.js, adapter, main.js,<br/>js/app, js/ui)"]
 
     F --> C
-    C --> M --> S --> T
-    T --> SH
-    SH --> D
+    C --> SH
+    SH --> M --> S --> T
+    T --> D
 
     style C fill:#f66,stroke:#900,color:#fff
+    style SH fill:#f66,stroke:#900,color:#fff
     classDef risk fill:#f66,stroke:#900,color:#fff
-    class C risk
+    class C,SH risk
 ```
 
 Group 2 (highlighted) carries the phase's biggest structural risk — see
-below — and gates every group after it, since maps/sprites/tiles/shell
-all currently import from `js/ui/`.
+below — and gates every group after it, since maps/sprites/tiles/shell all
+currently import from `js/ui/`. Group 4 (also highlighted, per the
+amendment above) now runs immediately after it instead of last among the
+mode/shell groups, since Group 3's per-mode cleanup can't safely start
+until Group 4 lands.
 
 ## Testing
 
