@@ -82,17 +82,25 @@ export function mountFileController() {
   // (also with zero remaining callers now). frame-editor-presenter.js reads/
   // writes it at ~26 sites; without re-pointing it here it would silently
   // keep referencing the previous project's onion settings after a switch.
+  // state.mode is included too, for the same reason but far wider blast
+  // radius: legacy switchMode() (retired by the document-controller.js
+  // rewrite) was its only writer, and 40+ sites across tool-palette.js and
+  // nearly every js/modes/*/presentation/*.js file gate tool availability,
+  // panel visibility, and command modeId-tagging on it directly. Frozen at
+  // its 'sprites' default, tiles/maps tools and panels silently break the
+  // instant a user leaves Sprites mode.
   getEditorHost().store.subscribe(
-    s => [s.project.model, s.session.activeDocument],
-    ([project, doc]) => {
+    s => [s.project.model, s.session.activeDocument, s.session.activeModeId],
+    ([project, doc, mode]) => {
       state.project = project;
       state.activeSheetId = doc && doc.kind !== 'map' ? doc.id : null;
       state.activeMapId = doc && doc.kind === 'map' ? doc.id : null;
       state.onion = project?.settings?.onion ?? state.onion;
+      state.mode = mode;
       emit('project');
       emit('view');
     },
-    { equals: (a, b) => a[0] === b[0] && a[1] === b[1], fireImmediately: true },
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2], fireImmediately: true },
   );
 
   // ---- file: Open ----
