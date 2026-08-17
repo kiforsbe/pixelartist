@@ -75,11 +75,22 @@ import each other.
 
 Entry point: `index.html` loads `<script type="module" src="js/bootstrap.js">`.
 
-`js/bootstrap.js` (36 lines) runs in this order:
+`js/bootstrap.js` (~50 lines, capped at 60 by `architecture.test.mjs`) is
+the **entire** composition root — Task 5 deleted the old `js/app/main.js`
+and folded its mount sequence directly into this file; there is no longer a
+separate dynamically-imported legacy entry point. It runs, top to bottom:
 
 1. Construct `EditorHost`, wired to the **legacy** `CommandStack`
-   (`app/state.js`'s `state.commands`) for undo/redo, and to browser
-   platform adapters (`js/platform/browser/*`).
+   (`app/state.js`'s `state.commands`, passed as the `historyStack` option)
+   for undo/redo, and to browser platform adapters (`js/platform/browser/*`).
+   This injection is load-bearing, not cosmetic: several still-legacy files
+   (`drawing-engine.js`, `layers-panel.js`, `color-panel.js`,
+   `terrain-preset-art.js`) push undo commands onto `state.commands`
+   directly rather than through `host.history.execute()`. Without this
+   option, `HistoryService` would default to its own private `CommandStack`
+   and those edits would become silently un-undoable and stop marking the
+   project dirty — this exact regression shipped and was caught in the
+   final review of the shell-rewrite plan that introduced `bootstrap.js`.
 2. `editorHost.registerMode(spriteMode | tileMode | mapMode)` — each mode's
    `register()` hook fires synchronously, registering its document
    provider and contributions.
@@ -88,8 +99,8 @@ Entry point: `index.html` loads `<script type="module" src="js/bootstrap.js">`.
    module-level singleton getter — the mechanism by which deeply legacy
    code (`app/actions.js`, `js/components/*`) reaches the one `EditorHost` instance
    without a DI container.
-5. Dynamically `import('./app/main.js')` — the legacy composition root
-   (16 lines, enforced ≤30 by `architecture.test.mjs`), which mounts DOM:
+5. Mounts DOM directly, synchronously, in module-load order (no dynamic
+   `import()` — everything below is a plain function call):
 
 ```js
 const workbench = mountEditorWorkbench();
@@ -100,6 +111,13 @@ mountApplicationMenu();
 mountFileController();
 ```
 
+`mountEditorWorkbench()` runs first because it returns the `workbench`
+handle the next three mounts need, and because it calls `initFloatSession()`.
+`mountFileController()` runs last: its own `boot()` IIFE performs the
+project's first `setProject()`, and by then every other mount's
+`fireImmediately` store subscription — including the host→legacy mirror
+described in [State model](#state-model) — already exists to observe it.
+
 ```mermaid
 sequenceDiagram
     participant HTML as index.html
@@ -107,7 +125,7 @@ sequenceDiagram
     participant Host as EditorHost
     participant Modes as sprite/tile/mapMode
     participant Runtime as host/runtime.js
-    participant Main as app/main.js
+    participant Mounts as mount*() calls<br/>(workbench, filters, project,<br/>document, menu, file controllers)
 
     HTML->>Boot: load module
     Boot->>Host: new EditorHost({historyStack, preferences, platform})
@@ -119,8 +137,7 @@ sequenceDiagram
     Boot->>Host: start('sprites')
     Host->>Modes: spriteMode.activate(context)
     Boot->>Runtime: setEditorHost(host)
-    Boot->>Main: import('./app/main.js')
-    Main->>Main: mountEditorWorkbench() / mountFileController() / ...
+    Boot->>Mounts: mountEditorWorkbench() / mountFileController() / ...
 ```
 
 ## The host — `EditorHost`
@@ -367,8 +384,8 @@ Command Handlers under `application/commands/`. **Maps mode**: `map-editor.js`,
 ## Features (`js/features/`)
 
 Orthogonal to modes — one slice per cross-cutting shell concern, not per
-document kind. This is what actually mounts DOM at startup (called from
-`app/main.js`):
+document kind. This is what actually mounts DOM at startup (called directly
+from `js/bootstrap.js` — see [Bootstrapping](#bootstrapping)):
 
 - `workbench/editor-workbench.js` (289 lines) — builds the shared
   `CanvasView`s, status bar, zoom shortcuts, and **generically iterates
@@ -376,11 +393,12 @@ document kind. This is what actually mounts DOM at startup (called from
   def.createController(...))`, a `PanelManager` reconciling
   `registries.panels` against DOM, `registries.views.list()` populating
   view controllers). Zero mode-specific imports (test-enforced).
-- `project/document-controller.js` (433 lines) — mode-tab switching,
-  sheet/map CRUD, undo/redo/cut/copy/paste, and
-  `legacy-state-adapter.js`'s bridge to the host (see
-  [State model](#state-model)).
-- `project/file-controller.js` (536 lines) — open/save/import/export flows.
+- `project/document-controller.js` — mode-tab switching, sheet/map CRUD,
+  and undo/redo/cut/copy/paste actions. The host→legacy state bridge itself
+  lives in `file-controller.js`, not here (see [State model](#state-model)).
+- `project/file-controller.js` — open/save/import/export flows, plus (in
+  `mountFileController()`) the host→legacy mirror described in
+  [State model](#state-model).
 - `project/project-controller.js` (443 lines) — project settings, new
   project.
 - `shell/menu-controller.js` (93 lines) — builds the `MENUS` array,
@@ -518,34 +536,62 @@ understand before changing anything here:
    (`DocumentService`, `HistoryService`, `ProjectService`,
    `SelectionService`) operate on.
 
-`js/features/project/legacy-state-adapter.js`'s `syncLegacyStateToHost`
-is the one-way bridge, called from `document-controller.js` on every
-`'project'|'view'|'selection'|'tool'|'history'` legacy event: it activates
-the matching host mode, pushes `legacyState.project` into
-`host.store.setProject(...)`, resolves the active document into
-`host.documents.setActive(...)`, and mirrors selection ids into
-`store.session` + `host.contextKeys`. Its own comment states the intent
-plainly: *"the host is authoritative for mode activation while legacy
-feature controllers still write the existing state object... lets
-features migrate one at a time without maintaining two independent
-application states."*
+There is no longer a separate adapter module for this: `js/features/project/
+legacy-state-adapter.js` and its `syncLegacyStateToHost` function were
+deleted by Task 5 once the direction of the bridge flipped. The host store
+is now authoritative and legacy `app/state.js` is the dependent copy —
+`js/features/project/file-controller.js`'s `mountFileController()` owns the
+bridge directly, as a block of `store.subscribe(...)` calls (plus one
+`host.history.subscribe(...)` and one legacy `on('view', ...)` listener)
+registered right after its DOM setup. Each mirrored field re-emits whichever
+legacy `on(event, fn)` bus event(s) its not-yet-migrated readers expect, so
+the UI actually repaints — not just the underlying data updates silently.
+As of this writing the mirror covers:
+
+- **project / activeSheetId / activeMapId / onion / mode** — one tuple
+  subscription on `[project.model, session.activeDocument,
+  session.activeModeId]`, re-emitting `'project'` and `'view'`. Must be a
+  single subscription, not five independent ones: `EditorHost.setProject()`
+  writes `project.model` and `activeDocument` in two separate store
+  transactions, and independent subscribes would observe them one step
+  apart, briefly resolving `activeSheetId`/`activeMapId` against the
+  *previous* project.
+- **overlays.labels / overlays.sequences** — a two-boolean tuple
+  subscription mirroring into `state.overlays` (mutated in place, so a
+  whole-object selector would never see its identity change — hence the
+  tuple), re-emitting `'view'`.
+- **view** — bidirectional: `session.activeViewId` (host-space:
+  `'sprites.frame'`, `'tiles.tile'`, `` `${mode}.sheet` ``, `'maps.canvas'`)
+  mirrors into legacy `state.view` (`'sheet'|'frame'|'tile'`) and back,
+  because both a host writer (`document-controller.js`'s `switchMode()`)
+  and several legacy writers (`frames-panel.js`, `frame-tool-presenter.js`,
+  `tile-tool-presenter.js`, `frame-editor-presenter.js`,
+  `tile-editor-presenter.js`) are still live. A reentrancy guard stops each
+  direction's write from bouncing back through the other and re-triggering
+  itself.
+- **history** — `host.history.subscribe(() => emit('history'))`, since
+  `layers-panel.js`, `color-panel.js`, `preview-panel.js`, and the
+  frame/tile editor presenters still refresh on the legacy `'history'`
+  event rather than calling `host.history.subscribe()` themselves.
+
+All of it persists until Group 3 (per-mode cleanup, scheduled after the
+plan that produced this mirror) migrates the roughly 29 remaining files off
+direct `app/state.js` reads/writes onto the host store and services
+directly, at which point Group 3 deletes the mirror block.
 
 ```mermaid
 sequenceDiagram
-    participant State as app/state.js (legacy, mutable)
-    participant DC as document-controller.js
-    participant Adapter as legacy-state-adapter.js
-    participant Host as EditorHost
     participant Store as EditorStore
+    participant Mirror as file-controller.js<br/>(mountFileController's mirror)
+    participant State as app/state.js (legacy, mutable)
+    participant Legacy as not-yet-migrated readers<br/>(layers-panel.js, drawing-engine.js, ...)
 
-    State-->>DC: emit('project' | 'view' | 'selection' | 'tool' | 'history')
-    DC->>Adapter: syncLegacyStateToHost(host, legacyState)
-    Adapter->>Host: activateMode(matching mode)
-    Adapter->>Store: setProject(legacyState.project)
-    Adapter->>Host: documents.setActive(activeDocumentRef)
-    Adapter->>Store: session.selectionsByDocument = ...
-    Adapter->>Host: contextKeys updated
-    Note over State,Store: one-way bridge — legacy state is<br/>still the source of truth for mutation
+    Store-->>Mirror: subscribe() fires (project/session/overlays/view changed)
+    Mirror->>State: state.project = ... / state.overlays.* = ... / state.view = ...
+    Mirror->>Legacy: emit('project' | 'view' | 'history')
+    Legacy-->>Legacy: on(event, fn) listeners re-render
+    Note over Store,Legacy: mostly one-way (host -> legacy);<br/>state.view is the one bidirectional field
+    Legacy->>Store: (state.view writers only) on('view') triggers<br/>updateSession({activeViewId}) back into the store
 ```
 
 Undo/redo itself still runs through the one legacy `CommandStack`

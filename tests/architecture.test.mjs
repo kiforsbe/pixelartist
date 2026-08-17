@@ -14,6 +14,18 @@ async function jsFiles(directory) {
   return nested.flat();
 }
 
+test('the browser composition root (bootstrap.js) stays small', async () => {
+  // Replaces the old js/app/main.js <= 30 line guard, retired along with
+  // that file when Task 5 consolidated composition into js/bootstrap.js.
+  // Ceiling set above bootstrap.js's current ~50 lines (not a tight rubber
+  // stamp) so it can absorb modest future growth without silently regrowing
+  // into a god-file that inlines mount-order logic instead of delegating to
+  // mount*() functions.
+  const source = await readFile(join(root, 'js/bootstrap.js'), 'utf8');
+  const lineCount = source.split('\n').length;
+  assert.ok(lineCount <= 60, `js/bootstrap.js has grown to ${lineCount} lines (limit 60) -- move logic into a mount*() function instead of inlining it here`);
+});
+
 test('nothing in the shell controllers imports the retired legacy setProject/markDirty writers', async () => {
   // Deliberately does NOT ban `on`/`emit`: pixels/selection/tool/view events
   // stay on the legacy bus in several of these files throughout this whole

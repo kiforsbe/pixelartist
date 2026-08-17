@@ -17,7 +17,13 @@ import { getEditorHost } from '../../host/runtime.js';
 export { isTypingTarget };
 
 const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, setSelection, getTargetRect}
-let floatCtx = null;     // { viewKind, targetRect } frozen at float creation (frame-editor confinement)
+// { viewKind, hostViewId, targetRect } frozen at float creation (frame-editor
+// confinement). viewKind stays legacy-space ('sheet'|'frame'|'tile') because
+// `views` is keyed that way; hostViewId is a separate snapshot of the HOST-
+// space session.activeViewId at creation time, kept only so the auto-commit
+// guard below can compare against a live activeViewId without mixing
+// namespaces (see that guard's comment).
+let floatCtx = null;
 let clipboard = null;    // { srcRect, layers: [{layerId, buffer}], allLayers }
 
 export function registerFloatView(viewKind, api) { views.set(viewKind, api); }
@@ -108,7 +114,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
           .filter(Boolean).map(f => ({ id: f.id, x: f.x, y: f.y }))
       : null,
   };
-  const ctx = { viewKind: state.view, targetRect: { ...target } };
+  const ctx = { viewKind: state.view, hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
   const prevSelection = viewApi.getSelection();
   getEditorHost().history.execute({
     label: 'float selection',
@@ -328,7 +334,7 @@ function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
     sheetId: sheet.id, srcRect: { x: pos.x, y: pos.y, w, h },
     cut: false, layers, transform: makeTransform(),
   };
-  const ctx = { viewKind: state.view, targetRect: { ...target } };
+  const ctx = { viewKind: state.view, hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
   const prevSelection = viewApi.getSelection();
   // switch to the move tool BEFORE pushing: initFloatSession's activeToolId
   // subscription skips 'move', so the fresh float survives its own tool switch
@@ -478,7 +484,14 @@ export function initFloatSession() {
     s => [s.session.activeDocument, s.session.activeViewId],
     ([activeDocument, activeViewId]) => {
       if (!state.floating || !floatCtx) return;
-      if (activeDocument?.id !== state.floating.sheetId || activeViewId !== floatCtx.viewKind) commitFloatIfAny();
+      // Compare activeViewId against floatCtx.hostViewId, NOT floatCtx.viewKind:
+      // activeViewId lives in host-space ('sprites.sheet', 'tiles.tile', ...)
+      // while viewKind is legacy-space ('sheet'|'frame'|'tile', kept only for
+      // the views.get() lookups elsewhere in this file) -- comparing across
+      // namespaces made this guard a tautology (always true) before hostViewId
+      // existed. hostViewId snapshots the real activeViewId at float-creation
+      // time, so this now correctly detects "the user left the float's view".
+      if (activeDocument?.id !== state.floating.sheetId || activeViewId !== floatCtx.hostViewId) commitFloatIfAny();
     },
     { equals: (a, b) => a[0]?.id === b[0]?.id && a[1] === b[1] },
   );

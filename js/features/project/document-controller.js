@@ -36,12 +36,20 @@ export function mountDocumentController({ editorHost, workbench }) {
   markDefaultAction(dlgNewSheet, nsCreate);
   
   // ---- mode tabs ----
-  function switchMode(mode, { fromHost = false } = {}) {
+  // `previousMode` is only meaningful on the fromHost re-entry path: by the
+  // time EditorHost.activateMode() fires onDidChangeMode, session.
+  // activeModeId already holds the NEW mode (editor-host.js sets it before
+  // notifying listeners), so re-reading the store here would always see
+  // previousMode === mode and early-return -- permanently skipping tab
+  // highlighting, seedSheetSelection, and focusMap()/fitSheet() on every
+  // mode switch. The event carries its own previousModeId for exactly this
+  // reason; the fromHost caller below passes it through as previousMode.
+  function switchMode(mode, { fromHost = false, previousMode: previousModeArg } = {}) {
     if (!fromHost && editorHost && editorHost.activeModeId !== mode) {
       editorHost.activateMode(mode);
       return;
     }
-    const previousMode = editorHost.store.getState().session.activeModeId;
+    const previousMode = fromHost ? previousModeArg : editorHost.store.getState().session.activeModeId;
     if (previousMode === mode) return;
     tabSprites.classList.toggle('active', mode === 'sprites');
     tabTiles.classList.toggle('active', mode === 'tiles');
@@ -78,7 +86,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     // blank Tile Sheets canvas).
     if (previousMode === 'maps') workbench.fitSheet();
   }
-  editorHost?.onDidChangeMode(({ modeId }) => switchMode(modeId, { fromHost: true }));
+  editorHost?.onDidChangeMode(({ modeId, previousModeId }) => switchMode(modeId, { fromHost: true, previousMode: previousModeId }));
   tabSprites.addEventListener('click', () => switchMode('sprites'));
   tabTiles.addEventListener('click', () => switchMode('tiles'));
   tabMaps.addEventListener('click', () => switchMode('maps'));
@@ -108,7 +116,10 @@ export function mountDocumentController({ editorHost, workbench }) {
   editorHost.store.subscribe(
     state => [state.project.model, state.session.activeModeId, state.session.activeDocument],
     () => refreshSheetSelect(),
-    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2], fireImmediately: true },
+    // activeDocument compared by {kind,id}, not reference: DocumentService
+    // resolve()/setActive() allocate a fresh object every call (see the
+    // matching fix/comment in file-controller.js's host->legacy mirror).
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2]?.id === b[2]?.id && a[2]?.kind === b[2]?.kind, fireImmediately: true },
   );
 
   sheetSelect.addEventListener('change', () => {

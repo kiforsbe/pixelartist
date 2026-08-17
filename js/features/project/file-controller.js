@@ -39,48 +39,47 @@ export function mountFileController() {
   markDefaultAction(dlgExportProject, epExport);
   epCancel.addEventListener('click', () => dlgExportProject.close());
 
-  // One-way host->legacy project/activeSheetId/activeMapId mirror: legacy
-  // setProject() was the ONLY writer of state.project/activeSheetId/
-  // activeMapId, and it has zero remaining callers project-wide after this
-  // task. The ~29 not-yet-migrated files under js/modes/js/components (out
-  // of this task's scope) still read state.project/activeSheet()/
-  // activeMap() directly -- without this mirror they'd silently observe a
-  // permanently-null project after boot/New/Open. This mirror is NOT
-  // this-task-temporary like the dirty mirror above -- it stays alive until
-  // Group 3 (per-mode cleanup, scheduled after this plan) migrates those
-  // files off state.project/activeSheetId/activeMapId, at which point
-  // Group 3 removes it.
-  // Also re-emits the legacy 'project'/'view' bus events (exactly what
-  // setProject() itself used to do as its last step) -- many of those same
-  // not-yet-migrated files (layers-panel.js, color-panel.js, drawing-
-  // engine.js, preview-panel.js, frame/tile-editor-presenter.js) refresh via
-  // `on('project', ...)`/`on('view', ...)`, not by re-reading state.project
-  // reactively, so setting the fields alone (without emitting) would update
-  // the data but leave the UI stale/blank. float-session.js is no longer in
-  // this list as of Task 5 -- it subscribes to the host store directly now.
-  // project.model and session.activeDocument are watched as ONE tuple
-  // selector (matching the pattern editor-workbench.js already uses for its
-  // own [project.model, activeViewId, activeDocument] subscribe) rather than
-  // two separate subscribes: EditorHost.setProject() changes project.model
-  // and activeDocument in two separate store writes, so two independent
-  // subscribes would fire in two steps -- the first (project.model) would
-  // emit 'project' while state.activeSheetId/activeMapId still held the
-  // PREVIOUS project's value, making activeSheet()/activeMap() resolve
-  // against the wrong id for that one emit and leaving dependent panels
-  // (e.g. the Layers panel) rendered empty with no later event to correct
-  // them, since the second subscribe (activeDocument) doesn't itself emit.
-  // state.onion is included here too: it's a live alias into
-  // project.settings.onion, only ever re-pointed by legacy setProject()
-  // (also with zero remaining callers now). frame-editor-presenter.js reads/
-  // writes it at ~26 sites; without re-pointing it here it would silently
-  // keep referencing the previous project's onion settings after a switch.
-  // state.mode is included too, for the same reason but far wider blast
-  // radius: legacy switchMode() (retired by the document-controller.js
-  // rewrite) was its only writer, and 40+ sites across tool-palette.js and
-  // nearly every js/modes/*/presentation/*.js file gate tool availability,
-  // panel visibility, and command modeId-tagging on it directly. Frozen at
-  // its 'sprites' default, tiles/maps tools and panels silently break the
-  // instant a user leaves Sprites mode.
+  // ---- host -> legacy mirror ----
+  // EditorStore is authoritative, but a broad swath of still-legacy code
+  // (js/modes/**/presentation/*.js, js/components/panels/*.js, drawing-
+  // engine.js, sheet-overlays.js, and others -- roughly 29 files, out of
+  // every completed task's scope) reads app/state.js's `state` object
+  // directly and refreshes only through the legacy `on(event, fn)` bus, not
+  // by observing the host store reactively. Every host field one of those
+  // files still depends on is mirrored one-way (host -> legacy) below, each
+  // mirror re-emitting whichever legacy bus event(s) that field's readers
+  // expect so they actually repaint -- exactly what legacy setProject()/
+  // switchMode() used to do as their own last step. All of this persists
+  // until Group 3 (per-mode cleanup, scheduled after this plan) migrates
+  // those files onto the host store/services directly, at which point
+  // Group 3 deletes it.
+  //
+  // project.model, session.activeDocument and session.activeModeId are
+  // watched as ONE tuple selector, not three independent subscribes:
+  // EditorHost.setProject() writes project.model and activeDocument in two
+  // separate store transactions, so two independent subscribes would fire
+  // in two steps -- the first (project.model) would emit 'project' while
+  // state.activeSheetId/activeMapId still held the PREVIOUS project's
+  // value, resolving activeSheet()/activeMap() against the wrong id for
+  // that one emit and leaving dependent panels (e.g. the Layers panel)
+  // rendered empty with no later event to correct them. A single tuple
+  // subscription fires exactly once, after both writes have landed.
+  //
+  // Fields covered by this tuple: state.project (the host is now the only
+  // writer), state.activeSheetId/activeMapId (resolved from
+  // session.activeDocument), state.onion (a live alias into
+  // project.settings.onion -- frame-editor-presenter.js reads/writes it at
+  // ~26 sites), and state.mode (40+ sites across tool-palette.js and nearly
+  // every js/modes/*/presentation/*.js file gate tool availability, panel
+  // visibility, and command modeId-tagging on it directly). Losing any one
+  // of these leaves its readers silently stuck on a stale/previous-project
+  // value after boot, New, Open, or a mode switch.
+  //
+  // The tuple's equals compares activeDocument by {kind,id} rather than
+  // reference: DocumentService.resolve() allocates a fresh {kind,id} object
+  // on every call, so reference equality would re-fire (and re-emit
+  // 'project'/'view', forcing a full panel repaint) on every setActive()
+  // call, even one that re-activates the document already active.
   getEditorHost().store.subscribe(
     s => [s.project.model, s.session.activeDocument, s.session.activeModeId],
     ([project, doc, mode]) => {
@@ -92,8 +91,85 @@ export function mountFileController() {
       emit('project');
       emit('view');
     },
-    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2], fireImmediately: true },
+    {
+      equals: (a, b) => a[0] === b[0] && a[1]?.id === b[1]?.id && a[1]?.kind === b[1]?.kind && a[2] === b[2],
+      fireImmediately: true,
+    },
   );
+
+  // History bridge: HistoryService now wraps the shared legacy CommandStack
+  // (see bootstrap.js), but has zero legacy listeners of its own --
+  // layers-panel.js, color-panel.js, preview-panel.js, frame-editor-
+  // presenter.js and tile-editor-presenter.js still refresh exclusively on
+  // the legacy `on('history', ...)` event. Until Group 3 moves them onto
+  // host.history.subscribe() directly, this one-line re-emit is what makes
+  // every undo/redo (from either stack) reach them.
+  getEditorHost().history.subscribe(() => emit('history'));
+
+  // Overlays mirror: the View menu's Show Labels/Show Sequences toggles
+  // (editor-workbench.js) write workspace.overlays.{labels,sequences} on
+  // the host store; the only reader, sheet-overlays.js, still reads legacy
+  // state.overlays.{labels,sequences} and repaints only on `on('view', ...)`.
+  // The store mutates `workspace.overlays` in place, so a selector
+  // returning the object itself would never change identity under
+  // Object.is -- select the two booleans as a tuple instead. state.overlays
+  // stays the same mutable object app/state.js created at boot; only its
+  // fields are reassigned, so any other holder of a reference to it keeps
+  // working. Persists until Group 3 migrates sheet-overlays.js onto the
+  // host store.
+  getEditorHost().store.subscribe(
+    s => [s.workspace.overlays.labels, s.workspace.overlays.sequences],
+    ([labels, sequences]) => {
+      state.overlays.labels = labels;
+      state.overlays.sequences = sequences;
+      emit('view');
+    },
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1], fireImmediately: true },
+  );
+
+  // state.view <-> session.activeViewId mirror (bidirectional): frames-
+  // panel.js, frame-tool-presenter.js and tile-tool-presenter.js still set
+  // legacy state.view = 'frame'|'tile' (frame-editor-presenter.js/tile-
+  // editor-presenter.js reset it to 'sheet') to open/close the frame/tile
+  // sub-editor; editor-workbench.js's applyView() -- the only place that
+  // actually shows/hides those sub-editors -- reads session.activeViewId
+  // exclusively. Both directions have live writers (the legacy presenters
+  // above write state.view; document-controller.js's switchMode() writes
+  // activeViewId directly on every mode switch), so this mirror has to run
+  // both ways, unlike the one-way mirrors above. The `syncingView` guard
+  // stops each direction's own write from bouncing back through the other
+  // and re-triggering itself -- without it, a host write would flow to
+  // legacy, re-emit 'view', flow back to host, and so on (harmlessly, since
+  // both sides already agree by the second pass, but pointlessly). Persists
+  // until Group 3 migrates the frame/tile presenters onto
+  // session.activeViewId directly.
+  let syncingView = false;
+  const legacyViewFor = viewId => (viewId === 'sprites.frame' ? 'frame' : viewId === 'tiles.tile' ? 'tile' : 'sheet');
+  const hostViewFor = (view, mode) => {
+    if (view === 'frame') return 'sprites.frame';
+    if (view === 'tile') return 'tiles.tile';
+    return mode === 'maps' ? 'maps.canvas' : `${mode}.sheet`;
+  };
+  getEditorHost().store.subscribe(
+    s => s.session.activeViewId,
+    (viewId) => {
+      if (syncingView || viewId == null) return;
+      const legacy = legacyViewFor(viewId);
+      if (state.view === legacy) return;
+      syncingView = true;
+      try { state.view = legacy; emit('view'); } finally { syncingView = false; }
+    },
+    { fireImmediately: true },
+  );
+  on('view', () => {
+    if (syncingView) return;
+    const mode = getEditorHost().store.getState().session.activeModeId;
+    if (!mode) return;
+    const target = hostViewFor(state.view, mode);
+    if (getEditorHost().store.getState().session.activeViewId === target) return;
+    syncingView = true;
+    try { getEditorHost().store.updateSession({ activeViewId: target }, 'view'); } finally { syncingView = false; }
+  });
 
   // ---- file: Open ----
   // Folder ("unpacked") projects are disabled for now (see io.saveUnpacked/

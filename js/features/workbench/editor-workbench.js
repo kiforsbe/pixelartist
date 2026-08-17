@@ -109,7 +109,10 @@ export function mountEditorWorkbench() {
   editorHost.store.subscribe(
     s => [s.project.model, s.session.activeViewId, s.session.activeDocument],
     updateStatusPlatform,
-    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2], fireImmediately: true },
+    // activeDocument compared by {kind,id}, not reference -- DocumentService
+    // allocates a fresh object per call; reference equals would re-run this
+    // (flattenSheet + colorFrequency) on every setActive(), even a no-op one.
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2]?.id === b[2]?.id && a[2]?.kind === b[2]?.kind, fireImmediately: true },
   );
   
   // ---- canvas view ----
