@@ -12,11 +12,11 @@ export class HistoryService {
   #listeners = new Set();
   #suppressDirty = false;
 
-  constructor({ stack = new CommandStack(), store = null } = {}) {
-    this.#stack = stack;
+  constructor({ store = null } = {}) {
+    this.#stack = new CommandStack();
     this.#store = store;
-    const previous = stack.onChange;
-    stack.onChange = value => {
+    const previous = this.#stack.onChange;
+    this.#stack.onChange = value => {
       if (previous) previous(value);
       if (this.#store && !this.#suppressDirty) this.#store.markDirty(true);
       for (const listener of [...this.#listeners]) listener(this.snapshot());

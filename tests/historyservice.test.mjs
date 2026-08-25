@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { HistoryService } from '../js/host/history-service.js';
-import { CommandStack } from '../js/core/commands.js';
 
 test('HistoryService executes undoable edits separately from UI commands', () => {
   const store = new EditorStore();
@@ -18,12 +17,11 @@ test('HistoryService executes undoable edits separately from UI commands', () =>
   assert.equal(value, 1);
 });
 
-test('HistoryService can own an existing compatibility stack without dirtying on reset', () => {
+test('HistoryService.clear() suppresses the dirty flag unless markDirty is passed', () => {
   const store = new EditorStore();
-  const stack = new CommandStack();
-  const history = new HistoryService({ store, stack });
+  const history = new HistoryService({ store });
   let value = 0;
-  stack.push({ do: () => { value++; }, undo: () => { value--; } });
+  history.execute({ do: () => { value++; }, undo: () => { value--; } });
   assert.equal(history.canUndo(), true);
   assert.equal(store.getState().project.dirty, true);
   store.markDirty(false);

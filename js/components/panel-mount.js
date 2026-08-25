@@ -25,3 +25,26 @@ export function mountReactivePanel(on, events, render, { onDispose } = {}) {
     dispose() { onDispose?.(); subscriptions.forEach(dispose => dispose()); },
   };
 }
+
+// Store-backed sibling of mountReactivePanel above: same debounced-render +
+// subscribe/dispose contract, keyed on EditorStore selectors instead of
+// legacy event names. `selectors` entries are either a selector function
+// (wired straight to the debounced render) or a `[selector, handler]` pair,
+// matching mountReactivePanel's `[event, handler]` shape.
+export function mountStorePanel(store, selectors, render, { onDispose } = {}) {
+  let queued = false;
+  function scheduleRender() {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => { queued = false; render(); });
+  }
+  const subscriptions = selectors.map(spec => {
+    const [selector, handler] = Array.isArray(spec) ? spec : [spec, null];
+    return store.subscribe(selector, handler ? () => { handler(); scheduleRender(); } : scheduleRender);
+  });
+  render();
+  return {
+    scheduleRender,
+    dispose() { onDispose?.(); subscriptions.forEach(dispose => dispose()); },
+  };
+}

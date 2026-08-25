@@ -1,6 +1,5 @@
 import { EditorHost } from './host/editor-host.js';
 import { setEditorHost } from './host/runtime.js';
-import { state as legacyState } from './app/state.js';
 import { BrowserPreferences } from './platform/browser/preferences.js';
 import { BrowserFileSystem } from './platform/browser/file-system.js';
 import { BrowserAutosave } from './platform/browser/autosave.js';
@@ -16,16 +15,7 @@ import { mountDocumentController } from './features/project/document-controller.
 import { mountApplicationMenu } from './features/shell/menu-controller.js';
 import { mountFileController } from './features/project/file-controller.js';
 
-// historyStack: legacyState.commands makes HistoryService wrap the SAME
-// CommandStack instance that legacy code (drawing-engine.js, layers-
-// panel.js, color-panel.js, terrain-preset-art.js) still pushes onto
-// directly, instead of defaulting to a private, disconnected stack --
-// without this, undo/redo and the dirty flag only see host-issued commands,
-// not pixel/layer/palette edits. Persists until Group 3 migrates those
-// files onto services.history.execute(); same lifecycle as the mirror in
-// file-controller.js's mountFileController().
 export const editorHost = new EditorHost({
-  historyStack: legacyState.commands,
   preferences: new BrowserPreferences(),
   platform: {
     files: new BrowserFileSystem(),
