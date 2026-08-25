@@ -22,6 +22,11 @@ import {
   clearTerrainSlot, setTerrainSymmetry, applyTerrainLayoutPreset, setTerrainSetLayer,
 } from './application/commands/terrain-set-commands.js';
 import { setTileNeighborSlot } from './application/commands/tile-editor-commands.js';
+import {
+  toggleLayerVisible, addLayer, addGroup, deleteNode, mergeLayerDownCmd,
+  moveNode, dragMoveNode, renameNode, setLayerOpacity,
+} from './application/commands/layer-commands.js';
+import { editPaletteColor, remapPaletteColor } from './application/commands/palette-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
 
@@ -58,6 +63,17 @@ function registerTileCommands(api) {
   api.commands.register({ id: 'tiles.applyTerrainLayoutPreset', when: whenTiles, execute: (_c, { sheetId, terrainSetId, preset, sourceTileIds, cols }) => applyTerrainLayoutPreset(services(), sheetId, terrainSetId, preset, sourceTileIds, cols) });
   api.commands.register({ id: 'tiles.setTerrainSetLayer', when: whenTiles, execute: (_c, { sheetId, terrainSetId, layer }) => setTerrainSetLayer(services(), sheetId, terrainSetId, layer) });
   api.commands.register({ id: 'tiles.setTileNeighborSlot', when: whenTiles, execute: (_c, { sheetId, tileId, dir, slot }) => setTileNeighborSlot(services(), sheetId, tileId, dir, slot) });
+  api.commands.register({ id: 'tiles.addLayer', when: whenTiles, execute: (_c, { sheetId, targetGroupId }) => addLayer(services(), sheetId, targetGroupId) });
+  api.commands.register({ id: 'tiles.addGroup', when: whenTiles, execute: (_c, { sheetId, targetGroupId }) => addGroup(services(), sheetId, targetGroupId) });
+  api.commands.register({ id: 'tiles.deleteNode', when: whenTiles, execute: (_c, { sheetId, nodeId }) => deleteNode(services(), sheetId, nodeId) });
+  api.commands.register({ id: 'tiles.mergeDown', when: whenTiles, execute: (_c, { sheetId, layerId }) => mergeLayerDownCmd(services(), sheetId, layerId) });
+  api.commands.register({ id: 'tiles.moveNode', when: whenTiles, execute: (_c, { sheetId, nodeId, delta }) => moveNode(services(), sheetId, nodeId, delta) });
+  api.commands.register({ id: 'tiles.dragMoveNode', when: whenTiles, execute: (_c, { sheetId, nodeId, destParentId, destIndex }) => dragMoveNode(services(), sheetId, nodeId, destParentId, destIndex) });
+  api.commands.register({ id: 'tiles.toggleLayerVisible', when: whenTiles, execute: (_c, { sheetId, layerId }) => toggleLayerVisible(services(), sheetId, layerId) });
+  api.commands.register({ id: 'tiles.renameNode', when: whenTiles, execute: (_c, { sheetId, nodeId, name }) => renameNode(services(), sheetId, nodeId, name) });
+  api.commands.register({ id: 'tiles.setLayerOpacity', when: whenTiles, execute: (_c, { sheetId, layerId, opacity }) => setLayerOpacity(services(), sheetId, layerId, opacity) });
+  api.commands.register({ id: 'tiles.editPaletteColor', when: whenTiles, execute: (_c, { index, color }) => editPaletteColor(services(), index, color) });
+  api.commands.register({ id: 'tiles.remapPaletteColor', when: whenTiles, execute: (_c, { index, color }) => remapPaletteColor(services(), index, color) });
 }
 
 export function registerTileContributions(api) {

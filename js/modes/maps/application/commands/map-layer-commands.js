@@ -23,3 +23,14 @@ export function deleteMapLayer(services, mapId, layerId) {
     map => { map.layers = map.layers.filter(l => l.id !== layerId); },
     map => { if (!map.layers.some(l => l.id === layerId)) map.layers.splice(index, 0, layer); });
 }
+
+// Ports renderMapLayer's opacity change handler (layers-panel.js:746).
+export function setMapLayerOpacity(services, mapId, layerId, opacity) {
+  const map = findMap(services.projects.project, mapId);
+  const layer = map?.layers.find(l => l.id === layerId);
+  if (!layer || layer.opacity === opacity) return;
+  const before = layer.opacity;
+  runCommand(services, mapId, 'map layer opacity',
+    map => { map.layers.find(l => l.id === layerId).opacity = opacity; },
+    map => { map.layers.find(l => l.id === layerId).opacity = before; });
+}

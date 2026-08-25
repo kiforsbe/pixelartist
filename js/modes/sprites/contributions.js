@@ -23,6 +23,11 @@ import {
 import {
   addAnimationFrame, removeAnimationFrame, reorderAnimationFrame, setAnimationFrameDuration, setAnimationFrameStep,
 } from './application/commands/animation-frame-commands.js';
+import {
+  toggleLayerVisible, addLayer, addGroup, deleteNode, mergeLayerDownCmd,
+  moveNode, dragMoveNode, renameNode, setLayerOpacity,
+} from './application/commands/layer-commands.js';
+import { editPaletteColor, remapPaletteColor } from './application/commands/palette-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history, selections: host.selections }; }
 
@@ -70,6 +75,18 @@ function registerSpriteCommands(api) {
   command('sprites.reorderAnimationFrame', (_context, { sheetId, animationId, fromIndex, toIndex }) => reorderAnimationFrame(services(), sheetId, animationId, fromIndex, toIndex));
   command('sprites.setAnimationFrameDuration', (_context, { sheetId, animationId, index, duration }) => setAnimationFrameDuration(services(), sheetId, animationId, index, duration));
   command('sprites.setAnimationFrameStep', (_context, { sheetId, animationId, index, step }) => setAnimationFrameStep(services(), sheetId, animationId, index, step));
+
+  command('sprites.addLayer', (_context, { sheetId, targetGroupId }) => addLayer(services(), sheetId, targetGroupId));
+  command('sprites.addGroup', (_context, { sheetId, targetGroupId }) => addGroup(services(), sheetId, targetGroupId));
+  command('sprites.deleteNode', (_context, { sheetId, nodeId }) => deleteNode(services(), sheetId, nodeId));
+  command('sprites.mergeDown', (_context, { sheetId, layerId }) => mergeLayerDownCmd(services(), sheetId, layerId));
+  command('sprites.moveNode', (_context, { sheetId, nodeId, delta }) => moveNode(services(), sheetId, nodeId, delta));
+  command('sprites.dragMoveNode', (_context, { sheetId, nodeId, destParentId, destIndex }) => dragMoveNode(services(), sheetId, nodeId, destParentId, destIndex));
+  command('sprites.toggleLayerVisible', (_context, { sheetId, layerId }) => toggleLayerVisible(services(), sheetId, layerId));
+  command('sprites.renameNode', (_context, { sheetId, nodeId, name }) => renameNode(services(), sheetId, nodeId, name));
+  command('sprites.setLayerOpacity', (_context, { sheetId, layerId, opacity }) => setLayerOpacity(services(), sheetId, layerId, opacity));
+  command('sprites.editPaletteColor', (_context, { index, color }) => editPaletteColor(services(), index, color));
+  command('sprites.remapPaletteColor', (_context, { index, color }) => remapPaletteColor(services(), index, color));
 }
 
 export function registerSpriteContributions(api) {

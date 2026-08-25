@@ -5,7 +5,7 @@ import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
 import { state } from '../js/app/state.js';
-import { addMapLayer, deleteMapLayer } from '../js/modes/maps/application/commands/map-layer-commands.js';
+import { addMapLayer, deleteMapLayer, setMapLayerOpacity } from '../js/modes/maps/application/commands/map-layer-commands.js';
 
 function makeServices(project) {
   const store = new EditorStore();
@@ -60,4 +60,33 @@ test('deleteMapLayer removes a layer and is undoable', () => {
   services.history.undo();
   assert.equal(project.maps[0].layers.length, 2);
   assert.equal(project.maps[0].layers[1].id, layerId);
+});
+
+test('setMapLayerOpacity sets opacity and is undoable', () => {
+  const project = makeProject();
+  project.maps[0].layers[0].opacity = 1;
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  setMapLayerOpacity(services, 'map1', 'l0', 0.4);
+  assert.equal(project.maps[0].layers[0].opacity, 0.4);
+
+  services.history.undo();
+  assert.equal(project.maps[0].layers[0].opacity, 1);
+
+  services.history.redo();
+  assert.equal(project.maps[0].layers[0].opacity, 0.4);
+});
+
+test('setMapLayerOpacity is a no-op when opacity is unchanged or the layer is missing', () => {
+  const project = makeProject();
+  project.maps[0].layers[0].opacity = 1;
+  const services = makeServices(project);
+  state.commands = new CommandStack(); state.dirty = false;
+
+  setMapLayerOpacity(services, 'map1', 'l0', 1);
+  assert.equal(services.history.canUndo(), false);
+
+  setMapLayerOpacity(services, 'map1', 'missing', 0.5);
+  assert.equal(services.history.canUndo(), false);
 });
