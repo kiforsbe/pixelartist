@@ -4,14 +4,13 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
-import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import { createBitmap } from '../js/core/pixels.js';
 import { editPaletteColor, remapPaletteColor } from '../js/modes/tiles/application/commands/palette-commands.js';
 
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
+  if (project.sheets[0]) store.updateSession({ activeDocument: { kind: 'tile-sheet', id: project.sheets[0].id } });
   return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }) };
 }
 
@@ -26,15 +25,7 @@ function fillBitmap(bmp, color) {
   return bmp;
 }
 
-function resetLegacy() {
-  state.commands = new CommandStack();
-  state.dirty = false;
-  state.project = null;
-  state.activeSheetId = null;
-}
-
 test('editPaletteColor sets the palette entry and undo restores the exact prior entry', () => {
-  resetLegacy();
   const pal = makePalette();
   const project = { sheets: [], maps: [], palettes: [pal], activePaletteId: 'pal1' };
   const services = makeServices(project);
@@ -50,21 +41,18 @@ test('editPaletteColor sets the palette entry and undo restores the exact prior 
 });
 
 test('editPaletteColor does not touch sheet bitmaps (no remap)', () => {
-  resetLegacy();
   const pal = makePalette();
   const bmp = fillBitmap(createBitmap(2, 2), pal.colors[0]);
   const layer = { id: 'l0', type: 'layer', name: 'L', visible: true, opacity: 1, bitmap: bmp };
   const sheet = { id: 'sheet1', width: 2, height: 2, kind: 'tile', layerTree: { id: 'root', type: 'group', children: [layer] }, animations: [] };
   const project = { sheets: [sheet], maps: [], palettes: [pal], activePaletteId: 'pal1' };
   const services = makeServices(project);
-  state.project = project; state.activeSheetId = 'sheet1';
 
   editPaletteColor(services, 0, [9, 9, 9, 255]);
   assert.equal(bmp.data[0], 255); // unchanged -- editPaletteColor never remaps pixels
 });
 
 test('editPaletteColor is a no-op when the color is unchanged', () => {
-  resetLegacy();
   const pal = makePalette();
   const project = { sheets: [], maps: [], palettes: [pal], activePaletteId: 'pal1' };
   const services = makeServices(project);
@@ -74,7 +62,6 @@ test('editPaletteColor is a no-op when the color is unchanged', () => {
 });
 
 test('remapPaletteColor updates the palette entry and remaps matching pixels on the active sheet, and undo restores both byte-for-byte', () => {
-  resetLegacy();
   const pal = makePalette();
   const oldColor = pal.colors[0];
   const bmp = fillBitmap(createBitmap(2, 2), oldColor);
@@ -82,7 +69,6 @@ test('remapPaletteColor updates the palette entry and remaps matching pixels on 
   const sheet = { id: 'sheet1', width: 2, height: 2, kind: 'tile', layerTree: { id: 'root', type: 'group', children: [layer] }, animations: [] };
   const project = { sheets: [sheet], maps: [], palettes: [pal], activePaletteId: 'pal1' };
   const services = makeServices(project);
-  state.project = project; state.activeSheetId = 'sheet1';
 
   const beforeBytes = Uint8ClampedArray.from(bmp.data);
 
@@ -102,7 +88,6 @@ test('remapPaletteColor updates the palette entry and remaps matching pixels on 
 });
 
 test('remapPaletteColor only remaps pixels matching the exact old color, leaving others untouched', () => {
-  resetLegacy();
   const pal = makePalette();
   const oldColor = pal.colors[0]; // [255,0,0,255]
   const otherColor = [1, 2, 3, 255];
@@ -113,7 +98,6 @@ test('remapPaletteColor only remaps pixels matching the exact old color, leaving
   const sheet = { id: 'sheet1', width: 2, height: 1, kind: 'tile', layerTree: { id: 'root', type: 'group', children: [layer] }, animations: [] };
   const project = { sheets: [sheet], maps: [], palettes: [pal], activePaletteId: 'pal1' };
   const services = makeServices(project);
-  state.project = project; state.activeSheetId = 'sheet1';
 
   remapPaletteColor(services, 0, [50, 50, 50, 255]);
   assert.deepEqual(Array.from(bmp.data.slice(0, 4)), [50, 50, 50, 255]);
@@ -125,11 +109,9 @@ test('remapPaletteColor only remaps pixels matching the exact old color, leaving
 });
 
 test('remapPaletteColor with no active sheet still updates the palette entry (no layers to patch)', () => {
-  resetLegacy();
   const pal = makePalette();
   const project = { sheets: [], maps: [], palettes: [pal], activePaletteId: 'pal1' };
   const services = makeServices(project);
-  // state.project / state.activeSheetId left unset -> activeSheet() returns null
 
   remapPaletteColor(services, 0, [1, 1, 1, 255]);
   assert.deepEqual(pal.colors[0], [1, 1, 1, 255]);
@@ -139,7 +121,6 @@ test('remapPaletteColor with no active sheet still updates the palette entry (no
 });
 
 test('remapPaletteColor is a no-op when the color is unchanged', () => {
-  resetLegacy();
   const pal = makePalette();
   const project = { sheets: [], maps: [], palettes: [pal], activePaletteId: 'pal1' };
   const services = makeServices(project);

@@ -1,11 +1,11 @@
-import { state } from '../../../app/state.js';
 import { flattenSheet } from '../../../core/model.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
+import { activeFloating } from '../../../components/canvas/float-session.js';
 
 const cache = createRasterCache();
 const thumbnails = new Map();
 
-function flatten(sheet) { return flattenSheet(sheet, state.floating); }
+function flatten(sheet) { return flattenSheet(sheet, activeFloating()); }
 
 export function invalidateTileRaster() { cache.invalidate(); }
 

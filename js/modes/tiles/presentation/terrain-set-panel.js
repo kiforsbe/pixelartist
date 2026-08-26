@@ -1,10 +1,13 @@
 // js/modes/tiles/presentation/terrain-set-panel.js
-import { state, on, activeSheet } from '../../../app/state.js';
+import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { invalidateTileRaster } from './tile-raster-cache.js';
 import {
   buildTilePickerDialog, renderTerrainSetEditor, syncSelectedTerrainSetFromTile,
 } from './terrain-set-editor.js';
-import { mountReactivePanel } from '../../../components/panel-mount.js';
+import { mountStorePanel } from '../../../components/panel-mount.js';
+
+function sheetSelection(sheet) { return getEditorHost().selections.get({ kind: 'tile-sheet', id: sheet.id }) ?? {}; }
 
 export function mountAutotilesPanel(element) {
   const panel = document.createElement('div');
@@ -20,7 +23,7 @@ export function mountAutotilesPanel(element) {
   panel.appendChild(editor);
 
   function render() {
-    if (state.mode !== 'tiles') {
+    if (getEditorHost().store.getState().session.activeModeId !== 'tiles') {
       element.hidden = true;
       return;
     }
@@ -29,7 +32,7 @@ export function mountAutotilesPanel(element) {
     editor.innerHTML = '';
     if (!sheet) return;
 
-    const terrainSet = sheet.terrainSets.find(candidate => candidate.id === state.selectedTerrainSetId);
+    const terrainSet = sheet.terrainSets.find(candidate => candidate.id === sheetSelection(sheet).terrainSetId);
     if (terrainSet) {
       renderTerrainSetEditor(editor, sheet, terrainSet, tilePickerDialog);
       return;
@@ -42,15 +45,19 @@ export function mountAutotilesPanel(element) {
 
   function syncSelection() {
     const sheet = activeSheet();
-    if (sheet) syncSelectedTerrainSetFromTile(sheet.tiles.find(tile => tile.id === state.selectedTileId));
+    if (sheet) syncSelectedTerrainSetFromTile(sheet, sheet.tiles.find(tile => tile.id === sheetSelection(sheet).tileId));
   }
 
   syncSelection();
-  return mountReactivePanel(on, [
-    ['project', invalidateTileRaster],
-    ['history', invalidateTileRaster],
-    ['pixels', invalidateTileRaster],
-    'view',
-    ['selection', syncSelection],
+  const host = getEditorHost();
+  const panelMount = mountStorePanel(host.store, [
+    [s => s.project.model, invalidateTileRaster],
+    [s => s.workspace.pixelRevision, invalidateTileRaster],
+    s => s.session.activeModeId,
+    s => s.session.activeViewId,
+    s => s.session.activeDocument,
+    [s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; }, syncSelection],
   ], render);
+  const disposeHistory = host.history.subscribe(() => { invalidateTileRaster(); panelMount.scheduleRender(); });
+  return { ...panelMount, dispose() { disposeHistory(); panelMount.dispose(); } };
 }

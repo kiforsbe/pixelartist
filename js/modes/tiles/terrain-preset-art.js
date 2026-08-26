@@ -1,5 +1,4 @@
 // js/modes/tiles/terrain-preset-art.js
-import { emit } from '../../app/state.js';
 import { getEditorHost } from '../../host/runtime.js';
 import { activeLayer } from '../../host/document-helpers.js';
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
@@ -63,5 +62,5 @@ export async function importPresetArtOntoLayer(sheet, preset, sourceTiles, cols)
   // Direct history.execute(), no separate markDirty() call: HistoryService's
   // own onChange wrapper already marks the project dirty on every push.
   getEditorHost().history.execute(makePixelPatch(layer.bitmap, rect, before, after, 'import terrain layout art'));
-  emit('pixels');
+  getEditorHost().store.notifyPixelsChanged();
 }

@@ -3,8 +3,8 @@
 // geometry math lives in application/geometry/tile-geometry.js; all project
 // mutations go through CommandRegistry by id, never a direct import.
 
-import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { registerTool } from '../../../components/tool-palette.js';
 import { gridCellRect, ownedTiles } from '../../../core/tilegrids.js';
 import { rectBetween } from '../../../core/rect.js';
@@ -16,15 +16,32 @@ import {
   tileAt, hitHandle, hitGridHandle, gridBounds, tileGripGeometry, hitTileGrip, ghostGridFor,
 } from '../application/geometry/tile-geometry.js';
 
-function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
+function dispatch(id, args) {
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
+function currentModeId() { return getEditorHost().store.getState().session.activeModeId; }
+function currentToolId() { return getEditorHost().store.getState().session.activeToolId; }
+function sheetDocument(sheet) { return { kind: 'tile-sheet', id: sheet.id }; }
+function sheetSelection(sheet) { return getEditorHost().selections.get(sheetDocument(sheet)) ?? {}; }
+function setSheetSelection(sheet, patch) {
+  getEditorHost().selections.set({ ...sheetSelection(sheet), ...patch }, sheetDocument(sheet));
+}
+function storeOn(event, handler) {
+  const store = getEditorHost().store;
+  if (event === 'project') return store.subscribe(s => s.project.model, handler);
+  if (event === 'tool') return store.subscribe(s => s.session.activeToolId, handler);
+  throw new Error(`storeOn: unsupported event "${event}"`);
+}
 
-// Not a project-mutating command (no undo entry) -- pure UI navigation state
-// on the legacy `state` object. Shared by this file's double-click handler
-// and the Tiles properties panel's Edit button.
+// Not a project-mutating command (no undo entry) -- pure UI navigation state.
+// Shared by this file's double-click handler and the Tiles properties panel's
+// Edit button.
 export function openTileEditor(tileId) {
-  state.editingTileId = tileId;
-  state.view = 'tile';
-  emit('view');
+  const sheet = activeSheet();
+  if (!sheet) return;
+  setSheetSelection(sheet, { editingTileId: tileId });
+  getEditorHost().store.updateSession({ activeViewId: 'tiles.tile' }, 'view');
 }
 
 // ------------------------------------------------------------- pointer
@@ -47,7 +64,7 @@ function handleDown(ev, view) {
     return;
   }
 
-  const selected = sheet.tiles.find(t => t.id === state.selectedTileId) || null;
+  const selected = sheet.tiles.find(t => t.id === sheetSelection(sheet).tileId) || null;
   const handle = hitHandle(view, selected, ev.sx, ev.sy);
   if (handle) {
     drag = {
@@ -88,13 +105,13 @@ function handleDown(ev, view) {
   lastClick = hit ? { tileId: hit.id, time: now } : null;
 
   if (!hit) {
-    if (state.selectedTileId !== null) { state.selectedTileId = null; emit('selection'); }
+    if (sheetSelection(sheet).tileId !== null) setSheetSelection(sheet, { tileId: null });
     drag = { kind: 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
     view.requestRender();
     return;
   }
 
-  if (state.selectedTileId !== hit.id) { state.selectedTileId = hit.id; emit('selection'); }
+  if (sheetSelection(sheet).tileId !== hit.id) setSheetSelection(sheet, { tileId: hit.id });
   drag = { kind: 'tiledrag', from: hit, anchor: { x: ev.x, y: ev.y }, to: { x: ev.x, y: ev.y }, shift: ev.shiftKey };
   view.requestRender();
 }
@@ -175,8 +192,7 @@ function handleUp(ev, view) {
     if (target && target !== from && target.w === from.w && target.h === from.h) {
       if (d.shift) dispatch('tiles.moveTile', { sheetId: sheet.id, aId: from.id, bId: target.id });
       else dispatch('tiles.swapTile', { sheetId: sheet.id, aId: from.id, bId: target.id });
-      state.selectedTileId = target.id;
-      emit('selection');
+      setSheetSelection(sheet, { tileId: target.id });
       return;
     }
     const dx = Math.max(-from.x, Math.min(sheet.width - (from.x + from.w), ev.x - d.anchor.x));
@@ -270,11 +286,11 @@ function drawGridDims(ctx, view, grid, opts = {}) {
 }
 
 function drawTileToolGhost(ctx, view) {
-  if (state.mode !== 'tiles') return;
+  if (currentModeId() !== 'tiles') return;
   const sheet = activeSheet();
   if (!sheet) return;
 
-  if (state.tool === 'tiletool') drawGridHandles(ctx, view, sheet);
+  if (currentToolId() === 'tiletool') drawGridHandles(ctx, view, sheet);
 
   if (!drag) return;
   ctx.save();
@@ -337,10 +353,10 @@ function drawTileToolGhost(ctx, view) {
 }
 
 export function drawTileChrome(ctx, view) {
-  if (state.mode !== 'tiles' || state.tool !== 'tiletool' || drag) return;
+  if (currentModeId() !== 'tiles' || currentToolId() !== 'tiletool' || drag) return;
   const sheet = activeSheet();
   if (!sheet) return;
-  const tile = sheet.tiles.find(t => t.id === state.selectedTileId);
+  const tile = sheet.tiles.find(t => t.id === sheetSelection(sheet).tileId);
   if (!tile) return;
   if (tile.gridId != null) {
     const grid = sheet.tileGrids.find(g => g.id === tile.gridId);
@@ -361,25 +377,26 @@ export function drawTileChrome(ctx, view) {
 // ------------------------------------------------------------- public API
 
 export function registerTileTool() {
-  registerTool({ id: 'tiletool', icon: '🔲', key: 't', isAvailable: () => state.mode === 'tiles' });
+  registerTool({ id: 'tiletool', icon: '🔲', key: 't', isAvailable: () => currentModeId() === 'tiles' });
 
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Delete') return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
-    if (state.tool !== 'tiletool' || state.mode !== 'tiles') return;
+    if (currentToolId() !== 'tiletool' || currentModeId() !== 'tiles') return;
     const sheet = activeSheet();
-    if (!sheet || !state.selectedTileId) return;
-    dispatch('tiles.deleteTile', { sheetId: sheet.id, tileId: state.selectedTileId });
+    const tileId = sheet ? (sheetSelection(sheet).tileId ?? null) : null;
+    if (!sheet || !tileId) return;
+    dispatch('tiles.deleteTile', { sheetId: sheet.id, tileId });
   });
 
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (document.querySelector('dialog[open]')) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
-    if (state.mode === 'tiles' && state.selectedTileId !== null) {
-      state.selectedTileId = null;
+    const sheet = activeSheet();
+    if (currentModeId() === 'tiles' && sheet && sheetSelection(sheet).tileId !== null) {
+      setSheetSelection(sheet, { tileId: null });
       drag = null;
-      emit('selection');
     }
   });
 }
@@ -387,7 +404,7 @@ export function registerTileTool() {
 export function bindTileTool(view) {
   const prevPointer = view.onPointer;
   view.onPointer = (ev) => {
-    if (state.mode === 'tiles' && state.tool === 'tiletool') {
+    if (currentModeId() === 'tiles' && currentToolId() === 'tiletool') {
       if (ev.type === 'down') handleDown(ev, view);
       else if (ev.type === 'move') handleMove(ev, view);
       else if (ev.type === 'up') handleUp(ev, view);
@@ -402,8 +419,8 @@ export function bindTileTool(view) {
     drawTileToolGhost(ctx, view);
   };
 
-  bindDragCancelGuard(on, {
-    isToolActive: () => state.tool === 'tiletool',
+  bindDragCancelGuard(storeOn, {
+    isToolActive: () => currentToolId() === 'tiletool',
     hasDrag: () => !!drag,
     cancel: () => { drag = null; lastClick = null; },
     requestRender: () => view.requestRender(),

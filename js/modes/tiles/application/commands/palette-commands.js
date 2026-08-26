@@ -14,7 +14,12 @@ import { runEntityCommand } from '../../../../host/command-helpers.js';
 import { cloneBitmap, blitRegion, colorsEqual } from '../../../../core/pixels.js';
 import { sheetLayers } from '../../../../core/model.js';
 import { setEntry, remapColor } from '../../../../core/palettes.js';
-import { activeSheet } from '../../../../app/state.js';
+
+function activeSheet(services) {
+  const document = services.store.getState().session.activeDocument;
+  if (!document || (document.kind !== 'sprite-sheet' && document.kind !== 'tile-sheet')) return null;
+  return services.projects.project?.sheets.find(sheet => sheet.id === document.id) ?? null;
+}
 
 function currentPalette(project) {
   return project?.palettes.find(p => p.id === project.activePaletteId) ?? null;
@@ -41,7 +46,7 @@ export function remapPaletteColor(services, index, color) {
   if (!pal) return;
   const old = pal.colors[index];
   if (colorsEqual(old, color)) return;
-  const sheet = activeSheet();
+  const sheet = activeSheet(services);
   const layerPatches = (sheet ? sheetLayers(sheet) : []).map(layer => {
     const before = cloneBitmap(layer.bitmap);
     const after = cloneBitmap(layer.bitmap);

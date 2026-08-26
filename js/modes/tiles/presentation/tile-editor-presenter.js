@@ -40,10 +40,11 @@
 // the same sign-direction cell as the down event (i.e. no drag) -- see
 // wrapped view.onPointer below.
 
-import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { CanvasView } from '../../../components/canvas/canvas-view.js';
 import { bindDrawing } from '../../../components/canvas/drawing-engine.js';
+import { activeFloating } from '../../../components/canvas/float-session.js';
 import { flattenSheet } from '../../../core/model.js';
 import { getPreset, resolveNeighborGrid } from '../../../core/neighbors.js';
 import { terrainNeighborPreviewCells } from '../../../core/blob47templates.js';
@@ -54,7 +55,16 @@ import {
   dirForCell, DIR_LABELS, computeOffset, mapEditorPoint, cellAt, insideCenter,
 } from '../application/geometry/tile-editor-geometry.js';
 
-function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
+function dispatch(id, args) {
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
+function sheetDocument(sheet) { return { kind: 'tile-sheet', id: sheet.id }; }
+function sheetSelection(sheet) { return getEditorHost().selections.get(sheetDocument(sheet)) ?? {}; }
+function setSheetSelection(sheet, patch) {
+  getEditorHost().selections.set({ ...sheetSelection(sheet), ...patch }, sheetDocument(sheet));
+}
+function activeViewId() { return getEditorHost().store.getState().session.activeViewId; }
 
 export function mountTileEditor(hostEl) {
   const container = document.createElement('div');
@@ -99,7 +109,7 @@ export function mountTileEditor(hostEl) {
   function currentTile() {
     const sheet = activeSheet();
     if (!sheet) return null;
-    const id = state.editingTileId;
+    const id = sheetSelection(sheet).editingTileId;
     if (!id) return null;
     return sheet.tiles.find(t => t.id === id) ?? null;
   }
@@ -141,7 +151,7 @@ export function mountTileEditor(hostEl) {
   // what makes the neighbor preview live while drawing.
   const flatCache = createRasterCache();
   function invalidateFlat() { flatCache.invalidate(); }
-  function getFlatCanvas(sheet) { return flatCache.getCanvas(sheet, s => flattenSheet(s, state.floating)); }
+  function getFlatCanvas(sheet) { return flatCache.getCanvas(sheet, s => flattenSheet(s, activeFloating())); }
 
   // Draws `tile`'s current flattened pixels into the neighbor-grid cell at
   // (dx, dy) (tile units relative to center, 0,0 = center), applying flip
@@ -342,14 +352,13 @@ export function mountTileEditor(hostEl) {
   });
 
   function backToSheet() {
-    state.view = 'sheet';
-    emit('view');
+    getEditorHost().store.updateSession({ activeViewId: 'tiles.sheet' }, 'view');
   }
   btnBack.addEventListener('click', backToSheet);
 
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (state.view !== 'tile') return;
+    if (activeViewId() !== 'tiles.tile') return;
     if (document.querySelector('dialog[open]')) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     backToSheet();
@@ -379,7 +388,11 @@ export function mountTileEditor(hostEl) {
     const t = currentTile();
     if (!t) {
       hide();
-      if (state.view === 'tile') { state.view = 'sheet'; state.editingTileId = null; emit('view'); }
+      if (activeViewId() === 'tiles.tile') {
+        const sheet = activeSheet();
+        if (sheet) setSheetSelection(sheet, { editingTileId: null });
+        getEditorHost().store.updateSession({ activeViewId: 'tiles.sheet' }, 'view');
+      }
       return;
     }
     if (loadedTileId !== t.id || loadedRadius !== radius) loadContent();
@@ -406,10 +419,14 @@ export function mountTileEditor(hostEl) {
     visible = false;
   }
 
-  on('project', () => { invalidateFlat(); if (visible) refresh(); });
-  on('history', () => { invalidateFlat(); if (visible) refresh(); });
-  on('pixels', () => { invalidateFlat(); if (visible) view.requestRender(); });
-  on('selection', () => { if (visible) view.requestRender(); });
+  const editorHost = getEditorHost();
+  editorHost.store.subscribe(s => s.project.model, () => { invalidateFlat(); if (visible) refresh(); });
+  editorHost.history.subscribe(() => { invalidateFlat(); if (visible) refresh(); });
+  editorHost.store.subscribe(s => s.workspace.pixelRevision, () => { invalidateFlat(); if (visible) view.requestRender(); });
+  editorHost.store.subscribe(
+    s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
+    () => { if (visible) view.requestRender(); },
+  );
 
   return { show, hide, view };
 }

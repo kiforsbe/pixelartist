@@ -1,7 +1,9 @@
-import { state } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
 
-function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
+function dispatch(id, args) {
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
 
 let focusPending = false;
 

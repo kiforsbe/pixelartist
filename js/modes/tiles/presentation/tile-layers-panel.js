@@ -1,8 +1,11 @@
-import { state, on, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
-import { mountReactivePanel } from '../../../components/panel-mount.js';
+import { activeSheet } from '../../../host/document-helpers.js';
+import { mountStorePanel } from '../../../components/panel-mount.js';
 
-function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
+function dispatch(id, args) {
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
 
 export function mountTileLayersPanel(element, { showVisibility = false, showOpacity = false } = {}) {
   const panel = document.createElement('div');
@@ -51,7 +54,7 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
   panel.appendChild(actions);
 
   function render() {
-    if (state.mode !== 'tiles') {
+    if (getEditorHost().store.getState().session.activeModeId !== 'tiles') {
       element.hidden = true;
       return;
     }
@@ -81,5 +84,14 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
     }
   }
 
-  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render);
+  const host = getEditorHost();
+  const panelMount = mountStorePanel(host.store, [
+    s => s.project.model,
+    s => s.session.activeModeId,
+    s => s.session.activeViewId,
+    s => s.session.activeDocument,
+    s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
+  ], render);
+  const disposeHistory = host.history.subscribe(() => panelMount.scheduleRender());
+  return { ...panelMount, dispose() { disposeHistory(); panelMount.dispose(); } };
 }

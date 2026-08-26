@@ -6,10 +6,7 @@
 // setSheetSelection calls (Task 3 moves those into the panel's caller code).
 // sheet.layerTree is shared by sprite and tile sheets alike (see the
 // repo-wide comment at layers-panel.js:810-817), so this file and the
-// sprites-mode equivalent layer-commands.js are intentionally near-identical
-// -- only the runCommand helper differs (this file reuses
-// tile-sheet-commands.js's, which still carries the legacy markDirty() call;
-// sprites/ defines a fresh one without it -- see that file's own comment).
+// sprites-mode equivalent layer-commands.js are intentionally near-identical.
 import {
   createLayerNode, createGroupNode, findNode, findParent, findGroup, flattenLayers,
   mergeDown as mergeLayerDown, moveNode as moveTreeNode,

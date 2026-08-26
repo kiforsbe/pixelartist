@@ -1,8 +1,6 @@
 // js/modes/tiles/presentation/terrain-set-editor.js
-import {
-  state, emit, activeSheet,
-} from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { markDefaultAction } from '../../../components/dialogs.js';
 import { groupCellsByBlobIndex } from '../../../core/terrainsets.js';
 import { blobIndexToMask, resolveTerrainSlot, classifySlots, DIRECTION_OFFSETS } from '../../../core/blob47.js';
@@ -17,7 +15,16 @@ import {
 } from './autotile-paint-presenter.js';
 import { openBlob47Coverage } from './blob47-coverage-dialog.js';
 
-function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
+function dispatch(id, args) {
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
+function sheetDocument(sheet) { return { kind: 'tile-sheet', id: sheet.id }; }
+function sheetSelection(sheet) { return getEditorHost().selections.get(sheetDocument(sheet)) ?? {}; }
+function setSheetSelection(sheet, patch) {
+  getEditorHost().selections.set({ ...sheetSelection(sheet), ...patch }, sheetDocument(sheet));
+}
+function currentToolId() { return getEditorHost().store.getState().session.activeToolId; }
 
 // Cosmetic-only arrangement of the same 47 slots in the terrain-set editor
 // -- never touches terrainSet.slots or any saved/imported layout preset.
@@ -113,7 +120,7 @@ export function buildAddTerrainSetDialog() {
     // No terrain-set list to click any more -- auto-select the new set so
     // the Autotiles panel (and, once a tile exists, the Tiles panel) shows
     // it immediately instead of whatever was selected before.
-    state.selectedTerrainSetId = terrainSetId;
+    setSheetSelection(sheet, { terrainSetId });
 
     const presetValue = $('#ats-layout').value;
     if (presetValue !== '') {
@@ -128,7 +135,7 @@ export function buildAddTerrainSetDialog() {
       });
       const seededMode = preset.name.includes('8×6') ? 'grid8x6' : preset.name.includes('7×7') ? 'grid7x7' : null;
       if (seededMode) terrainSetViewModes.set(terrainSetId, seededMode);
-      state.selectedTileId = sourceTiles[0]?.id ?? null;
+      setSheetSelection(sheet, { tileId: sourceTiles[0]?.id ?? null });
       await importPresetArtOntoLayer(sheet, preset, sourceTiles, preset.cols);
     } else {
       // No preset -- seed with one standalone (non-grid) tile assigned to
@@ -137,17 +144,16 @@ export function buildAddTerrainSetDialog() {
       // pruneEmptyTerrainSets treats as garbage once any tile/grid deletion
       // elsewhere names it as a candidate.
       dispatch('tiles.createTile', { sheetId: sheet.id, rect: { x: 0, y: 0, w: tileW, h: tileH } });
-      const created = sheet.tiles.find(t => t.id === state.selectedTileId);
+      const created = sheet.tiles.find(t => t.id === sheetSelection(sheet).tileId);
       if (created) dispatch('tiles.assignTerrainSlot', { sheetId: sheet.id, terrainSetId, blobIndex: 0, tileId: created.id });
     }
 
-    emit('selection');
     dlg.close();
   });
   return {
     open() {
       const sheet = activeSheet();
-      const settings = state.project?.settings ?? {};
+      const settings = getEditorHost().projects.project?.settings ?? {};
       $('#ats-tilew').value = String(settings.tileW ?? 16);
       $('#ats-tileh').value = String(settings.tileH ?? 16);
 
@@ -251,8 +257,10 @@ export function buildTilePickerDialog() {
 // is the one case left untouched: state.selectedTerrainSetId persists so a
 // just-created, still-empty terrain set (nothing on the sheet to derive it
 // from) stays reachable.
-export function syncSelectedTerrainSetFromTile(tile) {
-  if (tile) state.selectedTerrainSetId = tile.terrainSetId ?? null;
+export function syncSelectedTerrainSetFromTile(sheet, tile) {
+  if (!tile) return;
+  const terrainSetId = tile.terrainSetId ?? null;
+  if (sheetSelection(sheet).terrainSetId !== terrainSetId) setSheetSelection(sheet, { terrainSetId });
 }
 
 // Shared by the Tiles panel's per-tile detail (when the tile belongs to a
@@ -306,7 +314,7 @@ export function terrainSetDeleteButton(sheet, terrainSet) {
   btn.title = 'Delete terrain set';
   btn.addEventListener('click', () => {
     dispatch('tiles.deleteTerrainSet', { sheetId: sheet.id, terrainSetId: terrainSet.id });
-    if (state.selectedTerrainSetId === terrainSet.id) state.selectedTerrainSetId = null;
+    if (sheetSelection(sheet).terrainSetId === terrainSet.id) setSheetSelection(sheet, { terrainSetId: null });
   });
   return btn;
 }
@@ -317,7 +325,7 @@ export function renderTerrainSetEditor(container, sheet, terrainSet, tilePickerD
   const painterRow = document.createElement('div');
   painterRow.className = 'row layer-actions';
   const paintSession = getAutotilePaintSession();
-  const paintingThisSet = paintSession?.terrainSetId === terrainSet.id && state.tool === 'autotilepaint';
+  const paintingThisSet = paintSession?.terrainSetId === terrainSet.id && currentToolId() === 'autotilepaint';
   if (!paintingThisSet) {
     const start = document.createElement('button');
     start.type = 'button'; start.className = 'btn-sm'; start.textContent = '🧩 Paint terrain';

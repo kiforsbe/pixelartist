@@ -1,5 +1,4 @@
 // js/modes/tiles/application/commands/tile-sheet-commands.js
-import { state, emit, markDirty } from '../../../../app/state.js';
 import { copyRegion, blitRegion, fillRegion } from '../../../../core/pixels.js';
 import { sheetLayers, scrubTileReferences } from '../../../../core/model.js';
 import {
@@ -15,10 +14,14 @@ import { runEntityCommand } from '../../../../host/command-helpers.js';
 function findSheet(project, sheetId) { return project.sheets.find(s => s.id === sheetId) ?? null; }
 function findTile(sheet, tileId) { return sheet.tiles.find(t => t.id === tileId) ?? null; }
 function findGrid(sheet, gridId) { return sheet.tileGrids.find(g => g.id === gridId) ?? null; }
+function sheetDocument(sheet) { return { kind: 'tile-sheet', id: sheet.id }; }
+function selection(services, sheet) { return services.selections.get(sheetDocument(sheet)) ?? {}; }
+function setSelection(services, sheet, patch) {
+  services.selections.set({ ...selection(services, sheet), ...patch }, sheetDocument(sheet));
+}
 
 export function runCommand(services, sheetId, label, apply, revert) {
   runEntityCommand(services, label, project => findSheet(project, sheetId), apply, revert);
-  markDirty();
 }
 
 const cloneNb = v => v === undefined ? undefined : structuredClone(v);
@@ -119,13 +122,12 @@ export function createTile(services, sheetId, rect) {
         };
         sheet.tiles.push(created);
       }
-      state.selectedTileId = id;
+      setSelection(services, sheet, { tileId: id });
     },
     sheet => {
       sheet.tiles = sheet.tiles.filter(t => t.id !== id);
-      if (state.selectedTileId === id) state.selectedTileId = null;
+      if (selection(services, sheet).tileId === id) setSelection(services, sheet, { tileId: null });
     });
-  emit('selection');
 }
 
 // Grid-owned tiles aren't deleted individually (shrink the grid, or detach
@@ -135,8 +137,8 @@ export function deleteTile(services, sheetId, tileId) {
   const sheet = findSheet(services.projects.project, sheetId);
   const tile = findTile(sheet, tileId);
   if (!tile || tile.gridId != null) return;
-  const wasSelected = state.selectedTileId === tileId;
-  const beforeSelectedTerrainSetId = state.selectedTerrainSetId;
+  const wasSelected = selection(services, sheet).tileId === tileId;
+  const beforeSelectedTerrainSetId = selection(services, sheet).terrainSetId ?? null;
   const candidateTerrainSetId = tile.terrainSetId ?? null;
   const beforeTiles = sheet.tiles.slice();
   const beforeSets = sheet.terrainSets.slice();
@@ -144,9 +146,9 @@ export function deleteTile(services, sheetId, tileId) {
   sheet.tiles = sheet.tiles.filter(t => t !== tile);
   scrubTileReferences(sheet, tile.id);
   const prunedIds = candidateTerrainSetId != null ? pruneEmptyTerrainSets(sheet, [candidateTerrainSetId]) : [];
-  const terrainSetCleared = prunedIds.includes(state.selectedTerrainSetId);
-  if (terrainSetCleared) state.selectedTerrainSetId = null;
-  if (state.selectedTileId === tileId) state.selectedTileId = null;
+  const terrainSetCleared = prunedIds.includes(selection(services, sheet).terrainSetId);
+  if (terrainSetCleared) setSelection(services, sheet, { terrainSetId: null });
+  if (selection(services, sheet).tileId === tileId) setSelection(services, sheet, { tileId: null });
   const afterTiles = sheet.tiles.slice();
   const afterSets = sheet.terrainSets.slice();
   const afterSlotState = captureTerrainSlotState(sheet);
@@ -155,17 +157,16 @@ export function deleteTile(services, sheetId, tileId) {
       sheet.tiles = afterTiles.slice();
       sheet.terrainSets = afterSets.slice();
       restoreTerrainSlotState(sheet, afterSlotState);
-      if (state.selectedTileId === tileId) state.selectedTileId = null;
-      if (terrainSetCleared) state.selectedTerrainSetId = null;
+      if (selection(services, sheet).tileId === tileId) setSelection(services, sheet, { tileId: null });
+      if (terrainSetCleared) setSelection(services, sheet, { terrainSetId: null });
     },
     sheet => {
       sheet.tiles = beforeTiles.slice();
       sheet.terrainSets = beforeSets.slice();
       restoreTerrainSlotState(sheet, beforeSlotState);
-      if (wasSelected) state.selectedTileId = tileId;
-      if (terrainSetCleared) state.selectedTerrainSetId = beforeSelectedTerrainSetId;
+      if (wasSelected) setSelection(services, sheet, { tileId });
+      if (terrainSetCleared) setSelection(services, sheet, { terrainSetId: beforeSelectedTerrainSetId });
     });
-  emit('selection');
 }
 
 export function moveGrid(services, sheetId, gridId, dx, dy) {
@@ -186,9 +187,8 @@ export function growTileIntoGrid(services, sheetId, tileId, axis, side, count) {
   const afterGrids = sheet.tileGrids.slice();
   const afterTiles = sheet.tiles.slice();
   runCommand(services, sheetId, 'grow tile into grid',
-    sheet => { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); state.selectedTileId = tileId; },
-    sheet => { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); state.selectedTileId = tileId; });
-  emit('selection');
+    sheet => { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); setSelection(services, sheet, { tileId }); },
+    sheet => { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); setSelection(services, sheet, { tileId }); });
 }
 
 export function resizeGridAxis(services, sheetId, gridId, axis, side, count) {
@@ -197,7 +197,7 @@ export function resizeGridAxis(services, sheetId, gridId, axis, side, count) {
   const beforeGrids = sheet.tileGrids.slice();
   const beforeTiles = sheet.tiles.slice();
   const beforeSlotState = captureTerrainSlotState(sheet);
-  const beforeSelectedTileId = state.selectedTileId;
+  const beforeSelectedTileId = selection(services, sheet).tileId ?? null;
   coreResizeGridAxis(sheet, grid, axis, side, count);
   let survivorId = null;
   if (grid.cols === 1 && grid.rows === 1) survivorId = collapseGridToTile(sheet, grid).id;
@@ -208,14 +208,13 @@ export function resizeGridAxis(services, sheetId, gridId, axis, side, count) {
     sheet => {
       sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice();
       restoreTerrainSlotState(sheet, afterSlotState);
-      if (survivorId) state.selectedTileId = survivorId;
+      if (survivorId) setSelection(services, sheet, { tileId: survivorId });
     },
     sheet => {
       sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice();
       restoreTerrainSlotState(sheet, beforeSlotState);
-      if (survivorId) state.selectedTileId = beforeSelectedTileId;
+      if (survivorId) setSelection(services, sheet, { tileId: beforeSelectedTileId });
     });
-  if (survivorId) emit('selection');
 }
 
 export function addGrid(services, sheetId, opts) {
@@ -238,15 +237,16 @@ export function deleteGrid(services, sheetId, gridId) {
   const beforeTiles = sheet.tiles.slice();
   const beforeSets = sheet.terrainSets.slice();
   const beforeSlotState = captureTerrainSlotState(sheet);
-  const beforeSelectedTileId = state.selectedTileId;
-  const beforeSelectedTerrainSetId = state.selectedTerrainSetId;
+  const beforeSelectedTileId = selection(services, sheet).tileId ?? null;
+  const beforeSelectedTerrainSetId = selection(services, sheet).terrainSetId ?? null;
   const candidateTerrainSetIds = [...new Set(ownedTiles(sheet, grid.id).map(t => t.terrainSetId).filter(id => id != null))];
   removeTileGrid(sheet, grid.id);
   const prunedIds = pruneEmptyTerrainSets(sheet, candidateTerrainSetIds);
-  const terrainSetCleared = prunedIds.includes(state.selectedTerrainSetId);
-  if (terrainSetCleared) state.selectedTerrainSetId = null;
-  const tileCleared = state.selectedTileId != null && !sheet.tiles.some(t => t.id === state.selectedTileId);
-  if (tileCleared) state.selectedTileId = null;
+  const terrainSetCleared = prunedIds.includes(selection(services, sheet).terrainSetId);
+  if (terrainSetCleared) setSelection(services, sheet, { terrainSetId: null });
+  const selectedTileId = selection(services, sheet).tileId ?? null;
+  const tileCleared = selectedTileId != null && !sheet.tiles.some(t => t.id === selectedTileId);
+  if (tileCleared) setSelection(services, sheet, { tileId: null });
   const afterGrids = sheet.tileGrids.slice();
   const afterTiles = sheet.tiles.slice();
   const afterSets = sheet.terrainSets.slice();
@@ -255,16 +255,15 @@ export function deleteGrid(services, sheetId, gridId) {
     sheet => {
       sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); sheet.terrainSets = afterSets.slice();
       restoreTerrainSlotState(sheet, afterSlotState);
-      if (terrainSetCleared) state.selectedTerrainSetId = null;
-      if (tileCleared) state.selectedTileId = null;
+      if (terrainSetCleared) setSelection(services, sheet, { terrainSetId: null });
+      if (tileCleared) setSelection(services, sheet, { tileId: null });
     },
     sheet => {
       sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); sheet.terrainSets = beforeSets.slice();
       restoreTerrainSlotState(sheet, beforeSlotState);
-      if (terrainSetCleared) state.selectedTerrainSetId = beforeSelectedTerrainSetId;
-      if (tileCleared) state.selectedTileId = beforeSelectedTileId;
+      if (terrainSetCleared) setSelection(services, sheet, { terrainSetId: beforeSelectedTerrainSetId });
+      if (tileCleared) setSelection(services, sheet, { tileId: beforeSelectedTileId });
     });
-  if (terrainSetCleared || tileCleared) emit('selection');
 }
 
 export function setGridCellField(services, sheetId, gridId, key, value) {

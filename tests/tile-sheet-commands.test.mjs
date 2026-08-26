@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
+import { SelectionService } from '../js/host/selection-service.js';
 import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import { createBitmap } from '../js/core/pixels.js';
 import {
   swapTiles, moveTile, moveStandaloneTile, resizeTile, createTile, deleteTile,
@@ -15,9 +15,17 @@ import {
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
+  if (project.sheets[0]) store.updateSession({ activeDocument: { kind: 'tile-sheet', id: project.sheets[0].id } });
   const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return {
+    store,
+    projects: new ProjectService(store, null),
+    history: new HistoryService({ store, stack }),
+    selections: new SelectionService(store),
+  };
 }
+
+function selection(services, sheet) { return services.selections.get({ kind: 'tile-sheet', id: sheet.id }) ?? {}; }
 
 function makeTile(overrides = {}) {
   return { id: overrides.id ?? 't1', x: 0, y: 0, w: 8, h: 8, gridId: null, ...overrides };
@@ -34,15 +42,7 @@ function makeSheet(overrides = {}) {
 
 function makeProject(sheet) { return { sheets: [sheet] }; }
 
-function resetLegacy() {
-  state.commands = new CommandStack();
-  state.dirty = false;
-  state.selectedTileId = null;
-  state.selectedTerrainSetId = null;
-}
-
 test('swapTiles swaps pixels and names between two same-size tiles, and undoes', () => {
-  resetLegacy();
   const a = makeTile({ id: 'a', x: 0, y: 0, w: 8, h: 8, name: 'grass' });
   const b = makeTile({ id: 'b', x: 8, y: 0, w: 8, h: 8, name: 'water' });
   const sheet = makeSheet({ tiles: [a, b] });
@@ -62,7 +62,6 @@ test('swapTiles swaps pixels and names between two same-size tiles, and undoes',
 });
 
 test('moveTile clears the source tile and moves name/pixels to the target, and undoes', () => {
-  resetLegacy();
   const a = makeTile({ id: 'a', x: 0, y: 0, w: 8, h: 8, name: 'grass' });
   const b = makeTile({ id: 'b', x: 8, y: 0, w: 8, h: 8, name: undefined });
   const sheet = makeSheet({ tiles: [a, b] });
@@ -78,7 +77,6 @@ test('moveTile clears the source tile and moves name/pixels to the target, and u
 });
 
 test('moveStandaloneTile offsets position and undoes', () => {
-  resetLegacy();
   const tile = makeTile({ x: 4, y: 4 });
   const sheet = makeSheet({ tiles: [tile] });
   const services = makeServices(makeProject(sheet));
@@ -90,7 +88,6 @@ test('moveStandaloneTile offsets position and undoes', () => {
 });
 
 test('resizeTile applies and undoes a full rect change', () => {
-  resetLegacy();
   const tile = makeTile({ x: 0, y: 0, w: 8, h: 8 });
   const sheet = makeSheet({ tiles: [tile] });
   const services = makeServices(makeProject(sheet));
@@ -102,13 +99,12 @@ test('resizeTile applies and undoes a full rect change', () => {
 });
 
 test('createTile adds a tile, selects it, and undo removes + deselects; redo restores the same object identity', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
   createTile(services, 'sheet1', { x: 2, y: 2, w: 8, h: 8 });
   assert.equal(sheet.tiles.length, 1);
-  assert.equal(state.selectedTileId, sheet.tiles[0].id);
+  assert.equal(selection(services, sheet).tileId, sheet.tiles[0].id);
   const created = sheet.tiles[0];
   // Simulate an external reference holder (a caller that captured a tile
   // object by reference and mutates it directly, the way this codebase's
@@ -118,7 +114,7 @@ test('createTile adds a tile, selects it, and undo removes + deselects; redo res
 
   services.history.undo();
   assert.equal(sheet.tiles.length, 0);
-  assert.equal(state.selectedTileId, null);
+  assert.equal(selection(services, sheet).tileId, null);
 
   services.history.redo();
   assert.equal(sheet.tiles.length, 1);
@@ -127,7 +123,6 @@ test('createTile adds a tile, selects it, and undo removes + deselects; redo res
 });
 
 test('deleteTile removes a standalone tile and is undoable, refusing grid-owned tiles', () => {
-  resetLegacy();
   const standalone = makeTile({ id: 's1' });
   const owned = makeTile({ id: 'o1', gridId: 'g1' });
   const sheet = makeSheet({ tiles: [standalone, owned], terrainSets: [] });
@@ -145,23 +140,21 @@ test('deleteTile removes a standalone tile and is undoable, refusing grid-owned 
 });
 
 test('deleteTile restores selectedTerrainSetId on undo when pruning clears it', () => {
-  resetLegacy();
   const tile = makeTile({ id: 's1', terrainSetId: 'ts1' });
   const sheet = makeSheet({ tiles: [tile], terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }] });
   const services = makeServices(makeProject(sheet));
-  state.selectedTerrainSetId = 'ts1';
+  services.selections.patch({ terrainSetId: 'ts1' });
 
   deleteTile(services, 'sheet1', 's1');
   assert.equal(sheet.terrainSets.length, 0, 'the now-empty terrain set is pruned');
-  assert.equal(state.selectedTerrainSetId, null);
+  assert.equal(selection(services, sheet).terrainSetId, null);
 
   services.history.undo();
   assert.equal(sheet.terrainSets.length, 1);
-  assert.equal(state.selectedTerrainSetId, 'ts1');
+  assert.equal(selection(services, sheet).terrainSetId, 'ts1');
 });
 
 test('setTileLayer, renameTile, setTileTags each round-trip through undo', () => {
-  resetLegacy();
   const tile = makeTile();
   const sheet = makeSheet({ tiles: [tile] });
   const services = makeServices(makeProject(sheet));
@@ -180,7 +173,6 @@ test('setTileLayer, renameTile, setTileTags each round-trip through undo', () =>
 });
 
 test('setTileSize detaches from a mismatched terrain set as part of the mutation, and undo restores it', () => {
-  resetLegacy();
   const tile = makeTile({ w: 16, terrainSetId: 'ts1', blobIndex: 3 });
   const sheet = makeSheet({ tiles: [tile], terrainSets: [{ id: 'ts1', tileW: 16, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }] });
   const services = makeServices(makeProject(sheet));
@@ -196,7 +188,6 @@ test('setTileSize detaches from a mismatched terrain set as part of the mutation
 });
 
 test('addGrid creates a grid+tiles and undo removes them; deleteGrid reverses it', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
@@ -219,25 +210,22 @@ test('addGrid creates a grid+tiles and undo removes them; deleteGrid reverses it
 });
 
 test('deleteGrid restores selectedTileId/selectedTerrainSetId on undo when it clears them', () => {
-  resetLegacy();
   const sheet = makeSheet({ terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }] });
   const services = makeServices(makeProject(sheet));
   const { grid, tiles } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 1, rows: 1 });
   tiles[0].terrainSetId = 'ts1';
-  state.selectedTileId = tiles[0].id;
-  state.selectedTerrainSetId = 'ts1';
+  services.selections.patch({ tileId: tiles[0].id, terrainSetId: 'ts1' });
 
   deleteGrid(services, 'sheet1', grid.id);
-  assert.equal(state.selectedTileId, null);
-  assert.equal(state.selectedTerrainSetId, null, 'terrain set was pruned since its only tile was deleted with the grid');
+  assert.equal(selection(services, sheet).tileId, null);
+  assert.equal(selection(services, sheet).terrainSetId, null, 'terrain set was pruned since its only tile was deleted with the grid');
 
   services.history.undo();
-  assert.equal(state.selectedTileId, tiles[0].id);
-  assert.equal(state.selectedTerrainSetId, 'ts1');
+  assert.equal(selection(services, sheet).tileId, tiles[0].id);
+  assert.equal(selection(services, sheet).terrainSetId, 'ts1');
 });
 
 test('moveGrid offsets every owned tile via relayout, and undoes', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
   const { grid } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
@@ -252,7 +240,6 @@ test('moveGrid offsets every owned tile via relayout, and undoes', () => {
 });
 
 test('setGridCellField resizes owned tiles via relayout, and undo restores their rects', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
   const { grid } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 2, rows: 1 });
@@ -268,7 +255,6 @@ test('setGridCellField resizes owned tiles via relayout, and undo restores their
 });
 
 test('detachTile clears grid ownership and undo restores it', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
   const { grid } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 1, rows: 1 });
@@ -282,7 +268,6 @@ test('detachTile clears grid ownership and undo restores it', () => {
 });
 
 test('growTileIntoGrid converts a standalone tile into a 1-cell grid and selects the survivor; resizeGridAxis can collapse back to one tile', () => {
-  resetLegacy();
   const tile = makeTile({ id: 't1', x: 0, y: 0, w: 8, h: 8 });
   const sheet = makeSheet({ tiles: [tile] });
   const services = makeServices(makeProject(sheet));
@@ -292,20 +277,19 @@ test('growTileIntoGrid converts a standalone tile into a 1-cell grid and selects
   assert.equal(sheet.tiles.length, 2);
   const grid = sheet.tileGrids[0];
 
-  state.selectedTileId = 'some-other-id'; // simulate a prior selection unrelated to this grid
+  services.selections.patch({ tileId: 'some-other-id' }); // simulate a prior selection unrelated to this grid
   resizeGridAxis(services, 'sheet1', grid.id, 'cols', 'end', 1);
   assert.equal(sheet.tileGrids.length, 0, 'collapses back to a single standalone tile');
   assert.equal(sheet.tiles.length, 1);
-  assert.notEqual(state.selectedTileId, 'some-other-id', 'collapse selects the survivor tile');
+  assert.notEqual(selection(services, sheet).tileId, 'some-other-id', 'collapse selects the survivor tile');
 
   services.history.undo();
   assert.equal(sheet.tileGrids.length, 1);
   assert.equal(sheet.tiles.length, 2);
-  assert.equal(state.selectedTileId, 'some-other-id', 'undo restores whatever was selected before the collapse');
+  assert.equal(selection(services, sheet).tileId, 'some-other-id', 'undo restores whatever was selected before the collapse');
 });
 
 test('deleteTile restores a surviving terrain set\'s slots map and other tiles\' neighbor overrides on undo', () => {
-  resetLegacy();
   const victim = makeTile({ id: 'victim', terrainSetId: 'ts1', blobIndex: 5 });
   const survivor = makeTile({ id: 'survivor', terrainSetId: 'ts1', blobIndex: 6 });
   const watcher = makeTile({ id: 'watcher', neighbors: { e: { mode: 'tile', tileId: 'victim', flipH: false, flipV: false } } });
@@ -329,7 +313,6 @@ test('deleteTile restores a surviving terrain set\'s slots map and other tiles\'
 });
 
 test('deleteGrid restores a surviving terrain set\'s slots map on undo', () => {
-  resetLegacy();
   const sheet = makeSheet({
     terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }],
   });
@@ -354,7 +337,6 @@ test('deleteGrid restores a surviving terrain set\'s slots map on undo', () => {
 });
 
 test('resizeGridAxis shrink restores a surviving terrain set\'s slots map on undo', () => {
-  resetLegacy();
   const sheet = makeSheet({
     terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }],
   });

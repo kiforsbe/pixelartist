@@ -4,8 +4,8 @@
 // application/geometry/autotile-geometry.js; all project mutations go
 // through CommandRegistry by id, never a direct import.
 
-import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { registerTool } from '../../../components/tool-palette.js';
 import { blobIndexToMask, blobIndexFromPaintMask, BLOB47_PAINT_CELLS } from '../../../core/blob47.js';
 import { BLOB47_8X6_RAW, terrainNeighborPreviewCells } from '../../../core/blob47templates.js';
@@ -15,7 +15,12 @@ import {
   describeMask, terrainPaintGrid, paintTileAt, paintCellAt, strokePaintMask,
 } from '../application/geometry/autotile-geometry.js';
 
-function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
+function dispatch(id, args) {
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
+function currentModeId() { return getEditorHost().store.getState().session.activeModeId; }
+function currentToolId() { return getEditorHost().store.getState().session.activeToolId; }
 
 // A Tiled-style terrain editor paints the meaningful Wang positions directly
 // over tileset art. Blob-47 is the binary, reduced version of that model, so
@@ -63,7 +68,7 @@ function commitTerrainPaintStroke(view) {
 }
 
 function drawAutotilePaintOverlay(ctx, view) {
-  if (!autotilePaint || state.tool !== 'autotilepaint' || state.mode !== 'tiles') return;
+  if (!autotilePaint || currentToolId() !== 'autotilepaint' || currentModeId() !== 'tiles') return;
   const sheet = activeSheet();
   const terrainSet = sheet?.terrainSets.find(ts => ts.id === autotilePaint.terrainSetId);
   const grid = sheet && terrainSet && terrainPaintGrid(sheet, terrainSet);
@@ -154,10 +159,11 @@ function drawAutotilePaintPreview(ctx, view, sheet, terrainSet) {
 }
 
 let blob47ReferenceImage = null;
+let boundView = null;
 export function getBlob47ReferenceImage() {
   if (blob47ReferenceImage) return blob47ReferenceImage;
   const image = new Image();
-  image.onload = () => emit('view'); // repaint the canvas once the artwork is ready
+  image.onload = () => boundView?.requestRender();
   image.src = 'assets/blob47-templates/blob47-8x6-reference.png';
   blob47ReferenceImage = image;
   return image;
@@ -231,13 +237,14 @@ function drawBlob47PaintMarks(ctx, x, y, size, mask) {
 }
 
 export function registerAutotilePaintTool() {
-  registerTool({ id: 'autotilepaint', icon: '🧩', label: 'Autotile paint', key: 'a', isAvailable: () => state.mode === 'tiles' && !!autotilePaint });
+  registerTool({ id: 'autotilepaint', icon: '🧩', label: 'Autotile paint', key: 'a', isAvailable: () => currentModeId() === 'tiles' && !!autotilePaint });
 }
 
 export function bindAutotilePaintTool(view) {
+  boundView = view;
   const prevPointer = view.onPointer;
   view.onPointer = (ev) => {
-    if (state.mode === 'tiles' && state.tool === 'autotilepaint' && autotilePaint) {
+    if (currentModeId() === 'tiles' && currentToolId() === 'autotilepaint' && autotilePaint) {
       if (ev.type === 'down') beginTerrainPaintStroke(ev, view);
       else if (ev.type === 'move') {
         if (autotilePaint.stroke) applyTerrainPaintPoint(ev, view);
@@ -258,7 +265,9 @@ export function bindAutotilePaintTool(view) {
   };
   const prevOverlay = view.onOverlay;
   view.onOverlay = (ctx) => { prevOverlay(ctx); drawAutotilePaintOverlay(ctx, view); };
-  on('tool', () => { if (state.tool !== 'autotilepaint' && autotilePaint?.stroke) autotilePaint.stroke = null; });
+  getEditorHost().store.subscribe(s => s.session.activeToolId, toolId => {
+    if (toolId !== 'autotilepaint' && autotilePaint?.stroke) autotilePaint.stroke = null;
+  });
 }
 
 export function startAutotilePaint(sheet, terrainSet) {
@@ -270,18 +279,15 @@ export function startAutotilePaint(sheet, terrainSet) {
     terrainSetId: terrainSet.id, brush: 'paint', stroke: null, conflicts: new Map(), hover: null,
     previewTileId: initialPreviewTile?.id ?? null,
   };
-  state.tool = 'autotilepaint';
-  emit('tool');
-  emit('selection');
-  emit('view');
+  getEditorHost().store.updateSession({ activeToolId: 'autotilepaint' }, 'tool');
+  boundView?.requestRender();
 }
 
 export function stopAutotilePaint() {
   if (!autotilePaint) return;
   autotilePaint = null;
-  if (state.tool === 'autotilepaint') state.tool = 'tiletool';
-  emit('tool');
-  emit('view');
+  if (currentToolId() === 'autotilepaint') getEditorHost().store.updateSession({ activeToolId: 'tiletool' }, 'tool');
+  boundView?.requestRender();
 }
 
 // Conflicts are deliberately non-destructive during a paint stroke. This is

@@ -1,5 +1,5 @@
-import { state, on, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import {
   buildAddTerrainSetDialog,
   terrainSetNameField,
@@ -9,9 +9,13 @@ import {
 } from './terrain-set-editor.js';
 import { openTileEditor } from './tile-tool-presenter.js';
 import { buildTagsField } from './tile-tags-field.js';
-import { mountReactivePanel } from '../../../components/panel-mount.js';
+import { mountStorePanel } from '../../../components/panel-mount.js';
 
-function dispatch(id, args) { return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args); }
+function dispatch(id, args) {
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
+function sheetSelection(sheet) { return getEditorHost().selections.get({ kind: 'tile-sheet', id: sheet.id }) ?? {}; }
 
 function sizeField(labelText, value, onCommit) {
   const label = document.createElement('label');
@@ -60,7 +64,7 @@ export function mountTilePanel(element) {
   panel.appendChild(buttonRow);
 
   function render() {
-    if (state.mode !== 'tiles') {
+    if (getEditorHost().store.getState().session.activeModeId !== 'tiles') {
       panel.hidden = true;
       return;
     }
@@ -70,9 +74,10 @@ export function mountTilePanel(element) {
     selectionRow.classList.remove('active');
     if (!sheet) return;
 
-    const tile = sheet.tiles.find(candidate => candidate.id === state.selectedTileId);
+    const selection = sheetSelection(sheet);
+    const tile = sheet.tiles.find(candidate => candidate.id === selection.tileId);
     if (!tile) {
-      const terrainSet = sheet.terrainSets.find(candidate => candidate.id === state.selectedTerrainSetId);
+      const terrainSet = sheet.terrainSets.find(candidate => candidate.id === selection.terrainSetId);
       if (terrainSet) {
         selectionRow.classList.add('active');
         const title = document.createElement('div');
@@ -182,9 +187,18 @@ export function mountTilePanel(element) {
 
   function syncSelection() {
     const sheet = activeSheet();
-    if (sheet) syncSelectedTerrainSetFromTile(sheet.tiles.find(tile => tile.id === state.selectedTileId));
+    if (sheet) syncSelectedTerrainSetFromTile(sheet, sheet.tiles.find(tile => tile.id === sheetSelection(sheet).tileId));
   }
 
   syncSelection();
-  return mountReactivePanel(on, ['project', 'history', 'view', ['selection', syncSelection]], render);
+  const host = getEditorHost();
+  const panelMount = mountStorePanel(host.store, [
+    s => s.project.model,
+    s => s.session.activeModeId,
+    s => s.session.activeViewId,
+    s => s.session.activeDocument,
+    [s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; }, syncSelection],
+  ], render);
+  const disposeHistory = host.history.subscribe(() => panelMount.scheduleRender());
+  return { ...panelMount, dispose() { disposeHistory(); panelMount.dispose(); } };
 }
