@@ -1,12 +1,44 @@
 // Layers panel.
 
-import { state, on, emit, activeSheet, activeLayer, activeMap, markDirty, confirmOrAuto } from '../../app/state.js';
+import { getEditorHost } from '../../host/runtime.js';
+import { activeSheet, activeLayer, activeMap } from '../../host/document-helpers.js';
+import { confirmOrAuto } from '../../platform/browser/autotest.js';
+import { mountStorePanel } from '../panel-mount.js';
+import { documentKey } from '../../host/editor-store.js';
+// `state`/`on`/`emit` from app/state.js are kept for three narrow,
+// already-out-of-scope-for-this-task exceptions -- everything else this
+// file used to read from/write to `state` now goes through the host store,
+// services, or a dispatched Command Handler:
+//  - `state.floating` (the active floating-selection buffer, read only to
+//    composite it onto layer thumbnails) is owned exclusively by
+//    components/canvas/float-session.js; nothing mirrors it onto the host
+//    store yet.
+//  - `on('pixels', ...)` for live-stroke thumbnail redraws: drawing-engine.js
+//    emits this mid-stroke, live, for preview; there is no store equivalent.
+//  - The `emit('pixels'|'view'|'selection')` calls below reach other
+//    still-legacy listeners (tool-palette.js, preview-panel.js, the frame/
+//    tile presenters, document-controller.js's host<->legacy mirror) this
+//    task does not touch. Retiring 'pixels'/'selection' project-wide is
+//    explicitly called out as later Group 3 work, not this task's scope; the
+//    maps-branch `emit('view')` calls stay until Task 10 retires the mirror
+//    (see this task's brief).
+import { state, on, emit } from '../../app/state.js';
 import { commitDeleteAnimation } from '../../features/animations/commands.js';
-import { cloneBitmap, blitRegion } from '../../core/pixels.js';
-import { addLayer, addGroup, mergeDown, findNode, findParent, sheetLayers, flattenLayers, findGroup, createLayerNode, createGroupNode, moveNode, animationGroup, layerAnimationContext } from '../../core/model.js';
+import { findNode, findParent, sheetLayers, flattenLayers, findGroup, animationGroup, layerAnimationContext } from '../../core/model.js';
 import { compositeFloatOnLayer } from '../../core/floating.js';
 import { defineAction, bindAction } from '../../app/actions.js';
-import { getEditorHost } from '../../host/runtime.js';
+
+// Dispatches a Command Handler by id (registered in each mode's
+// contributions.js) rather than importing it directly -- matches the
+// established pattern in frames-panel.js/tile-layers-panel.js and this
+// file's own (former) maps branches.
+function dispatch(id, args) {
+  return getEditorHost().registries.commands.execute(id, { modeId: getEditorHost().store.getState().session.activeModeId }, args);
+}
+
+function currentModeId() {
+  return getEditorHost().store.getState().session.activeModeId;
+}
 
 function resetBody(el, headingText) {
   const h3 = el.querySelector('h3') ?? Object.assign(document.createElement('h3'), { textContent: headingText });
@@ -57,7 +89,7 @@ function drawFit(canvas, bmp) {
   const dh = Math.max(1, Math.round(bmp.height * scale));
   const dx = Math.floor((canvas.width - dw) / 2);
   const dy = Math.floor((canvas.height - dh) / 2);
-  const smooth = scale < 1 && state.project?.settings?.smoothThumbnails !== false;
+  const smooth = scale < 1 && getEditorHost().projects.project?.settings?.smoothThumbnails !== false;
   ctx.imageSmoothingEnabled = smooth;
   if (smooth) ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(tmp, 0, 0, bmp.width, bmp.height, dx, dy, dw, dh);
@@ -131,78 +163,49 @@ export function mountLayersPanel(el) {
   }
 
   function doAddLayer() {
-    if (state.mode === 'maps') {
+    const mode = currentModeId();
+    if (mode === 'maps') {
       const map = activeMap(); if (!map) return;
       const host = getEditorHost();
-      const layerId = host.registries.commands.execute('maps.addLayer', { modeId: state.mode }, { mapId: map.id, type: 'tile' });
+      const layerId = dispatch('maps.addLayer', { mapId: map.id, type: 'tile' });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
       emit('view'); return;
     }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
     if (!sheet || !group) return;
-    const beforeChildren = group.children.slice();
-    const beforeActive = currentLayerId();
-    let newLayer = null;
-    const cmd = {
-      label: 'add layer',
-      do() {
-        if (!newLayer) newLayer = createLayerNode(`Layer ${countNodes(sheet, 'layer') + 1}`, sheet.width, sheet.height);
-        if (!group.children.includes(newLayer)) group.children.push(newLayer);
-        setSheetSelection(sheet, { layerId: newLayer.id });
-        selectedNodeId = newLayer.id;
-      },
-      undo() {
-        group.children = beforeChildren.slice();
-        setSheetSelection(sheet, { layerId: beforeActive });
-        selectedNodeId = beforeActive;
-      },
-    };
-    state.commands.push(cmd);
-    markDirty();
+    const newLayerId = dispatch(`${mode}.addLayer`, { sheetId: sheet.id, targetGroupId: group === sheet.layerTree ? null : group.id });
+    setSheetSelection(sheet, { layerId: newLayerId });
+    selectedNodeId = newLayerId;
   }
 
   function doAddGroup() {
-    if (state.mode === 'maps') {
+    const mode = currentModeId();
+    if (mode === 'maps') {
       const map = activeMap(); if (!map) return;
       const host = getEditorHost();
-      const layerId = host.registries.commands.execute('maps.addLayer', { modeId: state.mode }, { mapId: map.id, type: 'sprite' });
+      const layerId = dispatch('maps.addLayer', { mapId: map.id, type: 'sprite' });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
       emit('view'); return;
     }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
     if (!sheet || !group) return;
-    const beforeChildren = group.children.slice();
-    const beforeActive = currentLayerId();
-    let newGroup = null;
-    const cmd = {
-      label: 'add group',
-      do() {
-        if (!newGroup) newGroup = createGroupNode(`Group ${countNodes(sheet, 'group') + 1}`);
-        if (!group.children.includes(newGroup)) group.children.push(newGroup);
-        selectedNodeId = newGroup.id;
-        setSheetSelection(sheet, { layerId: null });
-      },
-      undo() {
-        group.children = beforeChildren.slice();
-        selectedNodeId = beforeChildren[beforeChildren.length - 1]?.id ?? null;
-        setSheetSelection(sheet, { layerId: beforeActive });
-      },
-    };
-    state.commands.push(cmd);
-    markDirty();
+    const newGroupId = dispatch(`${mode}.addGroup`, { sheetId: sheet.id, targetGroupId: group === sheet.layerTree ? null : group.id });
+    selectedNodeId = newGroupId;
+    setSheetSelection(sheet, { layerId: null });
   }
 
   function doDelete() {
-    if (state.mode === 'maps') {
+    const mode = currentModeId();
+    if (mode === 'maps') {
       const host = getEditorHost();
       const map = activeMap(), layerId = (host.selections.get({ kind: 'map', id: map?.id }) ?? {}).layerId;
       const layer = map?.layers.find(l => l.id === layerId);
       if (!map || !layer || map.layers.length <= 1) return;
       if (!confirmOrAuto(`Delete ${layer.type} layer "${layer.name}"?`)) return;
       const remainingIndex = Math.min(map.layers.indexOf(layer), map.layers.length - 2);
-      host.registries.commands.execute('maps.deleteLayer', { modeId: state.mode }, { mapId: map.id, layerId: layer.id });
+      dispatch('maps.deleteLayer', { mapId: map.id, layerId: layer.id });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: map.layers[Math.max(0, remainingIndex)]?.id ?? null }, { kind: 'map', id: map.id });
       emit('view'); return;
     }
@@ -220,27 +223,18 @@ export function mountLayersPanel(el) {
       // blank composite.
       if (flattenLayers(parent).length <= 1) { alert('Cannot delete the last layer in this group.'); return; }
       if (!confirmOrAuto(`Delete layer "${layer.name}"?`)) return;
-      const beforeChildren = parent.children.slice();
-      const beforeActive = currentLayerId();
+      // deleteNode's Command Handler owns the actual mutation + undo
+      // snapshot; the fallback-selection id it can no longer compute for us
+      // (selection side effects live in the caller, never in a command) is
+      // computed here first, from the pre-delete tree, mirroring the old
+      // do()'s own all/fallback formula.
       const idx = loc.index;
-      const cmd = {
-        label: 'delete layer',
-        do() {
-          parent.children = parent.children.filter(c => c.id !== layer.id);
-          const all = sheetLayers(sheet);
-          const fallback = all[Math.min(idx, all.length - 1)];
-          const fallbackId = fallback ? fallback.id : null;
-          setSheetSelection(sheet, { layerId: fallbackId });
-          selectedNodeId = fallbackId;
-        },
-        undo() {
-          parent.children = beforeChildren.slice();
-          setSheetSelection(sheet, { layerId: beforeActive });
-          selectedNodeId = beforeActive;
-        },
-      };
-      state.commands.push(cmd);
-      markDirty();
+      const all = sheetLayers(sheet);
+      const fallback = all[Math.min(idx, all.length - 1)];
+      const fallbackId = fallback ? fallback.id : null;
+      dispatch(`${mode}.deleteNode`, { sheetId: sheet.id, nodeId: layer.id });
+      setSheetSelection(sheet, { layerId: fallbackId });
+      selectedNodeId = fallbackId;
       return;
     }
     if (selectedNodeId) {
@@ -256,35 +250,20 @@ export function mountLayersPanel(el) {
           // the layer-delete branch above which resets it after its own
           // deletion too. No explicit renderList() call needed here: like
           // every other branch in this function, commitDeleteAnimation's own
-          // markDirty() already triggers this panel's on('project', renderList).
+          // history push already triggers this panel's history.subscribe.
           selectedNodeId = null;
           return;
         }
         if (!confirmOrAuto(`Delete group "${g.name}" and its contents?`)) return;
-        const loc = findParent(sheet.layerTree, g.id);
-        if (!loc) return;
-        const parent = loc.parent;
-        const beforeChildren = parent.children.slice();
         const beforeActive = currentLayerId();
-        const cmd = {
-          label: 'delete group',
-          do() {
-            parent.children = parent.children.filter(c => c.id !== g.id);
-            selectedNodeId = beforeActive;
-          },
-          undo() {
-            parent.children = beforeChildren.slice();
-            selectedNodeId = g.id;
-            setSheetSelection(sheet, { layerId: beforeActive });
-          },
-        };
-        state.commands.push(cmd);
-        markDirty();
+        dispatch(`${mode}.deleteNode`, { sheetId: sheet.id, nodeId: g.id });
+        selectedNodeId = beforeActive;
       }
     }
   }
 
   function doMergeDown() {
+    const mode = currentModeId();
     const sheet = activeSheet();
     const layer = activeLayer();
     if (!sheet || !layer) return;
@@ -292,68 +271,18 @@ export function mountLayersPanel(el) {
     if (!loc || loc.index <= 0) { alert('Cannot merge the bottom layer down.'); return; }
     const dest = loc.parent.children[loc.index - 1];
     if (dest.type !== 'layer') { alert('Cannot merge into a group.'); return; }
-    const parent = loc.parent;
-    const beforeChildren = parent.children.slice();
-    const beforeActive = currentLayerId();
-    const destBefore = cloneBitmap(dest.bitmap);
-    mergeDown(sheet, layer.id);
-    const destAfter = cloneBitmap(dest.bitmap);
-    const afterChildren = parent.children.slice();
-    const afterActive = dest.id;
-    setSheetSelection(sheet, { layerId: afterActive });
-    const cmd = {
-      label: 'merge down',
-      do() {
-        blitRegion(dest.bitmap, destAfter, 0, 0);
-        parent.children = afterChildren.slice();
-        setSheetSelection(sheet, { layerId: afterActive });
-        selectedNodeId = afterActive;
-      },
-      undo() {
-        parent.children = beforeChildren.slice();
-        blitRegion(dest.bitmap, destBefore, 0, 0);
-        setSheetSelection(sheet, { layerId: beforeActive });
-        selectedNodeId = beforeActive;
-      },
-    };
-    state.commands.push(cmd);
-    markDirty();
+    const destId = dispatch(`${mode}.mergeDown`, { sheetId: sheet.id, layerId: layer.id });
+    if (destId) { setSheetSelection(sheet, { layerId: destId }); selectedNodeId = destId; }
   }
 
   function doMove(node, delta) {
     const sheet = activeSheet();
     if (!sheet || !node) return;
-    const loc = findParent(sheet.layerTree, node.id);
-    if (!loc) return;
-    const parent = loc.parent;
-    const beforeChildren = parent.children.slice();
-    const newIndex = Math.max(0, Math.min(parent.children.length - 1, loc.index + delta));
-    moveNode(sheet, node.id, parent.id, newIndex);
-    const afterChildren = parent.children.slice();
-    const cmd = {
-      label: 'reorder layers',
-      do() { parent.children = afterChildren.slice(); },
-      undo() { parent.children = beforeChildren.slice(); },
-    };
-    state.commands.push(cmd);
-    markDirty();
+    dispatch(`${currentModeId()}.moveNode`, { sheetId: sheet.id, nodeId: node.id, delta });
   }
 
   function doToggleVisible(layer) {
-    const before = layer.visible;
-    const after = !before;
-    state.commands.push({
-      label: 'toggle layer visibility',
-      do() { layer.visible = after; },
-      undo() { layer.visible = before; },
-    });
-    markDirty();
-  }
-
-  function animationForGroup(group) {
-    if (!group?.animationId) return null;
-    const sheet = activeSheet();
-    return sheet?.animations.find(a => a.id === group.animationId) ?? null;
+    dispatch(`${currentModeId()}.toggleLayerVisible`, { sheetId: activeSheet().id, layerId: layer.id });
   }
 
   function autoName(node) {
@@ -380,21 +309,7 @@ export function mountLayersPanel(el) {
       let v = input.value.trim();
       if (!v) v = autoName(node);
       if (v !== node.name) {
-        const oldName = node.name;
-        const anim = node.type === 'group' ? animationForGroup(node) : null;
-        const oldAnimName = anim?.name;
-        state.commands.push({
-          label: node.type === 'group' ? 'rename group' : 'rename layer',
-          do() {
-            node.name = v;
-            if (anim) anim.name = v;
-          },
-          undo() {
-            node.name = oldName;
-            if (anim) anim.name = oldAnimName;
-          },
-        });
-        markDirty();
+        dispatch(`${currentModeId()}.renameNode`, { sheetId: activeSheet().id, nodeId: node.id, name: v });
       }
       renderList();
     }
@@ -449,37 +364,8 @@ export function mountLayersPanel(el) {
   }
 
   function performMove(sheet, nodeId, destParentId, destIndex) {
-    const srcLoc = findParent(sheet.layerTree, nodeId);
     const destParent = findGroup(sheet.layerTree, destParentId) ?? sheet.layerTree;
-    if (!srcLoc || !destParent) return;
-
-    const srcParent = srcLoc.parent;
-    const beforeSrc = srcParent.children.slice();
-    const beforeDest = destParent.children.slice();
-
-    moveNode(sheet, nodeId, destParentId, destIndex);
-
-    const afterSrc = srcParent.children.slice();
-    const afterDest = destParent.children.slice();
-
-    // Skip if nothing changed.
-    if (beforeSrc.length === afterSrc.length && beforeDest.length === afterDest.length &&
-        beforeSrc.every((c, i) => c === afterSrc[i]) && beforeDest.every((c, i) => c === afterDest[i])) {
-      return;
-    }
-
-    state.commands.push({
-      label: 'move layer',
-      do() {
-        srcParent.children = afterSrc.slice();
-        destParent.children = afterDest.slice();
-      },
-      undo() {
-        srcParent.children = beforeSrc.slice();
-        destParent.children = beforeDest.slice();
-      },
-    });
-    markDirty();
+    dispatch(`${currentModeId()}.dragMoveNode`, { sheetId: sheet.id, nodeId, destParentId: destParent === sheet.layerTree ? null : destParent.id, destIndex });
   }
 
   function onRowDragStart(e, node) {
@@ -711,8 +597,12 @@ export function mountLayersPanel(el) {
       const before = opacityBefore, after = layer.opacity;
       opacityBefore = null;
       if (before === after) return;
-      state.commands.push({ label: 'layer opacity', do() { layer.opacity = after; }, undo() { layer.opacity = before; } });
-      markDirty();
+      // setLayerOpacity snapshots layer.opacity as "before" the instant it's
+      // called; the input handler above already live-applied `after` for
+      // drag preview, so reset it here first or the command would see
+      // before === after and silently no-op (no undo entry at all).
+      layer.opacity = before;
+      dispatch(`${currentModeId()}.setLayerOpacity`, { sheetId: activeSheet().id, layerId: layer.id, opacity: after });
     });
 
     row.append(spacer, thumb, visBtn, nameEl, opacityInput);
@@ -735,15 +625,33 @@ export function mountLayersPanel(el) {
       const map = activeMap(), i = map?.layers.indexOf(layer); if (i == null) return;
       const target = e.key === 'ArrowUp' ? i + 1 : i - 1;
       if (target < 0 || target >= map.layers.length) return;
-      e.preventDefault(); map.layers.splice(i, 1); map.layers.splice(target, 0, layer); markDirty(); emit('view');
+      // No Command Handler exists for map-layer reordering (out of Task 2's
+      // scope; never undoable even before this refactor) -- keep the direct
+      // mutation, but this panel no longer listens on the legacy 'view' bus
+      // for its own repaint, so ask mountStorePanel's debounced render for
+      // one explicitly or this row's new position would never show up.
+      e.preventDefault(); map.layers.splice(i, 1); map.layers.splice(target, 0, layer); host.projects.markDirty(); emit('view');
+      storePanel.scheduleRender();
     });
     const spacer = document.createElement('span'); spacer.className = 'tree-spacer leaf-spacer';
     const thumb = document.createElement('canvas'); thumb.className = 'layer-thumb'; thumb.width = LAYER_THUMB_SIZE; thumb.height = LAYER_THUMB_SIZE;
     const tctx = thumb.getContext('2d'); tctx.fillStyle = layer.type === 'tile' ? '#466b9c' : '#8a5b98'; tctx.fillRect(0, 0, thumb.width, thumb.height); tctx.fillStyle = '#fff'; tctx.font = '14px sans-serif'; tctx.textAlign = 'center'; tctx.textBaseline = 'middle'; tctx.fillText(layer.type === 'tile' ? '▦' : '♟', thumb.width / 2, thumb.height / 2);
-    const visBtn = document.createElement('button'); visBtn.type = 'button'; visBtn.textContent = layer.visible ? '👁' : '🚫'; visBtn.title = 'Toggle visibility'; visBtn.addEventListener('click', e => { e.stopPropagation(); layer.visible = !layer.visible; markDirty(); emit('view'); });
+    // Same "no Command Handler, keep it undoable-never but still repaint"
+    // reasoning as the keydown reorder handler above.
+    const visBtn = document.createElement('button'); visBtn.type = 'button'; visBtn.textContent = layer.visible ? '👁' : '🚫'; visBtn.title = 'Toggle visibility'; visBtn.addEventListener('click', e => { e.stopPropagation(); layer.visible = !layer.visible; host.projects.markDirty(); emit('view'); storePanel.scheduleRender(); });
     const nameEl = document.createElement('span'); nameEl.className = 'layer-name'; nameEl.textContent = layer.name; nameEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(layer, nameEl); });
     const opacityInput = document.createElement('input'); opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100'; opacityInput.value = String(Math.round(layer.opacity * 100)); opacityInput.addEventListener('click', e => e.stopPropagation());
-    let before = null; opacityInput.addEventListener('pointerdown', e => { e.stopPropagation(); before = layer.opacity; }); opacityInput.addEventListener('input', () => { layer.opacity = Number(opacityInput.value) / 100; emit('view'); }); opacityInput.addEventListener('change', () => { if (before != null && before !== layer.opacity) state.commands.push({ label:'map layer opacity', do(){layer.opacity=Number(opacityInput.value)/100;markDirty();}, undo(){layer.opacity=before;markDirty();} }); before = null; });
+    let before = null;
+    opacityInput.addEventListener('pointerdown', e => { e.stopPropagation(); before = layer.opacity; });
+    opacityInput.addEventListener('input', () => { layer.opacity = Number(opacityInput.value) / 100; emit('view'); });
+    opacityInput.addEventListener('change', () => {
+      if (before != null && before !== layer.opacity) {
+        // Same before/after ordering fix as renderLayer's opacity handler.
+        layer.opacity = before;
+        dispatch('maps.setLayerOpacity', { mapId: activeMap().id, layerId: layer.id, opacity: Number(opacityInput.value) / 100 });
+      }
+      before = null;
+    });
     row.append(spacer, thumb, visBtn, nameEl, opacityInput); list.appendChild(row);
   }
 
@@ -773,7 +681,7 @@ export function mountLayersPanel(el) {
   function renderList() {
     list.innerHTML = '';
     thumbCanvases.clear();
-    if (state.mode === 'maps') {
+    if (currentModeId() === 'maps') {
       const map = activeMap();
       btnAddLayer.title = 'Add tile layer'; btnAddGroup.title = 'Add sprite layer'; btnMerge.disabled = true;
       if (map) for (let i = map.layers.length - 1; i >= 0; i--) renderMapLayer(map.layers[i]);
@@ -808,26 +716,66 @@ export function mountLayersPanel(el) {
   }
 
   // sheet.layerTree (bitmap layers: visibility, opacity, groups) is shared
-  // by sprite and tile sheets alike -- see activeLayer()/flattenSheet() in
-  // state.js/model.js, which never branch on sheet.kind. It's unrelated to
-  // sheet.layers (tilemode.js's flat named-tag array for categorizing
-  // tiles, mounted separately as the "Tile Layers" panel). Groups only ever
-  // gain an animationId via frames.js's commitAcceptAnimation, which is
-  // gated to sprite mode, so these actions can never create or touch an
-  // animation-owned group on a tile sheet -- no isAvailable gating needed.
-  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet() || (state.mode === 'maps' && !!activeMap()) });
+  // by sprite and tile sheets alike -- see activeLayer() in
+  // host/document-helpers.js and flattenSheet() in core/model.js, which
+  // never branch on sheet.kind. It's unrelated to sheet.layers (tilemode.js's
+  // flat named-tag array for categorizing tiles, mounted separately as the
+  // "Tile Layers" panel). Groups only ever gain an animationId via frames.js's
+  // commitAcceptAnimation, which is gated to sprite mode, so these actions
+  // can never create or touch an animation-owned group on a tile sheet -- no
+  // isAvailable gating needed.
+  defineAction('layer.add', { label: 'Add Layer', run: doAddLayer, isEnabled: () => !!activeSheet() || (currentModeId() === 'maps' && !!activeMap()) });
   bindAction(btnAddLayer, 'layer.add');
-  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet() || (state.mode === 'maps' && !!activeMap()) });
+  defineAction('layer.addGroup', { label: 'Add Group', run: doAddGroup, isEnabled: () => !!activeSheet() || (currentModeId() === 'maps' && !!activeMap()) });
   bindAction(btnAddGroup, 'layer.addGroup');
-  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet() || (state.mode === 'maps' && !!activeMap()) });
+  defineAction('layer.delete', { label: 'Delete Layer', run: doDelete, isEnabled: () => !!activeSheet() || (currentModeId() === 'maps' && !!activeMap()) });
   bindAction(btnDelete, 'layer.delete');
   defineAction('layer.mergeDown', { label: 'Merge Down', run: doMergeDown, isEnabled: () => !!activeSheet() });
   bindAction(btnMerge, 'layer.mergeDown');
 
-  on('project', renderList);
-  on('history', renderList);
-  on('view', renderList);
-  on('selection', renderList);
-  on('pixels', scheduleThumbRedraw);
-  renderList();
+  // Selecting a layer/group via its name click always replaces the store's
+  // selectionsByDocument entry wholesale (see the selector comment below),
+  // even for a plain click that doesn't touch the animation selection --
+  // unlike the old on('selection', renderList) wiring, which only fired for
+  // an actual animation-selection change (selectGroupNode/selectLayerNode's
+  // own `changed` guard). Left unguarded, that would fire a (microtask-
+  // deferred, but still near-instant) render on every single name click,
+  // tearing the row down before scheduleNameSelect's deliberate 200ms grace
+  // window ever gets a chance to let a following dblclick reach startRename
+  // instead. Route the store-driven render through this guard so it defers
+  // to that grace window exactly like the local timer already does.
+  function renderListUnlessNameClickPending() {
+    if (pendingNameClickTimer) return;
+    renderList();
+  }
+
+  const store = getEditorHost().store;
+  // Legacy 'pixels' subscription for live-stroke thumbnail redraws: drawing
+  // engine emits this mid-stroke, and there's no store equivalent yet (see
+  // the import comment above). History-driven redraws (every add/delete/
+  // rename/merge/move/opacity dispatch above) reach renderList through
+  // host.history.subscribe below instead -- HistoryService's own onChange
+  // fires on every do()/undo()/redo() regardless of which store selector (if
+  // any) the underlying project mutation happens to touch.
+  const disposePixelSignal = on('pixels', scheduleThumbRedraw);
+  const disposeHistory = getEditorHost().history.subscribe(() => renderList());
+  const storePanel = mountStorePanel(store, [
+    s => s.project.model,
+    s => s.session.activeModeId,
+    s => s.session.activeDocument,
+    // NOT `s => s.session.selectionsByDocument` -- setSelection() mutates
+    // that outer object in place (`selectionsByDocument[key] = {...}`), so
+    // its own identity never changes and Object.is-based change detection
+    // would never fire. Select the ACTIVE document's own entry instead,
+    // which setSelection()/SelectionService.set() always replace wholesale.
+    s => {
+      const doc = s.session.activeDocument;
+      return doc ? s.session.selectionsByDocument[documentKey(doc)] : null;
+    },
+  ], renderListUnlessNameClickPending, {
+    onDispose() {
+      disposePixelSignal();
+      disposeHistory();
+    },
+  });
 }
