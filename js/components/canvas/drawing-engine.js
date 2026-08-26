@@ -12,11 +12,13 @@
 // module emits a lightweight 'pixels' event on every bitmap-affecting pointer
 // step; main.js listens for it and just invalidates the scratch cache + repaints
 // (no full setContent/dirty-flag work). The authoritative commit still goes
-// through markDirty() -> 'project' at stroke finalize, and undo/redo is covered
-// by main.js listening on 'history' the same way.
+// through getEditorHost().history.execute() at stroke finalize -- HistoryService's
+// own onChange wrapper marks the project dirty and fires 'project' -- and
+// undo/redo is covered by main.js listening on 'history' the same way.
 
-import { state, on, emit, activeSheet, activeLayer, markDirty } from '../../app/state.js';
+import { state, emit } from '../../app/state.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { activeSheet, activeLayer } from '../../host/document-helpers.js';
 import {
   cloneBitmap, drawLine, drawRect, drawEllipse, floodFill, softFloodFill,
   copyRegion, blitRegion, fillRegion, getPixel,
@@ -35,6 +37,14 @@ import { BRUSH_TOOLS, SHAPE_TOOLS, toolOptions } from '../tool-palette.js';
 
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
+
+// Mirrored one-way from legacy state.tool by editor-workbench.js (tool-
+// palette.js still writes state.tool synchronously on every tool switch),
+// so reading it off the store here is always in sync -- see that file's own
+// syncActiveTool comment.
+function activeTool() {
+  return getEditorHost().store.getState().session.activeToolId;
 }
 
 function activePalette() {
@@ -75,13 +85,11 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   view.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // A project switch (New/Open) invalidates any selection or in-progress
-  // stroke — bitmaps and layer ids from the old project are gone. Guard on
-  // project IDENTITY: markDirty() also emits 'project' after every committed
-  // command, and that must NOT wipe a live selection or pending float.
-  let lastProject = state.project;
-  on('project', () => {
-    if (state.project === lastProject) return;
-    lastProject = state.project;
+  // stroke — bitmaps and layer ids from the old project are gone. Store's
+  // selector-based subscribe already only fires when project.model's
+  // IDENTITY changes, so a committed command's own dirty-mark (a same-model
+  // mutation) can't spuriously wipe a live selection or pending float.
+  getEditorHost().store.subscribe(s => s.project.model, () => {
     selection = null;
     stroke = null;
     selStroke = null;
@@ -127,7 +135,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   // swap=true returns the OTHER swatch for the pressed button (used as the
   // interior color of filled rect/ellipse shapes)
   function currentColor(ev, swap = false, forcePrimary = false) {
-    if (state.tool === 'eraser') return [0, 0, 0, 0];
+    if (activeTool() === 'eraser') return [0, 0, 0, 0];
     const useSecondary = !forcePrimary && (!!(ev.buttons & 2) !== swap);
     let c = useSecondary ? state.secondary : state.primary;
     const pal = activePalette();
@@ -167,8 +175,14 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     // bleed), then let the command re-apply the target-clamped patch — undo
     // is exact and nothing outside the target can persist.
     blitRegion(bmp, copyRegion(before, fx0, fy0, fx1 - fx0 + 1, fy1 - fy0 + 1), fx0, fy0);
-    state.commands.push(makePixelPatch(bmp, rect, beforeRegion, afterRegion, label));
-    markDirty();
+    // Routes directly through HistoryService.execute() rather than a
+    // registered-by-id Command Handler: this command closes over the live
+    // `bmp` reference already resolved above, so there is no id to
+    // re-resolve later, and HistoryService.execute() is the same
+    // CommandStack.push() a Command Handler dispatch would end up calling
+    // anyway. HistoryService's own onChange wrapper marks the project dirty
+    // on every push, so no separate markDirty() call is needed here.
+    getEditorHost().history.execute(makePixelPatch(bmp, rect, beforeRegion, afterRegion, label));
   }
 
   // If the currently selected animation is floating (no layer yet -- see
@@ -193,7 +207,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     acceptFloatingContextIfAny();
     const layer = activeLayer();
     if (!layer) return;
-    const tool = state.tool;
+    const tool = activeTool();
     const before = cloneBitmap(layer.bitmap);
     const color = currentColor(ev);
 
@@ -551,7 +565,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const p = mapPoint(ev.x, ev.y);
       ev = { ...ev, x: p.x, y: p.y };
     }
-    const tool = state.tool;
+    const tool = activeTool();
     // The frame tool (registered by frames.js via registerTool()) and the tile
     // tool (registered by tilemode.js) own pointer routing on the sheet view
     // when active — each wraps view.onPointer around this function and
@@ -586,7 +600,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   view.onOverlay = (ctx) => {
     const float = state.floating;
     const sheet = activeSheet();
-    if (float && sheet && float.sheetId === sheet.id && state.tool === 'move') {
+    if (float && sheet && float.sheetId === sheet.id && activeTool() === 'move') {
       const { w, h } = float.srcRect;
       const corners = [[0, 0], [w, 0], [w, h], [0, h]]
         .map(([u, v]) => toScreen(forwardPoint(float, u, v)));
@@ -654,7 +668,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     ctx.lineDashOffset = 4;
     ctx.strokeRect(p0.x + 0.5, p0.y + 0.5, rw - 1, rh - 1);
     ctx.restore();
-    if (state.tool === 'select') {
+    if (activeTool() === 'select') {
       for (const h of SEL_HANDLES) drawHandleSquare(ctx, toScreen(handlePoint(selection, h)));
       if (selStroke?.mode === 'resize') {
         drawRectDims(ctx, view, selection, {
@@ -676,7 +690,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (document.querySelector('dialog[open]')) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey
-      && state.tool === 'select' && state.view === viewKind && selection && !state.floating) {
+      && activeTool() === 'select' && state.view === viewKind && selection && !state.floating) {
       const layer = activeLayer();
       if (!layer) return;
       const before = copyRegion(layer.bitmap, selection.x, selection.y, selection.w, selection.h);
@@ -684,8 +698,9 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       fillRegion(after, 0, 0, after.width, after.height, [0, 0, 0, 0]);
       // Avoid adding a no-op history entry for an already-empty selection.
       if (before.data.every((value, index) => value === after.data[index])) return;
-      state.commands.push(makePixelPatch(layer.bitmap, selection, before, after, 'delete selection'));
-      markDirty();
+      // Same reasoning as finalize() above: direct history.execute(), no
+      // separate markDirty() (HistoryService's onChange already marks dirty).
+      getEditorHost().history.execute(makePixelPatch(layer.bitmap, selection, before, after, 'delete selection'));
       emit('pixels');
       view.requestRender();
       e.preventDefault();

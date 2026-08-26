@@ -1,5 +1,8 @@
 // js/modes/tiles/terrain-preset-art.js
-import { state, emit, activeLayer, markDirty, confirmOrAuto } from '../../app/state.js';
+import { emit } from '../../app/state.js';
+import { getEditorHost } from '../../host/runtime.js';
+import { activeLayer } from '../../host/document-helpers.js';
+import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { copyRegion, blitRegion, scaleBitmap } from '../../core/pixels.js';
 import { makePixelPatch } from '../../core/commands.js';
 import { decodePng } from '../../app/pngcodec.js';
@@ -10,13 +13,17 @@ import { decodePng } from '../../app/pngcodec.js';
 // blank tiles the user has to hand-draw one by one. Only wired into the "Add
 // terrain set" creation flow (fresh, definitely-blank tiles); never into
 // "import layout" onto an existing grid, which could carry real user art.
-// Pushes a raw pixel-patch undo entry directly (matching the still-legacy,
-// cross-mode-shared paint-commit idiom js/ui/tools.js also uses) rather than
-// going through a resolve-by-id Command Handler -- out of scope for this
-// migration, see docs/superpowers/specs/2026-08-10-phase-3c-tiles-terrain-set-editor-design.md.
-// Lives outside presentation/ and application/ specifically because of that:
-// it imports core/commands.js directly, which tests/architecture.test.mjs's
-// presentation-layer scan forbids inside presentation/.
+// Pushes a raw pixel-patch undo entry directly through
+// getEditorHost().history.execute() (bypassing the registries.commands id/
+// context layer entirely, the same way drawing-engine.js's stroke finalize
+// does) rather than going through a resolve-by-id Command Handler -- out of
+// scope for this migration, see docs/superpowers/specs/
+// 2026-08-10-phase-3c-tiles-terrain-set-editor-design.md. Lives outside
+// presentation/ and application/ specifically because of that: it imports
+// core/commands.js directly, which tests/architecture.test.mjs's
+// presentation-layer scan forbids inside presentation/ (and is the one
+// tracked exception that same test's own outside-application/presentation
+// scan allows -- see 'only the tracked terrain-preset-art.js exception...').
 export async function importPresetArtOntoLayer(sheet, preset, sourceTiles, cols) {
   if (!preset.sourceImage || !sourceTiles.length) return;
   const layer = activeLayer();
@@ -53,7 +60,8 @@ export async function importPresetArtOntoLayer(sheet, preset, sourceTiles, cols)
   }
 
   const after = copyRegion(layer.bitmap, rect.x, rect.y, rect.w, rect.h);
-  state.commands.push(makePixelPatch(layer.bitmap, rect, before, after, 'import terrain layout art'));
-  markDirty();
+  // Direct history.execute(), no separate markDirty() call: HistoryService's
+  // own onChange wrapper already marks the project dirty on every push.
+  getEditorHost().history.execute(makePixelPatch(layer.bitmap, rect, before, after, 'import terrain layout art'));
   emit('pixels');
 }
