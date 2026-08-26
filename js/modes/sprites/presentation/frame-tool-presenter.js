@@ -8,8 +8,8 @@
 // its tool-options row (snap checkbox, grid size, slice button) and the
 // Delete/Enter key handlers; bindFrameTool(view) wraps the view's existing
 // onPointer/onOverlay, so it must run after bindDrawing() has installed its own.
-import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
 import { registerTool } from '../../../components/tool-palette.js';
 import { isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../../core/resizeAnchor.js';
@@ -49,7 +49,17 @@ function projector(view) { return (x, y) => view.imageToScreen(x, y); }
 // tests/architecture.test.mjs bans presentation-layer code from importing
 // anything under application/commands/.
 function dispatch(id, args) {
-  return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
+}
+
+function currentModeId() { return getEditorHost().store.getState().session.activeModeId; }
+function currentToolId() { return getEditorHost().store.getState().session.activeToolId; }
+function storeOn(event, handler) {
+  const store = getEditorHost().store;
+  if (event === 'project') return store.subscribe(s => s.project.model, handler);
+  if (event === 'tool') return store.subscribe(s => s.session.activeToolId, handler);
+  throw new Error(`storeOn: unsupported event "${event}"`);
 }
 
 function sheetDocument(sheet) {
@@ -68,7 +78,7 @@ function handleDown(ev, view) {
   const sheet = activeSheet();
   if (!sheet) return;
   const toScreen = projector(view);
-  if (state.tool === 'frametool') {
+  if (currentToolId() === 'frametool') {
     // Chrome is always visible for the selected segment, so hit-test it
     // directly at the down position — no dependence on hover state.
     const sel = selectedSegment(sheet, sheetSelection(sheet).frameId ?? null);
@@ -102,12 +112,9 @@ function handleDown(ev, view) {
   if (clickHit && lastClick && lastClick.frameId === clickHit.id && now - lastClick.t < 350) {
     lastClick = null;
     drag = null;
-    state.editingFrameId = clickHit.id;
     const owner = sheet.animations.find(a => a.frames.some(af => af.frameId === clickHit.id)) ?? null;
-    setSheetSelection(sheet, { animationId: owner ? owner.id : null });
-    state.view = 'frame';
-    emit('view');
-    emit('selection');
+    setSheetSelection(sheet, { animationId: owner ? owner.id : null, editingFrameId: clickHit.id });
+    getEditorHost().store.updateSession({ activeViewId: 'sprites.frame' }, 'view');
     return;
   }
   lastClick = clickHit ? { frameId: clickHit.id, t: now } : null;
@@ -153,7 +160,6 @@ function handleDown(ev, view) {
     const frameChanged = current.frameId !== hit.id;
     const animChanged = current.animationId !== ownerId;
     if (frameChanged || animChanged) setSheetSelection(sheet, { frameId: hit.id, animationId: ownerId });
-    if (frameChanged || animChanged) emit('selection');
     // If `hit` belongs to an intact strip, the drag targets every member of
     // the grabbed SEGMENT together (move-as-unit); otherwise just the frame.
     const strip = stripForFrame(sheet, hit.id);
@@ -170,7 +176,6 @@ function handleDown(ev, view) {
   const cleared = sheetSelection(sheet);
   if (cleared.frameId != null || cleared.animationId != null) {
     setSheetSelection(sheet, { frameId: null, animationId: null });
-    emit('selection');
   }
   drag = { kind: 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
   view.requestRender();
@@ -246,7 +251,7 @@ function handleUp(ev, view) {
 function updateHover(ev, view) {
   let next = null;
   const sheet = activeSheet();
-  if (sheet && state.mode === 'sprites' && state.tool === 'frametool' && !drag) {
+  if (sheet && currentModeId() === 'sprites' && currentToolId() === 'frametool' && !drag) {
     const toScreen = projector(view);
     const sel = selectedSegment(sheet, sheetSelection(sheet).frameId ?? null);
     if (sel) {
@@ -309,12 +314,12 @@ function buildOptionsRow(optionsRow) {
 
 export function registerFrameTool() {
   sliceDialogApi = buildSliceDialog();
-  registerTool({ id: 'frametool', icon: '🖼', key: 'f', isAvailable: () => state.mode === 'sprites' }, buildOptionsRow);
+  registerTool({ id: 'frametool', icon: '🖼', key: 'f', isAvailable: () => currentModeId() === 'sprites' }, buildOptionsRow);
 
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Delete') return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
-    if (state.tool !== 'frametool' || state.mode !== 'sprites') return;
+    if (currentToolId() !== 'frametool' || currentModeId() !== 'sprites') return;
     const sheet = activeSheet();
     if (!sheet) return;
     const frameId = sheetSelection(sheet).frameId ?? null;
@@ -332,7 +337,7 @@ export function registerFrameTool() {
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
-    if (state.tool !== 'frametool' || state.mode !== 'sprites') return;
+    if (currentToolId() !== 'frametool' || currentModeId() !== 'sprites') return;
     const sheet = activeSheet();
     if (!sheet) return;
     const animationId = sheetSelection(sheet).animationId ?? null;
@@ -343,17 +348,17 @@ export function registerFrameTool() {
 }
 
 function drawFrameToolGhost(ctx, view) {
-  if (state.mode !== 'sprites') return;
+  if (currentModeId() !== 'sprites') return;
   paintFrameToolGhost(ctx, view, activeSheet(), {
-    tool: state.tool, drag, slicePreview: slicePreviewOptions(),
+    tool: currentToolId(), drag, slicePreview: slicePreviewOptions(),
   });
 }
 
 export function drawStripChrome(ctx, view) {
-  if (state.mode !== 'sprites') return;
+  if (currentModeId() !== 'sprites') return;
   const sheet = activeSheet();
   paintStripChrome(ctx, view, sheet, {
-    tool: state.tool, drag, hover, selectedFrameId: sheet ? (sheetSelection(sheet).frameId ?? null) : null,
+    tool: currentToolId(), drag, hover, selectedFrameId: sheet ? (sheetSelection(sheet).frameId ?? null) : null,
   });
 }
 
@@ -361,7 +366,7 @@ export function bindFrameTool(view) {
   setSlicePreviewView(view);
   const prevPointer = view.onPointer;
   view.onPointer = (ev) => {
-    if (state.mode === 'sprites' && state.tool === 'frametool') {
+    if (currentModeId() === 'sprites' && currentToolId() === 'frametool') {
       if (ev.type === 'down') handleDown(ev, view);
       else if (ev.type === 'move') handleMove(ev, view);
       else if (ev.type === 'up') handleUp(ev, view);
@@ -376,8 +381,8 @@ export function bindFrameTool(view) {
     drawFrameToolGhost(ctx, view);
   };
 
-  bindDragCancelGuard(on, {
-    isToolActive: () => state.tool === 'frametool',
+  bindDragCancelGuard(storeOn, {
+    isToolActive: () => currentToolId() === 'frametool',
     hasDrag: () => !!drag,
     cancel: () => { drag = null; },
     requestRender: () => view.requestRender(),

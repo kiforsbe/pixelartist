@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
-import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import {
   setFrameField, moveStripTo, setStripFrameSize, setStripPivot,
 } from '../js/modes/sprites/application/commands/frame-metadata-commands.js';
@@ -12,8 +10,7 @@ import {
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
-  const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }) };
 }
 
 function makeProject({ width = 64, height = 64 } = {}) {
@@ -35,7 +32,7 @@ function addStrip(sheet, ids, { breaks = [] } = {}) {
   return anim;
 }
 
-function reset() { state.commands = new CommandStack(); state.dirty = false; }
+function reset() {}
 
 test('setFrameField edits one field, is undoable, and no-ops when the value is unchanged', () => {
   const project = makeProject();
@@ -46,7 +43,7 @@ test('setFrameField edits one field, is undoable, and no-ops when the value is u
 
   setFrameField(services, 'sheet1', 'f1', 'name', 'hero');
   assert.equal(sheet.frames[0].name, 'hero');
-  assert.equal(state.dirty, true);
+  assert.equal(services.store.getState().project.dirty, true);
 
   setFrameField(services, 'sheet1', 'f1', 'name', 'hero');
   services.history.undo();

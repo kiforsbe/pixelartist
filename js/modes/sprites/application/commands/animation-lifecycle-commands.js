@@ -1,10 +1,14 @@
 // js/modes/sprites/application/commands/animation-lifecycle-commands.js
 import { addAnimation, renameAnimation as renameAnimationOnSheet, findParent } from '../../../../core/model.js';
-import { activeSheet } from '../../../../app/state.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
+}
+
+function isActiveSheet(services, sheet) {
+  const doc = services.store?.getState().session.activeDocument;
+  return doc?.id === sheet.id && (doc.kind === 'sprite-sheet' || doc.kind === 'tile-sheet');
 }
 
 // A new animation starts FLOATING (see addAnimation/acceptAnimation in
@@ -24,7 +28,7 @@ export function newAnimation(services, sheetId) {
     target => {
       if (!anim) { anim = addAnimation(target, name, false, services.projects.project?.settings); idx = target.animations.indexOf(anim); }
       else if (!target.animations.includes(anim)) target.animations.splice(Math.min(idx, target.animations.length), 0, anim);
-      if (target === activeSheet()) services.selections.set({ ...services.selections.get(doc), animationId: anim.id }, doc);
+      if (isActiveSheet(services, target)) services.selections.set({ ...services.selections.get(doc), animationId: anim.id }, doc);
     },
     target => {
       idx = target.animations.indexOf(anim);

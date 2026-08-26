@@ -1,5 +1,4 @@
 import { acceptAnimation as acceptAnimationOnSheet } from '../../../../core/model.js';
-import { emit, activeSheet } from '../../../../app/state.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 function sheetDocument(sheet) {
@@ -9,6 +8,11 @@ function sheetDocument(sheet) {
 function findAnimation(services, sheetId, animationId) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   return { sheet, animation: sheet?.animations.find(a => a.id === animationId) ?? null };
+}
+
+function isActiveSheet(services, sheet) {
+  const doc = services.store?.getState().session.activeDocument;
+  return doc?.id === sheet.id && (doc.kind === 'sprite-sheet' || doc.kind === 'tile-sheet');
 }
 
 // Break apart = the animation keeps its frame entries but stops owning frame
@@ -42,12 +46,11 @@ export function acceptAnimation(services, sheetId, animationId) {
       if (!target.layerTree.children.includes(group)) {
         target.layerTree.children.splice(Math.min(groupIndex, target.layerTree.children.length), 0, group);
       }
-      if (target === activeSheet()) services.selections.set({ ...services.selections.get(doc), layerId: animationLayerId }, doc);
+      if (isActiveSheet(services, target)) services.selections.set({ ...services.selections.get(doc), layerId: animationLayerId }, doc);
     },
     target => {
       animation.layerGroupId = null;
       target.layerTree.children = target.layerTree.children.filter(child => child !== group);
       if (services.selections.get(doc)?.layerId === animationLayerId) services.selections.set({ ...services.selections.get(doc), layerId: beforeActiveLayerId }, doc);
     });
-  emit('selection');
 }

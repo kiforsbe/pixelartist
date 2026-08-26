@@ -31,22 +31,27 @@
 // flattened-sheet drawImage call, then restores back to frame-local space to
 // draw onion ghosts (which are pivot-aligned in that same frame-local frame).
 
-import { state, on, emit, activeSheet, currentContextLayers, markDirty } from '../../../app/state.js';
 import { CanvasView } from '../../../components/canvas/canvas-view.js';
 import { bindDrawing } from '../../../components/canvas/drawing-engine.js';
-import { commitFloatIfAny } from '../../../components/canvas/float-session.js';
+import { activeFloating, commitFloatIfAny } from '../../../components/canvas/float-session.js';
 import { flattenSheetLayers } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';
 import { runAction } from '../../../app/actions.js';
 import { computeOnionGhosts, resolveStepColor, traceOutline } from '../application/onion-skin.js';
 import { computeNeighborFrame } from '../application/frame-navigation.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet, currentContextLayers } from '../../../host/document-helpers.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
 
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
+
+function sheetSelection(sheet) { return getEditorHost().selections.get(sheetDocument(sheet)) ?? {}; }
+function onionSettings() { return getEditorHost().projects.project?.settings?.onion ?? null; }
+function activeViewId() { return getEditorHost().store.getState().session.activeViewId; }
+function openSheetView() { getEditorHost().store.updateSession({ activeViewId: 'sprites.sheet' }, 'view'); }
 
 export function mountFrameEditor(hostEl) {
   const container = document.createElement('div');
@@ -207,7 +212,7 @@ export function mountFrameEditor(hostEl) {
   function currentFrame() {
     const sheet = activeSheet();
     if (!sheet) return null;
-    return sheet.frames.find(f => f.id === state.editingFrameId) ?? null;
+    return sheet.frames.find(f => f.id === sheetSelection(sheet).editingFrameId) ?? null;
   }
 
   function getTargetRect() {
@@ -226,7 +231,7 @@ export function mountFrameEditor(hostEl) {
   // Invalidated on 'pixels'/'project'/'history'; rebuilt lazily on next paint.
   const flatCache = createRasterCache();
   function invalidateFlat() { flatCache.invalidate(); }
-  function flattenCurrentSheet(sheet) { return flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, state.floating, sheet.id); }
+  function flattenCurrentSheet(sheet) { return flattenSheetLayers(currentContextLayers(), sheet.width, sheet.height, activeFloating(), sheet.id); }
   function getFlatBitmap(sheet) { return flatCache.getBitmap(sheet, flattenCurrentSheet); }
   function getFlatCanvas(sheet) { return flatCache.getCanvas(sheet, flattenCurrentSheet); }
 
@@ -293,9 +298,10 @@ export function mountFrameEditor(hostEl) {
     const dx = f.pivotX - gf.pivotX;
     const dy = f.pivotY - gf.pivotY;
     for (const mode of ['mask', 'outline']) {
-      if (!state.onion[mode]) continue;
+      const onion = onionSettings();
+      if (!onion?.[mode]) continue;
       const key = dir + (mode === 'mask' ? 'MaskAlpha' : 'OutlineAlpha');
-      const baseAlpha = state.onion[key];
+      const baseAlpha = onion[key];
       if (baseAlpha <= 0) continue;
       const scratch = getGhostCanvas(flatBmp, gf, tintRgb, mode);
       ctx.save();
@@ -308,11 +314,13 @@ export function mountFrameEditor(hostEl) {
   function paintOnion(ctx, sheet, f) {
     const animationId = getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null;
     const anim = sheet.animations.find(a => a.id === animationId);
-    const ghosts = computeOnionGhosts(anim, f.id, state.onion);
+    const onion = onionSettings();
+    if (!onion) return;
+    const ghosts = computeOnionGhosts(anim, f.id, onion);
     if (!ghosts.length) return;
     const bmp = getFlatBitmap(sheet);
     for (const ghost of ghosts) {
-      drawGhost(ctx, bmp, f, frameById(sheet, ghost.frameId), resolveStepColor(state.onion, ghost.dir, ghost.k), ghost.k, ghost.dir);
+      drawGhost(ctx, bmp, f, frameById(sheet, ghost.frameId), resolveStepColor(onion, ghost.dir, ghost.k), ghost.k, ghost.dir);
     }
   }
 
@@ -332,7 +340,8 @@ export function mountFrameEditor(hostEl) {
     ctx.clip();
     ctx.save();
     ctx.translate(-f.x, -f.y);
-    ctx.globalAlpha = state.onion.enabled ? state.onion.currentAlpha : 1;
+    const onion = onionSettings();
+    ctx.globalAlpha = onion?.enabled ? onion.currentAlpha : 1;
     ctx.drawImage(getFlatCanvas(sheet), 0, 0);
     ctx.restore();
     ctx.restore();
@@ -376,19 +385,21 @@ export function mountFrameEditor(hostEl) {
 
   function updateStrip() {
     const f = currentFrame();
+    const onion = onionSettings();
     nameLabel.textContent = f ? f.name : '';
-    onionEnable.checked = state.onion.enabled;
-    currentAlphaInput.value = String(state.onion.currentAlpha);
-    maskEnable.checked = state.onion.mask;
-    outlineEnable.checked = state.onion.outline;
-    backInput.value = String(state.onion.back);
-    aheadInput.value = String(state.onion.ahead);
-    backColorInput.value = state.onion.backColor;
-    backMaskAlpha.input.value = String(state.onion.backMaskAlpha);
-    backOutlineAlpha.input.value = String(state.onion.backOutlineAlpha);
-    aheadColorInput.value = state.onion.aheadColor;
-    aheadMaskAlpha.input.value = String(state.onion.aheadMaskAlpha);
-    aheadOutlineAlpha.input.value = String(state.onion.aheadOutlineAlpha);
+    if (!onion) return;
+    onionEnable.checked = onion.enabled;
+    currentAlphaInput.value = String(onion.currentAlpha);
+    maskEnable.checked = onion.mask;
+    outlineEnable.checked = onion.outline;
+    backInput.value = String(onion.back);
+    aheadInput.value = String(onion.ahead);
+    backColorInput.value = onion.backColor;
+    backMaskAlpha.input.value = String(onion.backMaskAlpha);
+    backOutlineAlpha.input.value = String(onion.backOutlineAlpha);
+    aheadColorInput.value = onion.aheadColor;
+    aheadMaskAlpha.input.value = String(onion.aheadMaskAlpha);
+    aheadOutlineAlpha.input.value = String(onion.aheadOutlineAlpha);
     btnPrev.disabled = !neighborFrame(-1);
     btnNext.disabled = !neighborFrame(1);
   }
@@ -404,7 +415,11 @@ export function mountFrameEditor(hostEl) {
       // The frame we were editing is gone (deleted, or a new/opened project
       // no longer has it) — fall back to the sheet view rather than leaving
       // both this editor and the sheet canvas hidden.
-      if (state.view === 'frame') { state.view = 'sheet'; state.editingFrameId = null; emit('view'); }
+      if (activeViewId() === 'sprites.frame') {
+        const sheet = activeSheet();
+        if (sheet) getEditorHost().selections.patch({ editingFrameId: null }, sheetDocument(sheet));
+        openSheetView();
+      }
       return;
     }
     if (loadedFrameId !== f.id || view.width !== f.w || view.height !== f.h) loadFrame(f);
@@ -419,15 +434,15 @@ export function mountFrameEditor(hostEl) {
     // floatsession auto-commit hook can't see it — commit here or a pending
     // float outlives its creation frame's frozen target rect.
     commitFloatIfAny();
-    state.editingFrameId = nf.id;
+    const sheet = activeSheet();
+    if (sheet) getEditorHost().selections.patch({ editingFrameId: nf.id }, sheetDocument(sheet));
     loadFrame(nf);
     updateStrip();
     view.requestRender();
   }
 
   function backToSheet() {
-    state.view = 'sheet';
-    emit('view');
+    openSheetView();
   }
 
   btnBack.addEventListener('click', backToSheet);
@@ -446,17 +461,17 @@ export function mountFrameEditor(hostEl) {
   function bindOnionField(input, apply, { eager = false } = {}) {
     const commit = () => { apply(); view.requestRender(); };
     input.addEventListener(eager ? 'input' : 'change', commit);
-    input.addEventListener('change', () => markDirty());
+    input.addEventListener('change', () => getEditorHost().projects.markDirty());
   }
-  bindOnionField(onionEnable, () => { state.onion.enabled = onionEnable.checked; });
-  bindOnionField(maskEnable, () => { state.onion.mask = maskEnable.checked; });
-  bindOnionField(outlineEnable, () => { state.onion.outline = outlineEnable.checked; });
+  bindOnionField(onionEnable, () => { onionSettings().enabled = onionEnable.checked; });
+  bindOnionField(maskEnable, () => { onionSettings().mask = maskEnable.checked; });
+  bindOnionField(outlineEnable, () => { onionSettings().outline = outlineEnable.checked; });
 
   function bindOnionAlpha(input, key) {
     bindOnionField(input, () => {
       let v = parseFloat(input.value);
       if (!Number.isFinite(v)) v = 1;
-      state.onion[key] = Math.max(0, Math.min(1, v));
+      onionSettings()[key] = Math.max(0, Math.min(1, v));
     }, { eager: true });
   }
   bindOnionAlpha(currentAlphaInput, 'currentAlpha');
@@ -471,14 +486,14 @@ export function mountFrameEditor(hostEl) {
       if (!Number.isFinite(v)) v = 1;
       v = Math.max(0, Math.min(8, v));
       input.value = String(v);
-      state.onion[key] = v;
+      onionSettings()[key] = v;
     });
   }
   bindOnionCount(backInput, 'back');
   bindOnionCount(aheadInput, 'ahead');
 
-  bindOnionField(backColorInput, () => { state.onion.backColor = backColorInput.value; }, { eager: true });
-  bindOnionField(aheadColorInput, () => { state.onion.aheadColor = aheadColorInput.value; }, { eager: true });
+  bindOnionField(backColorInput, () => { onionSettings().backColor = backColorInput.value; }, { eager: true });
+  bindOnionField(aheadColorInput, () => { onionSettings().aheadColor = aheadColorInput.value; }, { eager: true });
 
   // ---- per-step (per-distance-k) color overrides ----
 
@@ -493,7 +508,7 @@ export function mountFrameEditor(hostEl) {
 
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (state.view !== 'frame') return;
+    if (activeViewId() !== 'sprites.frame') return;
     if (document.querySelector('dialog[open]')) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     backToSheet();
@@ -539,10 +554,14 @@ export function mountFrameEditor(hostEl) {
     visible = false;
   }
 
-  on('project', () => { invalidateFlat(); if (visible) refresh(); });
-  on('history', () => { invalidateFlat(); if (visible) refresh(); });
-  on('pixels', () => { invalidateFlat(); if (visible) view.requestRender(); });
-  on('selection', () => { if (visible) view.requestRender(); });
+  const editorHost = getEditorHost();
+  editorHost.store.subscribe(s => s.project.model, () => { invalidateFlat(); if (visible) refresh(); });
+  editorHost.history.subscribe(() => { invalidateFlat(); if (visible) refresh(); });
+  editorHost.store.subscribe(s => s.workspace.pixelRevision, () => { invalidateFlat(); if (visible) view.requestRender(); });
+  editorHost.store.subscribe(
+    s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
+    () => { if (visible) view.requestRender(); },
+  );
 
   return { show, hide, view };
 }

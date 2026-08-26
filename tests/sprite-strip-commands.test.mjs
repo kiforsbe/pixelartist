@@ -4,10 +4,8 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { SelectionService } from '../js/host/selection-service.js';
-import { CommandStack } from '../js/core/commands.js';
 import { setPixel, getPixel } from '../js/core/pixels.js';
 import { createLayerNode, createGroupNode } from '../js/core/model.js';
-import { state } from '../js/app/state.js';
 import {
   insertStripFrame, splitStrip, resizeStripSegment, removeStripMember,
   mergeStripSegments, newStripFromFrame,
@@ -16,8 +14,8 @@ import {
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
-  const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store) };
+  store.updateSession({ activeDocument: { kind: 'sprite-sheet', id: 'sheet1' } });
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }), selections: new SelectionService(store) };
 }
 
 function makeProject({ width = 64, height = 64 } = {}) {
@@ -56,10 +54,6 @@ function acceptStrip(sheet, anim) {
 }
 
 function reset(project) {
-  state.commands = new CommandStack();
-  state.dirty = false;
-  state.project = project;
-  state.activeSheetId = 'sheet1';
 }
 
 const frameIds = anim => anim.frames.map(entry => entry.frameId);
@@ -73,7 +67,7 @@ test('splitStrip adds a break, and re-splitting the same boundary is a no-op wit
 
   splitStrip(services, 'sheet1', 'an1', 1);
   assert.deepEqual(anim.breaks, [1]);
-  assert.equal(state.dirty, true);
+  assert.equal(services.store.getState().project.dirty, true);
 
   splitStrip(services, 'sheet1', 'an1', 1);
   assert.deepEqual(anim.breaks, [1]);

@@ -4,15 +4,13 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { SelectionService } from '../js/host/selection-service.js';
-import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import { breakApartStrip, acceptAnimation } from '../js/modes/sprites/application/commands/animation-commands.js';
 
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
-  const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store) };
+  store.updateSession({ activeDocument: { kind: 'sprite-sheet', id: 'sheet1' } });
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }), selections: new SelectionService(store) };
 }
 
 function makeProject() {
@@ -29,10 +27,6 @@ function makeProject() {
 }
 
 function reset(project) {
-  state.commands = new CommandStack();
-  state.dirty = false;
-  state.project = project;
-  state.activeSheetId = 'sheet1';
 }
 
 test('breakApartStrip clears the strip flag and its breaks, and undo restores both', () => {
@@ -44,7 +38,7 @@ test('breakApartStrip clears the strip flag and its breaks, and undo restores bo
   breakApartStrip(services, 'sheet1', 'an1');
   assert.equal(anim.strip, false);
   assert.deepEqual(anim.breaks, []);
-  assert.equal(state.dirty, true);
+  assert.equal(services.store.getState().project.dirty, true);
 
   services.history.undo();
   assert.equal(anim.strip, true);

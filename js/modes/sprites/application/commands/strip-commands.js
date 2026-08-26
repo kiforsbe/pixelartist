@@ -1,11 +1,10 @@
-import { addFrame, removeFrame, addAnimation, animationGroup } from '../../../../core/model.js';
+import { addFrame, removeFrame, addAnimation, animationGroup, contextLayers } from '../../../../core/model.js';
 import { createBitmap, copyRegion, blitRegion } from '../../../../core/pixels.js';
 import {
   segmentsOf, segmentOfFrame, segmentMembers,
   insertEntry, removeEntry, mergeSegments, transferSegment, normalizeBreaks,
 } from '../../../../core/strips.js';
 import { frameBounds } from '../../../../domain/sprites/frames.js';
-import { emit, activeSheet, currentContextLayers } from '../../../../app/state.js';
 import { stripLayersOf, buildMovePatches } from '../frame-pixel-motion.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
@@ -22,6 +21,16 @@ function resolve(services, sheetId, animationId, runIndex) {
 
 function defaultDuration(services) {
   return services.projects.project?.settings?.durationMs ?? 100;
+}
+
+function selectedContextLayers(services, sheet) {
+  const animationId = services.selections.get(sheetDocument(sheet))?.animationId ?? null;
+  return contextLayers(sheet, animationId);
+}
+
+function isActiveSheet(services, sheet) {
+  const doc = services.store?.getState().session.activeDocument;
+  return doc?.id === sheet.id && (doc.kind === 'sprite-sheet' || doc.kind === 'tile-sheet');
 }
 
 // Word-style insert-column at boundary k of a segment (0=before first,
@@ -48,7 +57,7 @@ export function insertStripFrame(services, sheetId, animationId, runIndex, k) {
   // ASSUMES sheetId === state.activeSheetId -- currentContextLayers() reads
   // the ACTIVE sheet, not the sheetId this handler was dispatched with.
   // Callers must ensure they match; see final-review finding for context.
-  const mv = tail.length ? buildMovePatches(tail, fw, 0, stripLayersOf(sheet, anim) ?? currentContextLayers()) : null;
+  const mv = tail.length ? buildMovePatches(tail, fw, 0, stripLayersOf(sheet, anim) ?? selectedContextLayers(services, sheet)) : null;
   const frame = addFrame(sheet, {
     name: `${anim.name}_${anim.frames.length}`,
     x: b.x + k * fw, y: b.y, w: fw, h: fh,
@@ -83,7 +92,6 @@ export function insertStripFrame(services, sheetId, animationId, runIndex, k) {
       anim.breaks = beforeBreaks.slice();
       if (services.selections.get(doc)?.frameId === frame.id) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     });
-  emit('selection');
 }
 
 // Split = add a break. Nothing moves; the dashed separator marks the cut
@@ -189,7 +197,6 @@ export function resizeStripSegment(services, sheetId, animationId, runIndex, sid
       services.selections.set({ ...services.selections.get(doc), frameId: beforeSelected }, doc);
       if (layer) for (const p of clearPatches) blitRegion(layer.bitmap, p.before, p.x, p.y);
     });
-  emit('selection');
 }
 
 // Delete on a strip member removes the frame AND closes the gap: the rest of
@@ -214,7 +221,7 @@ export function removeStripMember(services, sheetId, animationId, frameId) {
   // ASSUMES sheetId === state.activeSheetId -- currentContextLayers() reads
   // the ACTIVE sheet, not the sheetId this handler was dispatched with.
   // Callers must ensure they match; see final-review finding for context.
-  const mv = tail.length ? buildMovePatches(tail, -fw, 0, stripLayersOf(sheet, anim) ?? currentContextLayers()) : null;
+  const mv = tail.length ? buildMovePatches(tail, -fw, 0, stripLayersOf(sheet, anim) ?? selectedContextLayers(services, sheet)) : null;
   removeFrame(sheet, frameId);
 
   const afterSheetFrames = sheet.frames.slice();
@@ -239,7 +246,6 @@ export function removeStripMember(services, sheetId, animationId, frameId) {
       for (const s of beforeAnims) { s.anim.frames = s.frames.map(e => ({ ...e })); s.anim.breaks = s.breaks.slice(); }
       if (wasSelected) services.selections.set({ ...services.selections.get(doc), frameId }, doc);
     });
-  emit('selection');
 }
 
 // Snap-merge: one undoable command = reposition of the dragged members +
@@ -308,7 +314,6 @@ export function mergeStripSegments(services, sheetId, animationId, runIndex, tar
       target.animations = before.animations.slice();
       services.selections.set({ ...services.selections.get(doc), animationId: before.selectedAnimationId }, doc);
     });
-  emit('selection');
 }
 
 // Dragging a standalone (non-strip) frame's own edge grip promotes it into a
@@ -362,7 +367,7 @@ export function newStripFromFrame(services, sheetId, frameId, side, count) {
       target.animations = afterAnimations.slice();
       anim.frames = afterAnimFrames.map(e => ({ ...e }));
       frame.name = afterFrameName;
-      if (target === activeSheet()) {
+      if (isActiveSheet(services, target)) {
         services.selections.set({ ...services.selections.get(doc), frameId, animationId: animId }, doc);
       }
     },
@@ -372,5 +377,4 @@ export function newStripFromFrame(services, sheetId, frameId, side, count) {
       frame.name = beforeFrameName;
       services.selections.set({ ...services.selections.get(doc), frameId, animationId: beforeSelectedAnimationId }, doc);
     });
-  emit('selection');
 }

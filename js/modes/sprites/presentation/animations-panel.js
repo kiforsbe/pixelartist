@@ -5,17 +5,18 @@
 // selected". Mirrors the mount/render-on-emit pattern every other panel
 // uses (see frames.js's mountFramesPanel). See
 // docs/superpowers/specs/2026-07-19-animation-panel-design.md.
-import { state, on, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { buildBaseDurationControl } from '../../../components/panels/base-duration-control.js';
-import { mountReactivePanel } from '../../../components/panel-mount.js';
+import { mountStorePanel } from '../../../components/panel-mount.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly -- this file lives under presentation/, and
 // tests/architecture.test.mjs bans presentation-layer code from importing
 // anything under application/commands/.
 function dispatch(id, args) {
-  return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
 }
 
 function sheetDocument(sheet) {
@@ -88,7 +89,7 @@ export function mountAnimationsPanel(el) {
   });
 
   function render() {
-    if (state.mode !== 'sprites') { el.hidden = true; return; }
+    if (getEditorHost().store.getState().session.activeModeId !== 'sprites') { el.hidden = true; return; }
     el.hidden = false;
     const sheet = activeSheet();
     const animationId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null) : null;
@@ -101,5 +102,13 @@ export function mountAnimationsPanel(el) {
     durationControl.refresh();
   }
 
-  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render);
+  const host = getEditorHost();
+  const panel = mountStorePanel(host.store, [
+    s => s.project.model,
+    s => s.session.activeModeId,
+    s => s.session.activeDocument,
+    s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
+  ], render);
+  const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
+  return { ...panel, dispose() { disposeHistory(); panel.dispose(); } };
 }

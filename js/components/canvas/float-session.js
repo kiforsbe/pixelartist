@@ -27,6 +27,7 @@ let floatCtx = null;
 let clipboard = null;    // { srcRect, layers: [{layerId, buffer}], allLayers }
 
 export function registerFloatView(viewKind, api) { views.set(viewKind, api); }
+export function activeFloating() { return state.floating; }
 
 // Selection-or-target region for the CURRENT view, same rule createFloat
 // uses (selection clamped to target, or the whole target when there's no

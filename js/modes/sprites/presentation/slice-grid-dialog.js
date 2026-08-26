@@ -1,6 +1,6 @@
 // js/modes/sprites/presentation/slice-grid-dialog.js
-import { state, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { markDefaultAction } from '../../../components/dialogs.js';
 
 // Live Slice-grid preview: the dialog's current values while it is open, else
@@ -16,7 +16,8 @@ export function setSlicePreviewView(view) { sheetViewForPreview = view; }
 // tests/architecture.test.mjs bans presentation-layer code from importing
 // anything under application/commands/.
 function dispatch(id, args) {
-  return getEditorHost()?.registries.commands.execute(id, { modeId: state.mode }, args);
+  const host = getEditorHost();
+  return host?.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
 }
 
 export function buildSliceDialog() {

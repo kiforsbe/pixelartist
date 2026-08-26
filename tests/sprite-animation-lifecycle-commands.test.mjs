@@ -5,8 +5,6 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { SelectionService } from '../js/host/selection-service.js';
-import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import {
   newAnimation, deleteAnimation, renameAnimation, toggleAnimationLoop, setAnimationBaseDuration,
 } from '../js/modes/sprites/application/commands/animation-lifecycle-commands.js';
@@ -14,8 +12,8 @@ import {
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
-  const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store) };
+  store.updateSession({ activeDocument: { kind: 'sprite-sheet', id: 'sheet1' } });
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }), selections: new SelectionService(store) };
 }
 
 function makeProject() {
@@ -38,10 +36,6 @@ function makeProject() {
 // the same sheet object these tests construct. Mirrors
 // sprite-animation-commands.test.mjs's reset(project) exactly.
 function reset(project) {
-  state.commands = new CommandStack();
-  state.dirty = false;
-  state.project = project;
-  state.activeSheetId = 'sheet1';
 }
 
 test('newAnimation names by animation count, selects it when the sheet is active, and undo/redo restore the same object at the same index', () => {
@@ -56,7 +50,7 @@ test('newAnimation names by animation count, selects it when the sheet is active
   const created = sheet.animations[1];
   assert.equal(created.name, 'anim_1');
   assert.equal(services.selections.get(doc)?.animationId, created.id);
-  assert.equal(state.dirty, true);
+  assert.equal(services.store.getState().project.dirty, true);
 
   services.history.undo();
   assert.equal(sheet.animations.length, 1);

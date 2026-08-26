@@ -29,7 +29,7 @@ import {
 } from './application/commands/layer-commands.js';
 import { editPaletteColor, remapPaletteColor } from './application/commands/palette-commands.js';
 
-function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history, selections: host.selections }; }
+function services() { const host = getEditorHost(); return { store: host.store, projects: host.projects, history: host.history, selections: host.selections }; }
 
 // Registered by id so presentation/ (the Presenter, the slice dialog, the
 // Frames panel) and shared UI (js/features/animations/commands.js's façade)

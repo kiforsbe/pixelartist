@@ -14,21 +14,24 @@
 // presentation-layer file never touches state.commands or core/model.js
 // mutators directly.
 
-import { state, on, emit, activeSheet, confirmOrAuto, currentContextLayers } from '../../../app/state.js';
 import { contextLayers, flattenSheetLayers, effectiveDuration } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet, currentContextLayers } from '../../../host/document-helpers.js';
+import { confirmOrAuto } from '../../../platform/browser/autotest.js';
+import { activeFloating } from '../../../components/canvas/float-session.js';
 import { advancePlayback } from '../application/timeline-playback.js';
 import { setPreviewBitmap } from '../../../components/panels/preview-panel.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
-import { mountReactivePanel } from '../../../components/panel-mount.js';
+import { mountStorePanel } from '../../../components/panel-mount.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly -- this file lives under presentation/, and
 // tests/architecture.test.mjs bans presentation-layer code from importing
 // anything under application/commands/.
 function dispatch(id, args) {
-  return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
 }
 
 function sheetDocument(sheet) {
@@ -89,7 +92,7 @@ function drawFit(canvas, bmp) {
   const dh = Math.max(1, Math.round(bmp.height * scale));
   const dx = Math.floor((canvas.width - dw) / 2);
   const dy = Math.floor((canvas.height - dh) / 2);
-  const smooth = scale < 1 && state.project?.settings?.smoothThumbnails !== false;
+  const smooth = scale < 1 && getEditorHost().projects.project?.settings?.smoothThumbnails !== false;
   ctx.imageSmoothingEnabled = smooth;
   if (smooth) ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(tmp, 0, 0, bmp.width, bmp.height, dx, dy, dw, dh);
@@ -200,7 +203,7 @@ export function mountTimeline(el) {
   // doesn't re-flatten the whole sheet every frame.
   const flatCache = createRasterCache();
   function getFlat(sheet) {
-    return flatCache.getBitmap(sheet, s => flattenSheetLayers(currentContextLayers(), s.width, s.height, state.floating, s.id));
+    return flatCache.getBitmap(sheet, s => flattenSheetLayers(currentContextLayers(), s.width, s.height, activeFloating(), s.id));
   }
   function invalidateFlat() { flatCache.invalidate(); }
 
@@ -246,11 +249,6 @@ export function mountTimeline(el) {
     Array.from(strip.children).forEach((cell, i) => cell.classList.toggle('playhead', i === position));
   }
 
-  function emitPlayhead() {
-    const anim = currentAnim();
-    if (anim) emit('playhead', { animId: anim.id, position });
-  }
-
   function scrubTo(index) {
     stopPlaying();
     const anim = currentAnim();
@@ -259,7 +257,6 @@ export function mountTimeline(el) {
     acc = 0;
     renderPreview();
     updatePlayheadHighlight();
-    emitPlayhead();
   }
 
   function tick(ts) {
@@ -276,7 +273,6 @@ export function mountTimeline(el) {
     if (result.stopped) stopPlaying();
     renderPreview();
     updatePlayheadHighlight();
-    emitPlayhead();
     if (playing) rafId = requestAnimationFrame(tick);
   }
 
@@ -315,7 +311,6 @@ export function mountTimeline(el) {
       setSelection({ animationId, layerId: nextLayerId });
     }
     render();
-    emit('selection');
   });
 
   btnNewAnim.addEventListener('click', () => {
@@ -429,12 +424,10 @@ export function mountTimeline(el) {
       // a double-click) -- one click both selects and jumps in.
       if (frame && currentSelection().frameId !== frame.id) {
         setSelection({ frameId: frame.id });
-        emit('selection');
       }
       if (frame) {
-        state.editingFrameId = frame.id;
-        state.view = 'frame';
-        emit('view');
+        getEditorHost().selections.patch({ editingFrameId: frame.id }, sheetDocument(sheet));
+        getEditorHost().store.updateSession({ activeViewId: 'sprites.frame' }, 'view');
       }
     });
 
@@ -492,7 +485,7 @@ export function mountTimeline(el) {
   }
 
   function render() {
-    if (state.mode !== 'sprites') { el.hidden = true; stopPlaying(); return; }
+    if (getEditorHost().store.getState().session.activeModeId !== 'sprites') { el.hidden = true; stopPlaying(); return; }
     el.hidden = false;
     updateThumbSize();
     invalidateFlat();
@@ -520,5 +513,15 @@ export function mountTimeline(el) {
     renderPreview();
   }
 
-  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render, { onDispose: stopPlaying });
+  const host = getEditorHost();
+  const panel = mountStorePanel(host.store, [
+    s => s.project.model,
+    s => s.session.activeModeId,
+    s => s.session.activeViewId,
+    s => s.session.activeDocument,
+    s => s.workspace.pixelRevision,
+    s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
+  ], render, { onDispose: stopPlaying });
+  const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
+  return { ...panel, dispose() { disposeHistory(); panel.dispose(); } };
 }

@@ -1,18 +1,19 @@
 // js/modes/sprites/presentation/frames-panel.js
-import { state, on, emit, activeSheet } from '../../../app/state.js';
 import { getEditorHost } from '../../../host/runtime.js';
+import { activeSheet } from '../../../host/document-helpers.js';
 import { segmentsOf } from '../../../core/strips.js';
 import { stripForFrame } from '../../../domain/sprites/strips.js';
 import { frameBounds } from '../../../domain/sprites/frames.js';
 import { stripMembers } from '../application/frame-geometry.js';
-import { mountReactivePanel } from '../../../components/panel-mount.js';
+import { mountStorePanel } from '../../../components/panel-mount.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly — this panel lives under presentation/, and
 // tests/architecture.test.mjs bans presentation-layer code from importing
 // anything under application/commands/.
 function dispatch(id, args) {
-  return getEditorHost().registries.commands.execute(id, { modeId: state.mode }, args);
+  const host = getEditorHost();
+  return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
 }
 
 function sheetDocument(sheet) {
@@ -69,9 +70,9 @@ export function mountFramesPanel(element) {
     editButton.textContent = '✎';
     editButton.title = 'Edit';
     editButton.addEventListener('click', () => {
-      state.editingFrameId = frame.id;
-      state.view = 'frame';
-      emit('view');
+      const host = getEditorHost();
+      host.selections.patch({ editingFrameId: frame.id }, sheetDocument(sheet));
+      host.store.updateSession({ activeViewId: 'sprites.frame' }, 'view');
     });
 
     const deleteButton = document.createElement('button');
@@ -150,7 +151,7 @@ export function mountFramesPanel(element) {
   }
 
   function render() {
-    if (state.mode !== 'sprites') {
+    if (getEditorHost().store.getState().session.activeModeId !== 'sprites') {
       panel.hidden = true;
       return;
     }
@@ -172,5 +173,14 @@ export function mountFramesPanel(element) {
     else renderFrameDetail(sheet, frame);
   }
 
-  return mountReactivePanel(on, ['project', 'history', 'view', 'selection'], render);
+  const host = getEditorHost();
+  const panelMount = mountStorePanel(host.store, [
+    s => s.project.model,
+    s => s.session.activeModeId,
+    s => s.session.activeViewId,
+    s => s.session.activeDocument,
+    s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
+  ], render);
+  const disposeHistory = host.history.subscribe(() => panelMount.scheduleRender());
+  return { ...panelMount, dispose() { disposeHistory(); panelMount.dispose(); } };
 }

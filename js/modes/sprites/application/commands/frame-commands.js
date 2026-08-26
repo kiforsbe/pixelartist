@@ -1,7 +1,6 @@
 import { addFrame, removeFrame } from '../../../../core/model.js';
 import { sliceGrid } from '../../../../core/slicing.js';
 import { blitRegion } from '../../../../core/pixels.js';
-import { emit, markDirty } from '../../../../app/state.js';
 import { runEntityCommand } from '../../../../host/command-helpers.js';
 import { stripLayersOf, buildMovePatches } from '../frame-pixel-motion.js';
 
@@ -13,11 +12,8 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
-// markDirty() keeps the legacy title-bar/unsaved-changes guard in sync with
-// every do/undo until Phase 4 unifies the two state stores.
 export function runSheetCommand(services, sheetId, label, apply, revert) {
   runEntityCommand(services, label, project => findSpriteSheet(project, sheetId), apply, revert);
-  markDirty();
 }
 
 export function createFrame(services, sheetId, rect) {
@@ -36,7 +32,6 @@ export function createFrame(services, sheetId, rect) {
       target.frames = target.frames.filter(f => f !== created);
       if (services.selections.get(doc)?.frameId === created.id) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     });
-  emit('selection');
 }
 
 // Shared by the keyboard Delete handler and the frames panel's Delete button.
@@ -60,7 +55,6 @@ export function deleteFrame(services, sheetId, frameId) {
       for (const snap of animSnapshots) { snap.anim.frames = snap.frames.slice(); snap.anim.breaks = snap.breaks.slice(); }
       if (wasSelected) services.selections.set({ ...services.selections.get(doc), frameId: frame.id }, doc);
     });
-  emit('selection');
 }
 
 export function resizeFrame(services, sheetId, frameId, before, after) {

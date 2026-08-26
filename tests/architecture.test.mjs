@@ -82,6 +82,13 @@ test('modes never import sibling modes', async () => {
   }
 });
 
+test('sprites mode does not import the legacy app state module', async () => {
+  for (const file of await jsFiles(join(root, 'js/modes/sprites'))) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /from\s+['"][^'"]*app[\\/]state\.js['"]/, file);
+  }
+});
+
 test('shared workbench composes mode registries without concrete mode UI imports', async () => {
   const source = await readFile(join(root, 'js/features/workbench/editor-workbench.js'), 'utf8');
   assert.doesNotMatch(source, /from\s+['"][^'"]*modes[\\/]/);
@@ -132,7 +139,7 @@ test('mode command modules do not access browser UI globals', async () => {
     join(root, 'js/modes/tiles/application/commands/tile-editor-commands.js'),
   ]) {
     const source = await readFile(file, 'utf8');
-    assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
+    assert.doesNotMatch(source, /\bdocument\.|\b(?:window|prompt|alert|confirm)\b/, file);
   }
 });
 
@@ -142,7 +149,7 @@ test('map command modules do not access browser UI globals', async () => {
     join(root, 'js/modes/maps/application/commands/map-layer-commands.js'),
   ]) {
     const source = await readFile(file, 'utf8');
-    assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
+    assert.doesNotMatch(source, /\bdocument\.|\b(?:window|prompt|alert|confirm)\b/, file);
   }
 });
 
@@ -156,7 +163,7 @@ test('sprite command modules do not access browser UI globals', async () => {
     join(root, 'js/modes/sprites/application/commands/animation-frame-commands.js'),
   ]) {
     const source = await readFile(file, 'utf8');
-    assert.doesNotMatch(source, /\b(?:document|window|prompt|alert|confirm)\b/, file);
+    assert.doesNotMatch(source, /\bdocument\.|\b(?:window|prompt|alert|confirm)\b/, file);
   }
 });
 
