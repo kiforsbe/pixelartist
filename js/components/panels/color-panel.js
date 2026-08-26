@@ -1,12 +1,38 @@
 // Color/palette panel.
 
-import { state, on, emit, activeSheet, markDirty, confirmOrAuto } from '../../app/state.js';
-import { cloneBitmap, blitRegion } from '../../core/pixels.js';
+import { getEditorHost } from '../../host/runtime.js';
+import { activeSheet } from '../../host/document-helpers.js';
+import { confirmOrAuto } from '../../platform/browser/autotest.js';
+import { mountStorePanel } from '../panel-mount.js';
+// `state`/`on`/`emit` from app/state.js are kept for one narrow,
+// already-out-of-scope-for-this-task exception: `state.primary`/
+// `state.secondary` (the current drawing colors, used by the primary/
+// secondary swatch editors and the palette-swatch pick handlers below) and
+// the 'colors' event they're broadcast on are still read/written by other
+// still-legacy files (drawing-engine.js, editor-workbench.js's swap-colors
+// action, filter-controller.js's color pickers) that nothing mirrors onto
+// the host store yet. Everything else this file used to read from/write to
+// `state` -- the active project/its palettes, and the two indexed-entry
+// edit/remap operations -- now goes through host.projects or a dispatched
+// Command Handler.
+import { state, on, emit } from '../../app/state.js';
 import { sheetLayers } from '../../core/model.js';
-import { createPalette, addSwatch, setEntry, remapColor, INDEXED_SIZE_PRESETS } from '../../core/palettes.js';
+import { createPalette, addSwatch, INDEXED_SIZE_PRESETS } from '../../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../../core/systempalettes.js';
 import { markDefaultAction } from '../dialogs.js';
 import { rgbaToHex, hexToRgb } from '../color-utils.js';
+
+// Dispatches a Command Handler by id (registered in each mode's
+// contributions.js) rather than importing it directly -- matches the
+// established pattern in frames-panel.js/tile-layers-panel.js/
+// layers-panel.js.
+function dispatch(id, args) {
+  return getEditorHost().registries.commands.execute(id, { modeId: getEditorHost().store.getState().session.activeModeId }, args);
+}
+
+function currentModeId() {
+  return getEditorHost().store.getState().session.activeModeId;
+}
 
 function cssColor([r, g, b, a]) {
   return `rgba(${r},${g},${b},${a / 255})`;
@@ -99,7 +125,7 @@ export function mountColorPanel(el) {
   palettePanel.appendChild(swatchStrip);
 
   function currentPalette() {
-    const proj = state.project;
+    const proj = getEditorHost().projects.project;
     return proj?.palettes.find(p => p.id === proj.activePaletteId) ?? null;
   }
 
@@ -112,13 +138,14 @@ export function mountColorPanel(el) {
     paletteSelect.innerHTML = '';
     const none = document.createElement('option'); none.value = ''; none.textContent = '(none)';
     paletteSelect.appendChild(none);
-    for (const p of state.project?.palettes ?? []) {
+    const proj = getEditorHost().projects.project;
+    for (const p of proj?.palettes ?? []) {
       const o = document.createElement('option');
       o.value = p.id;
       o.textContent = p.indexed ? `${p.name} (${p.colors.length})` : p.name;
       paletteSelect.appendChild(o);
     }
-    paletteSelect.value = state.project?.activePaletteId ?? '';
+    paletteSelect.value = proj?.activePaletteId ?? '';
   }
 
   function countColor(bmp, c) {
@@ -134,6 +161,17 @@ export function mountColorPanel(el) {
     return sheet ? sheetLayers(sheet) : [];
   }
 
+  // The actual palette-entry (and, for a remap, per-layer bitmap) mutation
+  // plus its undo now live entirely inside the dispatched Command Handler
+  // (js/modes/{sprites,tiles}/application/commands/palette-commands.js,
+  // ported byte-for-byte from this function's old do()/undo() closures) --
+  // this function only decides WHICH command to run (a plain edit vs. a
+  // remap) and, for the remap confirm dialog, how many pixels are affected.
+  // Command ids are mode-scoped (sprites.*/tiles.*, each gated to its own
+  // mode); maps mode registers neither, since a map has no "active sheet"
+  // bitmaps of its own for the remap branch to ever touch -- editing an
+  // indexed swatch while parked in maps mode is a known no-op (see this
+  // task's report).
   function editIndexedEntry(pal, index) {
     const old = pal.colors[index];
     const input = hiddenColorInput();
@@ -149,41 +187,15 @@ export function mountColorPanel(el) {
       let count = 0;
       if (sheet) for (const layer of sheetLayers(sheet)) count += countColor(layer.bitmap, old);
 
-      // `old` references the original entry array; setEntry() replaces the
-      // slot with a fresh copy, so `old` stays valid for undo.
+      const mode = currentModeId();
       if (count === 0) {
-        state.commands.push({
-          label: 'edit palette color',
-          do() { setEntry(pal, index, to); },
-          undo() { setEntry(pal, index, old); },
-        });
-        markDirty();
+        dispatch(`${mode}.editPaletteColor`, { index, color: to });
         refreshSwatchStrip();
         return;
       }
       if (!confirmOrAuto(`Remap ${count} pixels of old color on active sheet?`)) return;
 
-      // The palette-entry mutation lives INSIDE the command so undo restores
-      // both the pixels AND the palette color. commands.push() executes do(),
-      // so nothing is pre-applied here.
-      const layerPatches = sheetLayers(sheet).map(layer => {
-        const before = cloneBitmap(layer.bitmap);
-        const after = cloneBitmap(layer.bitmap);
-        remapColor(after, old, to);
-        return { bitmap: layer.bitmap, before, after };
-      });
-      state.commands.push({
-        label: 'remap palette color',
-        do() {
-          setEntry(pal, index, to);
-          for (const lp of layerPatches) blitRegion(lp.bitmap, lp.after, 0, 0);
-        },
-        undo() {
-          setEntry(pal, index, old);
-          for (const lp of layerPatches) blitRegion(lp.bitmap, lp.before, 0, 0);
-        },
-      });
-      markDirty();
+      dispatch(`${mode}.remapPaletteColor`, { index, color: to });
       refreshSwatchStrip();
     });
     input.click();
@@ -208,9 +220,10 @@ export function mountColorPanel(el) {
   }
 
   paletteSelect.addEventListener('change', () => {
-    if (!state.project) return;
-    state.project.activePaletteId = paletteSelect.value || null;
-    markDirty();
+    const proj = getEditorHost().projects.project;
+    if (!proj) return;
+    proj.activePaletteId = paletteSelect.value || null;
+    getEditorHost().projects.markDirty();
     refreshSwatchStrip();
   });
 
@@ -218,7 +231,7 @@ export function mountColorPanel(el) {
     const pal = currentPalette();
     if (!pal || pal.indexed) return;
     addSwatch(pal, state.primary);
-    markDirty();
+    getEditorHost().projects.markDirty();
     refreshSwatchStrip();
   });
 
@@ -246,15 +259,16 @@ export function mountColorPanel(el) {
   markDefaultAction(dlgNew, dlgNew.querySelector('#np-create'));
   dlgNew.querySelector('#np-cancel').addEventListener('click', () => dlgNew.close());
   dlgNew.querySelector('#np-create').addEventListener('click', () => {
-    if (!state.project) { dlgNew.close(); return; }
+    const proj = getEditorHost().projects.project;
+    if (!proj) { dlgNew.close(); return; }
     const indexed = npIndexed.checked;
     let size = 0;
     if (indexed) size = npPreset.value === 'custom' ? Math.max(1, parseInt(npCustom.value, 10) || 1) : parseInt(npPreset.value, 10);
     const p = createPalette({ name: npName.value.trim() || 'Palette', indexed, size });
-    state.project.palettes.push(p);
-    state.project.activePaletteId = p.id;
+    proj.palettes.push(p);
+    proj.activePaletteId = p.id;
     dlgNew.close();
-    markDirty();
+    getEditorHost().projects.markDirty();
     refreshPaletteSelect();
     refreshSwatchStrip();
   });
@@ -287,12 +301,13 @@ export function mountColorPanel(el) {
     card.appendChild(preview);
 
     card.addEventListener('click', () => {
-      if (!state.project) return;
+      const proj = getEditorHost().projects.project;
+      if (!proj) return;
       const p = clonePalette(sys);
-      state.project.palettes.push(p);
-      state.project.activePaletteId = p.id;
+      proj.palettes.push(p);
+      proj.activePaletteId = p.id;
       dlgSys.close();
-      markDirty();
+      getEditorHost().projects.markDirty();
       refreshPaletteSelect();
       refreshSwatchStrip();
     });
@@ -315,8 +330,26 @@ export function mountColorPanel(el) {
     primaryEditor.sync();
     secondaryEditor.sync();
   }
-  on('project', refreshAll);
-  on('history', refreshAll);
-  on('colors', () => { primaryEditor.sync(); secondaryEditor.sync(); });
-  refreshAll();
+
+  // Legacy 'colors' subscription for the current drawing colors (see the
+  // import comment above) -- nothing else in this panel still needs
+  // on/emit, so this is the one narrow exception kept alive here.
+  const disposeColors = on('colors', () => { primaryEditor.sync(); secondaryEditor.sync(); });
+  // History-driven redraws (the two editPaletteColor/remapPaletteColor
+  // dispatches above, undo/redo of either) reach refreshAll through
+  // HistoryService's own onChange, which fires on every do()/undo()/redo()
+  // regardless of which store selector (if any) the underlying project
+  // mutation happens to touch -- same reasoning as layers-panel.js's own
+  // disposeHistory.
+  const disposeHistory = getEditorHost().history.subscribe(() => refreshAll());
+  mountStorePanel(getEditorHost().store, [
+    s => s.project.model,
+    s => s.session.activeModeId,
+    s => s.session.activeDocument,
+  ], refreshAll, {
+    onDispose() {
+      disposeColors();
+      disposeHistory();
+    },
+  });
 }
