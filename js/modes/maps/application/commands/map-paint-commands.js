@@ -2,7 +2,6 @@
 import { findSheet, terrainAt, terrainResolution } from '../map-geometry.js';
 import { refreshMapBounds } from '../../../../core/model.js';
 import { newId } from '../../../../core/palettes.js';
-import { markDirty } from '../../../../app/state.js';
 import { runEntityCommand } from '../../../../host/command-helpers.js';
 
 function findMap(project, mapId) { return project.maps.find(m => m.id === mapId) ?? null; }
@@ -12,7 +11,6 @@ export function runCommand(services, mapId, label, apply, revert) {
   runEntityCommand(services, label, project => findMap(project, mapId), apply, revert, {
     after: (project, map) => refreshMapBounds(project, map),
   });
-  markDirty();
 }
 
 export function paintMapTile(services, mapId, layerId, sheetId, tileId, at) {

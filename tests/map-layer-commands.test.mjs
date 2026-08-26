@@ -4,7 +4,6 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import { addMapLayer, deleteMapLayer, setMapLayerOpacity } from '../js/modes/maps/application/commands/map-layer-commands.js';
 
 function makeServices(project) {
@@ -21,7 +20,6 @@ function makeProject() {
 test('addMapLayer creates a layer of the given type and marks the project dirty', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   const layerId = addMapLayer(services, 'map1', 'sprite');
   const map = project.maps[0];
@@ -29,13 +27,11 @@ test('addMapLayer creates a layer of the given type and marks the project dirty'
   assert.equal(map.layers[1].id, layerId);
   assert.equal(map.layers[1].type, 'sprite');
   assert.equal(services.store.getState().project.dirty, true);
-  assert.equal(state.dirty, true);
 });
 
 test('addMapLayer is undoable, and redo restores the same layer object at the same id', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   const layerId = addMapLayer(services, 'map1', 'sprite');
   assert.equal(services.history.canUndo(), true);
@@ -51,7 +47,6 @@ test('addMapLayer is undoable, and redo restores the same layer object at the sa
 test('deleteMapLayer removes a layer and is undoable', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
   const layerId = addMapLayer(services, 'map1', 'sprite');
 
   deleteMapLayer(services, 'map1', layerId);
@@ -66,7 +61,6 @@ test('setMapLayerOpacity sets opacity and is undoable', () => {
   const project = makeProject();
   project.maps[0].layers[0].opacity = 1;
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   setMapLayerOpacity(services, 'map1', 'l0', 0.4);
   assert.equal(project.maps[0].layers[0].opacity, 0.4);
@@ -82,7 +76,6 @@ test('setMapLayerOpacity is a no-op when opacity is unchanged or the layer is mi
   const project = makeProject();
   project.maps[0].layers[0].opacity = 1;
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   setMapLayerOpacity(services, 'map1', 'l0', 1);
   assert.equal(services.history.canUndo(), false);

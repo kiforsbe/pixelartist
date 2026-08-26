@@ -5,7 +5,6 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import {
   paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
   moveMapItem, deleteMapItem,
@@ -37,14 +36,12 @@ function makeProject() {
 test('paintMapTile places a tile and is undoable/redoable', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
   const layer = project.maps[0].layers[0];
   assert.equal(layer.tiles.length, 1);
   assert.equal(layer.tiles[0].tileId, 'tile1');
   assert.equal(services.store.getState().project.dirty, true);
-  assert.equal(state.dirty, true);
 
   services.history.undo();
   assert.equal(layer.tiles.length, 0);
@@ -55,7 +52,6 @@ test('paintMapTile places a tile and is undoable/redoable', () => {
 test('eraseMapTile removes the tile at a point and undo restores it', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
   eraseMapTile(services, 'map1', 'layer1', { x: 0, y: 0 });
@@ -69,7 +65,6 @@ test('eraseMapTile removes the tile at a point and undo restores it', () => {
 test('paintMapTerrain adds a terrain entry once per cell', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', { x: 0, y: 0 });
   const layer = project.maps[0].layers[0];
@@ -80,7 +75,6 @@ test('paintMapTerrain adds a terrain entry once per cell', () => {
 test('paintMapSprite places a sprite entry and eraseMapSprite removes by id', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapSprite(services, 'map1', 'layer2', 'sheet1', 'frame', 'frame1', { x: 4, y: 4 });
   const layer = project.maps[0].layers[1];
@@ -97,7 +91,6 @@ test('paintMapSprite places a sprite entry and eraseMapSprite removes by id', ()
 test('moveMapItem repositions an item and undo restores the prior position', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
   paintMapSprite(services, 'map1', 'layer2', 'sheet1', 'frame', 'frame1', { x: 0, y: 0 });
   const item = project.maps[0].layers[1].sprites[0];
 
@@ -111,7 +104,6 @@ test('moveMapItem repositions an item and undo restores the prior position', () 
 test('deleteMapItem removes any item kind by id and is undoable', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
   paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
   const item = project.maps[0].layers[0].tiles[0];
 
@@ -125,7 +117,6 @@ test('deleteMapItem removes any item kind by id and is undoable', () => {
 test('paintMapTile repainting the identical tile onto an occupied cell is a no-op', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
   const layer = project.maps[0].layers[0];
@@ -140,7 +131,6 @@ test('paintMapTile repainting the identical tile onto an occupied cell is a no-o
 test('paintMapTile painting a different tile onto an occupied cell replaces the occupant, undo restores original', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
   const layer = project.maps[0].layers[0];
@@ -160,7 +150,6 @@ test('paintMapTile painting a different tile onto an occupied cell replaces the 
 test('eraseMapTile fully clears a cell after repeated repaints of the same tile', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
   paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', { x: 0, y: 0 });
@@ -174,7 +163,6 @@ test('eraseMapTile fully clears a cell after repeated repaints of the same tile'
 test('paintMapTerrain repainting an occupied cell is a no-op and does not grow the undo stack', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', { x: 0, y: 0 });
   const layer = project.maps[0].layers[0];
@@ -190,7 +178,6 @@ test('paintMapTerrain repainting an occupied cell is a no-op and does not grow t
 test('eraseMapTerrain removes a terrain entry at a point and undo restores it', () => {
   const project = makeProject();
   const services = makeServices(project);
-  state.commands = new CommandStack(); state.dirty = false;
 
   paintMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', { x: 0, y: 0 });
   const layer = project.maps[0].layers[0];

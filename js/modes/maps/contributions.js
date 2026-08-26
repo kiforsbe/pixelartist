@@ -1,10 +1,10 @@
-import { state, activeMap } from '../../app/state.js';
+import { getEditorHost } from '../../host/runtime.js';
+import { activeMap } from '../../host/document-helpers.js';
 import { registerMapTool, bindMapMode, mapHoverPoint } from './presentation/map-tool-presenter.js';
 import { paintMap, drawMapOverlay, focusMapCanvas } from './presentation/map-renderer.js';
 import { mountMapPanel } from './presentation/map-panel.js';
 import { mountMapAssetsPanel } from './presentation/map-assets-panel.js';
 import { renderMapPreview } from './preview.js';
-import { getEditorHost } from '../../host/runtime.js';
 import {
   paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
   moveMapItem, deleteMapItem,
@@ -57,12 +57,13 @@ export function registerMapContributions(api) {
   api.views.register({
     id: 'maps.canvas', order: 50,
     create(_host, { mapCanvasView }) {
-      mapCanvasView.onPaint = ctx => paintMap(ctx, state.project, activeMap(), () => mapCanvasView.requestRender());
+      mapCanvasView.onPaint = ctx => paintMap(ctx, getEditorHost().projects.project, activeMap(), () => mapCanvasView.requestRender());
       mapCanvasView.onOverlay = ctx => {
         const map = activeMap(); if (!map) return;
-        const selection = getEditorHost().selections.get({ kind: 'map', id: map.id }) ?? {};
-        drawMapOverlay(mapCanvasView, ctx, state.project, map, {
-          tool: state.tool, hover: mapHoverPoint(), selectedItemId: selection.mapItemId, activeLayerId: selection.layerId,
+        const host = getEditorHost();
+        const selection = host.selections.get({ kind: 'map', id: map.id }) ?? {};
+        drawMapOverlay(mapCanvasView, ctx, host.projects.project, map, {
+          tool: host.store.getState().session.activeToolId, hover: mapHoverPoint(), selectedItemId: selection.mapItemId, activeLayerId: selection.layerId,
         });
       };
       mapCanvasView.canvas.addEventListener('contextmenu', event => event.preventDefault());
