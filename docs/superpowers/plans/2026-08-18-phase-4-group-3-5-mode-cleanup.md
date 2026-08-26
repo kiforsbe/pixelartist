@@ -16,6 +16,19 @@ The design spec scoped this to 29 `js/modes/**` files. A full-repo grep found **
 
 Separately, three of those files (`drawing-engine.js`, `layers-panel.js`, `color-panel.js`) push raw `{do,undo}` command objects directly onto the shared `CommandStack` instance (`state.commands`), bypassing Command Handlers entirely — ~14 sites in total (2 + 11 + 2, respectively; a 15th, `terrain-preset-art.js:56`, is explicitly excluded, see Task 8). The user explicitly chose (after being shown the size/risk) to fully encapsulate `HistoryService`'s `CommandStack` and convert all ~14 sites to proper Command Handlers as part of this plan, rather than deferring that conversion to a separate future phase (Tasks 1, 2, 3, 4, 5 cover this).
 
+### Execution amendment (approved 2026-08-26)
+
+The first Task 3-6 implementation pass exposed a gap between this plan and the parent spec's state-field mapping. `color-panel.js`, `drawing-engine.js`, `layers-panel.js`, `float-session.js`, and several preview/shell consumers still depend on `state.primary`, `state.secondary`, `state.brushSize`, `state.floating`, and the legacy `pixels`/`colors` notifications. Task 10 cannot delete `app/state.js` until those dependencies have an explicit home.
+
+The approved correction is:
+
+- Store shared drawing settings (`primary`, `secondary`, `brushSize`) and a monotonic live-pixel revision in `EditorStore.workspace`. Mutations use store transactions so panels, canvases, and shell shortcuts remain reactive without recreating the generic legacy event bus.
+- Make `float-session.js` the sole owner of the floating-selection value and expose narrow read/clear accessors to renderers, previews, autosave, and document lifecycle code.
+- Replace legacy `emit('pixels')`/`on('pixels')` wiring with workspace pixel-revision transactions/subscriptions. Replace `colors` and `brushSize` notifications with selectors over the drawing-settings workspace fields.
+- Treat the two stale `sprite-frame-commands` assertions and the remaining maps palette `activeSheet` import as completion fixes for the already-landed Task 1/6 work before starting Task 7.
+
+Tasks 7-10 retain their original behavior and verification goals; this amendment supplies the missing state ownership needed for their zero-import and final-deletion gates.
+
 ## Global Constraints
 
 - No user-facing behavior change, with one explicit exception: the `markDirty()` bug fix (edits that mutate project data without going through the command stack currently fail to mark the project dirty — see parent spec's "Current-state findings"). Every `markDirty()` call site converts to `getEditorHost().projects.markDirty()`.

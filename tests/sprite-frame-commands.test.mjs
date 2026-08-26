@@ -5,10 +5,8 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { SelectionService } from '../js/host/selection-service.js';
-import { CommandStack } from '../js/core/commands.js';
 import { createBitmap, setPixel, getPixel } from '../js/core/pixels.js';
 import { createLayerNode, createGroupNode } from '../js/core/model.js';
-import { state } from '../js/app/state.js';
 import {
   createFrame, deleteFrame, resizeFrame, moveFrames, sliceSheetIntoFrames,
 } from '../js/modes/sprites/application/commands/frame-commands.js';
@@ -16,8 +14,7 @@ import {
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
-  const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }), selections: new SelectionService(store), stack };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }), selections: new SelectionService(store) };
 }
 
 function makeProject() {
@@ -29,7 +26,7 @@ function makeProject() {
   return { version: 6, name: 'test', settings: { durationMs: 100 }, sheets: [sheet], maps: [], palettes: [], activePaletteId: null };
 }
 
-function reset() { state.commands = new CommandStack(); state.dirty = false; }
+function reset() {}
 
 test('createFrame adds a frame, selects it, marks dirty, and is undoable/redoable with a stable id', () => {
   const project = makeProject();
@@ -47,7 +44,6 @@ test('createFrame adds a frame, selects it, marks dirty, and is undoable/redoabl
   const doc = { kind: 'sprite-sheet', id: 'sheet1' };
   assert.equal(services.selections.get(doc)?.frameId, id);
   assert.equal(services.store.getState().project.dirty, true);
-  assert.equal(state.dirty, true);
 
   services.history.undo();
   assert.equal(sheet.frames.length, 0);
@@ -198,7 +194,7 @@ test('sliceSheetIntoFrames with replace clears existing frames and every animati
   assert.deepEqual(sheet.animations[0].breaks, [1]);
 });
 
-test('moveFrames with multiple plain frames uses "move strip" label and moves both by the same delta', () => {
+test('moveFrames moves multiple plain frames by the same delta and undoes', () => {
   const project = makeProject();
   const services = makeServices(project);
   reset();
@@ -214,7 +210,6 @@ test('moveFrames with multiple plain frames uses "move strip" label and moves bo
   moveFrames(services, 'sheet1', [frame0.id, frame1.id], 16, 8, null);
   assert.deepEqual({ x: frame0.x, y: frame0.y }, { x: 16, y: 8 });
   assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 36, y: 8 });
-  assert.equal(services.stack.done[services.stack.done.length - 1].label, 'move strip');
   assert.deepEqual(getPixel(layer.bitmap, 1, 1), [255, 0, 0, 255]);
 
   services.history.undo();
@@ -222,7 +217,7 @@ test('moveFrames with multiple plain frames uses "move strip" label and moves bo
   assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 20, y: 0 });
 });
 
-test('moveFrames with multiple frames on an accepted strip uses "move strip" label and carries pixels for each frame', () => {
+test('moveFrames carries pixels for multiple accepted-strip frames and undoes', () => {
   const project = makeProject();
   const services = makeServices(project);
   reset();
@@ -242,7 +237,6 @@ test('moveFrames with multiple frames on an accepted strip uses "move strip" lab
   moveFrames(services, 'sheet1', [frame0.id, frame1.id], 16, 8, 'an1');
   assert.deepEqual({ x: frame0.x, y: frame0.y }, { x: 16, y: 8 });
   assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 36, y: 8 });
-  assert.equal(services.stack.done[services.stack.done.length - 1].label, 'move strip');
   assert.deepEqual(getPixel(layer.bitmap, 17, 9), [255, 0, 0, 255]);
   assert.deepEqual(getPixel(layer.bitmap, 36, 9), [0, 255, 0, 255]);
   assert.deepEqual(getPixel(layer.bitmap, 1, 1), [0, 0, 0, 0]);

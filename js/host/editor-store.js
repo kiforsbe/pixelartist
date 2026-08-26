@@ -3,6 +3,7 @@ export function documentKey(document) {
 }
 
 export function createEditorState(initial = {}) {
+  const initialWorkspace = initial.workspace ?? {};
   return {
     project: { model: null, dirty: false, ...(initial.project ?? {}) },
     session: {
@@ -15,7 +16,18 @@ export function createEditorState(initial = {}) {
       ...(initial.session ?? {}),
     },
     interaction: { ...(initial.interaction ?? {}) },
-    workspace: { focusedSurfaceId: null, overlays: { labels: true, sequences: true }, ...(initial.workspace ?? {}) },
+    workspace: {
+      focusedSurfaceId: null,
+      ...initialWorkspace,
+      overlays: { labels: true, sequences: true, ...(initialWorkspace.overlays ?? {}) },
+      drawing: {
+        primary: [0, 0, 0, 255],
+        secondary: [255, 255, 255, 255],
+        brushSize: 1,
+        ...(initialWorkspace.drawing ?? {}),
+      },
+      pixelRevision: initialWorkspace.pixelRevision ?? 0,
+    },
   };
 }
 
@@ -56,6 +68,16 @@ export class EditorStore {
 
   markDirty(dirty = true) {
     this.transaction('dirty', state => { state.project.dirty = !!dirty; });
+  }
+
+  updateDrawingSettings(patch) {
+    this.transaction('drawing', state => {
+      state.workspace.drawing = { ...state.workspace.drawing, ...patch };
+    });
+  }
+
+  notifyPixelsChanged() {
+    this.transaction('pixels', state => { state.workspace.pixelRevision++; });
   }
 
   updateSession(patch, reason = 'session') {

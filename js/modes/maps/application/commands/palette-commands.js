@@ -17,7 +17,7 @@ import { runEntityCommand } from '../../../../host/command-helpers.js';
 import { cloneBitmap, blitRegion, colorsEqual } from '../../../../core/pixels.js';
 import { sheetLayers } from '../../../../core/model.js';
 import { setEntry, remapColor } from '../../../../core/palettes.js';
-import { activeSheet } from '../../../../app/state.js';
+import { activeSheet } from '../../../../host/document-helpers.js';
 
 function currentPalette(project) {
   return project?.palettes.find(p => p.id === project.activePaletteId) ?? null;
