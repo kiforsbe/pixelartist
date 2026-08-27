@@ -4,7 +4,7 @@ import { createProject, createSheet } from '../js/core/model.js';
 import { createTerrainSet, assignSlot } from '../js/core/terrainsets.js';
 import { blobIndexToMask, maskToBlobIndex, NEIGHBOR_BITS } from '../js/core/blob47.js';
 import { BLOB47_7X7_RAW } from '../js/core/blob47templates.js';
-import { buildTiledTsx } from '../js/app/tiledExport.js';
+import { buildTiledTsx } from '../js/core/export/tiledExport.js';
 
 function addTile(sheet, x, y, w, h) {
   const tile = { id: `t${sheet.tiles.length}`, x, y, w, h };

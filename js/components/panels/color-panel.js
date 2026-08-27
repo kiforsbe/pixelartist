@@ -4,18 +4,6 @@ import { getEditorHost } from '../../host/runtime.js';
 import { activeSheet } from '../../host/document-helpers.js';
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { mountStorePanel } from '../panel-mount.js';
-// `state`/`on`/`emit` from app/state.js are kept for one narrow,
-// already-out-of-scope-for-this-task exception: `state.primary`/
-// `state.secondary` (the current drawing colors, used by the primary/
-// secondary swatch editors and the palette-swatch pick handlers below) and
-// the 'colors' event they're broadcast on are still read/written by other
-// still-legacy files (drawing-engine.js, editor-workbench.js's swap-colors
-// action, filter-controller.js's color pickers) that nothing mirrors onto
-// the host store yet. Everything else this file used to read from/write to
-// `state` -- the active project/its palettes, and the two indexed-entry
-// edit/remap operations -- now goes through host.projects or a dispatched
-// Command Handler.
-import { state, on, emit } from '../../app/state.js';
 import { sheetLayers } from '../../core/model.js';
 import { createPalette, addSwatch, INDEXED_SIZE_PRESETS } from '../../core/palettes.js';
 import { SYSTEM_PALETTES, clonePalette } from '../../core/systempalettes.js';
@@ -33,6 +21,9 @@ function dispatch(id, args) {
 function currentModeId() {
   return getEditorHost().store.getState().session.activeModeId;
 }
+
+function drawingSettings() { return getEditorHost().store.getState().workspace.drawing; }
+function updateDrawingSettings(patch) { getEditorHost().store.updateDrawingSettings(patch); }
 
 function cssColor([r, g, b, a]) {
   return `rgba(${r},${g},${b},${a / 255})`;
@@ -68,20 +59,20 @@ export function mountColorPanel(el) {
     const alpha = document.createElement('input');
     alpha.type = 'range'; alpha.min = '0'; alpha.max = '255';
 
-    function getColor() { return slot === 'primary' ? state.primary : state.secondary; }
-    function setColor(c) { if (slot === 'primary') state.primary = c; else state.secondary = c; }
+    function getColor() { return drawingSettings()[slot]; }
+    function setColor(c) { updateDrawingSettings({ [slot]: c }); }
     function sync() { const c = getColor(); swatchColor.style.background = cssColor(c); alpha.value = String(c[3]); }
 
     swatch.addEventListener('click', () => { colorInput.value = rgbaToHex(getColor()); colorInput.click(); });
     colorInput.addEventListener('input', () => {
       const [r, g, b] = hexToRgb(colorInput.value);
       setColor([r, g, b, getColor()[3]]);
-      sync(); emit('colors');
+      sync();
     });
     alpha.addEventListener('input', () => {
       const c = getColor();
       setColor([c[0], c[1], c[2], Number(alpha.value)]);
-      sync(); emit('colors');
+      sync();
     });
 
     row.append(swatch, colorInput, alpha);
@@ -212,8 +203,8 @@ export function mountColorPanel(el) {
       sw.className = 'palette-swatch';
       sw.style.background = cssColor(c);
       sw.title = pal.indexed ? `index ${i}` : '';
-      sw.addEventListener('click', () => { state.primary = [...c]; primaryEditor.sync(); emit('colors'); });
-      sw.addEventListener('contextmenu', (e) => { e.preventDefault(); state.secondary = [...c]; secondaryEditor.sync(); emit('colors'); });
+      sw.addEventListener('click', () => { updateDrawingSettings({ primary: [...c] }); primaryEditor.sync(); });
+      sw.addEventListener('contextmenu', (e) => { e.preventDefault(); updateDrawingSettings({ secondary: [...c] }); secondaryEditor.sync(); });
       if (pal.indexed) sw.addEventListener('dblclick', () => editIndexedEntry(pal, i));
       swatchStrip.appendChild(sw);
     });
@@ -230,7 +221,7 @@ export function mountColorPanel(el) {
   btnAddSwatch.addEventListener('click', () => {
     const pal = currentPalette();
     if (!pal || pal.indexed) return;
-    addSwatch(pal, state.primary);
+    addSwatch(pal, drawingSettings().primary);
     getEditorHost().projects.markDirty();
     refreshSwatchStrip();
   });
@@ -331,10 +322,6 @@ export function mountColorPanel(el) {
     secondaryEditor.sync();
   }
 
-  // Legacy 'colors' subscription for the current drawing colors (see the
-  // import comment above) -- nothing else in this panel still needs
-  // on/emit, so this is the one narrow exception kept alive here.
-  const disposeColors = on('colors', () => { primaryEditor.sync(); secondaryEditor.sync(); });
   // History-driven redraws (the two editPaletteColor/remapPaletteColor
   // dispatches above, undo/redo of either) reach refreshAll through
   // HistoryService's own onChange, which fires on every do()/undo()/redo()
@@ -346,9 +333,9 @@ export function mountColorPanel(el) {
     s => s.project.model,
     s => s.session.activeModeId,
     s => s.session.activeDocument,
+    s => s.workspace.drawing,
   ], refreshAll, {
     onDispose() {
-      disposeColors();
       disposeHistory();
     },
   });

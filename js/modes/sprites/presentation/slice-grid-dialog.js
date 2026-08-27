@@ -55,7 +55,7 @@ export function buildSliceDialog() {
   markDefaultAction(dlg, $('#sg-create'));
   $('#sg-cancel').addEventListener('click', () => dlg.close());
   $('#sg-create').addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet) { dlg.close(); return; }
     const options = { ...readPreview(), namePrefix: $('#sg-prefix').value.trim() || 'frame' };
     dispatch('sprites.sliceGrid', { sheetId: sheet.id, options, replace: $('#sg-replace').checked });

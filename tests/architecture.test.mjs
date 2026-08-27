@@ -96,6 +96,13 @@ test('tiles mode does not import the legacy app state module', async () => {
   }
 });
 
+test('production modules do not import the legacy app state module', async () => {
+  for (const file of await jsFiles(join(root, 'js'))) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /from\s+['"][^'"]*app[\\/]state\.js['"]/, file);
+  }
+});
+
 test('shared workbench composes mode registries without concrete mode UI imports', async () => {
   const source = await readFile(join(root, 'js/features/workbench/editor-workbench.js'), 'utf8');
   assert.doesNotMatch(source, /from\s+['"][^'"]*modes[\\/]/);
@@ -114,6 +121,13 @@ test('nothing imports the retired js/ui directory', async () => {
   for (const file of await jsFiles(join(root, 'js'))) {
     const source = await readFile(file, 'utf8');
     assert.doesNotMatch(source, /from\s+['"][^'"]*[\\/]ui[\\/]/, file);
+  }
+});
+
+test('nothing imports the retired js/app directory', async () => {
+  for (const file of await jsFiles(join(root, 'js'))) {
+    const source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /from\s+['"][^'"]*[\\/]app[\\/]/, file);
   }
 });
 

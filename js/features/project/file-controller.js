@@ -1,26 +1,28 @@
-import { state, on, emit, activeSheet, activeMap, newDefaultProject, AUTOTEST, confirmOrAuto } from '../../app/state.js';
 import { getEditorHost } from '../../host/runtime.js';
-import * as io from '../../app/io.js';
-import { flattenSheet } from '../../core/model.js';
+import * as io from '../../platform/browser/project-io.js';
+import { flattenSheet, newDefaultProject } from '../../core/model.js';
 import { copyRegion } from '../../core/pixels.js';
-import { commitFloatIfAny } from '../../components/canvas/float-session.js';
-import { buildFramesJson, buildTilesJson, buildMapJson } from '../../app/exports.js';
-import { buildTiledTsx } from '../../app/tiledExport.js';
-import { buildC99, MAX_COLORS } from '../../app/c99Export.js';
+import { activeFloating, commitFloatIfAny } from '../../components/canvas/float-session.js';
+import { buildFramesJson, buildTilesJson, buildMapJson } from '../../core/export/exports.js';
+import { buildTiledTsx } from '../../core/export/tiledExport.js';
+import { buildC99, MAX_COLORS } from '../../core/export/c99Export.js';
 import {
   buildGbaBinary, buildNesChr, buildSnesBinary, buildGbBinary, buildGbcBinary, buildC64Binary,
   checkGbaCompatibility, checkNesCompatibility, checkSnesCompatibility,
   checkGbCompatibility, checkGbcCompatibility, checkC64Compatibility,
-} from '../../app/platformExport.js';
-import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from '../../app/animationExport.js';
+} from '../../core/export/platformExport.js';
+import { selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames } from '../../core/export/animationExport.js';
 import { encodeGif } from '../../core/gif.js';
 import { buildPalette, quantizeBitmap, colorFrequency } from '../../core/quantize.js';
 import { PLATFORMS, NES_PALETTE, C64_PALETTE, GB_PALETTE, snapPaletteToHardware } from '../../core/platforms.js';
-import { encodePng } from '../../app/pngcodec.js';
+import { encodePng } from '../../core/pngcodec.js';
 import { zipWrite } from '../../core/zip.js';
-import { collectProjectExportEntries } from '../../app/projectExport.js';
-import { defineAction } from '../../app/actions.js';
+import { collectProjectExportEntries } from '../../core/export/projectExport.js';
+import { defineAction } from '../shell/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
+import { activeSheet, activeMap } from '../../host/document-helpers.js';
+import { AUTOTEST, confirmOrAuto } from '../../platform/browser/autotest.js';
+import { fileSession } from './file-session.js';
 
 function isCancel(error) {
   return error?.name === 'AbortError' || error?.message === 'cancelled';
@@ -30,6 +32,8 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
+function project() { return getEditorHost().projects.project; }
+
 export function mountFileController() {
   const dlgExportProject = document.getElementById('dlg-export-project');
   const epSheets = document.getElementById('ep-sheets');
@@ -38,138 +42,6 @@ export function mountFileController() {
   const epCancel = document.getElementById('ep-cancel');
   markDefaultAction(dlgExportProject, epExport);
   epCancel.addEventListener('click', () => dlgExportProject.close());
-
-  // ---- host -> legacy mirror ----
-  // EditorStore is authoritative, but a broad swath of still-legacy code
-  // (js/modes/**/presentation/*.js, js/components/panels/*.js, drawing-
-  // engine.js, sheet-overlays.js, and others -- roughly 29 files, out of
-  // every completed task's scope) reads app/state.js's `state` object
-  // directly and refreshes only through the legacy `on(event, fn)` bus, not
-  // by observing the host store reactively. Every host field one of those
-  // files still depends on is mirrored one-way (host -> legacy) below, each
-  // mirror re-emitting whichever legacy bus event(s) that field's readers
-  // expect so they actually repaint -- exactly what legacy setProject()/
-  // switchMode() used to do as their own last step. All of this persists
-  // until Group 3 (per-mode cleanup, scheduled after this plan) migrates
-  // those files onto the host store/services directly, at which point
-  // Group 3 deletes it.
-  //
-  // project.model, session.activeDocument and session.activeModeId are
-  // watched as ONE tuple selector, not three independent subscribes:
-  // EditorHost.setProject() writes project.model and activeDocument in two
-  // separate store transactions, so two independent subscribes would fire
-  // in two steps -- the first (project.model) would emit 'project' while
-  // state.activeSheetId/activeMapId still held the PREVIOUS project's
-  // value, resolving activeSheet()/activeMap() against the wrong id for
-  // that one emit and leaving dependent panels (e.g. the Layers panel)
-  // rendered empty with no later event to correct them. A single tuple
-  // subscription fires exactly once, after both writes have landed.
-  //
-  // Fields covered by this tuple: state.project (the host is now the only
-  // writer), state.activeSheetId/activeMapId (resolved from
-  // session.activeDocument), state.onion (a live alias into
-  // project.settings.onion -- frame-editor-presenter.js reads/writes it at
-  // ~26 sites), and state.mode (40+ sites across tool-palette.js and nearly
-  // every js/modes/*/presentation/*.js file gate tool availability, panel
-  // visibility, and command modeId-tagging on it directly). Losing any one
-  // of these leaves its readers silently stuck on a stale/previous-project
-  // value after boot, New, Open, or a mode switch.
-  //
-  // The tuple's equals compares activeDocument by {kind,id} rather than
-  // reference: DocumentService.resolve() allocates a fresh {kind,id} object
-  // on every call, so reference equality would re-fire (and re-emit
-  // 'project'/'view', forcing a full panel repaint) on every setActive()
-  // call, even one that re-activates the document already active.
-  getEditorHost().store.subscribe(
-    s => [s.project.model, s.session.activeDocument, s.session.activeModeId],
-    ([project, doc, mode]) => {
-      state.project = project;
-      state.activeSheetId = doc && doc.kind !== 'map' ? doc.id : null;
-      state.activeMapId = doc && doc.kind === 'map' ? doc.id : null;
-      state.onion = project?.settings?.onion ?? state.onion;
-      state.mode = mode;
-      emit('project');
-      emit('view');
-    },
-    {
-      equals: (a, b) => a[0] === b[0] && a[1]?.id === b[1]?.id && a[1]?.kind === b[1]?.kind && a[2] === b[2],
-      fireImmediately: true,
-    },
-  );
-
-  // History bridge: HistoryService now wraps the shared legacy CommandStack
-  // (see bootstrap.js), but has zero legacy listeners of its own --
-  // layers-panel.js, color-panel.js, preview-panel.js, frame-editor-
-  // presenter.js and tile-editor-presenter.js still refresh exclusively on
-  // the legacy `on('history', ...)` event. Until Group 3 moves them onto
-  // host.history.subscribe() directly, this one-line re-emit is what makes
-  // every undo/redo (from either stack) reach them.
-  getEditorHost().history.subscribe(() => emit('history'));
-
-  // Overlays mirror: the View menu's Show Labels/Show Sequences toggles
-  // (editor-workbench.js) write workspace.overlays.{labels,sequences} on
-  // the host store; the only reader, sheet-overlays.js, still reads legacy
-  // state.overlays.{labels,sequences} and repaints only on `on('view', ...)`.
-  // The store mutates `workspace.overlays` in place, so a selector
-  // returning the object itself would never change identity under
-  // Object.is -- select the two booleans as a tuple instead. state.overlays
-  // stays the same mutable object app/state.js created at boot; only its
-  // fields are reassigned, so any other holder of a reference to it keeps
-  // working. Persists until Group 3 migrates sheet-overlays.js onto the
-  // host store.
-  getEditorHost().store.subscribe(
-    s => [s.workspace.overlays.labels, s.workspace.overlays.sequences],
-    ([labels, sequences]) => {
-      state.overlays.labels = labels;
-      state.overlays.sequences = sequences;
-      emit('view');
-    },
-    { equals: (a, b) => a[0] === b[0] && a[1] === b[1], fireImmediately: true },
-  );
-
-  // state.view <-> session.activeViewId mirror (bidirectional): frames-
-  // panel.js, frame-tool-presenter.js and tile-tool-presenter.js still set
-  // legacy state.view = 'frame'|'tile' (frame-editor-presenter.js/tile-
-  // editor-presenter.js reset it to 'sheet') to open/close the frame/tile
-  // sub-editor; editor-workbench.js's applyView() -- the only place that
-  // actually shows/hides those sub-editors -- reads session.activeViewId
-  // exclusively. Both directions have live writers (the legacy presenters
-  // above write state.view; document-controller.js's switchMode() writes
-  // activeViewId directly on every mode switch), so this mirror has to run
-  // both ways, unlike the one-way mirrors above. The `syncingView` guard
-  // stops each direction's own write from bouncing back through the other
-  // and re-triggering itself -- without it, a host write would flow to
-  // legacy, re-emit 'view', flow back to host, and so on (harmlessly, since
-  // both sides already agree by the second pass, but pointlessly). Persists
-  // until Group 3 migrates the frame/tile presenters onto
-  // session.activeViewId directly.
-  let syncingView = false;
-  const legacyViewFor = viewId => (viewId === 'sprites.frame' ? 'frame' : viewId === 'tiles.tile' ? 'tile' : 'sheet');
-  const hostViewFor = (view, mode) => {
-    if (view === 'frame') return 'sprites.frame';
-    if (view === 'tile') return 'tiles.tile';
-    return mode === 'maps' ? 'maps.canvas' : `${mode}.sheet`;
-  };
-  getEditorHost().store.subscribe(
-    s => s.session.activeViewId,
-    (viewId) => {
-      if (syncingView || viewId == null) return;
-      const legacy = legacyViewFor(viewId);
-      if (state.view === legacy) return;
-      syncingView = true;
-      try { state.view = legacy; emit('view'); } finally { syncingView = false; }
-    },
-    { fireImmediately: true },
-  );
-  on('view', () => {
-    if (syncingView) return;
-    const mode = getEditorHost().store.getState().session.activeModeId;
-    if (!mode) return;
-    const target = hostViewFor(state.view, mode);
-    if (getEditorHost().store.getState().session.activeViewId === target) return;
-    syncingView = true;
-    try { getEditorHost().store.updateSession({ activeViewId: target }, 'view'); } finally { syncingView = false; }
-  });
 
   // ---- file: Open ----
   // Folder ("unpacked") projects are disabled for now (see io.saveUnpacked/
@@ -181,9 +53,9 @@ export function mountFileController() {
       if (getEditorHost().projects.dirty && !confirmOrAuto('Discard unsaved changes and open another project?')) return;
       try {
         const { project, handle } = await io.openPacked();
-        state.fileHandle = handle;
-        state.dirHandle = null;
-        state.saveMode = handle ? 'packed' : null;
+        fileSession.fileHandle = handle;
+        fileSession.dirHandle = null;
+        fileSession.saveMode = handle ? 'packed' : null;
         getEditorHost().history.clear({ markDirty: false });
         getEditorHost().setProject(project, { dirty: false });
       } catch (e) {
@@ -197,35 +69,33 @@ export function mountFileController() {
   async function doSave() {
     commitFloatIfAny();
     try {
-      state.fileHandle = await io.savePacked(state.project, state.fileHandle);
-      state.saveMode = 'packed';
+      fileSession.fileHandle = await io.savePacked(project(), fileSession.fileHandle);
+      fileSession.saveMode = 'packed';
       getEditorHost().projects.markSaved();
       await io.clearAutosave().catch(() => {});
-      emit('project');
     } catch (e) {
       if (!isCancel(e)) alert(`Save failed: ${e.message}`);
     }
   }
-  defineAction('file.save', { label: 'Save', shortcut: 'Ctrl+S', run: doSave, isEnabled: () => !!state.project });
+  defineAction('file.save', { label: 'Save', shortcut: 'Ctrl+S', run: doSave, isEnabled: () => !!project() });
 
   // ---- file: Save As ----
   async function doSaveAs() {
     commitFloatIfAny();
     try {
-      state.fileHandle = await io.savePacked(state.project, null);
-      state.dirHandle = null;
-      state.saveMode = 'packed';
+      fileSession.fileHandle = await io.savePacked(project(), null);
+      fileSession.dirHandle = null;
+      fileSession.saveMode = 'packed';
       getEditorHost().projects.markSaved();
       await io.clearAutosave().catch(() => {});
-      emit('project');
     } catch (e) {
       if (!isCancel(e)) alert(`Save failed: ${e.message}`);
     }
   }
-  defineAction('file.saveAs', { label: 'Save As…', run: doSaveAs, isEnabled: () => !!state.project });
+  defineAction('file.saveAs', { label: 'Save As…', run: doSaveAs, isEnabled: () => !!project() });
   
   // ---- export ----
-  // Every export operation is a registered action (js/app/actions.js), never
+  // Every export operation is a registered action (js/features/shell/actions.js), never
   // an ad hoc closure inline in a menu structure -- Document > Export Sheet
   // and Document > Export Selected Animation are themselves actions whose
   // `submenu` is a fixed list of child action ids. Items that don't apply to
@@ -235,10 +105,10 @@ export function mountFileController() {
   async function exportSheetPng() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     const bitmap = flattenSheet(sheet);
     const blob = await io.exportPngBlob(bitmap);
-    io.downloadBlob(blob, `${state.project.name}-${sheet.name}.png`);
+    io.downloadBlob(blob, `${project().name}-${sheet.name}.png`);
   }
   function exportFramesJson() {
     commitFloatIfAny();
@@ -251,8 +121,8 @@ export function mountFileController() {
   
   function exportMapJson() {
     const map = activeMap();
-    if (!map || !state.project) return;
-    io.downloadBlob(new Blob([JSON.stringify(buildMapJson(map, state.project), null, 2)], { type: 'application/json' }), `${state.project.name}-${map.name}.map.json`);
+    if (!map || !project()) return;
+    io.downloadBlob(new Blob([JSON.stringify(buildMapJson(map, project()), null, 2)], { type: 'application/json' }), `${project().name}-${map.name}.map.json`);
   }
   function exportTilesJson() {
     commitFloatIfAny();
@@ -339,9 +209,9 @@ export function mountFileController() {
     const flat = flattenSheet(sheet);
     const rects = sheet.kind === 'sprite' ? sheet.frames : sheet.tiles;
     const bitmaps = rects.map(r => copyRegion(flat, r.x, r.y, r.w, r.h));
-    const colorMode = state.project.settings.exportColorMode ?? 'strict';
+    const colorMode = project().settings.exportColorMode ?? 'strict';
     const maxColors = colorMode === 'total' ? SYSTEM_TOTAL_COLORS[target] : MAX_COLORS[target];
-    const sourcePalette = state.project.palettes.find(p => p.id === state.project.activePaletteId);
+    const sourcePalette = project().palettes.find(p => p.id === project().activePaletteId);
     const sourceColorCount = sourcePalette?.indexed ? sourcePalette.colors.length : colorFrequency(bitmaps).length;
     let palette = buildPalette(bitmaps, maxColors, sourcePalette).map(c => [c[0], c[1], c[2]]);
     const hwPalette = HARDWARE_PALETTE_BY_TARGET[target];
@@ -369,7 +239,7 @@ export function mountFileController() {
   function exportGenericC99() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     try {
       const { palette, items } = resolveC99Items(sheet, 'generic8');
       const { h, c } = buildC99({ projectName: sheet.name, target: 'generic8', palette, items });
@@ -382,7 +252,7 @@ export function mountFileController() {
   function exportGbaNative() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     try {
       const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gba4');
       if (!confirmPlatformExport('Game Boy Advance', checkGbaCompatibility, sourceColorCount, items, paletteBudget)) return;
@@ -396,7 +266,7 @@ export function mountFileController() {
   function exportNesNative() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     try {
       const { items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'nes2');
       if (!confirmPlatformExport('NES', checkNesCompatibility, sourceColorCount, items, paletteBudget)) return;
@@ -409,7 +279,7 @@ export function mountFileController() {
   function exportSnesNative() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     try {
       const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'snes4');
       if (!confirmPlatformExport('SNES', checkSnesCompatibility, sourceColorCount, items, paletteBudget)) return;
@@ -423,7 +293,7 @@ export function mountFileController() {
   function exportGbNative() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     try {
       const { items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gb2');
       if (!confirmPlatformExport('Game Boy', checkGbCompatibility, sourceColorCount, items, paletteBudget)) return;
@@ -436,7 +306,7 @@ export function mountFileController() {
   function exportGbcNative() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     try {
       const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'gbc2');
       if (!confirmPlatformExport('Game Boy Color', checkGbcCompatibility, sourceColorCount, items, paletteBudget)) return;
@@ -450,7 +320,7 @@ export function mountFileController() {
   function exportC64Native() {
     commitFloatIfAny();
     const sheet = activeSheet();
-    if (!sheet || !state.project) return;
+    if (!sheet || !project()) return;
     try {
       const { palette, items, sourceColorCount, paletteBudget } = resolveC99Items(sheet, 'c64mc');
       if (!confirmPlatformExport('Commodore 64', checkC64Compatibility, sourceColorCount, items, paletteBudget)) return;
@@ -492,7 +362,7 @@ export function mountFileController() {
       { action: 'document.exportSheet.c64' },
       { action: 'document.exportSheet.c99' },
     ],
-    isEnabled: () => !!state.project,
+    isEnabled: () => !!project(),
   });
   
   const SHEET_FORMATS = {
@@ -612,9 +482,9 @@ export function mountFileController() {
   defineAction('file.export', {
     label: 'Export Project…',
     run: () => {
-      if (!state.project) return;
+      if (!project()) return;
       epSheets.innerHTML = '';
-      for (const sheet of state.project.sheets) {
+      for (const sheet of project().sheets) {
         const row = document.createElement('div');
         row.className = 'row';
         const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: true, id: `ep-sheet-${sheet.id}` });
@@ -628,19 +498,19 @@ export function mountFileController() {
       epDestFolderRow.hidden = !io.supportsFS();
       dlgExportProject.showModal();
     },
-    isEnabled: () => !!state.project,
+    isEnabled: () => !!project(),
   });
   
   epExport.addEventListener('click', async () => {
     dlgExportProject.close();
     commitFloatIfAny();
-    const selections = state.project.sheets
+    const selections = project().sheets
       .filter(s => document.getElementById(`ep-sheet-${s.id}`).checked)
       .map(s => ({ sheetId: s.id, format: document.getElementById(`ep-format-${s.id}`).value }));
     const warnings = [];
     let entries;
     try {
-      entries = await collectProjectExportEntries(state.project, selections,
+      entries = await collectProjectExportEntries(project(), selections,
         (sheet, format) => buildSheetExportEntries(sheet, format, warnings));
     } catch (e) {
       alert(`Export blocked: ${e.message}`);
@@ -649,7 +519,7 @@ export function mountFileController() {
     if (warnings.length && !confirmOrAuto(`Export has ${warnings.length} issue(s):\n\n${warnings.join('\n\n')}\n\nExport anyway?`)) return;
     const dest = document.querySelector('input[name="ep-dest"]:checked').value;
     if (dest === 'folder') await io.saveEntriesToFolder(entries);
-    else io.downloadBlob(new Blob([await zipWrite(entries)]), `${state.project.name}-export.zip`);
+    else io.downloadBlob(new Blob([await zipWrite(entries)]), `${project().name}-export.zip`);
   });
   
   // ---- beforeunload guard ----
@@ -659,7 +529,7 @@ export function mountFileController() {
   
   // ---- autosave ----
   setInterval(() => {
-    if (getEditorHost().projects.dirty && state.project && !state.floating) io.autosave(state.project).catch(() => {});
+    if (getEditorHost().projects.dirty && project() && !activeFloating()) io.autosave(project()).catch(() => {});
   }, 30000);
   
   // ---- boot ----
@@ -678,4 +548,3 @@ export function mountFileController() {
     }
   })();
 }
-

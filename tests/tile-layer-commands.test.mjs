@@ -4,7 +4,6 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import { addTileLayer, removeTileLayer } from '../js/modes/tiles/application/commands/tile-layer-commands.js';
 
 function makeServices(project) {
@@ -19,7 +18,6 @@ function makeProject() {
 }
 
 test('addTileLayer appends a layer name and is undoable', () => {
-  state.commands = new CommandStack(); state.dirty = false;
   const project = makeProject();
   const services = makeServices(project);
 
@@ -34,7 +32,6 @@ test('addTileLayer appends a layer name and is undoable', () => {
 });
 
 test('removeTileLayer clears the layer name from every tile that used it, and undo restores both', () => {
-  state.commands = new CommandStack(); state.dirty = false;
   const project = makeProject();
   const sheet = project.sheets[0];
   sheet.layers = ['terrain', 'decor'];

@@ -107,7 +107,7 @@ export function mountTileEditor(hostEl) {
   let radius = 1; // 0 = 1x1 (off), 1 = 3x3, 2 = 5x5
 
   function currentTile() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (!sheet) return null;
     const id = sheetSelection(sheet).editingTileId;
     if (!id) return null;
@@ -179,7 +179,7 @@ export function mountTileEditor(hostEl) {
   }
 
   view.onPaint = (ctx) => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     const t = currentTile();
     if (!sheet || !t) return;
     const tw = t.w, th = t.h;
@@ -207,7 +207,7 @@ export function mountTileEditor(hostEl) {
   };
 
   view.onOverlay = (ctx) => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     const r = centerRect();
     if (!sheet || !r) return;
     const p0 = view.imageToScreen(r.x, r.y);
@@ -250,7 +250,7 @@ export function mountTileEditor(hostEl) {
   let dialogDir = null;
 
   function openSlotDialog(dir) {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     const t = currentTile();
     if (!sheet || !t || t.terrainSetId != null) return;
     dialogDir = dir;
@@ -274,7 +274,7 @@ export function mountTileEditor(hostEl) {
   teCancel.addEventListener('click', () => dlg.close());
   teOk.addEventListener('click', () => {
     const t = currentTile();
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (!t || !sheet || !dialogDir) { dlg.close(); return; }
     const mode = teModeRadios.find(r => r.checked)?.value ?? 'same';
     const tileId = mode === 'tile' ? teTileSelect.value : null;
@@ -329,7 +329,7 @@ export function mountTileEditor(hostEl) {
   // ---- top strip wiring ----
 
   function updateStrip() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     const t = currentTile();
     if (!sheet || !t) { nameLabel.textContent = ''; return; }
     const idx = sheet.tiles.indexOf(t);
@@ -370,7 +370,7 @@ export function mountTileEditor(hostEl) {
   let loadedRadius = null;
 
   function loadContent() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     const t = currentTile();
     if (!sheet || !t) return;
     view.setContent({ width: (2 * radius + 1) * t.w, height: (2 * radius + 1) * t.h });
@@ -389,7 +389,7 @@ export function mountTileEditor(hostEl) {
     if (!t) {
       hide();
       if (activeViewId() === 'tiles.tile') {
-        const sheet = activeSheet();
+        const sheet = activeSheet('tile');
         if (sheet) setSheetSelection(sheet, { editingTileId: null });
         getEditorHost().store.updateSession({ activeViewId: 'tiles.sheet' }, 'view');
       }

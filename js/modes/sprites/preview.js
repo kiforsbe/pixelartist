@@ -9,7 +9,7 @@ function sheetDocument(sheet) {
 }
 
 export function renderSpritePreview({ overrideLayers = null } = {}) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('sprite');
   if (!sheet) return { bitmap: null };
   const selection = getEditorHost().selections.get(sheetDocument(sheet)) ?? {};
   if (selection.animationId) return { managed: true };

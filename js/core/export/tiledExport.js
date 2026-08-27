@@ -3,7 +3,7 @@
 // app is single-material blob-47 autotiling, so it maps to exactly one
 // <wangset> with exactly one <wangcolor> (wangid index 1 = "this terrain
 // present", index 0 = unset) -- see the export-system design doc.
-import { blobIndexToMask, resolveTerrainSlot } from '../core/blob47.js';
+import { blobIndexToMask, resolveTerrainSlot } from '../blob47.js';
 
 // wangid order per the TMX spec: top, topright, right, bottomright, bottom,
 // bottomleft, left, topleft -- exactly blob47's N,NE,E,SE,S,SW,W,NW bit

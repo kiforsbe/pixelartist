@@ -50,6 +50,11 @@ export function mountMapAssetsPanel(container) {
   };
   return mountStorePanel(getEditorHost().store, [
     s => s.session.activeViewId,
+    s => s.session.activeDocument,
+    s => {
+      const document = s.session.activeDocument;
+      return document?.kind === 'map' ? s.session.selectionsByDocument[`map:${document.id}`] : null;
+    },
     s => s.project.model,
     s => s.session.activeToolId,
   ], render);

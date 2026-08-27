@@ -53,6 +53,7 @@ export class DocumentService {
     this.#store.transaction('document', next => {
       next.session.activeDocument = reference;
       next.session.activeDocumentByMode[mode.id] = reference;
+      this.#seedInitialSelection(next, reference);
     });
     return reference;
   }
@@ -64,6 +65,7 @@ export class DocumentService {
     this.#store.transaction('document', state => {
       state.session.activeDocument = value;
       if (modeId) state.session.activeDocumentByMode[modeId] = value;
+      this.#seedInitialSelection(state, value);
     });
     return value;
   }
@@ -103,5 +105,14 @@ export class DocumentService {
     });
     const modeId = this.#store.getState().session.activeModeId;
     return modeId ? (this.activateMode({ id: modeId, documentKinds: [reference.kind] }), true) : true;
+  }
+
+  #seedInitialSelection(state, reference) {
+    const key = documentKey(reference);
+    if (!key || !state.project.model || Object.hasOwn(state.session.selectionsByDocument, key)) return;
+    const provider = this.provider(reference.kind);
+    const document = provider?.get(state.project.model, reference.id) ?? null;
+    const selection = document ? provider?.initialSelection?.(document, state.project.model) : null;
+    if (selection != null) state.session.selectionsByDocument[key] = { ...selection };
   }
 }

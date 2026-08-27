@@ -1,16 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { state } from '../js/app/state.js';
 import { registerFloatView, currentEditRegion } from '../js/components/canvas/float-session.js';
 import { createProject, createSheet, sheetLayers } from '../js/core/model.js';
+import { EditorHost } from '../js/host/editor-host.js';
+import { setEditorHost } from '../js/host/runtime.js';
+
+const host = new EditorHost();
+setEditorHost(host);
 
 function setupProject() {
   const project = createProject('p');
   const sheet = createSheet(project, { name: 's', width: 20, height: 20, kind: 'sprite' });
-  state.project = project;
-  state.activeSheetId = sheet.id;
-  state.activeLayerId = sheetLayers(sheet)[0].id;
-  state.view = 'sheet';
+  const document = { kind: 'sprite-sheet', id: sheet.id };
+  host.setProject(project);
+  host.store.updateSession({ activeDocument: document, activeViewId: 'sprites.sheet' }, 'view');
+  host.selections.set({ layerId: sheetLayers(sheet)[0].id }, document);
   return sheet;
 }
 
@@ -37,8 +41,8 @@ test('currentEditRegion: a selection is clamped to the target rect', () => {
   assert.deepEqual(rr.region, { x: 5, y: 5, w: 15, h: 15 });
 });
 
-test('currentEditRegion: null when there is no active view registered for state.view', () => {
+test('currentEditRegion: null when there is no active registered view', () => {
   setupProject();
-  state.view = 'frame'; // never registered in this test file
+  host.store.updateSession({ activeViewId: 'sprites.frame' }, 'view'); // never registered in this test file
   assert.equal(currentEditRegion(), null);
 });

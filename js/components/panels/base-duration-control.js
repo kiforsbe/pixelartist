@@ -1,6 +1,5 @@
 // Shared ms/fps(+step) control for a "base duration" value -- reused by the
-// Animation panel (js/ui/animpanel.js) and, in the next task, the New
-// Project and Project Settings dialogs (js/app/main.js). One unit is
+// Animation panel and the New Project and Project Settings dialogs. One unit is
 // "primary" (editable) at a time; the other is shown read-only, live-
 // converted, for reference. fps-primary additionally shows a "step" field
 // (animate on every Nth frame at this fps), inline on the same row as fps. See

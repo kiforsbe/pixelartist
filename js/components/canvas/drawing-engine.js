@@ -7,16 +7,15 @@
 //
 // Rendering note: pixel edits mutate layer bitmaps directly (in-place, for live
 // preview) and main.js caches a flattened "scratch" composite that is normally
-// only invalidated on the 'project' event. To keep the canvas visually in sync
+// only invalidated on project changes. To keep the canvas visually in sync
 // during an in-progress stroke (before the undo command is committed) this
-// module emits a lightweight 'pixels' event on every bitmap-affecting pointer
+// module increments the store's lightweight pixel revision on every bitmap-affecting pointer
 // step; main.js listens for it and just invalidates the scratch cache + repaints
 // (no full setContent/dirty-flag work). The authoritative commit still goes
 // through getEditorHost().history.execute() at stroke finalize -- HistoryService's
 // own onChange wrapper marks the project dirty and fires 'project' -- and
 // undo/redo is covered by main.js listening on 'history' the same way.
 
-import { state, emit } from '../../app/state.js';
 import { getEditorHost } from '../../host/runtime.js';
 import { activeSheet, activeLayer } from '../../host/document-helpers.js';
 import {
@@ -28,7 +27,7 @@ import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '..
 import { nearestColor } from '../../core/palettes.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../../core/model.js';
 import { segmentAt } from '../../core/strips.js';
-import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat } from './float-session.js';
+import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat, activeFloating } from './float-session.js';
 import { commitAcceptAnimation } from '../../features/animations/commands.js';
 import { stripForFrame as stripOf } from '../../domain/sprites/strips.js';
 import { HANDLES_ALL, handlePoint, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../core/resizeAnchor.js';
@@ -39,16 +38,19 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
-// Mirrored one-way from legacy state.tool by editor-workbench.js (tool-
-// palette.js still writes state.tool synchronously on every tool switch),
-// so reading it off the store here is always in sync -- see that file's own
-// syncActiveTool comment.
 function activeTool() {
   return getEditorHost().store.getState().session.activeToolId;
 }
 
+function activeViewKind() {
+  return getEditorHost().store.getState().session.activeViewId?.split('.').at(-1) ?? null;
+}
+
+function drawingSettings() { return getEditorHost().store.getState().workspace.drawing; }
+function notifyPixelsChanged() { getEditorHost().store.notifyPixelsChanged(); }
+
 function activePalette() {
-  const p = state.project;
+  const p = getEditorHost().projects.project;
   if (!p) return null;
   return p.palettes.find(pl => pl.id === p.activePaletteId) ?? null;
 }
@@ -137,7 +139,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   function currentColor(ev, swap = false, forcePrimary = false) {
     if (activeTool() === 'eraser') return [0, 0, 0, 0];
     const useSecondary = !forcePrimary && (!!(ev.buttons & 2) !== swap);
-    let c = useSecondary ? state.secondary : state.primary;
+    let c = useSecondary ? drawingSettings().secondary : drawingSettings().primary;
     const pal = activePalette();
     if (pal && pal.indexed && pal.colors.length) c = nearestColor(pal, c);
     return c;
@@ -165,7 +167,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (x1 < x0 || y1 < y0) {
       // nothing inside the target: discard any stray live edits, no command
       blitRegion(bmp, copyRegion(before, fx0, fy0, fx1 - fx0 + 1, fy1 - fy0 + 1), fx0, fy0);
-      emit('pixels');
+      notifyPixelsChanged();
       return;
     }
     const rect = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
@@ -225,7 +227,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       }
       finalize(layer, before, dirty, 'fill', t);
       stroke = null;
-      emit('pixels');
+      notifyPixelsChanged();
       return;
     }
     if (tool === 'softflood') {
@@ -245,18 +247,19 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       }
       finalize(layer, before, dirty, 'soft flood', t);
       stroke = null;
-      emit('pixels');
+      notifyPixelsChanged();
       return;
     }
     if (BRUSH_TOOLS.has(tool)) {
       const target = getTargetRect(ev.x, ev.y);
       const p = clampPoint(ev.x, ev.y, target);
       if (!p) return;
-      drawLine(layer.bitmap, p.x, p.y, p.x, p.y, color, state.brushSize);
-      maskOutsideTarget(layer.bitmap, before, p.x, p.y, p.x + state.brushSize - 1, p.y + state.brushSize - 1, target);
-      const dirty = extend(null, p.x, p.y, p.x + state.brushSize - 1, p.y + state.brushSize - 1);
+      const brushSize = drawingSettings().brushSize;
+      drawLine(layer.bitmap, p.x, p.y, p.x, p.y, color, brushSize);
+      maskOutsideTarget(layer.bitmap, before, p.x, p.y, p.x + brushSize - 1, p.y + brushSize - 1, target);
+      const dirty = extend(null, p.x, p.y, p.x + brushSize - 1, p.y + brushSize - 1);
       stroke = { tool, layer, before, color, dirty, last: p, target };
-      emit('pixels');
+      notifyPixelsChanged();
       return;
     }
     if (SHAPE_TOOLS.has(tool)) {
@@ -267,7 +270,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       // opposite swatch (left = primary outline / secondary fill, right = swapped)
       const fill = (tool !== 'line' && toolOptions.filled) ? currentColor(ev, true) : null;
       stroke = { tool, layer, before, color, fill, dirty: null, anchor: p, target };
-      emit('pixels');
+      notifyPixelsChanged();
       return;
     }
   }
@@ -279,14 +282,15 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const p = clampPoint(ev.x, ev.y, stroke.target);
       if (!p) return;
       const last = stroke.last;
-      drawLine(layer.bitmap, last.x, last.y, p.x, p.y, color, state.brushSize);
+      const brushSize = drawingSettings().brushSize;
+      drawLine(layer.bitmap, last.x, last.y, p.x, p.y, color, brushSize);
       const sx0 = Math.min(last.x, p.x), sy0 = Math.min(last.y, p.y);
-      const sx1 = Math.max(last.x, p.x) + state.brushSize - 1;
-      const sy1 = Math.max(last.y, p.y) + state.brushSize - 1;
+      const sx1 = Math.max(last.x, p.x) + brushSize - 1;
+      const sy1 = Math.max(last.y, p.y) + brushSize - 1;
       maskOutsideTarget(layer.bitmap, before, sx0, sy0, sx1, sy1, stroke.target);
       stroke.dirty = extend(stroke.dirty, sx0, sy0, sx1, sy1);
       stroke.last = p;
-      emit('pixels');
+      notifyPixelsChanged();
       return;
     }
     if (SHAPE_TOOLS.has(tool)) {
@@ -295,9 +299,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       blitRegion(layer.bitmap, before, 0, 0);
       const a = stroke.anchor;
       if (tool === 'line') {
-        drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, state.brushSize);
-        const sx1 = Math.max(a.x, p.x) + state.brushSize - 1;
-        const sy1 = Math.max(a.y, p.y) + state.brushSize - 1;
+        const brushSize = drawingSettings().brushSize;
+        drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, brushSize);
+        const sx1 = Math.max(a.x, p.x) + brushSize - 1;
+        const sy1 = Math.max(a.y, p.y) + brushSize - 1;
         maskOutsideTarget(layer.bitmap, before, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1, stroke.target);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
       } else if (tool === 'rect') {
@@ -307,7 +312,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         drawEllipse(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
       }
-      emit('pixels');
+      notifyPixelsChanged();
       return;
     }
   }
@@ -326,11 +331,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (ev.type !== 'down') return;
     const sheet = activeSheet();
     if (!sheet) return;
-    const flat = flattenSheet(sheet, state.floating);
+    const flat = flattenSheet(sheet, activeFloating());
     const p = getPixel(flat, ev.x, ev.y);
     if (!p) return;
-    if (ev.buttons & 2) state.secondary = p; else state.primary = p;
-    emit('colors');
+    getEditorHost().store.updateDrawingSettings(ev.buttons & 2 ? { secondary: p } : { primary: p });
   }
 
   // ---- select (marquee only — the move tool is the only content mover) ----
@@ -420,7 +424,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   // ---- move (floating selection) ----
   //
   // The move tool never edits bitmaps directly: pointer-down cuts the region
-  // into state.floating (floatsession command), and every gesture only
+  // into the floating-selection session, and every gesture only
   // mutates float.transform live, pushing one transform command per completed
   // drag. Enter/Escape/tool-switch commit or cancel via floatsession.
 
@@ -464,7 +468,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   function handleMoveDown(ev) {
     const sheet = activeSheet();
     if (!sheet) return;
-    const float = state.floating;
+    const float = activeFloating();
     if (float && float.sheetId === sheet.id) {
       // Frame-floats are translate-only: no rotation knob, no scale handles.
       const knob = !float.frameIds && knobScreenPos(float);
@@ -497,7 +501,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     // translate-only, and on commit the frame rects move with the pixels.
     // Everything else keeps the classic behavior: cut the selection (or
     // whole target) and drag it.
-    if (state.view === 'sheet' && !selection) {
+    if (activeViewKind() === 'sheet' && !selection) {
       const seg = segmentAt(sheet, ev.x, ev.y);
       if (seg) {
         // An accepted strip's own segment carries only ITS OWN layer(s) --
@@ -510,17 +514,17 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         const ownGroup = owner?.layerGroupId ? animationGroup(sheet, owner.id) : null;
         const layers = ownGroup ? flattenLayers(ownGroup) : null;
         if (!createFloat({ allLayers: true, region: seg.rect, frameIds: seg.frameIds, layers, x: ev.x, y: ev.y })) return;
-        moveStroke = { kind: 'translate', t0: { ...state.floating.transform }, anchor: { x: ev.x, y: ev.y } };
+        moveStroke = { kind: 'translate', t0: { ...activeFloating().transform }, anchor: { x: ev.x, y: ev.y } };
         return;
       }
     }
     if (!createFloat({ allLayers: !!ev.altKey, x: ev.x, y: ev.y })) return;
-    moveStroke = { kind: 'translate', t0: { ...state.floating.transform }, anchor: { x: ev.x, y: ev.y } };
+    moveStroke = { kind: 'translate', t0: { ...activeFloating().transform }, anchor: { x: ev.x, y: ev.y } };
   }
 
   function handleMoveMove(ev) {
-    if (!moveStroke || !state.floating) return;
-    const float = state.floating;
+    if (!moveStroke || !activeFloating()) return;
+    const float = activeFloating();
     const t0 = moveStroke.t0;
     if (moveStroke.kind === 'translate') {
       float.transform.tx = t0.tx + Math.round(ev.x - moveStroke.anchor.x);
@@ -547,7 +551,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         mx: ev.x + 0.5, my: ev.y + 0.5,
       });
     }
-    emit('pixels');
+    notifyPixelsChanged();
   }
 
   function handleMoveUp(ev) {
@@ -555,7 +559,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     handleMoveMove(ev);
     const t0 = moveStroke.t0;
     moveStroke = null;
-    if (state.floating) pushTransformCommand(t0, { ...state.floating.transform });
+    if (activeFloating()) pushTransformCommand(t0, { ...activeFloating().transform });
   }
 
   // ---- dispatch ----
@@ -598,7 +602,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   }
 
   view.onOverlay = (ctx) => {
-    const float = state.floating;
+    const float = activeFloating();
     const sheet = activeSheet();
     if (float && sheet && float.sheetId === sheet.id && activeTool() === 'move') {
       const { w, h } = float.srcRect;
@@ -690,7 +694,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     if (document.querySelector('dialog[open]')) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey
-      && activeTool() === 'select' && state.view === viewKind && selection && !state.floating) {
+      && activeTool() === 'select' && activeViewKind() === viewKind && selection && !activeFloating()) {
       const layer = activeLayer();
       if (!layer) return;
       const before = copyRegion(layer.bitmap, selection.x, selection.y, selection.w, selection.h);
@@ -701,13 +705,13 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       // Same reasoning as finalize() above: direct history.execute(), no
       // separate markDirty() (HistoryService's onChange already marks dirty).
       getEditorHost().history.execute(makePixelPatch(layer.bitmap, selection, before, after, 'delete selection'));
-      emit('pixels');
+      notifyPixelsChanged();
       view.requestRender();
       e.preventDefault();
       return;
     }
     if (e.key !== 'Escape') return;
-    if (state.floating) return; // floatsession's capture handler owns Escape while floating
+    if (activeFloating()) return; // floatsession's capture handler owns Escape while floating
     if (selection) { selection = null; view.requestRender(); }
   });
 }

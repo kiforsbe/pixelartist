@@ -1,11 +1,13 @@
-import { state, activeSheet, activeMap, confirmOrAuto, maybeSnapPixels } from '../../app/state.js';
-import * as io from '../../app/io.js';
-import { decodePng } from '../../app/pngcodec.js';
+import * as io from '../../platform/browser/project-io.js';
+import { decodePng } from '../../core/pngcodec.js';
 import { createSheet, createMap, removeSheet, sheetLayers } from '../../core/model.js';
-import { commitFloatIfAny, cutSelection, copySelection, paste, hasSelection } from '../../components/canvas/float-session.js';
-import { defineAction, runAction, bindAction } from '../../app/actions.js';
+import { snapProjectPixels } from '../../core/project-pixel-snapper.js';
+import { commitFloatIfAny, cutSelection, copySelection, paste, hasSelection, discardFloatingForSheet } from '../../components/canvas/float-session.js';
+import { defineAction, runAction, bindAction } from '../shell/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
 import { isTypingTarget } from '../../components/dom-utils.js';
+import { activeSheet, activeMap } from '../../host/document-helpers.js';
+import { confirmOrAuto } from '../../platform/browser/autotest.js';
 
 export function mountDocumentController({ editorHost, workbench }) {
   function isCancel(e) {
@@ -243,8 +245,8 @@ export function mountDocumentController({ editorHost, workbench }) {
         alert('Image is too large (max 4096×4096).');
         return;
       }
-      bitmap = maybeSnapPixels(bitmap);
       const project = editorHost.projects.project;
+      bitmap = snapProjectPixels(project, bitmap);
       const kind = mode === 'sprites' ? 'sprite' : 'tile';
       const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
       const sheet = createSheet(project, {
@@ -337,7 +339,7 @@ export function mountDocumentController({ editorHost, workbench }) {
       label: 'delete sheet',
       do() {
         removeSheet(project, sheet.id);
-        if (state.floating?.sheetId === sheet.id) state.floating = null;
+        discardFloatingForSheet(sheet.id);
         if (wasActive) {
           const siblings = project.sheets.filter(s => s.kind === sheet.kind);
           const next = siblings[Math.min(index, siblings.length - 1)] ?? null;

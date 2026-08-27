@@ -1,5 +1,5 @@
-import { buildEntries, loadEntries, packProject, unpackProject } from '../core/bundle.js';
-import { encodePng, decodePng } from './pngcodec.js';
+import { buildEntries, loadEntries, packProject, unpackProject } from '../../core/bundle.js';
+import { encodePng, decodePng } from '../../core/pngcodec.js';
 
 export const PACKED_TYPE = {
   description: 'PixelArtist project',

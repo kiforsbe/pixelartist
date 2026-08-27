@@ -55,6 +55,46 @@ test('mode switching remembers active documents per mode', () => {
   assert.notEqual(spriteA.id, spriteB.id);
 });
 
+test('setProject seeds the active document selection from its provider', () => {
+  const host = new EditorHost();
+  host.registerMode({
+    id: 'sprites', label: 'Sprites', documentKinds: ['sprite-sheet'], defaultViewId: 'sprites.sheet',
+    register(api) { api.documents.register({
+      ...sheetProvider('sprite-sheet', 'sprite'),
+      initialSelection: sheet => ({ layerId: sheet.layerTree.children[0].id, frameId: null }),
+    }); },
+  });
+  host.start('sprites');
+  const project = createProject('test');
+  const sheet = createSheet(project, { name: 'sprites', width: 8, height: 8, kind: 'sprite' });
+  host.setProject(project);
+  assert.deepEqual(host.selections.get({ kind: 'sprite-sheet', id: sheet.id }), {
+    layerId: sheet.layerTree.children[0].id,
+    frameId: null,
+  });
+});
+
+test('setActive seeds a newly available document selection from its provider', () => {
+  const host = new EditorHost();
+  host.registerMode({
+    id: 'maps', label: 'Maps', documentKinds: ['map'], defaultViewId: 'maps.canvas',
+    register(api) { api.documents.register({
+      kind: 'map', list: project => project.maps, get: (project, id) => project.maps.find(map => map.id === id),
+      create: (project, input) => createMap(project, input), rename: (map, name) => { map.name = name; },
+      remove: () => {}, initialSelection: map => ({ layerId: map.layers[0]?.id ?? null, itemId: null }),
+    }); },
+  });
+  host.start('maps');
+  const project = createProject('maps');
+  host.setProject(project);
+  const map = createMap(project, { name: 'World' });
+  host.documents.setActive({ kind: 'map', id: map.id });
+  assert.deepEqual(host.selections.get({ kind: 'map', id: map.id }), {
+    layerId: map.layers[0].id,
+    itemId: null,
+  });
+});
+
 test('failed mode activation rolls state back and leaves prior mode active', () => {
   const host = new EditorHost();
   host.registerMode(mode('sprites', 'sprite-sheet'));

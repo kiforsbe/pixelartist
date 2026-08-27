@@ -4,7 +4,7 @@ import { activeLayer } from '../../host/document-helpers.js';
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { copyRegion, blitRegion, scaleBitmap } from '../../core/pixels.js';
 import { makePixelPatch } from '../../core/commands.js';
-import { decodePng } from '../../app/pngcodec.js';
+import { decodePng } from '../../core/pngcodec.js';
 
 // Paints preset.sourceImage's reference art onto the active paint layer, one
 // crop per cell, at the freshly-created sourceTiles' sheet coordinates --

@@ -38,7 +38,7 @@ export function editPaletteColor(services, index, color) {
 // The palette-entry mutation lives INSIDE the command so undo restores both
 // the pixels AND the palette color, exactly like editIndexedEntry's own
 // remap branch. layerPatches is collected once, up front, over every layer
-// of the CURRENT active sheet (activeSheet(), matching editIndexedEntry's
+// of the CURRENT active sheet (activeSheet('tile'), matching editIndexedEntry's
 // own scope -- not every sheet in the project), regardless of whether that
 // layer's bitmap actually contains the old color.
 export function remapPaletteColor(services, index, color) {

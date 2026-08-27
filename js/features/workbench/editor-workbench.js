@@ -1,4 +1,3 @@
-import { state, on, emit, activeSheet, activeLayer } from '../../app/state.js';
 import { flattenSheet, layerAnimationContext } from '../../core/model.js';
 import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../../core/strips.js';
 import { copyRegion } from '../../core/pixels.js';
@@ -11,9 +10,11 @@ import { mountColorPanel } from '../../components/panels/color-panel.js';
 import { mountLayersPanel } from '../../components/panels/layers-panel.js';
 import { drawSheetOverlays } from '../../components/canvas/sheet-overlays.js';
 import { mountPreviewPanel } from '../../components/panels/preview-panel.js';
-import { initFloatSession } from '../../components/canvas/float-session.js';
-import { defineAction } from '../../app/actions.js';
+import { activeFloating, initFloatSession } from '../../components/canvas/float-session.js';
+import { defineAction } from '../shell/actions.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { activeLayer, activeSheet } from '../../host/document-helpers.js';
+import { documentKey } from '../../host/editor-store.js';
 import { PanelManager } from '../../host/workbench/panel-manager.js';
 import { findWorkbenchRegions } from '../../host/workbench/layout.js';
 import { isTypingTarget } from '../../components/dom-utils.js';
@@ -34,18 +35,16 @@ export function mountEditorWorkbench() {
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
+    const drawing = editorHost.store.getState().workspace.drawing;
     if (e.key === '[') {
       e.preventDefault();
-      state.brushSize = Math.max(1, state.brushSize - 1);
-      emit('brushSize');
+      editorHost.store.updateDrawingSettings({ brushSize: Math.max(1, drawing.brushSize - 1) });
     } else if (e.key === ']') {
       e.preventDefault();
-      state.brushSize = Math.min(8, state.brushSize + 1);
-      emit('brushSize');
+      editorHost.store.updateDrawingSettings({ brushSize: Math.min(8, drawing.brushSize + 1) });
     } else if (e.key.toLowerCase() === 'x') {
       e.preventDefault();
-      const p = state.primary; state.primary = state.secondary; state.secondary = p;
-      emit('colors');
+      editorHost.store.updateDrawingSettings({ primary: drawing.secondary, secondary: drawing.primary });
     }
   });
   
@@ -67,7 +66,7 @@ export function mountEditorWorkbench() {
 
   // Live per-item compatibility check against project.settings.targetPlatform
   // (js/core/platforms.js) -- only while a specific frame/tile is open in its
-  // own editor (state.view 'frame'/'tile'), since that's the one item whose
+  // own editor (active view 'frame'/'tile'), since that's the one item whose
   // pixels/size are meaningful to check in isolation. Recomputed on every
   // pixel/history/selection/project/view change; cheap enough at this app's
   // sheet sizes to just redo the flatten+color-scan rather than cache it.
@@ -92,27 +91,20 @@ export function mountEditorWorkbench() {
     statusPlatform.title = warnings.join('\n');
     statusPlatform.classList.toggle('status-platform-warn', warnings.length > 0);
   }
-  on('pixels', updateStatusPlatform);
-  on('selection', updateStatusPlatform);
   editorHost.history.subscribe(updateStatusPlatform);
-  // tool-palette.js is not migrated yet (out of this task's scope) — it still
-  // writes state.tool + emit('tool') only. Mirror that one-way into
-  // session.activeToolId so switchMode's stale-tool fallback (document-
-  // controller.js) and updateStatusTool above observe the real active tool.
-  // Sync once immediately too: EditorStore's initial activeToolId (null)
-  // doesn't match state.tool's legacy default ('pencil') until the first
-  // 'tool' emit, which previously only happened via legacy-state-adapter's
-  // one-time sync call that this task's Step 2 removed.
-  const syncActiveTool = () => editorHost.store.updateSession({ activeToolId: state.tool }, 'tool');
-  on('tool', syncActiveTool);
-  syncActiveTool();
   editorHost.store.subscribe(
-    s => [s.project.model, s.session.activeViewId, s.session.activeDocument],
+    s => [
+      s.project.model,
+      s.session.activeViewId,
+      s.session.activeDocument,
+      s.session.selectionsByDocument[documentKey(s.session.activeDocument)],
+      s.workspace.pixelRevision,
+    ],
     updateStatusPlatform,
     // activeDocument compared by {kind,id}, not reference -- DocumentService
     // allocates a fresh object per call; reference equals would re-run this
     // (flattenSheet + colorFrequency) on every setActive(), even a no-op one.
-    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2]?.id === b[2]?.id && a[2]?.kind === b[2]?.kind, fireImmediately: true },
+    { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2]?.id === b[2]?.id && a[2]?.kind === b[2]?.kind && a[3] === b[3] && a[4] === b[4], fireImmediately: true },
   );
   
   // ---- canvas view ----
@@ -157,7 +149,7 @@ export function mountEditorWorkbench() {
     const sheet = activeSheet();
     if (!sheet) return null;
     if (scratchDirty || scratchSheet !== sheet || !scratchCanvas || scratchCanvas.width !== sheet.width || scratchCanvas.height !== sheet.height) {
-      const bitmap = flattenSheet(sheet, state.floating, canvasPreviewLayers);
+      const bitmap = flattenSheet(sheet, activeFloating(), canvasPreviewLayers);
       if (!scratchCanvas || scratchCanvas.width !== bitmap.width || scratchCanvas.height !== bitmap.height) {
         scratchCanvas = (typeof OffscreenCanvas !== 'undefined')
           ? new OffscreenCanvas(bitmap.width, bitmap.height)
@@ -199,15 +191,22 @@ export function mountEditorWorkbench() {
     () => canvasView.requestRender(),
     { equals: (a, b) => a[0] === b[0] && a[1] === b[1] },
   );
-  // 'pixels': lightweight bitmap-changed-mid-stroke signal from drawing-engine.js/layers-panel.js
+  // pixelRevision: lightweight bitmap-changed-mid-stroke signal from drawing-engine.js/layers-panel.js
   // (in-progress drawing preview, live opacity drag) — just re-flatten + repaint,
   // skip the heavier setContent/dirty-flag work that a project-model change does.
-  on('pixels', () => { invalidateScratch(); canvasView.requestRender(); });
+  editorHost.store.subscribe(s => s.workspace.pixelRevision, () => {
+    invalidateScratch();
+    canvasView.requestRender();
+    mapCanvasView.requestRender();
+  });
   // undo/redo can touch pixels, layer structure, or both — repaint on every change.
   editorHost.history.subscribe(() => { invalidateScratch(); refreshCanvasView(); });
   // frame/tile selection changed (no pixel or structural change) — cheap repaint
   // so the label-overlay highlight tracks the selected frame immediately.
-  on('selection', () => canvasView.requestRender());
+  editorHost.store.subscribe(
+    s => s.session.selectionsByDocument[documentKey(s.session.activeDocument)],
+    () => { canvasView.requestRender(); mapCanvasView.requestRender(); },
+  );
   
   // The sheet view's paint/float/paste target: normally the whole sheet, but
   // narrowed to the current SEGMENT of an accepted strip's own frames when the

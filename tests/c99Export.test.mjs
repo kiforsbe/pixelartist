@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildC99 } from '../js/app/c99Export.js';
+import { buildC99 } from '../js/core/export/c99Export.js';
 
 test('buildC99 generic8: one byte per pixel, palette as [r,g,b] rows', () => {
   const { h, c } = buildC99({

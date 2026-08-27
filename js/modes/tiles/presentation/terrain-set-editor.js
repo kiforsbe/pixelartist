@@ -108,7 +108,7 @@ export function buildAddTerrainSetDialog() {
   markDefaultAction(dlg, $('#ats-create'));
   $('#ats-cancel').addEventListener('click', () => dlg.close());
   $('#ats-create').addEventListener('click', async () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (!sheet) { dlg.close(); return; }
     const intVal = (el) => Math.max(1, parseInt(el.value, 10) || 1);
     const tileW = intVal($('#ats-tilew'));
@@ -152,7 +152,7 @@ export function buildAddTerrainSetDialog() {
   });
   return {
     open() {
-      const sheet = activeSheet();
+      const sheet = activeSheet('tile');
       const settings = getEditorHost().projects.project?.settings ?? {};
       $('#ats-tilew').value = String(settings.tileW ?? 16);
       $('#ats-tileh').value = String(settings.tileH ?? 16);
@@ -279,7 +279,7 @@ export function terrainSetNameField(terrainSet) {
   input.addEventListener('change', () => {
     const v = input.value.trim();
     if (v) {
-      const sheet = activeSheet();
+      const sheet = activeSheet('tile');
       if (sheet) dispatch('tiles.renameTerrainSet', { sheetId: sheet.id, terrainSetId: terrainSet.id, name: v });
     } else input.value = terrainSet.name;
   });

@@ -6,7 +6,7 @@ import { effectiveDuration } from '../../../core/model.js';
 // multiplier), advances `position`/`acc` across as many frame boundaries as
 // `elapsedMs` covers -- a slow tab can lag several frames behind in one rAF
 // tick, hence the while loop rather than a single step. Mirrors
-// js/ui/timeline.js's tick() exactly, minus the DOM/rAF/preview side
+// timeline-presenter.js's tick behavior, minus the DOM/rAF/preview side
 // effects, which stay in the Presenter (js/modes/sprites/presentation/
 // timeline-presenter.js).
 export function advancePlayback(anim, position, acc, elapsedMs, loop) {

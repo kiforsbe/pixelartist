@@ -18,9 +18,9 @@
 // current fit zoom into a manual one so the drag has room to move the
 // content off-center.
 
-import { state, on } from '../../app/state.js';
 import { stepZoom, snapFitZoom } from '../../core/zoom.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { documentKey } from '../../host/editor-store.js';
 
 // Module-level scratch canvas, mirroring timeline.js/panels.js's own copies
 // of this pattern -- reused across draws, resized only when the source
@@ -54,6 +54,8 @@ let previewContextKey = null;
 let mapRefreshQueued = false;
 let mapRefreshGeneration = 0;
 let editorHost = null;
+
+function currentModeId() { return editorHost?.store.getState().session.activeModeId ?? null; }
 
 // The zoom actually on screen right now, for both drawing and the readout.
 function displayedZoom() {
@@ -92,7 +94,7 @@ function draw() {
 export function setPreviewBitmap(bmp) {
   // A timeline playback callback may still arrive during a mode switch; it
   // must never overwrite the active map preview.
-  if (state.mode !== 'sprites') return;
+  if (currentModeId() !== 'sprites') return;
   exactFit = false;
   lastBmp = bmp;
   draw();
@@ -236,7 +238,7 @@ export function mountPreviewPanel(el) {
   canvas.addEventListener('pointercancel', endDrag);
 
   const requestContextRender = () => {
-    if (state.mode !== 'maps') {
+    if (currentModeId() !== 'maps') {
       mapRefreshGeneration++; mapRefreshQueued = false;
       render(); return;
     }
@@ -252,7 +254,7 @@ export function mountPreviewPanel(el) {
     });
   };
   const renderMapContentNow = () => {
-    if (state.mode !== 'maps') return;
+    if (currentModeId() !== 'maps') return;
     // Map brush commands have finished mutating occupancy and recalculating
     // bounds before this event is emitted. In particular, an autotile stroke
     // can change the resolved artwork of every neighbouring terrain cell even
@@ -262,11 +264,24 @@ export function mountPreviewPanel(el) {
     mapRefreshQueued = false;
     render();
   };
-  on('project', requestContextRender);
-  on('history', requestContextRender);
-  on('view', requestContextRender);
-  on('selection', requestContextRender);
-  on('pixels', requestContextRender);
-  getEditorHost()?.history.subscribe(() => { if (state.mode === 'maps') renderMapContentNow(); });
+  const storeDisposables = [
+    editorHost.store.subscribe(s => s.project.model, requestContextRender),
+    editorHost.store.subscribe(s => s.session.activeModeId, requestContextRender),
+    editorHost.store.subscribe(s => s.session.activeDocument, requestContextRender),
+    editorHost.store.subscribe(s => s.session.activeViewId, requestContextRender),
+    editorHost.store.subscribe(s => s.session.selectionsByDocument[documentKey(s.session.activeDocument)], requestContextRender),
+    editorHost.store.subscribe(s => s.workspace.pixelRevision, requestContextRender),
+  ];
+  const disposeHistory = editorHost.history.subscribe(() => {
+    if (currentModeId() === 'maps') renderMapContentNow();
+    else requestContextRender();
+  });
   render();
+  return {
+    dispose() {
+      ro.disconnect();
+      storeDisposables.forEach(dispose => dispose());
+      disposeHistory();
+    },
+  };
 }

@@ -4,7 +4,7 @@ import { createProject, createSheet, createMap, addFrame, addAnimation } from '.
 import { createTileGrid } from '../js/core/tilegrids.js';
 import { setSlot } from '../js/core/neighbors.js';
 import { createTerrainSet, assignSlot } from '../js/core/terrainsets.js';
-import { buildFramesJson, buildTilesJson, buildMapJson } from '../js/app/exports.js';
+import { buildFramesJson, buildTilesJson, buildMapJson } from '../js/core/export/exports.js';
 
 test('buildMapJson preserves reference placements and infinite-map settings', () => {
   const p = createProject('demo'); const map = createMap(p, { name: 'scene', gridW: 8, gridH: 8 });

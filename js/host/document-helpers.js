@@ -5,11 +5,12 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
-export function activeSheet() {
+export function activeSheet(kind = null) {
   const host = getEditorHost();
   const doc = host?.store.getState().session.activeDocument;
   if (!doc || (doc.kind !== 'sprite-sheet' && doc.kind !== 'tile-sheet')) return null;
-  return host.projects.project?.sheets.find(s => s.id === doc.id) ?? null;
+  const sheet = host.projects.project?.sheets.find(s => s.id === doc.id) ?? null;
+  return sheet && (!kind || sheet.kind === kind) ? sheet : null;
 }
 
 export function activeMap() {

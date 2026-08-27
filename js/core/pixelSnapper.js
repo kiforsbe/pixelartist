@@ -2,7 +2,7 @@
 // pixel-snapper, src/lib.rs) -- detects the implicit pixel grid of a
 // downscaled-with-artifacts or photographed pixel-art image and snaps it
 // back to its true resolution. Used for pasted/imported images (see
-// js/app/main.js's document.importSheet and js/components/canvas/float-session.js's
+// document-controller.js's document.importSheet and components/canvas/float-session.js's
 // pasteSystemImage), both DOM-free/pure like the rest of js/core/.
 //
 // Pipeline (mirrors process_image_common in the Rust source):
@@ -43,7 +43,7 @@ import { getPixel, setPixel, createBitmap } from './pixels.js';
 
 // Matches the reference implementation's MAX_PALETTE_COLORS -- a
 // deliberately generous quantization budget for "no target palette
-// selected" callers (see js/app/state.js's maybeSnapPixels), so the
+// selected" callers (see core/project-pixel-snapper.js), so the
 // snapped output keeps close to full RGB fidelity instead of being forced
 // through the default 16-cluster budget meant for pre-palette noise
 // smoothing.

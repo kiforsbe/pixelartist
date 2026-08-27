@@ -4,18 +4,22 @@
 // components/canvas/drawing-engine.js; this module owns only the TOOLS
 // registry, the shared tool-options state, and the palette UI.
 
-import { state, on, emit } from '../app/state.js';
 import { isTypingTarget } from './canvas/float-session.js';
+import { getEditorHost } from '../host/runtime.js';
+
+function currentModeId() { return getEditorHost()?.store.getState().session.activeModeId ?? null; }
+function currentToolId() { return getEditorHost()?.store.getState().session.activeToolId ?? 'pencil'; }
+function drawingSettings() { return getEditorHost().store.getState().workspace.drawing; }
 
 export const TOOLS = [
-  { id: 'pencil', icon: '✏️', key: 'b', isAvailable: () => state.mode !== 'maps' },
-  { id: 'eraser', icon: '🧽', key: 'e', isAvailable: () => state.mode !== 'maps' },
-  { id: 'fill', icon: '🪣', key: 'g', isAvailable: () => state.mode !== 'maps' },
-  { id: 'softflood', label: 'Soft flood', icon: '🫗', key: 'k', isAvailable: () => state.mode !== 'maps' },
-  { id: 'line', icon: '📏', key: 'l', isAvailable: () => state.mode !== 'maps' },
-  { id: 'rect', icon: '▭', key: 'u', isAvailable: () => state.mode !== 'maps' },
-  { id: 'ellipse', icon: '◯', key: 'o', isAvailable: () => state.mode !== 'maps' },
-  { id: 'eyedropper', icon: '💉', key: 'i', isAvailable: () => state.mode !== 'maps' },
+  { id: 'pencil', icon: '✏️', key: 'b', isAvailable: () => currentModeId() !== 'maps' },
+  { id: 'eraser', icon: '🧽', key: 'e', isAvailable: () => currentModeId() !== 'maps' },
+  { id: 'fill', icon: '🪣', key: 'g', isAvailable: () => currentModeId() !== 'maps' },
+  { id: 'softflood', label: 'Soft flood', icon: '🫗', key: 'k', isAvailable: () => currentModeId() !== 'maps' },
+  { id: 'line', icon: '📏', key: 'l', isAvailable: () => currentModeId() !== 'maps' },
+  { id: 'rect', icon: '▭', key: 'u', isAvailable: () => currentModeId() !== 'maps' },
+  { id: 'ellipse', icon: '◯', key: 'o', isAvailable: () => currentModeId() !== 'maps' },
+  { id: 'eyedropper', icon: '💉', key: 'i', isAvailable: () => currentModeId() !== 'maps' },
   // These are shared with Maps mode; mapmode.js intercepts their pointer events.
   { id: 'select', icon: '⛶', key: 'm' },
   { id: 'move', icon: '✋', key: 'v' },
@@ -75,6 +79,9 @@ export function registerTool(def, buildOptionsRow) {
 // ---------------------------------------------------------------- palette UI
 
 export function mountToolPalette(el) {
+  const host = getEditorHost();
+  const { store } = host;
+  if (!store.getState().session.activeToolId) store.updateSession({ activeToolId: 'pencil' }, 'tool');
   el.innerHTML = '<h3>Tools</h3>';
 
   const buttonsHost = el;
@@ -119,21 +126,16 @@ export function mountToolPalette(el) {
   brushRow.appendChild(document.createTextNode('Size'));
   const brushInput = document.createElement('input');
   brushInput.type = 'number'; brushInput.min = '1'; brushInput.max = '8';
-  brushInput.value = String(state.brushSize);
+  brushInput.value = String(drawingSettings().brushSize);
   brushInput.addEventListener('change', () => {
     let v = parseInt(brushInput.value, 10);
     if (!Number.isFinite(v)) v = 1;
     v = Math.max(1, Math.min(8, v));
     brushInput.value = String(v);
-    state.brushSize = v;
+    store.updateDrawingSettings({ brushSize: v });
   });
   brushRow.appendChild(brushInput);
   optionsRow.appendChild(brushRow);
-  // main.js's `[`/`]` brush-size shortcut mutates state.brushSize directly and
-  // emits 'brushSize' so this input (the only other writer of that value)
-  // stays in sync without main.js needing a reference to it.
-  on('brushSize', () => { brushInput.value = String(state.brushSize); });
-
   const optionChecks = document.createElement('div');
   optionChecks.className = 'tool-option-checks';
   optionChecks.dataset.commonOption = 'checks';
@@ -207,30 +209,30 @@ export function mountToolPalette(el) {
   }
 
   function refresh() {
+    const toolId = currentToolId();
     for (const [id, btn] of buttons) {
       const entry = TOOLS.find(t => t.id === id) ?? extraTools.find(t => t.id === id);
-      btn.classList.toggle('active', state.tool === id);
+      btn.classList.toggle('active', toolId === id);
       btn.hidden = !!entry?.isAvailable && !entry.isAvailable();
     }
     for (const extra of extraTools) {
       const btn = buttons.get(extra.id);
       if (btn && extra.isAvailable) btn.hidden = !extra.isAvailable();
     }
-    toolNameEl.textContent = toolTitle(state.tool);
-    const vis = optionVisibleFor(state.tool);
+    toolNameEl.textContent = toolTitle(toolId);
+    const vis = optionVisibleFor(toolId);
     brushRow.style.display = vis.size ? '' : 'none';
     contiguousRow.style.display = vis.contiguous ? '' : 'none';
     filledRow.style.display = vis.filled ? '' : 'none';
     optionChecks.style.display = (vis.contiguous || vis.filled) ? '' : 'none';
     softFloodRow.style.display = vis.softFlood ? '' : 'none';
     for (const { id, els } of extraRows)
-      for (const rEl of els) rEl.style.display = state.tool === id ? '' : 'none';
+      for (const rEl of els) rEl.style.display = toolId === id ? '' : 'none';
+    brushInput.value = String(drawingSettings().brushSize);
   }
 
   function selectTool(id) {
-    state.tool = id;
-    emit('tool');
-    refresh();
+    store.updateSession({ activeToolId: id }, 'tool');
   }
 
   function addTool(entry) {
@@ -248,15 +250,26 @@ export function mountToolPalette(el) {
   paletteApi = { addTool, refresh };
 
   refresh();
-  on('view', refresh); // re-check isAvailable() (e.g. sprite/tile mode switch)
-  on('tool', refresh);
+  const disposables = [
+    store.subscribe(s => s.session.activeModeId, refresh),
+    store.subscribe(s => s.session.activeToolId, refresh),
+    store.subscribe(s => s.workspace.drawing.brushSize, refresh),
+  ];
 
-  window.addEventListener('keydown', (e) => {
+  const onKeyDown = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     const t = [...TOOLS, ...extraTools].find(t => t.key === e.key.toLowerCase() && (!t.isAvailable || t.isAvailable()));
     if (!t) return;
     e.preventDefault();
     selectTool(t.id);
-  });
+  };
+  window.addEventListener('keydown', onKeyDown);
+  return {
+    dispose() {
+      disposables.forEach(dispose => dispose());
+      window.removeEventListener('keydown', onKeyDown);
+      if (paletteApi?.refresh === refresh) paletteApi = null;
+    },
+  };
 }

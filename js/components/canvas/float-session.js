@@ -1,18 +1,19 @@
-// Floating-selection session: owns state.floating's lifecycle (create /
+// Floating-selection session: owns the active floating selection's lifecycle (create /
 // transform / commit / cancel), the internal clipboard, and the global
 // keyboard bindings (Enter/Escape commit/cancel, Ctrl+X/C/V clipboard).
 // Pointer GESTURES (drag/scale/rotate) live in drawing-engine.js's move tool;
 // every state change funnels through here so stepwise undo and auto-commit
 // stay consistent. This module must never import drawing-engine.js
 // (drawing-engine.js imports us).
-import { state, emit, activeSheet, activeLayer, activeLayerScope, maybeSnapPixels } from '../../app/state.js';
 import { copyRegion, fillRegion, blitRegion, blitOver, cloneBitmap, createBitmap } from '../../core/pixels.js';
 import { findLayer } from '../../core/model.js';
 import { makeTransform, isIdentity, rasterizeFloat, floatBounds } from '../../core/floating.js';
-import { decodePng } from '../../app/pngcodec.js';
-import { exportPngBlob } from '../../app/io.js';
+import { snapProjectPixels } from '../../core/project-pixel-snapper.js';
+import { decodePng } from '../../core/pngcodec.js';
+import { exportPngBlob } from '../../platform/browser/project-io.js';
 import { isTypingTarget } from '../dom-utils.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { activeSheet, activeLayer, activeLayerScope } from '../../host/document-helpers.js';
 
 export { isTypingTarget };
 
@@ -24,21 +25,29 @@ const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, 
 // guard below can compare against a live activeViewId without mixing
 // namespaces (see that guard's comment).
 let floatCtx = null;
+let floating = null;
 let clipboard = null;    // { srcRect, layers: [{layerId, buffer}], allLayers }
 
 export function registerFloatView(viewKind, api) { views.set(viewKind, api); }
-export function activeFloating() { return state.floating; }
+export function activeFloating() { return floating; }
+export function discardFloatingForSheet(sheetId) {
+  if (floating?.sheetId !== sheetId) return false;
+  floating = null;
+  floatCtx = null;
+  return true;
+}
 
 // Selection-or-target region for the CURRENT view, same rule createFloat
 // uses (selection clamped to target, or the whole target when there's no
 // selection) -- null when there's no active view/sheet or the target is
-// empty. Read-only: unlike createFloat, never touches state.floating.
+// empty. Read-only: unlike createFloat, never touches the active float.
 export function currentEditRegion() {
   const viewApi = activeView();
   return viewApi ? resolveRegion(viewApi, false, null) : null;
 }
-function activeView() { return views.get(state.view) ?? null; }
-function sheetById(id) { return state.project?.sheets.find(s => s.id === id) ?? null; }
+function activeViewKind() { return getEditorHost()?.store.getState().session.activeViewId?.split('.').at(-1) ?? null; }
+function activeView() { return views.get(activeViewKind()) ?? null; }
+function sheetById(id) { return getEditorHost()?.projects.project?.sheets.find(s => s.id === id) ?? null; }
 function layerIn(sheet, layerId) { return findLayer(sheet.layerTree, layerId); }
 
 function rectIntersect(a, b) {
@@ -115,7 +124,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
           .filter(Boolean).map(f => ({ id: f.id, x: f.x, y: f.y }))
       : null,
   };
-  const ctx = { viewKind: state.view, hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
+  const ctx = { viewKind: activeViewKind(), hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
   const prevSelection = viewApi.getSelection();
   getEditorHost().history.execute({
     label: 'float selection',
@@ -124,20 +133,20 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
         const l = layerIn(sheet, layerId);
         if (l) fillRegion(l.bitmap, reg.x, reg.y, reg.w, reg.h, [0, 0, 0, 0]);
       }
-      state.floating = float;
+      floating = float;
       floatCtx = ctx;
       views.get(ctx.viewKind)?.setSelection(null); // float outline replaces the marquee
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
       for (const { layerId, buffer } of captured) {
         const l = layerIn(sheet, layerId);
         if (l) blitRegion(l.bitmap, buffer, reg.x, reg.y);
       }
-      state.floating = null;
+      floating = null;
       floatCtx = null;
       views.get(ctx.viewKind)?.setSelection(prevSelection ? { ...prevSelection } : null);
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
   });
   getEditorHost().projects.markDirty();
@@ -145,11 +154,11 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
 }
 
 export function commitFloatIfAny() {
-  const float = state.floating;
+  const float = floating;
   if (!float) return;
   const ctx = floatCtx;
   const sheet = sheetById(float.sheetId);
-  if (!sheet || !ctx) { state.floating = null; floatCtx = null; return; }
+  if (!sheet || !ctx) { floating = null; floatCtx = null; return; }
   // Untouched cut float: committing would restore the source exactly —
   // degrade to cancel so history gets one clean reversal, not a no-op patch.
   if (float.cut && isIdentity(float.transform)) { cancelFloatIfAny(); return; }
@@ -185,29 +194,29 @@ export function commitFloatIfAny() {
     do() {
       for (const p of patches) blitRegion(p.layer.bitmap, p.after, rect.x, rect.y);
       for (const c of frameCoords) { c.frame.x = c.x + dx; c.frame.y = c.y + dy; }
-      state.floating = null;
+      floating = null;
       floatCtx = null;
       views.get(ctx.viewKind)?.setSelection(sel ? { ...sel } : null);
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
       for (const p of patches) blitRegion(p.layer.bitmap, p.before, rect.x, rect.y);
       for (const c of frameCoords) { c.frame.x = c.x; c.frame.y = c.y; }
-      state.floating = float;
+      floating = float;
       floatCtx = ctx;
       views.get(ctx.viewKind)?.setSelection(null);
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
   });
   getEditorHost().projects.markDirty();
 }
 
 export function cancelFloatIfAny() {
-  const float = state.floating;
+  const float = floating;
   if (!float) return;
   const ctx = floatCtx;
   const sheet = sheetById(float.sheetId);
-  if (!sheet || !ctx) { state.floating = null; floatCtx = null; return; }
+  if (!sheet || !ctx) { floating = null; floatCtx = null; return; }
   // Live-synced frame-float rects snap back to their original origins on
   // cancel (and back to the cancelled translation on redo... i.e. undo).
   const cdx = Math.round(float.transform.tx), cdy = Math.round(float.transform.ty);
@@ -223,11 +232,11 @@ export function cancelFloatIfAny() {
         if (l) blitRegion(l.bitmap, buffer, float.srcRect.x, float.srcRect.y);
       }
       for (const c of frameCoords) { c.frame.x = c.x; c.frame.y = c.y; }
-      state.floating = null;
+      floating = null;
       floatCtx = null;
       // Frame-floats never leave a marquee behind — the frames ARE the shape.
       views.get(ctx.viewKind)?.setSelection(float.cut && !float.frameIds ? { ...float.srcRect } : null);
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
       if (float.cut) for (const { layerId } of float.layers) {
@@ -235,10 +244,10 @@ export function cancelFloatIfAny() {
         if (l) fillRegion(l.bitmap, float.srcRect.x, float.srcRect.y, float.srcRect.w, float.srcRect.h, [0, 0, 0, 0]);
       }
       for (const c of frameCoords) { c.frame.x = c.x + cdx; c.frame.y = c.y + cdy; }
-      state.floating = float;
+      floating = float;
       floatCtx = ctx;
       views.get(ctx.viewKind)?.setSelection(null);
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
   });
   getEditorHost().projects.markDirty();
@@ -248,7 +257,7 @@ export function cancelFloatIfAny() {
 // reads as moving (labels/overlays/panel follow) instead of a detached
 // selection. No-op for plain floats.
 export function syncFrameFloat() {
-  const float = state.floating;
+  const float = floating;
   if (!float?.frameOrig) return;
   const sheet = sheetById(float.sheetId);
   if (!sheet) return;
@@ -260,16 +269,16 @@ export function syncFrameFloat() {
 }
 
 export function pushTransformCommand(before, after) {
-  const float = state.floating;
+  const float = floating;
   if (!float) return;
   if (before.tx === after.tx && before.ty === after.ty && before.sx === after.sx
     && before.sy === after.sy && before.rot === after.rot) return;
   getEditorHost().history.execute({
     label: 'transform float',
-    do() { float.transform = { ...after }; syncFrameFloat(); emit('pixels'); },
-    undo() { float.transform = { ...before }; syncFrameFloat(); emit('pixels'); },
+    do() { float.transform = { ...after }; syncFrameFloat(); getEditorHost().store.notifyPixelsChanged(); },
+    undo() { float.transform = { ...before }; syncFrameFloat(); getEditorHost().store.notifyPixelsChanged(); },
   });
-  // no markDirty: bitmaps unchanged; state.dirty is already true from creation
+  // no explicit markDirty: HistoryService already marked the project dirty at float creation
 }
 
 // ---- clipboard ----
@@ -309,14 +318,14 @@ function clipboardCapture(allLayers, clearSource) {
         const l = layerIn(sheet, layerId);
         if (l) fillRegion(l.bitmap, region.x, region.y, region.w, region.h, [0, 0, 0, 0]);
       }
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
       for (const { layerId, buffer } of captured) {
         const l = layerIn(sheet, layerId);
         if (l) blitRegion(l.bitmap, buffer, region.x, region.y);
       }
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
   });
   getEditorHost().projects.markDirty();
@@ -335,24 +344,26 @@ function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
     sheetId: sheet.id, srcRect: { x: pos.x, y: pos.y, w, h },
     cut: false, layers, transform: makeTransform(),
   };
-  const ctx = { viewKind: state.view, hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
+  const ctx = { viewKind: activeViewKind(), hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
   const prevSelection = viewApi.getSelection();
   // switch to the move tool BEFORE pushing: initFloatSession's activeToolId
   // subscription skips 'move', so the fresh float survives its own tool switch
-  if (state.tool !== 'move') { state.tool = 'move'; emit('tool'); }
+  if (getEditorHost().store.getState().session.activeToolId !== 'move') {
+    getEditorHost().store.updateSession({ activeToolId: 'move' }, 'tool');
+  }
   getEditorHost().history.execute({
     label: 'paste',
     do() {
-      state.floating = float;
+      floating = float;
       floatCtx = ctx;
       views.get(ctx.viewKind)?.setSelection(null);
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
-      state.floating = null;
+      floating = null;
       floatCtx = null;
       views.get(ctx.viewKind)?.setSelection(prevSelection ? { ...prevSelection } : null);
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     },
   });
   // paste can be the FIRST edit of a clean project — without this, the
@@ -433,7 +444,7 @@ async function readSystemClipboardBitmap() {
 async function pasteSystemImage() {
   let bitmap = await readSystemClipboardBitmap();
   if (!bitmap) return;
-  bitmap = maybeSnapPixels(bitmap);
+  bitmap = snapProjectPixels(getEditorHost().projects.project, bitmap);
   commitFloatIfAny();
   const viewApi = activeView();
   const sheet = activeSheet();
@@ -470,7 +481,7 @@ function onKeydown(e) {
     if (key === 'v') { e.preventDefault(); if (clipboard) pasteClipboard(); else pasteSystemImage(); return; }
     return;
   }
-  if (e.ctrlKey || e.metaKey || e.altKey || !state.floating) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || !floating) return;
   // capture-phase + stopImmediatePropagation: Escape must cancel the float
   // WITHOUT also exiting the frame editor or clearing a marquee (their own
   // window listeners run in the bubble phase)
@@ -484,7 +495,7 @@ export function initFloatSession() {
   editorHost.store.subscribe(
     s => [s.session.activeDocument, s.session.activeViewId],
     ([activeDocument, activeViewId]) => {
-      if (!state.floating || !floatCtx) return;
+      if (!floating || !floatCtx) return;
       // Compare activeViewId against floatCtx.hostViewId, NOT floatCtx.viewKind:
       // activeViewId lives in host-space ('sprites.sheet', 'tiles.tile', ...)
       // while viewKind is legacy-space ('sheet'|'frame'|'tile', kept only for
@@ -492,12 +503,12 @@ export function initFloatSession() {
       // namespaces made this guard a tautology (always true) before hostViewId
       // existed. hostViewId snapshots the real activeViewId at float-creation
       // time, so this now correctly detects "the user left the float's view".
-      if (activeDocument?.id !== state.floating.sheetId || activeViewId !== floatCtx.hostViewId) commitFloatIfAny();
+      if (activeDocument?.id !== floating.sheetId || activeViewId !== floatCtx.hostViewId) commitFloatIfAny();
     },
     { equals: (a, b) => a[0]?.id === b[0]?.id && a[1] === b[1] },
   );
   // project REPLACEMENT (New/Open) drops the float without a command — the
   // command stack was cleared and the old bitmaps are gone
-  editorHost.store.subscribe(s => s.project.model, () => { state.floating = null; floatCtx = null; });
+  editorHost.store.subscribe(s => s.project.model, () => { floating = null; floatCtx = null; });
   window.addEventListener('keydown', onKeydown, true);
 }

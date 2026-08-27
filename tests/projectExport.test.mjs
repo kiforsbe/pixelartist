@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createProject, createSheet } from '../js/core/model.js';
-import { collectProjectExportEntries } from '../js/app/projectExport.js';
+import { collectProjectExportEntries } from '../js/core/export/projectExport.js';
 
 test('collectProjectExportEntries: prefixes each builder output with its sheet name, skips missing sheets', async () => {
   const project = createProject('demo');

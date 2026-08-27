@@ -36,7 +36,7 @@ import { bindDrawing } from '../../../components/canvas/drawing-engine.js';
 import { activeFloating, commitFloatIfAny } from '../../../components/canvas/float-session.js';
 import { flattenSheetLayers } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';
-import { runAction } from '../../../app/actions.js';
+import { runAction } from '../../../features/shell/actions.js';
 import { computeOnionGhosts, resolveStepColor, traceOutline } from '../application/onion-skin.js';
 import { computeNeighborFrame } from '../application/frame-navigation.js';
 import { getEditorHost } from '../../../host/runtime.js';
@@ -210,7 +210,7 @@ export function mountFrameEditor(hostEl) {
   };
 
   function currentFrame() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet) return null;
     return sheet.frames.find(f => f.id === sheetSelection(sheet).editingFrameId) ?? null;
   }
@@ -327,7 +327,7 @@ export function mountFrameEditor(hostEl) {
   // ---- paint ----
 
   view.onPaint = (ctx) => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const f = currentFrame();
     if (!sheet || !f) return;
     // own pixels: draw the sheet-global-aligned flattened canvas shifted so
@@ -355,7 +355,7 @@ export function mountFrameEditor(hostEl) {
   // Walks the selected animation's order if the current frame belongs to it,
   // else falls back to sheet frame order. Clamped (no wraparound) at the ends.
   function neighborFrame(dir) {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const f = currentFrame();
     if (!sheet || !f) return null;
     const animationId = getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null;
@@ -416,7 +416,7 @@ export function mountFrameEditor(hostEl) {
       // no longer has it) — fall back to the sheet view rather than leaving
       // both this editor and the sheet canvas hidden.
       if (activeViewId() === 'sprites.frame') {
-        const sheet = activeSheet();
+        const sheet = activeSheet('sprite');
         if (sheet) getEditorHost().selections.patch({ editingFrameId: null }, sheetDocument(sheet));
         openSheetView();
       }
@@ -434,7 +434,7 @@ export function mountFrameEditor(hostEl) {
     // floatsession auto-commit hook can't see it — commit here or a pending
     // float outlives its creation frame's frozen target rect.
     commitFloatIfAny();
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (sheet) getEditorHost().selections.patch({ editingFrameId: nf.id }, sheetDocument(sheet));
     loadFrame(nf);
     updateStrip();

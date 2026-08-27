@@ -2,7 +2,7 @@
 // + "Add selected frame" + playback transport) and a horizontal strip of
 // frame cells (thumbnail + duration + remove, drag to reorder, click to
 // scrub/select/open). The live playhead preview itself renders in the
-// right-hand Preview panel (js/ui/previewpanel.js) -- this module still owns
+// right-hand Preview panel (components/panels/preview-panel.js) -- this module still owns
 // all playback/scrub timing (position, rAF loop) and just pushes the current
 // frame's bitmap over via setPreviewBitmap() on every tick.
 //
@@ -208,16 +208,16 @@ export function mountTimeline(el) {
   function invalidateFlat() { flatCache.invalidate(); }
 
   function currentSelection() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     return sheet ? (getEditorHost().selections.get(sheetDocument(sheet)) ?? {}) : {};
   }
   function setSelection(patch) {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (sheet) getEditorHost().selections.set({ ...currentSelection(), ...patch }, sheetDocument(sheet));
   }
 
   function currentAnim() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet) return null;
     return sheet.animations.find(a => a.id === currentSelection().animationId) ?? null;
   }
@@ -236,7 +236,7 @@ export function mountTimeline(el) {
   function renderPreview() {
     const anim = currentAnim();
     if (!anim) return;
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet || !anim.frames.length) { setPreviewBitmap(null); return; }
     const entry = anim.frames[Math.max(0, Math.min(position, anim.frames.length - 1))];
     const frame = sheet.frames.find(f => f.id === entry.frameId);
@@ -292,7 +292,7 @@ export function mountTimeline(el) {
 
   // ---- header controls ----
   animSelect.addEventListener('change', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const animationId = animSelect.value || null;
     stopPlaying();
     position = 0; acc = 0;
@@ -314,13 +314,13 @@ export function mountTimeline(el) {
   });
 
   btnNewAnim.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet) return;
     dispatch('sprites.newAnimation', { sheetId: sheet.id });
   });
 
   btnRenameAnim.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const anim = currentAnim();
     if (!sheet || !anim) return;
     const name = prompt('Animation name', anim.name);
@@ -330,7 +330,7 @@ export function mountTimeline(el) {
   });
 
   btnDeleteAnim.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const anim = currentAnim();
     if (!sheet || !anim) return;
     if (!confirmOrAuto(`Delete animation "${anim.name}"?`)) return;
@@ -343,7 +343,7 @@ export function mountTimeline(el) {
   });
 
   btnAddFrame.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const anim = currentAnim();
     const frameId = currentSelection().frameId ?? null;
     if (!sheet || !anim || !frameId) return;
@@ -351,7 +351,7 @@ export function mountTimeline(el) {
   });
 
   btnBreakApart.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const anim = currentAnim();
     if (!sheet || !anim || !anim.strip) return;
     dispatch('sprites.breakApartStrip', { sheetId: sheet.id, animationId: anim.id });
@@ -489,7 +489,7 @@ export function mountTimeline(el) {
     el.hidden = false;
     updateThumbSize();
     invalidateFlat();
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     renderAnimSelect(sheet);
     const anim = currentAnim();
 

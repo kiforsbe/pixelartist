@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PROJECT_VERSION, DEFAULT_SETTINGS, defaultOnionSettings, createProject, createSheet, createMap, createMapLayer, mapContentBounds, refreshMapBounds, addLayer, removeLayer,
+  PROJECT_VERSION, DEFAULT_SETTINGS, defaultOnionSettings, createProject, newDefaultProject, createSheet, createMap, createMapLayer, mapContentBounds, refreshMapBounds, addLayer, removeLayer,
   moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
   sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
@@ -16,6 +16,16 @@ function proj() {
   const s = createSheet(p, { name: 'sheet1', width: 32, height: 16, kind: 'sprite' });
   return { p, s };
 }
+
+test('newDefaultProject creates the initial sprite and tile sheets from settings', () => {
+  const settings = { ...DEFAULT_SETTINGS, spriteSheetW: 24, spriteSheetH: 12, tileSheetW: 40, tileSheetH: 20 };
+  const p = newDefaultProject(settings);
+  assert.equal(p.name, 'untitled');
+  assert.deepEqual(p.sheets.map(({ name, width, height, kind }) => ({ name, width, height, kind })), [
+    { name: 'Sprites', width: 24, height: 12, kind: 'sprite' },
+    { name: 'Tiles', width: 40, height: 20, kind: 'tile' },
+  ]);
+});
 
 test('removeSheet splices the matching sheet out of project.sheets and returns it', () => {
   const p = createProject('t');

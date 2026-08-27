@@ -75,7 +75,7 @@ function setSheetSelection(sheet, patch) {
 // ------------------------------------------------------------- pointer
 
 function handleDown(ev, view) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('sprite');
   if (!sheet) return;
   const toScreen = projector(view);
   if (currentToolId() === 'frametool') {
@@ -188,14 +188,14 @@ function handleMove(ev, view) {
   } else if (drag.kind === 'move') {
     const target = snapPoint(drag.frame.x + (ev.x - drag.anchor.x), drag.frame.y + (ev.y - drag.anchor.y), frameToolOptions);
     drag.delta = { dx: target.x - drag.frame.x, dy: target.y - drag.frame.y };
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     drag.snap = (drag.anim && sheet && (drag.delta.dx !== 0 || drag.delta.dy !== 0)) ? findSnap(sheet, drag, view.zoom) : null;
   } else if (drag.kind === 'resize') {
     drag.rect = snapRect(resizeRectFromHandle(drag.before, drag.handle, ev.x, ev.y, {
       useCenter: isCenterAnchorModifier(ev), shiftHeld: isProportionalModifier(ev),
     }), frameToolOptions);
   } else if (drag.kind === 'stripresize') {
-    drag.count = stripResizeCount(activeSheet(), drag, ev.x);
+    drag.count = stripResizeCount(activeSheet('sprite'), drag, ev.x);
   }
   view.requestRender();
 }
@@ -203,7 +203,7 @@ function handleMove(ev, view) {
 function handleUp(ev, view) {
   if (!drag) return;
   handleMove(ev, view);
-  const sheet = activeSheet();
+  const sheet = activeSheet('sprite');
   const d = drag;
   drag = null;
   view.requestRender();
@@ -250,7 +250,7 @@ function handleUp(ev, view) {
 
 function updateHover(ev, view) {
   let next = null;
-  const sheet = activeSheet();
+  const sheet = activeSheet('sprite');
   if (sheet && currentModeId() === 'sprites' && currentToolId() === 'frametool' && !drag) {
     const toScreen = projector(view);
     const sel = selectedSegment(sheet, sheetSelection(sheet).frameId ?? null);
@@ -320,7 +320,7 @@ export function registerFrameTool() {
     if (e.key !== 'Delete') return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (currentToolId() !== 'frametool' || currentModeId() !== 'sprites') return;
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet) return;
     const frameId = sheetSelection(sheet).frameId ?? null;
     if (!frameId) return;
@@ -338,7 +338,7 @@ export function registerFrameTool() {
     if (e.key !== 'Enter') return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (currentToolId() !== 'frametool' || currentModeId() !== 'sprites') return;
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet) return;
     const animationId = sheetSelection(sheet).animationId ?? null;
     if (!animationId) return;
@@ -349,14 +349,14 @@ export function registerFrameTool() {
 
 function drawFrameToolGhost(ctx, view) {
   if (currentModeId() !== 'sprites') return;
-  paintFrameToolGhost(ctx, view, activeSheet(), {
+  paintFrameToolGhost(ctx, view, activeSheet('sprite'), {
     tool: currentToolId(), drag, slicePreview: slicePreviewOptions(),
   });
 }
 
 export function drawStripChrome(ctx, view) {
   if (currentModeId() !== 'sprites') return;
-  const sheet = activeSheet();
+  const sheet = activeSheet('sprite');
   paintStripChrome(ctx, view, sheet, {
     tool: currentToolId(), drag, hover, selectedFrameId: sheet ? (sheetSelection(sheet).frameId ?? null) : null,
   });

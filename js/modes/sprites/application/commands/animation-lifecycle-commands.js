@@ -88,7 +88,7 @@ export function toggleAnimationLoop(services, sheetId, animationId, loop) {
     () => { anim.loop = before; });
 }
 
-// No before/after equality guard here -- matches js/ui/animpanel.js's
+// No before/after equality guard here -- matches animations-panel.js's
 // commitBaseDuration exactly, which always pushes a command even when
 // nothing actually changed (buildBaseDurationControl only calls setValue on
 // a real user commit, so this hasn't needed a guard in practice).

@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defineAction, getAction, runAction, bindAction } from '../js/app/actions.js';
-import { emit } from '../js/app/state.js';
+import { defineAction, getAction, runAction, bindAction, refreshActions } from '../js/features/shell/actions.js';
 
 test('defineAction fills in defaults; getAction returns them', () => {
   defineAction('t1.plain', { label: 'Plain', run: () => {} });
@@ -68,7 +67,7 @@ test('bindAction wires click to runAction and sets the title', () => {
   assert.equal(ran, 1);
 });
 
-test('bound elements refresh disabled/hidden on any app event', () => {
+test('bound elements refresh disabled/hidden when actions are refreshed', () => {
   let enabled = false, available = true;
   defineAction('t2.state', { label: 'State', run: () => {}, isEnabled: () => enabled, isAvailable: () => available });
   const el = fakeElement();
@@ -76,10 +75,10 @@ test('bound elements refresh disabled/hidden on any app event', () => {
   assert.equal(el.disabled, true);
   assert.equal(el.hidden, false);
   enabled = true;
-  emit('project');
+  refreshActions();
   assert.equal(el.disabled, false);
   available = false;
-  emit('selection');
+  refreshActions();
   assert.equal(el.hidden, true);
 });
 
@@ -90,6 +89,6 @@ test('toggle-bound checkbox mirrors isChecked and updates via events', () => {
   bindAction(el, 't2.toggle', { toggle: true });
   assert.equal(el.checked, false);
   checked = true;
-  emit('view');
+  refreshActions();
   assert.equal(el.checked, true);
 });

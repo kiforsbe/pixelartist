@@ -1,4 +1,4 @@
-import { defineAction } from '../../app/actions.js';
+import { defineAction } from './actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
 import { mountMenuBar } from '../../components/menubar.js';
 
@@ -90,4 +90,3 @@ export function mountApplicationMenu() {
   ];
   mountMenuBar(document.getElementById('menubar'), MENUS);
 }
-

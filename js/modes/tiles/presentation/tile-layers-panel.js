@@ -30,7 +30,7 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
   addButton.textContent = '➕';
   addButton.title = 'Add layer';
   addButton.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (!sheet) return;
     const name = prompt('Layer name?');
     if (!name) return;
@@ -44,7 +44,7 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
   deleteButton.textContent = '🗑';
   deleteButton.title = 'Delete layer';
   deleteButton.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (!sheet || selectedName == null) return;
     dispatch('tiles.removeTileLayer', { sheetId: sheet.id, name: selectedName });
     selectedName = null;
@@ -59,7 +59,7 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
       return;
     }
     element.hidden = false;
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     list.innerHTML = '';
     if (!sheet) return;
     if (selectedName != null && !sheet.layers.includes(selectedName)) selectedName = null;

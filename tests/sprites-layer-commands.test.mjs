@@ -4,8 +4,6 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
-import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import { createBitmap } from '../js/core/pixels.js';
 import {
   toggleLayerVisible, addLayer, addGroup, deleteNode, mergeLayerDownCmd,
@@ -37,17 +35,13 @@ function makeSheet(overrides = {}) {
 
 function makeProject(sheet) { return { sheets: [sheet], maps: [], palettes: [] }; }
 
-function resetLegacy() { state.commands = new CommandStack(); state.dirty = false; }
-
-test('toggleLayerVisible flips visibility, undoes, and does NOT call the legacy markDirty (unlike tiles)', () => {
-  resetLegacy();
+test('toggleLayerVisible flips visibility, marks host dirty, and undoes', () => {
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
   toggleLayerVisible(services, 'sheet1', 'l0');
   assert.equal(sheet.layerTree.children[0].visible, false);
-  assert.equal(services.projects.dirty, true); // host-level dirty, via runEntityCommand
-  assert.equal(state.dirty, false); // sprites/layer-commands.js's local runCommand skips legacy markDirty()
+  assert.equal(services.projects.dirty, true);
 
   services.history.undo();
   assert.equal(sheet.layerTree.children[0].visible, true);
@@ -57,7 +51,6 @@ test('toggleLayerVisible flips visibility, undoes, and does NOT call the legacy 
 });
 
 test('addLayer pushes a new layer into the target group, and undo removes it / redo restores the same id', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
@@ -75,7 +68,6 @@ test('addLayer pushes a new layer into the target group, and undo removes it / r
 });
 
 test('addLayer targets a specific group when given its id', () => {
-  resetLegacy();
   const inner = makeGroup({ id: 'g1', name: 'Inner', children: [] });
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer(), inner] }) });
   const services = makeServices(makeProject(sheet));
@@ -87,7 +79,6 @@ test('addLayer targets a specific group when given its id', () => {
 });
 
 test('addGroup pushes a new group and undo removes it', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
@@ -101,7 +92,6 @@ test('addGroup pushes a new group and undo removes it', () => {
 });
 
 test('deleteNode removes a layer and undo restores it at the same index', () => {
-  resetLegacy();
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'a' }), makeLayer({ id: 'b' }), makeLayer({ id: 'c' })] }) });
   const services = makeServices(makeProject(sheet));
 
@@ -113,7 +103,6 @@ test('deleteNode removes a layer and undo restores it at the same index', () => 
 });
 
 test('deleteNode removes a non-animation group and undo restores it', () => {
-  resetLegacy();
   const g = makeGroup({ id: 'g1', name: 'G', children: [makeLayer({ id: 'inner' })] });
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'a' }), g] }) });
   const services = makeServices(makeProject(sheet));
@@ -127,7 +116,6 @@ test('deleteNode removes a non-animation group and undo restores it', () => {
 });
 
 test('deleteNode refuses to delete the last layer in a group', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
@@ -137,7 +125,6 @@ test('deleteNode refuses to delete the last layer in a group', () => {
 });
 
 test('deleteNode refuses to delete an animation-owned group (out of scope; handled by sprites.deleteAnimation elsewhere)', () => {
-  resetLegacy();
   const animGroup = makeGroup({ id: 'anim-g', animationId: 'anim1', children: [makeLayer({ id: 'af1' })] });
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'a' }), animGroup] }) });
   const services = makeServices(makeProject(sheet));
@@ -148,7 +135,6 @@ test('deleteNode refuses to delete an animation-owned group (out of scope; handl
 });
 
 test('mergeLayerDownCmd composites into the layer below and undo restores its bitmap byte-for-byte', () => {
-  resetLegacy();
   const bottom = makeLayer({ id: 'bottom' });
   const top = makeLayer({ id: 'top' });
   for (let i = 0; i < top.bitmap.data.length; i += 4) {
@@ -173,7 +159,6 @@ test('mergeLayerDownCmd composites into the layer below and undo restores its bi
 });
 
 test('mergeLayerDownCmd refuses to merge the bottom layer, and refuses to merge into a group', () => {
-  resetLegacy();
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'only' })] }) });
   const services = makeServices(makeProject(sheet));
   assert.equal(mergeLayerDownCmd(services, 'sheet1', 'only'), null);
@@ -185,7 +170,6 @@ test('mergeLayerDownCmd refuses to merge the bottom layer, and refuses to merge 
 });
 
 test('moveNode reorders within the parent and undo restores original order', () => {
-  resetLegacy();
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'a' }), makeLayer({ id: 'b' }), makeLayer({ id: 'c' })] }) });
   const services = makeServices(makeProject(sheet));
 
@@ -197,7 +181,6 @@ test('moveNode reorders within the parent and undo restores original order', () 
 });
 
 test('dragMoveNode moves a node across parents and undo restores both sides', () => {
-  resetLegacy();
   const g1 = makeGroup({ id: 'g1', children: [makeLayer({ id: 'x' }), makeLayer({ id: 'y' })] });
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'a' }), g1] }) });
   const services = makeServices(makeProject(sheet));
@@ -216,7 +199,6 @@ test('dragMoveNode moves a node across parents and undo restores both sides', ()
 });
 
 test('dragMoveNode is a no-op (no history entry) when the drop location does not change anything', () => {
-  resetLegacy();
   const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'a' }), makeLayer({ id: 'b' })] }) });
   const services = makeServices(makeProject(sheet));
 
@@ -225,7 +207,6 @@ test('dragMoveNode is a no-op (no history entry) when the drop location does not
 });
 
 test('renameNode renames a plain layer and undoes', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 
@@ -237,7 +218,6 @@ test('renameNode renames a plain layer and undoes', () => {
 });
 
 test('renameNode syncs the matching animations entry name for an animation-owned group, and undoes', () => {
-  resetLegacy();
   const animGroup = makeGroup({ id: 'anim-g', name: 'Walk', animationId: 'anim1', children: [] });
   const sheet = makeSheet({
     layerTree: makeGroup({ children: [makeLayer(), animGroup] }),
@@ -255,7 +235,6 @@ test('renameNode syncs the matching animations entry name for an animation-owned
 });
 
 test('renameNode is a no-op when the name is unchanged', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
   renameNode(services, 'sheet1', 'l0', 'Layer 1');
@@ -263,7 +242,6 @@ test('renameNode is a no-op when the name is unchanged', () => {
 });
 
 test('setLayerOpacity sets opacity, undoes, and is a no-op when unchanged', () => {
-  resetLegacy();
   const sheet = makeSheet();
   const services = makeServices(makeProject(sheet));
 

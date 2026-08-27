@@ -125,7 +125,7 @@ export function distanceHistogram(bitmaps, referenceColor, buckets = 64) {
 }
 
 // mode 'transparent': full-strength match becomes [0,0,0,0] (mirrors the
-// eraser tool's own zero-everything convention, see js/ui/tools.js); a
+// eraser tool's own zero-everything convention, see drawing-engine.js); a
 // partial-strength match treats `strength` as the estimated background
 // share: alpha retains only the remaining foreground share, and RGB is
 // un-mixed from the key color. This removes key-colored fringe in a single

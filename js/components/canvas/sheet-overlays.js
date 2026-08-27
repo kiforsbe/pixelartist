@@ -3,8 +3,8 @@
 // rendering — drawn in SCREEN space (the CanvasView identity transform
 // active during onOverlay), never baked into sheet bitmaps or exports.
 
-import { state, activeSheet } from '../../app/state.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { activeSheet } from '../../host/document-helpers.js';
 import { classifySlots } from '../../core/blob47.js';
 
 function sheetDocument(sheet) {
@@ -32,9 +32,11 @@ const REMOVABLE_FILL = 'rgba(120,130,170,.35)';
 export function drawSheetOverlays(view, ctx) {
   const sheet = activeSheet();
   if (!sheet) return;
-  if (state.mode === 'sprites') drawSpriteOverlays(view, ctx, sheet);
+  if (getEditorHost().store.getState().session.activeModeId === 'sprites') drawSpriteOverlays(view, ctx, sheet);
   else drawTileOverlays(view, ctx, sheet);
 }
+
+function overlays() { return getEditorHost().store.getState().workspace.overlays; }
 
 // Draws a small dark pill with `text` anchored so its top-left corner is at
 // (x, y), clamped fully inside the viewport so labels near the sheet edge
@@ -67,7 +69,7 @@ function drawSpriteOverlays(view, ctx, sheet) {
   if (!frames.length) return;
   const selectedFrameId = getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null;
 
-  if (state.overlays.labels) {
+  if (overlays().labels) {
     ctx.save();
     frames.forEach((f) => {
       const selected = f.id === selectedFrameId;
@@ -87,13 +89,13 @@ function drawSpriteOverlays(view, ctx, sheet) {
     ctx.restore();
   }
 
-  if (!state.overlays.labels && !state.overlays.sequences) return;
+  if (!overlays().labels && !overlays().sequences) return;
 
   frames.forEach((f, index) => {
     const p0 = view.imageToScreen(f.x, f.y);
     let labelRect = null;
-    if (state.overlays.labels) labelRect = drawChip(ctx, view, `${index}:${f.name}`, p0.x, p0.y);
-    if (state.overlays.sequences && sheet.animations.length) {
+    if (overlays().labels) labelRect = drawChip(ctx, view, `${index}:${f.name}`, p0.x, p0.y);
+    if (overlays().sequences && sheet.animations.length) {
       let stackY = labelRect ? labelRect.y + labelRect.h + 2 : p0.y;
       for (const anim of sheet.animations) {
         const pos = anim.frames.findIndex(af => af.frameId === f.id);
@@ -109,7 +111,7 @@ function drawTileOverlays(view, ctx, sheet) {
   if (!sheet.tiles) return;
   const tiles = sheet.tiles;
 
-  if (state.overlays.labels && tiles.length > 0) {
+  if (overlays().labels && tiles.length > 0) {
     ctx.save();
     ctx.lineWidth = 1;
     for (const t of tiles) {
@@ -145,7 +147,8 @@ function drawTileOverlays(view, ctx, sheet) {
 
   // Selected-tile highlight (tile tool) — independent of the labels toggle,
   // like sprite mode's selected-frame fill/stroke.
-  const sel = tiles.find(t => t.id === state.selectedTileId);
+  const selectedTileId = getEditorHost().selections.get(sheetDocument(sheet))?.tileId ?? null;
+  const sel = tiles.find(t => t.id === selectedTileId);
   if (sel) {
     const p0 = view.imageToScreen(sel.x, sel.y);
     const p1 = view.imageToScreen(sel.x + sel.w, sel.y + sel.h);

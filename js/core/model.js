@@ -24,12 +24,12 @@ export const DEFAULT_SETTINGS = {
   // master palette) -- the per-tile/sprite INDEX COUNT hardware limit is
   // never relaxed (native binary exporters still hard-cap at MAX_COLORS
   // regardless of this setting), only which colors those indices may be
-  // chosen from. See js/app/main.js's resolveC99Items.
+  // chosen from. See file-controller.js's resolveC99Items.
   exportColorMode: 'strict',
   // See js/core/pixelSnapper.js -- auto-detects and snaps a pasted/
   // imported image's implicit pixel grid back to its true resolution.
   // Applies to both Document > Import Sheet from Image and OS-clipboard
-  // paste (js/app/main.js, js/ui/floatsession.js).
+  // paste (document-controller.js and components/canvas/float-session.js).
   pixelSnapperEnabled: false,
   // Quantization budget for grid detection (and, with no target palette,
   // the final output's own color count) -- defaults to the module's max so
@@ -47,8 +47,8 @@ export const DEFAULT_SETTINGS = {
   // Advanced tuning knobs (Project Settings > Import > Advanced) -- mirror
   // js/core/pixelSnapper.js's own DEFAULT_PIXEL_SNAPPER_CONFIG exactly, so
   // leaving them untouched reproduces today's default behavior. Passed
-  // through as snapPixels' `config` override; see js/app/state.js's
-  // maybeSnapPixels for the exact field mapping.
+  // through as snapPixels' `config` override; see project-pixel-snapper.js
+  // for the exact field mapping.
   pixelSnapperMaxIterations: DEFAULT_PIXEL_SNAPPER_CONFIG.maxKmeansIterations,
   pixelSnapperPeakThreshold: DEFAULT_PIXEL_SNAPPER_CONFIG.peakThresholdMultiplier,
   pixelSnapperPeakDistanceFilter: DEFAULT_PIXEL_SNAPPER_CONFIG.peakDistanceFilter,
@@ -74,9 +74,8 @@ const ONION_STEP_PALETTE = [
 // A fresh object every call (never a shared constant) -- project.settings.onion
 // is mutated in place as the user drags sliders/pickers in the frame editor,
 // so aliasing this across projects would leak one project's onion tweaks into
-// every other project's "default". See setProject() in app/state.js, which
-// points state.onion at this object so the frame editor's existing
-// state.onion.* reads/writes persist as part of the project automatically.
+// every other project's "default". Project creation stores a fresh object
+// so frame-editor changes remain isolated to that project.
 export function defaultOnionSettings() {
   const stepColors = { back: {}, ahead: {} };
   for (let k = 1; k <= 8; k++) {
@@ -120,9 +119,16 @@ export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
     sheets: [], maps: [], palettes: [], activePaletteId: null };
 }
 
+export function newDefaultProject(settings = DEFAULT_SETTINGS) {
+  const project = createProject('untitled', settings);
+  createSheet(project, { name: 'Sprites', width: settings.spriteSheetW, height: settings.spriteSheetH, kind: 'sprite' });
+  createSheet(project, { name: 'Tiles', width: settings.tileSheetW, height: settings.tileSheetH, kind: 'tile' });
+  return project;
+}
+
 // Works for both indexed (fixed-size) and free-form swatch palettes --
-// `indexed` only matters for export quantization budgets (see js/app/
-// main.js's resolveC99Items), not for "is there a color list to use" here.
+// `indexed` only matters for export quantization budgets (see
+// file-controller.js's resolveC99Items), not for "is there a color list to use" here.
 function paletteColorsById(project, id) {
   const palette = project.palettes.find(p => p.id === id);
   if (!palette?.colors.length) return null;
@@ -347,9 +353,8 @@ export function flattenSheetLayers(layers, width, height, floating = null, sheet
 // Any real layer whose id matches one here is swapped for the override
 // version for this flatten pass only -- lets a filter dialog preview a
 // hypothetical edit on the real canvas/sheet without touching real layer
-// data (same by-id substitution previewpanel.js's own override mechanism
-// uses for the side Preview panel; js/app/main.js's buildPreviewLayers
-// builds the array either one consumes).
+// data (same by-id substitution preview-panel.js's own override mechanism
+// uses for the side Preview panel; that panel builds the array either one consumes).
 function withOverrides(layers, overrideLayers) {
   if (!overrideLayers) return layers;
   const byId = new Map(overrideLayers.map(l => [l.id, l]));

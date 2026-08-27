@@ -57,18 +57,18 @@ Tasks 7-10 retain their original behavior and verification goals; this amendment
 - Produces: `js/components/panel-mount.js` exports `mountStorePanel(store, selectors, render, { onDispose })` — same shape/contract as the existing `mountReactivePanel(on, events, render, { onDispose })`, but keyed on `EditorStore` selectors instead of legacy event names.
 - Consumes: `EditorStore.subscribe(selector, listener, opts)` (`js/host/editor-store.js:78`, returns a dispose function), `getEditorHost()` (`js/host/runtime.js`).
 
-- [ ] **Step 1: `HistoryService` constructs its own `CommandStack`; `bootstrap.js` stops injecting the legacy one**
+- [x] **Step 1: `HistoryService` constructs its own `CommandStack`; `bootstrap.js` stops injecting the legacy one**
 
 Read `js/host/history-service.js` first — its constructor is currently `constructor({ stack = new CommandStack(), store = null } = {})`. Change the signature to drop the `stack` option entirely: `constructor({ store = null } = {})`, with `this.#stack = new CommandStack();` hardcoded. This is safe now (and was not safe before Task 1) because after this task, nothing outside `HistoryService` pushes onto a `CommandStack` directly anymore except the two remaining tracked exceptions (`drawing-engine.js`/`terrain-preset-art.js` after Tasks 5/8 convert them to `getEditorHost().history.execute(command)`, which goes through `HistoryService`'s own stack correctly).
 
 In `js/bootstrap.js`, remove the `historyStack: legacyState.commands` option and the `import { state as legacyState } from './app/state.js';` line — `new EditorHost({ preferences: ..., platform: ... })` no longer needs it.
 
-- [ ] **Step 2: Run the full suite to confirm nothing yet depends on the old injection**
+- [x] **Step 2: Run the full suite to confirm nothing yet depends on the old injection**
 
 Run: `npm test`
 Expected: failures in every test that still calls `state.commands.push(...)` directly and expects it to affect the host (there will be several — this is expected until Tasks 2-5, 8 land; do not try to fix them in this task). Confirm specifically that `tests/historyservice.test.mjs` and `tests/host.test.mjs` still pass (they construct `HistoryService`/`EditorHost` directly, not through `state.commands`).
 
-- [ ] **Step 3: Create `js/host/document-helpers.js`**
+- [x] **Step 3: Create `js/host/document-helpers.js`**
 
 Read `js/app/state.js` in full first (lines 58-93 define `activeSheet`/`activeMap`/`activeLayer`/`currentContextLayers`/`activeLayerScope` today) and `js/features/project/document-controller.js:95-114` (the established host-native pattern for resolving `session.activeDocument` into a real sheet/map object: `editorHost.projects.project?.sheets.find(s => s.id === activeDoc.id)` — NOT `host.documents.resolve()`, which only re-validates the `{kind,id}` reference, not the object). Write:
 
@@ -119,7 +119,7 @@ export function activeLayerScope() {
 
 This drops the legacy fallback branches entirely (no `host ? ... : state.activeLayerId` — every caller of these functions runs after a host exists, same as today's already-host-primary `activeLayer()`/`currentContextLayers()`).
 
-- [ ] **Step 4: Write `tests/document-helpers.test.mjs`**
+- [x] **Step 4: Write `tests/document-helpers.test.mjs`**
 
 Follow `tests/editorstore.test.mjs`'s style (construct a real `EditorStore`/`EditorHost`, no mocking framework). At minimum:
 
@@ -141,7 +141,7 @@ test('activeSheet/activeMap/activeLayer resolve from the host store, not a stale
 
 Read `tests/host.test.mjs` for how it constructs a project/registers a mode/activates a document, and extend the test above to cover the populated case (a sheet with layers, resolved via `host.documents.setActive(...)` then `activeSheet()` returns the matching object; `activeLayer()` returns the correct layer after `host.selections.set(...)`). Match that file's exact setup helpers rather than reinventing project/mode fixtures.
 
-- [ ] **Step 5: Relocate `AUTOTEST`/`confirmOrAuto` to `js/platform/browser/autotest.js`**
+- [x] **Step 5: Relocate `AUTOTEST`/`confirmOrAuto` to `js/platform/browser/autotest.js`**
 
 Verbatim move from `js/app/state.js:6-9`:
 
@@ -155,7 +155,7 @@ export const confirmOrAuto = (msg) => AUTOTEST || (typeof confirm !== 'undefined
 
 No test needed beyond what already exercises `?autotest` behavior end-to-end (memory: `?autotest` already relied on throughout the test suite/manual verification).
 
-- [ ] **Step 6: Add `mountStorePanel` to `js/components/panel-mount.js`**
+- [x] **Step 6: Add `mountStorePanel` to `js/components/panel-mount.js`**
 
 Read the existing `mountReactivePanel` in that file first (already present, do not remove it — `js/components/tool-palette.js` and others may still use the legacy `on`-based version until their own task lands). Append:
 
@@ -184,7 +184,7 @@ export function mountStorePanel(store, selectors, render, { onDispose } = {}) {
 }
 ```
 
-- [ ] **Step 7: Write `tests/panel-mount.test.mjs`**
+- [x] **Step 7: Write `tests/panel-mount.test.mjs`**
 
 ```js
 import { test } from 'node:test';
@@ -218,12 +218,12 @@ test('mountStorePanel runs a paired handler synchronously before the debounced r
 
 (The second assertion's exact ordering — `render()` fires once synchronously at mount before any transaction — mirrors `mountReactivePanel`'s own documented behavior; verify against the actual behavior when you run this and adjust the expected array if the synchronous initial `render()` call changes the count, but do not change `mountStorePanel`'s logic to match a wrong expectation — the implementation in Step 6 is correct, fix the test's expected array if needed.)
 
-- [ ] **Step 8: Run the full suite**
+- [x] **Step 8: Run the full suite**
 
 Run: `npm test`
 Expected: `tests/document-helpers.test.mjs` and `tests/panel-mount.test.mjs` pass. The same pre-existing failures from Step 2 remain (still expected — later tasks fix them). No NEW failures beyond Step 2's baseline.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add js/host/history-service.js js/bootstrap.js js/host/document-helpers.js tests/document-helpers.test.mjs js/platform/browser/autotest.js js/components/panel-mount.js tests/panel-mount.test.mjs
@@ -252,7 +252,7 @@ git commit -m "feat: HistoryService owns its CommandStack; add host-driven docum
 
 This task does NOT touch `layers-panel.js`/`color-panel.js` — it only adds and unit-tests the handlers. Task 3/4 wire the panels to them.
 
-- [ ] **Step 1: Read the exact current undo semantics you're porting**
+- [x] **Step 1: Read the exact current undo semantics you're porting**
 
 Read `js/components/panels/layers-panel.js` in full (834 lines) — every command this task creates must reproduce the exact `do()`/`undo()` data mutation of one of these existing closures verbatim, minus the `selectedNodeId`/`setSheetSelection` calls (per Global Constraints, those move to Task 3's caller code):
 
@@ -270,7 +270,7 @@ Read `js/components/panels/layers-panel.js` in full (834 lines) — every comman
 
 Read `js/components/panels/color-panel.js` around lines 155 and 175 (`editIndexedEntry`) for the two palette operations: `edit palette color` (single `setEntry(pal, index, to/old)` call, no bitmap remap) and `remap palette color` (same palette-entry mutation, plus `blitRegion` over every sheet layer's bitmap using a pre-collected `layerPatches` array — read the surrounding ~40 lines of `editIndexedEntry` to get the exact patch-collection logic before porting it).
 
-- [ ] **Step 2: `js/modes/tiles/application/commands/layer-commands.js` — worked example (`toggleLayerVisible`) plus the rest of the same file**
+- [x] **Step 2: `js/modes/tiles/application/commands/layer-commands.js` — worked example (`toggleLayerVisible`) plus the rest of the same file**
 
 Read `js/modes/tiles/application/commands/tile-sheet-commands.js:1-22` first (its `findSheet`/`runCommand` helpers) — import and reuse `runCommand` from there rather than redefining sheet-resolution:
 
@@ -458,11 +458,11 @@ export function setLayerOpacity(services, sheetId, layerId, opacity) {
 
 Note: `findParent`/`findGroup`/`findNode` signatures — confirm their exact return shapes against `js/core/model.js` before finalizing (the sketch above assumes `findParent(tree, id)` returns `{parent, index, node}` and `findGroup(tree, groupId)` returns the group node or `null`, matching how `layers-panel.js` already calls them — verify against the actual `js/core/model.js` source, which this task's implementer has full read access to, and adjust the property names above if they differ).
 
-- [ ] **Step 3: Write `tests/tiles-layer-commands.test.mjs`**
+- [x] **Step 3: Write `tests/tiles-layer-commands.test.mjs`**
 
 Follow the style of an existing per-command test file for tiles (check `tests/` for one covering `tile-sheet-commands.js`'s existing exports, or `map-paint-commands.test.mjs` for the general shape: construct a real project via existing test fixtures, call the command function, assert the mutation, call `services.history.undo()`, assert it reverted). At minimum, cover: `addLayer` (do + undo removes it), `deleteNode` (do + undo restores at the same index), `toggleLayerVisible` (do + undo), `setLayerOpacity` (do + undo, and a no-op when `opacity` is unchanged), `renameNode` (including the animation-name-sync case), `mergeLayerDownCmd` (bitmap content correctly restored on undo), `moveNode` and `dragMoveNode` (children array order correct after do, restored after undo; `dragMoveNode` specifically covering the cross-parent case where `destParentId !== srcParentId`).
 
-- [ ] **Step 4: `js/modes/sprites/application/commands/layer-commands.js`**
+- [x] **Step 4: `js/modes/sprites/application/commands/layer-commands.js`**
 
 Same operations, same logic (sprite sheets use the identical `sheet.layerTree` shape — per the existing repo-wide comment in `layers-panel.js:810-817`: "sheet.layerTree ... is shared by sprite and tile sheets alike"). Check whether `js/modes/sprites/application/commands/*.js` already defines a `runCommand(services, sheetId, label, apply, revert)`-shaped helper (grep for `runEntityCommand` under `js/modes/sprites/application/commands/`); if one exists, import and reuse it. If not, define a local one matching `tile-sheet-commands.js:19-22`'s exact pattern:
 
@@ -475,11 +475,11 @@ export function runCommand(services, sheetId, label, apply, revert) {
 
 (Note: do NOT port the legacy `markDirty()` call that `tile-sheet-commands.js`'s own `runCommand` currently makes — that call is the redundant legacy shadow this whole plan is retiring; Task 8 removes it from `tile-sheet-commands.js` too. New code should never call the legacy `markDirty()` at all — `runEntityCommand`'s `services.projects.mutate()` already marks the host dirty.)
 
-- [ ] **Step 5: Write `tests/sprites-layer-commands.test.mjs`**
+- [x] **Step 5: Write `tests/sprites-layer-commands.test.mjs`**
 
 Same coverage as Step 3, adapted for a sprite sheet fixture.
 
-- [ ] **Step 6: `js/modes/maps/application/commands/map-layer-commands.js` — add `setMapLayerOpacity`**
+- [x] **Step 6: `js/modes/maps/application/commands/map-layer-commands.js` — add `setMapLayerOpacity`**
 
 Read the file (already shown above in the design investigation) and add, matching `deleteMapLayer`'s exact style:
 
@@ -495,7 +495,7 @@ export function setMapLayerOpacity(services, mapId, layerId, opacity) {
 }
 ```
 
-- [ ] **Step 7: `js/modes/sprites/application/commands/palette-commands.js` and the `tiles/` equivalent**
+- [x] **Step 7: `js/modes/sprites/application/commands/palette-commands.js` and the `tiles/` equivalent**
 
 Read `js/components/panels/color-panel.js`'s `editIndexedEntry` (around lines 140-190) in full before writing this — the exact `layerPatches` collection logic for the remap case must be ported faithfully, not approximated. Both files are structurally identical (palettes are project-level, not sheet-scoped, so `resolve = project => project`):
 
@@ -524,20 +524,20 @@ export function remapPaletteColor(services, index, color) {
 
 The `editPaletteColor`/`remapPaletteColor` sketch above is intentionally incomplete for the remap case — port `editIndexedEntry`'s exact current logic (read it first, per this step's instruction) rather than guessing at `setEntry`'s import path or the patch shape.
 
-- [ ] **Step 8: Write `tests/sprites-palette-commands.test.mjs` and `tests/tiles-palette-commands.test.mjs`**
+- [x] **Step 8: Write `tests/sprites-palette-commands.test.mjs` and `tests/tiles-palette-commands.test.mjs`**
 
 Cover: `editPaletteColor` do/undo restores the exact prior palette entry; `remapPaletteColor` do/undo restores both the palette entry and every affected layer's bitmap region byte-for-byte.
 
-- [ ] **Step 9: Register every new handler**
+- [x] **Step 9: Register every new handler**
 
 In each mode's `contributions.js`, follow the exact existing registration style (`api.commands.register({ id, when, execute })`, matching `js/modes/maps/contributions.js`'s `maps.addLayer`/`maps.deleteLayer` lines shown above). Register `sprites.addLayer`, `sprites.addGroup`, `sprites.deleteNode`, `sprites.mergeDown`, `sprites.moveNode`, `sprites.dragMoveNode`, `sprites.toggleLayerVisible`, `sprites.renameNode`, `sprites.setLayerOpacity`, `sprites.editPaletteColor`, `sprites.remapPaletteColor` in `sprites/contributions.js`; the identical set (minus `mergeDown`, which is sprite/tile-specific per Step 2 — keep it in both since both modes have `layerTree`) under `tiles.*` in `tiles/contributions.js`; `maps.setLayerOpacity` in `maps/contributions.js`.
 
-- [ ] **Step 10: Run the full suite**
+- [x] **Step 10: Run the full suite**
 
 Run: `npm test`
 Expected: all new test files pass; the pre-existing Task-1-introduced failures (still-unconverted `state.commands.push` sites) remain unchanged — this task adds handlers but doesn't wire consumers yet.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add js/modes/sprites/application/commands/layer-commands.js tests/sprites-layer-commands.test.mjs js/modes/tiles/application/commands/layer-commands.js tests/tiles-layer-commands.test.mjs js/modes/sprites/application/commands/palette-commands.js tests/sprites-palette-commands.test.mjs js/modes/tiles/application/commands/palette-commands.js tests/tiles-palette-commands.test.mjs js/modes/maps/application/commands/map-layer-commands.js js/modes/sprites/contributions.js js/modes/tiles/contributions.js js/modes/maps/contributions.js
@@ -554,7 +554,7 @@ git commit -m "feat: add layer-tree, map-opacity, and palette Command Handlers f
 **Interfaces:**
 - Consumes: Task 2's registered command ids; `js/host/document-helpers.js`'s `activeSheet`/`activeMap`/`activeLayer` (Task 1); `js/platform/browser/autotest.js`'s `confirmOrAuto` (Task 1); `js/components/panel-mount.js`'s `mountStorePanel` (Task 1).
 
-- [ ] **Step 1: Replace the import line and every direct-mutation function**
+- [x] **Step 1: Replace the import line and every direct-mutation function**
 
 Replace line 3's `import { state, on, emit, activeSheet, activeLayer, activeMap, markDirty, confirmOrAuto } from '../../app/state.js';` with:
 
@@ -590,7 +590,7 @@ Rewrite each function per this table (mode-branch dispatch: `dispatch(mode === '
 | `renderLayer`'s opacity `change` handler (698-716) | `dispatch(`${mode}.setLayerOpacity`, {sheetId: activeSheet().id, layerId: layer.id, opacity: after})` |
 | `renderMapLayer`'s opacity `change` handler (line 746) | `dispatch('maps.setLayerOpacity', {mapId: activeMap().id, layerId: layer.id, opacity: Number(opacityInput.value)/100})` |
 
-- [ ] **Step 2: Replace the `on`/`emit`-based reactivity with `mountStorePanel`**
+- [x] **Step 2: Replace the `on`/`emit`-based reactivity with `mountStorePanel`**
 
 Replace the closing lines (827-832: `on('project', renderList); on('history', renderList); on('view', renderList); on('selection', renderList); on('pixels', scheduleThumbRedraw); renderList();`) with:
 
@@ -608,16 +608,16 @@ getEditorHost().history.subscribe(() => renderList());
 
 That sketch has a real bug intentionally left in it as a worked check: `s => s.session.selectionsByDocument` is the exact in-place-mutation trap the Group 4 final review already found once (Minor 1 in that review, and the parent spec's own "Sharp edge" callout for `setSelection`) — `selectionsByDocument[key] = {...}` mutates a property of the SAME outer object, so `Object.is` on the outer object never re-fires. Do not use that selector as written. Instead, select the specific active document's selection entry, which IS replaced wholesale on every `setSelection`/`SelectionService.set()` call (confirmed in the parent spec's Foundation section): `s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; }` (match `documentKey()`'s exact format from `js/host/editor-store.js` rather than hand-building the string — import and use `documentKey` from there if it's exported, otherwise inline the identical format it produces). For `pixels`-driven thumbnail redraws (`scheduleThumbRedraw`, currently triggered by legacy `emit('pixels')`), this event has NO store equivalent yet (drawing engine emits it directly, mid-stroke, for live preview) — keep a legacy `on('pixels', scheduleThumbRedraw)` subscription alongside the `mountStorePanel`/`history.subscribe` wiring for this one signal only, disposing it together with the store subscriptions. Import `on` from `../../app/state.js'` ONLY for this one purpose, with a comment explaining why (matches the `architecture.test.mjs` shell-file precedent of deliberately NOT banning `on`/`emit` for pixel-level signals — see that test's own comment). Combine all disposal into one `dispose()` via `mountStorePanel`'s `onDispose` option, wrapping the extra `on('pixels', ...)` and `history.subscribe(...)` teardown.
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 Run: `npm test`
 Expected: `tests/panels.test.mjs` (existing coverage for this file, if it covers `layers-panel.js` specifically — check its contents first) passes. No regressions in `tests/sprites-layer-commands.test.mjs`/`tests/tiles-layer-commands.test.mjs` from Task 2.
 
-- [ ] **Step 4: Manual verification (Playwright, `?autotest`, no drag simulation)**
+- [x] **Step 4: Manual verification (Playwright, `?autotest`, no drag simulation)**
 
 Load the app, exercise in sprites mode then tiles mode: add layer, add group, rename a layer, toggle visibility, change opacity, delete a layer, merge down, undo each one and confirm the exact prior state returns (bitmap content for merge-down, tree structure for add/delete). For drag-and-drop reorder specifically (`performMove`/`dragMoveNode`), this cannot be simulated — verify by hand in the same live browser session per established policy, confirming a drag-reorder followed by Ctrl+Z restores the original order.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add js/components/panels/layers-panel.js
@@ -634,24 +634,24 @@ git commit -m "refactor: layers-panel.js dispatches through Command Handlers, dr
 **Interfaces:**
 - Consumes: Task 2's `sprites.editPaletteColor`/`sprites.remapPaletteColor`/`tiles.editPaletteColor`/`tiles.remapPaletteColor`; Task 1's `document-helpers.js`/`autotest.js`/`mountStorePanel`.
 
-- [ ] **Step 1: Read the current file in full**, then replace `import { state, on, emit, activeSheet, markDirty, confirmOrAuto } from '../../app/state.js';` with the same `getEditorHost`/`document-helpers`/`autotest`/`panel-mount` imports as Task 3, plus the same `dispatch(id, args)` helper.
+- [x] **Step 1: Read the current file in full**, then replace `import { state, on, emit, activeSheet, markDirty, confirmOrAuto } from '../../app/state.js';` with the same `getEditorHost`/`document-helpers`/`autotest`/`panel-mount` imports as Task 3, plus the same `dispatch(id, args)` helper.
 
-- [ ] **Step 2: Convert `editIndexedEntry`'s two `state.commands.push(...)` sites (lines ~155, ~175)**
+- [x] **Step 2: Convert `editIndexedEntry`'s two `state.commands.push(...)` sites (lines ~155, ~175)**
 
 Replace with `dispatch(`${mode}.editPaletteColor`, {index, color})` and `dispatch(`${mode}.remapPaletteColor`, {index, color})` respectively, removing the now-dead local `do()`/`undo()` closures and the trailing `markDirty()` calls (the Command Handler's `runEntityCommand` already marks the host dirty).
 
-- [ ] **Step 3: Replace `on`/`emit`-based reactivity with `mountStorePanel`**, following Task 3 Step 2's exact pattern (selectors for `project.model`/`activeModeId`/`activeDocument`; keep a legacy `on('pixels', ...)` subscription only if this file redraws swatches on live pixel changes — check the current file for a `pixels`-driven handler before assuming one exists).
+- [x] **Step 3: Replace `on`/`emit`-based reactivity with `mountStorePanel`**, following Task 3 Step 2's exact pattern (selectors for `project.model`/`activeModeId`/`activeDocument`; keep a legacy `on('pixels', ...)` subscription only if this file redraws swatches on live pixel changes — check the current file for a `pixels`-driven handler before assuming one exists).
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run: `npm test`
 Expected: green, including `tests/sprites-palette-commands.test.mjs`/`tests/tiles-palette-commands.test.mjs`.
 
-- [ ] **Step 5: Manual verification (Playwright, `?autotest`)**
+- [x] **Step 5: Manual verification (Playwright, `?autotest`)**
 
 Edit a palette color, undo, confirm the swatch and every affected pixel on canvas revert. Trigger a remap (color used across multiple layers), undo, confirm every layer's bitmap reverted correctly, not just the palette entry.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add js/components/panels/color-panel.js
@@ -671,30 +671,30 @@ git commit -m "refactor: color-panel.js dispatches through Command Handlers, dro
 
 Per the CommandStack-encapsulation investigation: these two files' commands close over live `bitmap`/`layer` references built by `makePixelPatch` (`js/core/commands.js`), not entity ids — unlike Task 2/3/4's tree operations, there is no natural "re-resolve by id" Command Handler shape here (the drawing engine already knows exactly which live bitmap it just painted; re-deriving a `sheetId`/`layerId` lookup would only reintroduce a lookup that's already redundant at the moment `finalize()` runs). Route both directly through `services.history.execute(command)` (equivalently `getEditorHost().history.execute(command)`), bypassing the `registries.commands` id/context layer entirely — this is architecturally sound because `HistoryService.execute()` (`js/host/history-service.js`) is a thin validating pass-through to `CommandStack.push()`, the exact same mechanism `registries.commands.execute()` uses internally once a handler is found; no id/`when`/`isEnabled` gating is needed here since both call sites are already correctly mode/context-scoped by the caller.
 
-- [ ] **Step 1: `drawing-engine.js` — convert both `state.commands.push(...)` sites**
+- [x] **Step 1: `drawing-engine.js` — convert both `state.commands.push(...)` sites**
 
 Read the file's current import line (`import { state, on, emit, activeSheet, activeLayer, markDirty } from '../../../app/state.js';`) and both push sites (line ~170 in `finalize()`, line ~687 in the delete-selection keydown handler). Replace each `state.commands.push(makePixelPatch(...))` with `getEditorHost().history.execute(makePixelPatch(...))`, and each accompanying legacy `markDirty()` call (if present at either site — check; `runEntityCommand`-equivalent dirty-marking doesn't apply here since this bypasses `services.projects.mutate()`, so confirm whether `HistoryService`'s `stack.onChange` wrapper — read `js/host/history-service.js` again, lines ~18-23 — already calls `store.markDirty(true)` on every push; if it does, as the investigation found, no explicit `markDirty()` call is needed at all here) with nothing (rely on `HistoryService`'s own `onChange` → `store.markDirty(true)` wiring, confirmed in Task 1's investigation).
 
 Replace remaining `state.mode`/`state.tool`/`activeSheet`/`activeLayer` reads with `getEditorHost().store.getState().session.activeModeId`/`.activeToolId` and `js/host/document-helpers.js`'s `activeSheet`/`activeLayer`. For `on`/`emit` usage: read what events this file listens for (mode/tool changes to know when to (re)bind) and emits (`'pixels'` for live paint preview, already established as staying on the legacy bus per `architecture.test.mjs`'s own comment) — convert the LISTENING side to `getEditorHost().store.subscribe(...)`, keep the `emit('pixels')` calls as-is (still legitimate, per that test's explicit carve-out).
 
-- [ ] **Step 2: `terrain-preset-art.js` — minimal fix only, NOT a full Command Handler conversion**
+- [x] **Step 2: `terrain-preset-art.js` — minimal fix only, NOT a full Command Handler conversion**
 
 Read the file (56 lines). Replace `state.commands.push(makePixelPatch(layer.bitmap, rect, before, after, 'import terrain layout art'))` at line 56 with `getEditorHost().history.execute(makePixelPatch(layer.bitmap, rect, before, after, 'import terrain layout art'))`. Keep the `import { makePixelPatch } from '.../core/commands.js'` import (Do NOT change or remove it — `tests/architecture.test.mjs`'s `'only the tracked terrain-preset-art.js exception imports core/commands.js from outside application/presentation'` test asserts this file is the ONLY one under `js/modes/**` outside `application/`/`presentation/` allowed to do so; removing this import would silently make that test vacuous rather than failing, so keep it and re-run that specific test explicitly in Step 4 to confirm it still exercises the exception). Replace the remaining `state`/`activeLayer`/`markDirty`/`confirmOrAuto` imports per the same pattern as Task 6-8's other files (see the substitution table there) — remove the redundant `markDirty()` call entirely (same reasoning as Step 1).
 
-- [ ] **Step 3: Run the full suite**
+- [x] **Step 3: Run the full suite**
 
 Run: `npm test`
 
-- [ ] **Step 4: Confirm the architecture-test exception still holds**
+- [x] **Step 4: Confirm the architecture-test exception still holds**
 
 Run: `node --test tests/architecture.test.mjs`
 Expected: all pass, specifically `'only the tracked terrain-preset-art.js exception imports core/commands.js from outside application/presentation'`.
 
-- [ ] **Step 5: Manual verification (Playwright, `?autotest`, no drag simulation)**
+- [x] **Step 5: Manual verification (Playwright, `?autotest`, no drag simulation)**
 
 Paint a stroke with the pencil tool, undo, confirm the bitmap reverts exactly. Select a region, delete it, undo, confirm restoration. Import terrain preset art (tiles mode), undo, confirm reversion. This task's two `drawing-engine.js` sites are the single highest-risk change in this whole plan (per the CommandStack investigation's risk assessment: no automated drag coverage) — do this verification personally, not delegated, per established policy.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add js/components/canvas/drawing-engine.js js/modes/tiles/terrain-preset-art.js
@@ -776,11 +776,11 @@ Note the direct `map.snap[key]`/`map.snap.mode` mutations here are the exact `ma
 
 `map-tool-presenter.js` and `map-assets-panel.js` both read `state.mode`/`state.tool` at ~10 call sites each (grep-verified) — apply the table above at every site; `contributions.js` and `preview.js` each have a single `import { state, activeMap } from '.../app/state.js'` line and light usage — verify with `grep -n "state\." <file>` after editing that zero references remain before moving on.
 
-- [ ] **Step 1: Apply the substitutions to all 6 files** (worked example above for `map-panel.js`, table-driven for the rest — read each file fully before editing, do not pattern-match blindly).
-- [ ] **Step 2: Run the full suite.** Run: `npm test`. Expected: green.
-- [ ] **Step 3: `grep -rl "app/state.js" js/modes/maps/`** — expected: zero results.
-- [ ] **Step 4: Manual verification (Playwright, `?autotest`)** — switch to maps mode, create/select a map, change snap settings (confirm dirty indicator now activates — this is the bug-fix repro case), paint tiles/sprites, undo/redo, add/delete map layers via the layers panel (exercises Task 2's `maps.setLayerOpacity` too — set an opacity, undo).
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Apply the substitutions to all 6 files** (worked example above for `map-panel.js`, table-driven for the rest — read each file fully before editing, do not pattern-match blindly).
+- [x] **Step 2: Run the full suite.** Run: `npm test`. Expected: green.
+- [x] **Step 3: `grep -rl "app/state.js" js/modes/maps/`** — expected: zero results.
+- [x] **Step 4: Manual verification (Playwright, `?autotest`)** — switch to maps mode, create/select a map, change snap settings (confirm dirty indicator now activates — this is the bug-fix repro case), paint tiles/sprites, undo/redo, add/delete map layers via the layers panel (exercises Task 2's `maps.setLayerOpacity` too — set an opacity, undo).
+- [x] **Step 5: Commit**
 
 ```bash
 git add js/modes/maps/
@@ -856,11 +856,11 @@ Apply the same substitution table as Task 6 to the remaining 10 files, reading e
 - `animation-lifecycle-commands.js` only imports `activeSheet` — trivial swap.
 - `strip-commands.js` imports `emit, activeSheet, currentContextLayers` — no `state`/`on`/`markDirty`, so this file only needs the import-source swap for `activeSheet`/`currentContextLayers` plus confirming its `emit(...)` calls target a signal that's staying on the legacy bus (`'pixels'`/`'selection'` are fine per established carve-outs; anything else needs a store-based replacement — check before leaving `emit` in place).
 
-- [ ] **Step 1: Apply substitutions to all 11 files.**
-- [ ] **Step 2: Run the full suite.** Run: `npm test`.
-- [ ] **Step 3: `grep -rl "app/state.js" js/modes/sprites/`** — expected: zero results.
-- [ ] **Step 4: Manual verification (Playwright, `?autotest`)** — sprites mode: open the frame editor (confirms the `activeViewId` fix), edit onion-skin settings (confirms the markDirty fix), create/edit/delete animation strips, break apart a strip, undo/redo across all of the above.
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Apply substitutions to all 11 files.**
+- [x] **Step 2: Run the full suite.** Run: `npm test`.
+- [x] **Step 3: `grep -rl "app/state.js" js/modes/sprites/`** — expected: zero results.
+- [x] **Step 4: Manual verification (Playwright, `?autotest`)** — sprites mode: open the frame editor (confirms the `activeViewId` fix), edit onion-skin settings (confirms the markDirty fix), create/edit/delete animation strips, break apart a strip, undo/redo across all of the above.
+- [x] **Step 5: Commit**
 
 ```bash
 git add js/modes/sprites/
@@ -923,11 +923,11 @@ Apply the Task 6/7 substitution table to the remaining files. Call-outs from gre
 - `autotile-paint-presenter.js` both reads AND writes `state.tool` (lines 273, 282: `state.tool = 'autotilepaint'` / `state.tool = 'tiletool'`) — writes go through `getEditorHost().store.transaction('tool', s => { s.session.activeToolId = 'autotilepaint'; })`, not a direct property assignment (`EditorStore` has no raw settable `activeToolId` outside a transaction).
 - `tile-tags-field.js`, `tile-raster-cache.js` only import `{ state }` (no `on`/`emit`/helpers) — check their actual `state.*` usage before assuming they're purely `state.mode`-gated; read in full.
 
-- [ ] **Step 1: Apply substitutions to all 11 files** (10 presentation/preview files + `tile-sheet-commands.js`).
-- [ ] **Step 2: Run the full suite.** Run: `npm test`.
-- [ ] **Step 3: `grep -rl "app/state.js" js/modes/tiles/`** — expected: zero results (including `terrain-preset-art.js`, already clean from Task 5).
-- [ ] **Step 4: Manual verification (Playwright, `?autotest`)** — tiles mode: open the tile editor (confirms `activeViewId`), autotile paint a stroke and undo, edit terrain sets, select/deselect tiles and terrain sets via the panel (confirms the `selections.patch` conversion didn't break selection persistence across the many converted sites in `tile-sheet-commands.js`), add/rename/delete tile layers.
-- [ ] **Step 5: Commit**
+- [x] **Step 1: Apply substitutions to all 11 files** (10 presentation/preview files + `tile-sheet-commands.js`).
+- [x] **Step 2: Run the full suite.** Run: `npm test`.
+- [x] **Step 3: `grep -rl "app/state.js" js/modes/tiles/`** — expected: zero results (including `terrain-preset-art.js`, already clean from Task 5).
+- [x] **Step 4: Manual verification (Playwright, `?autotest`)** — tiles mode: open the tile editor (confirms `activeViewId`), autotile paint a stroke and undo, edit terrain sets, select/deselect tiles and terrain sets via the panel (confirms the `selections.patch` conversion didn't break selection persistence across the many converted sites in `tile-sheet-commands.js`), add/rename/delete tile layers.
+- [x] **Step 5: Commit**
 
 ```bash
 git add js/modes/tiles/
@@ -958,16 +958,16 @@ These 9 files (5 already-migrated Group-4 shell controllers + 4 shared component
 | `sheet-overlays.js` | `import { state, activeSheet } from '../../app/state.js';` | `activeSheet` → `document-helpers.js`; check remaining `state.*` reads (likely `state.overlays.labels`/`.sequences`, already noted as legacy-mirror-fed in Group 4's work — leave those exactly as they are, this file's relationship to the overlays mirror is unaffected by this plan; only the `activeSheet` import changes). |
 | `float-session.js` | `import { state, emit, activeSheet, activeLayer, activeLayerScope, maybeSnapPixels } from '../../app/state.js';` | `activeSheet`/`activeLayer`/`activeLayerScope` → `document-helpers.js`; `maybeSnapPixels` → wherever `document-controller.js`'s step above relocates it (same call, updated signature). |
 
-- [ ] **Step 1: Apply the table above to all 9 files, reading each in full first** (several have subtleties flagged in the table — `newDefaultProject`/`maybeSnapPixels` relocation is shared groundwork used by 2 files each, do it once and update both call sites).
-- [ ] **Step 2: Run the full suite.** Run: `npm test`.
-- [ ] **Step 3: Re-run `tests/architecture.test.mjs`'s shell-file test specifically**
+- [x] **Step 1: Apply the table above to all 9 files, reading each in full first** (several have subtleties flagged in the table — `newDefaultProject`/`maybeSnapPixels` relocation is shared groundwork used by 2 files each, do it once and update both call sites).
+- [x] **Step 2: Run the full suite.** Run: `npm test`.
+- [x] **Step 3: Re-run `tests/architecture.test.mjs`'s shell-file test specifically**
 
 Run: `node --test tests/architecture.test.mjs`
 Expected: `'nothing in the shell controllers imports the retired legacy setProject/markDirty writers'` still passes (it already did after Group 4 — confirm this task didn't regress it) — this test also documents that `on`/`emit` staying imported in these files is fine, so don't over-remove.
 
-- [ ] **Step 4: `grep -rl "app/state.js" js/features/ js/components/`** — expected: zero results.
-- [ ] **Step 5: Manual verification (Playwright, `?autotest`)** — new-project flow (exercises `newDefaultProject`'s relocation), paste/import an image that goes through the pixel snapper (exercises `maybeSnapPixels`'s relocation) in both a mode with pixel-snapping enabled and disabled, toggle label/sequence overlays, exercise the tool palette and preview panel across all 3 modes.
-- [ ] **Step 6: Commit**
+- [x] **Step 4: `grep -rl "app/state.js" js/features/ js/components/`** — expected: zero results.
+- [x] **Step 5: Manual verification (Playwright, `?autotest`)** — new-project flow (exercises `newDefaultProject`'s relocation), paste/import an image that goes through the pixel snapper (exercises `maybeSnapPixels`'s relocation) in both a mode with pixel-snapping enabled and disabled, toggle label/sequence overlays, exercise the tool palette and preview panel across all 3 modes.
+- [x] **Step 6: Commit**
 
 ```bash
 git add js/features/ js/components/
@@ -991,18 +991,18 @@ git commit -m "refactor: migrate remaining shell/component residuals off app/sta
 **Interfaces:**
 - Produces: the 8 relocated files' public exports are unchanged — only their import path changes for every consumer.
 
-- [ ] **Step 1: Confirm zero remaining `state.js` importers**
+- [x] **Step 1: Confirm zero remaining `state.js` importers**
 
 Run: `grep -rl "app/state.js" js/` (or PowerShell: `Get-ChildItem -Recurse js -Filter *.js | Select-String "app/state.js" -List`)
 Expected: zero results. If any remain, STOP — do not proceed with this task until Tasks 6-9 are fully verified complete; deleting `state.js` with a live importer breaks the app.
 
-- [ ] **Step 2: Delete `file-controller.js`'s host→legacy mirror block**
+- [x] **Step 2: Delete `file-controller.js`'s host→legacy mirror block**
 
 Read the file's current mirror section (the `getEditorHost().store.subscribe(...)` calls that write `state.project`/`state.activeSheetId`/`state.activeMapId`/`state.onion`/`state.mode`, the `getEditorHost().history.subscribe(() => emit('history'))` bridge, the overlays mirror, and the bidirectional `state.view` ↔ `activeViewId` sync — all added across Group 4). Delete the entire block; it existed solely to keep the now-fully-migrated 42 files working. Remove the now-unused `import { state, ... } from '../../app/state.js';` line's remaining named imports that were only used by the mirror (some names in that import may still be needed for this file's OWN non-mirror logic — check before deleting the whole import statement; if this file has zero remaining `state.js` usage after removing the mirror, delete the import line entirely).
 
-- [ ] **Step 3: Delete `js/app/state.js`**
+- [x] **Step 3: Delete `js/app/state.js`**
 
-- [ ] **Step 4: Relocate the 8 state-free files**
+- [x] **Step 4: Relocate the 8 state-free files**
 
 For each, `git mv` (preserves history) to its target, then grep-and-fix every importer:
 
@@ -1020,11 +1020,11 @@ git mv js/app/tiledExport.js js/core/export/tiledExport.js
 
 Then: `grep -rn "app/io\.js\|app/pngcodec\.js\|app/exports\.js\|app/animationExport\.js\|app/c99Export\.js\|app/platformExport\.js\|app/projectExport\.js\|app/tiledExport\.js" js/` and fix every matched import path to the new location. Each moved file's own internal relative imports (e.g. `pngcodec.js` importing from `../core/...`) also need adjusting for its new location — check each file's own imports after moving, not just its importers.
 
-- [ ] **Step 5: Delete `js/app/`**
+- [x] **Step 5: Delete `js/app/`**
 
 Confirm it's empty first (`ls js/app` — should show nothing after Steps 2-4), then remove the directory.
 
-- [ ] **Step 6: Add the architecture-test guard**
+- [x] **Step 6: Add the architecture-test guard**
 
 In `tests/architecture.test.mjs`, add a new test banning any future `js/app` import, mirroring the existing style (e.g. the `'nothing imports the retired js/ui directory'` test at line 99):
 
@@ -1039,16 +1039,16 @@ test('nothing imports the retired js/app directory', async () => {
 
 Run it against the pre-this-task baseline first (`git stash`, run just this new test, confirm it FAILS against the old tree with `app/state.js` still present, then `git stash pop`) to confirm it's non-vacuous, per this codebase's established testing discipline (Task 5 of the Group 4 plan did the same check for its own guard test).
 
-- [ ] **Step 7: Run the full suite**
+- [x] **Step 7: Run the full suite**
 
 Run: `npm test`
 Expected: all green, no failures.
 
-- [ ] **Step 8: Manual verification (Playwright, `?autotest`)**
+- [x] **Step 8: Manual verification (Playwright, `?autotest`)**
 
 Full smoke pass: load the app fresh (zero console errors), switch through all 3 modes, create/save/load a project (exercises the relocated `io.js`), export in at least 2 formats (exercises relocated export files — pick 2 different ones, e.g. PNG spritesheet and Tiled JSON), undo/redo a few operations in each mode.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A

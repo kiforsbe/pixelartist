@@ -4,7 +4,7 @@ import {
   buildGbaBinary, buildNesChr, buildSnesBinary, buildGbBinary, buildGbcBinary, buildC64Binary,
   checkGbaCompatibility, checkNesCompatibility, checkSnesCompatibility,
   checkGbCompatibility, checkGbcCompatibility, checkC64Compatibility,
-} from '../js/app/platformExport.js';
+} from '../js/core/export/platformExport.js';
 import { C64_PALETTE } from '../js/core/platforms.js';
 
 function item(name, w, h) { return { name, w, h, indices: new Uint8Array(w * h) }; }
@@ -251,7 +251,7 @@ test('checkC64Compatibility: warns when cell count exceeds the 1000-cell bitmap 
 
 // -------------------------------------------------------------- paletteBudget
 // (project.settings.exportColorMode === 'total') and the per-item overflow
-// guard it makes reachable -- see js/app/main.js's resolveC99Items /
+// guard it makes reachable -- see file-controller.js's resolveC99Items /
 // SYSTEM_TOTAL_COLORS.
 
 test('checkNesCompatibility: with a larger paletteBudget (system-total mode), a sheet-wide color count under that budget no longer warns', () => {

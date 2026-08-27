@@ -4,7 +4,7 @@ import { createProject, createSheet, addFrame, addAnimation, sheetLayers } from 
 import { setPixel } from '../js/core/pixels.js';
 import {
   selectAnimations, buildAnimationSpritesheet, buildAnimationImageSequence, buildAnimationGifFrames,
-} from '../js/app/animationExport.js';
+} from '../js/core/export/animationExport.js';
 
 function makeSheetWithTwoFrameAnim() {
   const project = createProject('demo');

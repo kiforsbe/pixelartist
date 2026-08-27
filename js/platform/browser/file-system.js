@@ -1,6 +1,6 @@
-import * as legacyIo from '../../app/io.js';
+import * as legacyIo from './project-io.js';
 
-// Compatibility adapter while file workflows move out of app/main.js.
+// Browser adapter used by the project file workflows.
 export class BrowserFileSystem {
   supportsNativeFileSystem() { return legacyIo.supportsFS(); }
   openPacked() { return legacyIo.openPacked(); }

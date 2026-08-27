@@ -42,6 +42,8 @@ test('activeSheet/activeMap/activeLayer resolve from the host store, not a stale
   host.documents.setActive({ kind: 'sprite-sheet', id: sprite.id });
 
   assert.equal(activeSheet(), sprite);
+  assert.equal(activeSheet('sprite'), sprite);
+  assert.equal(activeSheet('tile'), null);
   assert.equal(activeMap(), null);
 
   const layer = sheetLayers(sprite)[0];

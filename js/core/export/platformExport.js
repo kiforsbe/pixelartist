@@ -1,5 +1,5 @@
 // Packs quantized pixel data into each platform's actual native binary
-// format -- not a C source wrapper (see js/app/c99Export.js for that).
+// format -- not a C source wrapper (see js/core/export/c99Export.js for that).
 // Reuses c99Export.js's tile packing (identical byte layout, GBA4/NES2/
 // SNES4 hardware formats don't change based on how the bytes get shipped
 // to a compiler) but ships raw bytes instead of `const unsigned char[] =
@@ -9,7 +9,7 @@ import { packItem, MAX_COLORS } from './c99Export.js';
 // set) -- reuse the project's existing hardware palette table instead of
 // hand-typing a second copy (js/core/platforms.js already sourced it from
 // js/core/systempalettes.js).
-import { C64_PALETTE } from '../core/platforms.js';
+import { C64_PALETTE } from '../platforms.js';
 
 // GBA and SNES palette RAM both use this exact 15-bit BGR555 format, 2
 // bytes per color, little-endian (bit15 unused, bits10-14 = blue, bits5-9
@@ -137,11 +137,11 @@ function itemTileIssues(items) {
   return { badItems, tileCount };
 }
 
-// Every bit-packed target's tile packer (packGba4Tile etc., js/app/
-// c99Export.js) masks each pixel's index to its format's bit depth (e.g.
+// Every bit-packed target's tile packer (packGba4Tile etc.,
+// core/export/c99Export.js) masks each pixel's index to its format's bit depth (e.g.
 // `& 3` for 2bpp) -- if project.settings.exportColorMode is 'total', the
 // shared export palette can be much larger than any one item's own
-// hardware budget (js/app/main.js's resolveC99Items), so an individual
+// hardware budget (file-controller.js's resolveC99Items), so an individual
 // item's OWN quantized indices can silently exceed that mask and wrap
 // around to the wrong color. This catches that before it happens: it's a
 // blocking error, not a lossy-but-valid warning, since wraparound produces
@@ -248,7 +248,7 @@ export function checkGbcCompatibility({ sourceColorCount, items, paletteBudget =
 }
 
 // Multicolor bitmap-mode pixels are always 2 physical pixels wide (see
-// packC64McTile in js/app/c99Export.js) -- counts how many horizontally-
+// packC64McTile in js/core/export/c99Export.js) -- counts how many horizontally-
 // adjacent source pixel pairs disagree, since those get silently collapsed
 // to the even column's color on export.
 function c64PairedColumnLoss(items) {

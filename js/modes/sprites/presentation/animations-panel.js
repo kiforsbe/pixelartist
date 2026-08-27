@@ -64,7 +64,7 @@ export function mountAnimationsPanel(el) {
       baseStep: currentAnim?.baseStep,
     }),
     setValue: (after) => {
-      const sheet = activeSheet();
+      const sheet = activeSheet('sprite');
       if (!sheet || !currentAnim) return;
       const before = { durationMs: currentAnim.baseDuration, baseFps: currentAnim.baseFps, baseStep: currentAnim.baseStep };
       dispatch('sprites.setAnimationBaseDuration', { sheetId: sheet.id, animationId: currentAnim.id, before, after });
@@ -75,7 +75,7 @@ export function mountAnimationsPanel(el) {
   el.append(hint, body);
 
   nameInput.addEventListener('change', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet || !currentAnim) return;
     const v = nameInput.value.trim();
     if (v) dispatch('sprites.renameAnimation', { sheetId: sheet.id, animationId: currentAnim.id, name: v });
@@ -83,7 +83,7 @@ export function mountAnimationsPanel(el) {
   });
 
   loopCheckbox.addEventListener('change', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet || !currentAnim) return;
     dispatch('sprites.toggleAnimationLoop', { sheetId: sheet.id, animationId: currentAnim.id, loop: loopCheckbox.checked });
   });
@@ -91,7 +91,7 @@ export function mountAnimationsPanel(el) {
   function render() {
     if (getEditorHost().store.getState().session.activeModeId !== 'sprites') { el.hidden = true; return; }
     el.hidden = false;
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const animationId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null) : null;
     currentAnim = sheet?.animations.find(a => a.id === animationId) ?? null;
     hint.hidden = !!currentAnim;

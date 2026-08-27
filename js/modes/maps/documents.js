@@ -4,6 +4,7 @@ export const mapDocumentProvider = {
   kind: 'map',
   list: project => project.maps ?? [],
   get: (project, id) => project.maps?.find(map => map.id === id) ?? null,
+  initialSelection: map => ({ layerId: map.layers[0]?.id ?? null, itemId: null }),
   create: (project, input = {}) => createMap(project, {
     name: input.name ?? 'Map', gridW: input.gridW ?? project.settings.tileW,
     gridH: input.gridH ?? project.settings.tileH,

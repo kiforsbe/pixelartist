@@ -1,8 +1,8 @@
-import { state, on, emit, activeSheet, activeLayer, activeLayerScope, currentContextLayers } from '../../app/state.js';
 import { MAX_PALETTE_COLORS } from '../../core/pixelSnapper.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../../core/pixels.js';
 import { commitFloatIfAny, currentEditRegion } from '../../components/canvas/float-session.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { activeSheet, activeLayer, activeLayerScope, currentContextLayers } from '../../host/document-helpers.js';
 import { medianCutPalette, resolveAlphaForQuantize } from '../../core/quantize.js';
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
@@ -10,8 +10,12 @@ import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCell
 import { rgbaToHex, hexToRgb } from '../../components/color-utils.js';
 import { SYSTEM_PALETTES } from '../../core/systempalettes.js';
 import { previewWithOverride, refreshPreviewPanel } from '../../components/panels/preview-panel.js';
-import { defineAction } from '../../app/actions.js';
+import { defineAction } from '../shell/actions.js';
 import { markDefaultAction, makeDialogMovable, centerDialog, closeOnEscape } from '../../components/dialogs.js';
+
+function project() { return getEditorHost().projects.project; }
+function drawingSettings() { return getEditorHost().store.getState().workspace.drawing; }
+function notifyPixelsChanged() { getEditorHost().store.notifyPixelsChanged(); }
 
 export function mountFilterController(workbench) {
   // ---- shared filter-preview plumbing (chroma key + quantize) ----
@@ -86,8 +90,8 @@ export function mountFilterController(workbench) {
     const { region, patches } = result;
     getEditorHost().history.execute({
       label: 'quantize to palette',
-      do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
-      undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
+      do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); notifyPixelsChanged(); },
+      undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); notifyPixelsChanged(); },
     });
     getEditorHost().projects.markDirty();
   }
@@ -135,7 +139,7 @@ export function mountFilterController(workbench) {
     qzPalette.innerHTML = '';
     const projGroup = document.createElement('optgroup');
     projGroup.label = 'Project Palettes';
-    for (const p of state.project?.palettes ?? []) {
+    for (const p of project()?.palettes ?? []) {
       if (!p.colors.length) continue;
       const o = document.createElement('option');
       o.value = `proj:${p.id}`;
@@ -154,13 +158,13 @@ export function mountFilterController(workbench) {
     }
     qzPalette.appendChild(sysGroup);
   
-    const activeOpt = state.project?.activePaletteId ? `proj:${state.project.activePaletteId}` : null;
+    const activeOpt = project()?.activePaletteId ? `proj:${project().activePaletteId}` : null;
     if (activeOpt && [...qzPalette.options].some(o => o.value === activeOpt)) qzPalette.value = activeOpt;
     else if (qzPalette.options.length) qzPalette.selectedIndex = 0;
   }
   
   function resolveQuantizePalette(value) {
-    if (value.startsWith('proj:')) return state.project?.palettes.find(p => p.id === value.slice(5)) ?? null;
+    if (value.startsWith('proj:')) return project()?.palettes.find(p => p.id === value.slice(5)) ?? null;
     if (value.startsWith('sys:')) return SYSTEM_PALETTES.find(s => s.name === value.slice(4)) ?? null;
     return null;
   }
@@ -241,8 +245,8 @@ export function mountFilterController(workbench) {
     const { region, patches } = result;
     getEditorHost().history.execute({
       label: 'chroma key',
-      do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
-      undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
+      do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); notifyPixelsChanged(); },
+      undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); notifyPixelsChanged(); },
     });
     getEditorHost().projects.markDirty();
   }
@@ -398,8 +402,8 @@ export function mountFilterController(workbench) {
     previewChromaKey();
     refreshChromaKeyHistograms();
   });
-  ckColorPrimary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.primary); previewChromaKey(); refreshChromaKeyHistograms(); });
-  ckColorSecondary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, state.secondary); previewChromaKey(); refreshChromaKeyHistograms(); });
+  ckColorPrimary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, drawingSettings().primary); previewChromaKey(); refreshChromaKeyHistograms(); });
+  ckColorSecondary.addEventListener('click', () => { setColorInputs(ckColor, ckColorHex, drawingSettings().secondary); previewChromaKey(); refreshChromaKeyHistograms(); });
   
   ckReplaceColor.addEventListener('input', () => { ckReplaceHex.value = ckReplaceColor.value; previewChromaKey(); });
   ckReplaceHex.addEventListener('input', () => {
@@ -407,8 +411,8 @@ export function mountFilterController(workbench) {
     ckReplaceColor.value = ckReplaceHex.value.toLowerCase();
     previewChromaKey();
   });
-  ckReplacePrimary.addEventListener('click', () => { setColorInputs(ckReplaceColor, ckReplaceHex, state.primary); previewChromaKey(); });
-  ckReplaceSecondary.addEventListener('click', () => { setColorInputs(ckReplaceColor, ckReplaceHex, state.secondary); previewChromaKey(); });
+  ckReplacePrimary.addEventListener('click', () => { setColorInputs(ckReplaceColor, ckReplaceHex, drawingSettings().primary); previewChromaKey(); });
+  ckReplaceSecondary.addEventListener('click', () => { setColorInputs(ckReplaceColor, ckReplaceHex, drawingSettings().secondary); previewChromaKey(); });
   
   function updateChromaKeyModeUI() {
     ckReplaceRow.hidden = !ckModeReplace.checked;
@@ -433,8 +437,8 @@ export function mountFilterController(workbench) {
     previewChromaKey();
     refreshChromaKeyHistograms();
   });
-  ckProtectPrimary.addEventListener('click', () => { setColorInputs(ckProtectColor, ckProtectHex, state.primary); previewChromaKey(); refreshChromaKeyHistograms(); });
-  ckProtectSecondary.addEventListener('click', () => { setColorInputs(ckProtectColor, ckProtectHex, state.secondary); previewChromaKey(); refreshChromaKeyHistograms(); });
+  ckProtectPrimary.addEventListener('click', () => { setColorInputs(ckProtectColor, ckProtectHex, drawingSettings().primary); previewChromaKey(); refreshChromaKeyHistograms(); });
+  ckProtectSecondary.addEventListener('click', () => { setColorInputs(ckProtectColor, ckProtectHex, drawingSettings().secondary); previewChromaKey(); refreshChromaKeyHistograms(); });
   ckProtectTolerance.addEventListener('input', () => { ckProtectToleranceVal.textContent = ckProtectTolerance.value; previewChromaKey(); drawChromaKeyHistograms(); });
   ckProtectSoftness.addEventListener('input', () => { ckProtectSoftnessVal.textContent = ckProtectSoftness.value; previewChromaKey(); drawChromaKeyHistograms(); });
   
@@ -443,10 +447,10 @@ export function mountFilterController(workbench) {
   defineAction('edit.filters.chromaKey', {
     label: 'Chroma Key…',
     run: () => {
-      setColorInputs(ckColor, ckColorHex, state.primary);
+      setColorInputs(ckColor, ckColorHex, drawingSettings().primary);
       ckModeTransparent.checked = true;
       updateChromaKeyModeUI();
-      setColorInputs(ckReplaceColor, ckReplaceHex, state.secondary);
+      setColorInputs(ckReplaceColor, ckReplaceHex, drawingSettings().secondary);
       ckTolerance.value = '15'; ckToleranceVal.textContent = '15';
       ckSoftness.value = '10'; ckSoftnessVal.textContent = '10';
       ckBackgroundOnly.checked = true;
@@ -533,8 +537,8 @@ export function mountFilterController(workbench) {
     const { region, patches } = result;
     getEditorHost().history.execute({
       label: 'remove checkerboard',
-      do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); emit('pixels'); },
-      undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); emit('pixels'); },
+      do() { for (const p of patches) blitRegion(p.layer.bitmap, p.after, region.x, region.y); notifyPixelsChanged(); },
+      undo() { for (const p of patches) blitRegion(p.layer.bitmap, p.before, region.x, region.y); notifyPixelsChanged(); },
     });
     getEditorHost().projects.markDirty();
   }
@@ -656,8 +660,8 @@ export function mountFilterController(workbench) {
     cbReplaceColor.value = cbReplaceHex.value.toLowerCase();
     previewCheckerboard();
   });
-  cbReplacePrimary.addEventListener('click', () => { setColorInputs(cbReplaceColor, cbReplaceHex, state.primary); previewCheckerboard(); });
-  cbReplaceSecondary.addEventListener('click', () => { setColorInputs(cbReplaceColor, cbReplaceHex, state.secondary); previewCheckerboard(); });
+  cbReplacePrimary.addEventListener('click', () => { setColorInputs(cbReplaceColor, cbReplaceHex, drawingSettings().primary); previewCheckerboard(); });
+  cbReplaceSecondary.addEventListener('click', () => { setColorInputs(cbReplaceColor, cbReplaceHex, drawingSettings().secondary); previewCheckerboard(); });
   
   function updateCheckerboardModeUI() {
     cbReplaceRow.hidden = !cbModeReplace.checked;
@@ -680,8 +684,8 @@ export function mountFilterController(workbench) {
     cbProtectColor.value = cbProtectHex.value.toLowerCase();
     previewCheckerboard();
   });
-  cbProtectPrimary.addEventListener('click', () => { setColorInputs(cbProtectColor, cbProtectHex, state.primary); previewCheckerboard(); });
-  cbProtectSecondary.addEventListener('click', () => { setColorInputs(cbProtectColor, cbProtectHex, state.secondary); previewCheckerboard(); });
+  cbProtectPrimary.addEventListener('click', () => { setColorInputs(cbProtectColor, cbProtectHex, drawingSettings().primary); previewCheckerboard(); });
+  cbProtectSecondary.addEventListener('click', () => { setColorInputs(cbProtectColor, cbProtectHex, drawingSettings().secondary); previewCheckerboard(); });
   cbProtectTolerance.addEventListener('input', () => { cbProtectToleranceVal.textContent = cbProtectTolerance.value; previewCheckerboard(); });
   cbProtectSoftness.addEventListener('input', () => { cbProtectSoftnessVal.textContent = cbProtectSoftness.value; previewCheckerboard(); });
   
@@ -703,7 +707,7 @@ export function mountFilterController(workbench) {
       setColorInputs(cbColorB, cbColorBHex, [192, 192, 192]);
       cbModeTransparent.checked = true;
       updateCheckerboardModeUI();
-      setColorInputs(cbReplaceColor, cbReplaceHex, state.secondary);
+      setColorInputs(cbReplaceColor, cbReplaceHex, drawingSettings().secondary);
       cbTolerance.value = '18'; cbToleranceVal.textContent = '18';
       cbSoftness.value = '0'; cbSoftnessVal.textContent = '0';
       cbCellSize.value = '12'; cbCellSizeVal.textContent = '12';
@@ -742,4 +746,3 @@ export function mountFilterController(workbench) {
     commitCheckerboard(params, cbAllLayers.checked);
   });
 }
-

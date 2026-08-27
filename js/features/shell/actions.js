@@ -2,15 +2,15 @@
 // (menu item, toolbar button, keyboard shortcut). Each action is defined
 // once, wherever its logic already lives; buttons/menu items become thin
 // views over it, so they can never independently drift out of sync.
-import { on } from './state.js';
-import { CommandRegistry } from '../host/contributions/commands.js';
-import { getEditorHost } from '../host/runtime.js';
+import { CommandRegistry } from '../../host/contributions/commands.js';
+import { getEditorHost } from '../../host/runtime.js';
 
-// Compatibility facade for UI modules that still use the original action
-// vocabulary. In the browser the EditorHost registry is the sole source of
-// truth; the fallback keeps this small module independently testable.
+// The EditorHost registry is the browser's sole source of truth; the fallback
+// keeps this small module independently testable.
 const fallbackRegistry = new CommandRegistry();
 const registrations = new Map();
+let reactiveHost = null;
+let reactiveDisposables = [];
 
 function registry() {
   return getEditorHost()?.registries.commands ?? fallbackRegistry;
@@ -26,6 +26,7 @@ function commandContext() {
 }
 
 export function defineAction(id, def) {
+  ensureReactiveRefresh();
   registrations.get(id)?.dispose();
   const action = {
     id,
@@ -41,7 +42,7 @@ export function defineAction(id, def) {
     ...action,
     when: context => action.isAvailable(context),
     execute: (context, args) => action.run(context, args),
-  }, { owner: 'legacy-action-facade' });
+  }, { owner: 'shell-actions' });
   registrations.set(id, registration);
   return registration;
 }
@@ -61,6 +62,7 @@ const bound = new Map(); // action id -> Set<{ el, toggle }>
 // refreshAction below) -- callers never need to remember to refresh it by
 // hand after a mutation.
 export function bindAction(el, id, { toggle = false } = {}) {
+  ensureReactiveRefresh();
   const a = getAction(id);
   if (!a) throw new Error(`bindAction: unknown action "${id}"`);
   el.title = a.shortcut ? `${a.label} (${a.shortcut})` : a.label;
@@ -87,9 +89,22 @@ function refreshAction(id) {
   }
 }
 
-// Event-driven refresh: any app event can change some action's
-// enabled/checked/available state (a layer got deleted, the mode switched,
-// history changed, ...) so re-derive every bound element on every event
-// rather than requiring each feature module to know which events matter to
-// which actions.
-on('*', () => { for (const id of bound.keys()) refreshAction(id); });
+export function refreshActions() {
+  for (const id of bound.keys()) refreshAction(id);
+}
+
+// Store/history/context changes can all affect action predicates. Subscribe
+// lazily because this module is imported before the browser composition root
+// configures its EditorHost, and keep the fallback registry independently
+// testable when no host exists.
+function ensureReactiveRefresh() {
+  const host = getEditorHost();
+  if (!host || host === reactiveHost) return;
+  reactiveDisposables.forEach(dispose => dispose());
+  reactiveHost = host;
+  reactiveDisposables = [
+    host.store.subscribe(() => ({}), refreshActions),
+    host.history.subscribe(refreshActions),
+    host.contextKeys.subscribe(refreshActions),
+  ];
+}

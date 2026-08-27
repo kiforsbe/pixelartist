@@ -52,7 +52,7 @@ export function mountFramesPanel(element) {
   breakApartButton.textContent = '✂';
   breakApartButton.title = 'Break apart';
   breakApartButton.addEventListener('click', () => {
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     if (!sheet) return;
     const frameId = getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null;
     if (!frameId) return;
@@ -157,7 +157,7 @@ export function mountFramesPanel(element) {
     }
     panel.hidden = false;
     list.innerHTML = '';
-    const sheet = activeSheet();
+    const sheet = activeSheet('sprite');
     const selectedFrameId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null) : null;
     const frame = sheet?.frames.find(candidate => candidate.id === selectedFrameId) ?? null;
     if (!sheet) return;

@@ -5,7 +5,6 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import {
   addAnimationFrame, removeAnimationFrame, reorderAnimationFrame, setAnimationFrameDuration, setAnimationFrameStep,
 } from '../js/modes/sprites/application/commands/animation-frame-commands.js';
@@ -37,12 +36,9 @@ function makeProject() {
   return { version: 6, name: 'test', settings: { durationMs: 100 }, sheets: [sheet], maps: [], palettes: [], activePaletteId: null };
 }
 
-function reset() { state.commands = new CommandStack(); state.dirty = false; }
-
 test('addAnimationFrame appends a null-duration/step entry and is undoable', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset();
   const sheet = project.sheets[0];
 
   addAnimationFrame(services, 'sheet1', 'an1', 'f0');
@@ -56,7 +52,6 @@ test('addAnimationFrame appends a null-duration/step entry and is undoable', () 
 test('removeAnimationFrame drops the entry at index and is undoable', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset();
   const sheet = project.sheets[0];
 
   removeAnimationFrame(services, 'sheet1', 'an1', 0);
@@ -69,7 +64,6 @@ test('removeAnimationFrame drops the entry at index and is undoable', () => {
 test('reorderAnimationFrame moves an entry to a new index, clamping to the array bounds, and is undoable', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset();
   const sheet = project.sheets[0];
 
   reorderAnimationFrame(services, 'sheet1', 'an1', 0, 2);
@@ -85,7 +79,6 @@ test('reorderAnimationFrame moves an entry to a new index, clamping to the array
 test('setAnimationFrameDuration edits one entry, is undoable, and no-ops when the value is unchanged', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset();
   const sheet = project.sheets[0];
 
   setAnimationFrameDuration(services, 'sheet1', 'an1', 1, 150);
@@ -100,7 +93,6 @@ test('setAnimationFrameDuration edits one entry, is undoable, and no-ops when th
 test('setAnimationFrameStep edits one entry, is undoable, and no-ops when the value is unchanged', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset();
   const sheet = project.sheets[0];
 
   setAnimationFrameStep(services, 'sheet1', 'an1', 0, null);

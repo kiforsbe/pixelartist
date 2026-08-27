@@ -1,9 +1,9 @@
 // Pure builders for the "Frames JSON" / "Tiles JSON" export shapes (see
 // task-19 brief). Kept free of DOM/io concerns so they're node-testable;
 // main.js wraps the result in a Blob and hands it to io.downloadBlob.
-import { getPreset, NEIGHBOR_DIRS } from '../core/neighbors.js';
-import { blobIndexToMask, resolveTerrainSlot } from '../core/blob47.js';
-import { effectiveDuration, mapContentBounds } from '../core/model.js';
+import { getPreset, NEIGHBOR_DIRS } from '../neighbors.js';
+import { blobIndexToMask, resolveTerrainSlot } from '../blob47.js';
+import { effectiveDuration, mapContentBounds } from '../model.js';
 
 // Portable reference form for the in-project test scene. Asset ids point at
 // the accompanying PixelArtist sheets rather than duplicating sheet pixels.

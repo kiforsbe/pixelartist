@@ -1,14 +1,12 @@
 # PixelArtist Architecture
 
-Snapshot as of `f433a50` ("Separate tile commands and terrain features"). No
-build step, no framework — plain ES modules loaded directly by the browser
-(see [Build & tooling](#build--tooling)).
+Snapshot after the Phase 4 state-ownership migration. No build step, no
+framework — plain ES modules loaded directly by the browser (see
+[Build & tooling](#build--tooling)).
 
-This document describes the code as it exists *today*. It is mid-migration:
-a legacy globally-mutable app (`js/app`, `js/ui`) is being incrementally
-wrapped by a newer host/registry framework (`js/host`, `js/modes`,
-`js/features`). Both are live at once, bridged explicitly — see
-[State model](#state-model).
+This document describes the code as it exists *today*. `EditorHost` and its
+services now own application state; the former `js/app` and `js/ui` legacy
+layers have been retired.
 
 ## Layering
 
@@ -25,16 +23,13 @@ js/modes       one self-contained vertical slice per document kind:
                sprites, tiles, maps
 js/features    cross-cutting shell chrome that composes host + modes:
                workbench, menu bar, document tabs, file I/O, filters
-js/app         legacy composition root + global mutable state + actions
-js/ui          legacy DOM-manipulation panels/dialogs, consumed by both
-               js/features and js/modes
-js/components  the one shared UI primitive so far (panel-frame.js)
+js/components  shared DOM/canvas controls and panel primitives
 ```
 
 `tests/architecture.test.mjs` encodes the intended dependency direction as
 executable tests — it is the most authoritative source for these rules and
 is worth reading directly. Rules it enforces include: `core` never imports
-`app`/`ui`/`host`/`platform`/`modes`; `domain` imports nothing outside
+`components`/`features`/`host`/`platform`/`modes`; `domain` imports nothing outside
 itself; no mode imports a sibling mode's files; the shared workbench
 (`features/workbench`) never imports concrete mode UI; and per-mode
 pointer/geometry controllers never define `mount*Panel(` or import the
@@ -44,8 +39,7 @@ Allowed dependency direction (arrows = "imports from"):
 
 ```mermaid
 graph TD
-    UI["js/ui<br/>(legacy panels/dialogs)"]
-    APP["js/app<br/>(legacy state + actions)"]
+    COMPONENTS["js/components<br/>(shared DOM/canvas UI)"]
     FEATURES["js/features<br/>(shell: workbench, menu, file I/O)"]
     MODES["js/modes<br/>(sprites, tiles, maps)"]
     PLATFORM["js/platform<br/>(browser adapters)"]
@@ -55,13 +49,12 @@ graph TD
 
     FEATURES --> MODES
     FEATURES --> HOST
-    FEATURES --> APP
-    FEATURES --> UI
+    FEATURES --> COMPONENTS
     MODES --> HOST
     MODES --> CORE
-    MODES --> UI
-    UI --> APP
-    APP --> CORE
+    MODES --> COMPONENTS
+    COMPONENTS --> HOST
+    COMPONENTS --> CORE
     HOST --> CORE
     PLATFORM --> HOST
     CORE --> DOMAIN
@@ -76,29 +69,18 @@ import each other.
 Entry point: `index.html` loads `<script type="module" src="js/bootstrap.js">`.
 
 `js/bootstrap.js` (~50 lines, capped at 60 by `architecture.test.mjs`) is
-the **entire** composition root — Task 5 deleted the old `js/app/main.js`
-and folded its mount sequence directly into this file; there is no longer a
-separate dynamically-imported legacy entry point. It runs, top to bottom:
+the **entire** composition root. It runs, top to bottom:
 
-1. Construct `EditorHost`, wired to the **legacy** `CommandStack`
-   (`app/state.js`'s `state.commands`, passed as the `historyStack` option)
-   for undo/redo, and to browser platform adapters (`js/platform/browser/*`).
-   This injection is load-bearing, not cosmetic: several still-legacy files
-   (`drawing-engine.js`, `layers-panel.js`, `color-panel.js`,
-   `terrain-preset-art.js`) push undo commands onto `state.commands`
-   directly rather than through `host.history.execute()`. Without this
-   option, `HistoryService` would default to its own private `CommandStack`
-   and those edits would become silently un-undoable and stop marking the
-   project dirty — this exact regression shipped and was caught in the
-   final review of the shell-rewrite plan that introduced `bootstrap.js`.
+1. Construct `EditorHost`, whose `HistoryService` owns the application
+   `CommandStack`, and inject the browser platform adapters
+   (`js/platform/browser/*`).
 2. `editorHost.registerMode(spriteMode | tileMode | mapMode)` — each mode's
    `register()` hook fires synchronously, registering its document
    provider and contributions.
 3. `editorHost.start('sprites')` activates the sprite mode.
 4. `setEditorHost(editorHost)` publishes it through `js/host/runtime.js`'s
-   module-level singleton getter — the mechanism by which deeply legacy
-   code (`app/actions.js`, `js/components/*`) reaches the one `EditorHost` instance
-   without a DI container.
+   module-level singleton getter so shared components and feature modules can
+   reach the one `EditorHost` instance without a DI container.
 5. Mounts DOM directly, synchronously, in module-load order (no dynamic
    `import()` — everything below is a plain function call):
 
@@ -114,9 +96,8 @@ mountFileController();
 `mountEditorWorkbench()` runs first because it returns the `workbench`
 handle the next three mounts need, and because it calls `initFloatSession()`.
 `mountFileController()` runs last: its own `boot()` IIFE performs the
-project's first `setProject()`, and by then every other mount's
-`fireImmediately` store subscription — including the host→legacy mirror
-described in [State model](#state-model) — already exists to observe it.
+project's first `setProject()`, and by then every other mount's store
+subscriptions exist to observe it.
 
 ```mermaid
 sequenceDiagram
@@ -340,16 +321,15 @@ belongs to. It has fully migrated to the Application/Presentation split
   (test-enforced).
 - `presentation/terrain-set-panel.js` — a thin **panel mount function**:
   builds the tile-picker dialog + editor container, delegates rendering to
-  `terrain-set-editor.js`, subscribes to legacy
-  `on('project'|'history'|'pixels'|'view'|'selection', ...)` events to
-  schedule `queueMicrotask`-debounced re-renders, and syncs
-  `state.selectedTerrainSetId` from `state.selectedTileId`.
+  `terrain-set-editor.js`, subscribes to `EditorStore` selectors and history
+  to schedule `queueMicrotask`-debounced re-renders, and syncs the selected
+  terrain-set id from the active tile's per-document selection.
 - `terrain-preset-art.js` — **outside both `application/` and
   `presentation/`**, deliberately. Contains `importPresetArtOntoLayer`,
   which paints a terrain-set preset's reference art onto the active layer
   when a new terrain set is created from that preset. Pushes a raw
   pixel-patch undo entry directly via `core/commands.js`'s `makePixelPatch`
-  (the same still-legacy, cross-mode-shared paint-commit idiom
+  (the same cross-mode-shared paint-commit idiom
   `js/components/canvas/drawing-engine.js` uses elsewhere), which is exactly why it can't live in
   `presentation/`: `tests/architecture.test.mjs`'s presentation-layer scan
   forbids importing `core/commands.js` from anywhere under `presentation/`.
@@ -394,11 +374,8 @@ from `js/bootstrap.js` — see [Bootstrapping](#bootstrapping)):
   `registries.panels` against DOM, `registries.views.list()` populating
   view controllers). Zero mode-specific imports (test-enforced).
 - `project/document-controller.js` — mode-tab switching, sheet/map CRUD,
-  and undo/redo/cut/copy/paste actions. The host→legacy state bridge itself
-  lives in `file-controller.js`, not here (see [State model](#state-model)).
-- `project/file-controller.js` — open/save/import/export flows, plus (in
-  `mountFileController()`) the host→legacy mirror described in
-  [State model](#state-model).
+  and undo/redo/cut/copy/paste actions.
+- `project/file-controller.js` — open/save/import/export flows and autosave.
 - `project/project-controller.js` (443 lines) — project settings, new
   project.
 - `shell/menu-controller.js` (93 lines) — builds the `MENUS` array,
@@ -409,12 +386,12 @@ from `js/bootstrap.js` — see [Bootstrapping](#bootstrapping)):
 In short: **modes** = what document kind is being edited plus its
 tool/panel/view contributions; **features** = the always-present shell
 that composes the host and all registered modes together. Features import
-from `js/host`, `js/app` (legacy state/actions), and `js/ui`; modes stay
+from `js/host`, `js/components`, `js/core`, and `js/platform`; modes stay
 self-contained and are driven generically through the registries.
 
 ## Commands — `defineAction`
 
-`js/app/actions.js` (95 lines) is a **compatibility facade over the host's
+`js/features/shell/actions.js` is a **thin facade over the host's
 `CommandRegistry`**, not a separate system:
 
 ```js
@@ -425,15 +402,15 @@ export function defineAction(id, def) {
     ...action,
     when: context => action.isAvailable(context),
     execute: (context, args) => action.run(context, args),
-  }, { owner: 'legacy-action-facade' });
+  }, { owner: 'shell-actions' });
 }
 ```
 
-`bindAction(el, id)` wires a toolbar button: click → `runAction(id)`, plus
-a subscription to the legacy `on('*', ...)` firehose to refresh
-`hidden`/`disabled`/`checked` after any app event.
+`bindAction(el, id)` wires a toolbar button: click → `runAction(id)`. The
+facade subscribes to store, history, and context-key changes to refresh
+`hidden`/`disabled`/`checked` state.
 
-`js/ui/menubar.js`'s `mountMenuBar(el, menus)` renders a declarative
+`js/components/menubar.js`'s `mountMenuBar(el, menus)` renders a declarative
 `MENUS` array (built in `features/shell/menu-controller.js`) whose items
 are only `{action: 'id'}` or `{separator: true}` — read exclusively
 through `getAction`/`runAction`, silently skipping unknown ids so menus
@@ -456,10 +433,10 @@ group into just its animation frames' rects. `overrideLayers` lets filter
 previews and the Preview panel substitute hypothetical bitmaps without
 touching real data.
 
-Consumers cache their own flattened canvas, invalidated on legacy
-`'project'`/`'pixels'`/`'history'` events: `editor-workbench.js` (main
-canvas), `modes/tiles/presentation/tile-raster-cache.js` (tile sheet + thumbnails),
-`modes/{sprites,tiles}/preview.js` (Preview panel).
+Consumers cache their own flattened canvas, invalidated by store selectors,
+`workspace.pixelRevision`, and history subscriptions: `editor-workbench.js`
+(main canvas), `modes/tiles/presentation/tile-raster-cache.js` (tile sheet +
+thumbnails), and `modes/{sprites,tiles}/preview.js` (Preview panel).
 
 **`sheet.layerTree` and `sheet.layers` are two unrelated fields that
 happen to share a naming root** — worth flagging explicitly since it's a
@@ -516,97 +493,33 @@ classDiagram
 
 ## State model
 
-State is **distributed across two coexisting stores mid-migration**,
-bridged explicitly — this is the single most important thing to
-understand before changing anything here:
+`js/host/editor-store.js`'s `EditorStore` is the single application store. It
+provides `getState()`, named `transaction()` boundaries, selector-based
+`subscribe()`, shared drawing settings, overlay settings, and a monotonic
+`workspace.pixelRevision` signal for bitmap mutations. Its state is grouped
+as `{project, session, interaction, workspace}`.
 
-1. **Legacy** — `js/app/state.js`: one mutable `state` object (`project`,
-   `mode`, `view`, `activeSheetId`, `activeLayerId`, `tool`,
-   `commands: new CommandStack()`, `floating`, ...) plus a flat
-   `on(event, fn)` / `emit(event, payload)` pub-sub (`'project' | 'view' |
-   'tool' | 'history' | 'selection' | 'pixels' | 'colors' | 'brushSize' |
-   'playhead' | '*'`). Almost all actual document mutation still happens
-   here, and most of `js/ui`/`js/modes`/`js/features` read/write it
-   directly.
-2. **New** — `js/host/editor-store.js`'s `EditorStore`: a small
-   selector-based reactive store (`getState()`, `transaction(reason,
-   mutate)`, `subscribe(selector, listener, {equals, signal,
-   fireImmediately})`) holding `{project, session, interaction,
-   workspace}`. This is what `EditorHost` and its application services
-   (`DocumentService`, `HistoryService`, `ProjectService`,
-   `SelectionService`) operate on.
+`ProjectService`, `DocumentService`, `SelectionService`, and `HistoryService`
+own writes in their respective areas. Selections are keyed per document in
+`session.selectionsByDocument`; document providers supply `initialSelection`
+so activation can atomically seed a valid first layer. Undo/redo runs through
+the `CommandStack` owned by `HistoryService`. Floating selection is deliberately
+module-owned by `components/canvas/float-session.js` and exposed only through
+narrow accessors.
 
-There is no longer a separate adapter module for this: `js/features/project/
-legacy-state-adapter.js` and its `syncLegacyStateToHost` function were
-deleted by Task 5 once the direction of the bridge flipped. The host store
-is now authoritative and legacy `app/state.js` is the dependent copy —
-`js/features/project/file-controller.js`'s `mountFileController()` owns the
-bridge directly, as a block of `store.subscribe(...)` calls (plus one
-`host.history.subscribe(...)` and one legacy `on('view', ...)` listener)
-registered right after its DOM setup. Each mirrored field re-emits whichever
-legacy `on(event, fn)` bus event(s) its not-yet-migrated readers expect, so
-the UI actually repaints — not just the underlying data updates silently.
-As of this writing the mirror covers:
-
-- **project / activeSheetId / activeMapId / onion / mode** — one tuple
-  subscription on `[project.model, session.activeDocument,
-  session.activeModeId]`, re-emitting `'project'` and `'view'`. Must be a
-  single subscription, not five independent ones: `EditorHost.setProject()`
-  writes `project.model` and `activeDocument` in two separate store
-  transactions, and independent subscribes would observe them one step
-  apart, briefly resolving `activeSheetId`/`activeMapId` against the
-  *previous* project.
-- **overlays.labels / overlays.sequences** — a two-boolean tuple
-  subscription mirroring into `state.overlays` (mutated in place, so a
-  whole-object selector would never see its identity change — hence the
-  tuple), re-emitting `'view'`.
-- **view** — bidirectional: `session.activeViewId` (host-space:
-  `'sprites.frame'`, `'tiles.tile'`, `` `${mode}.sheet` ``, `'maps.canvas'`)
-  mirrors into legacy `state.view` (`'sheet'|'frame'|'tile'`) and back,
-  because both a host writer (`document-controller.js`'s `switchMode()`)
-  and several legacy writers (`frames-panel.js`, `frame-tool-presenter.js`,
-  `tile-tool-presenter.js`, `frame-editor-presenter.js`,
-  `tile-editor-presenter.js`) are still live. A reentrancy guard stops each
-  direction's write from bouncing back through the other and re-triggering
-  itself.
-- **history** — `host.history.subscribe(() => emit('history'))`, since
-  `layers-panel.js`, `color-panel.js`, `preview-panel.js`, and the
-  frame/tile editor presenters still refresh on the legacy `'history'`
-  event rather than calling `host.history.subscribe()` themselves.
-
-All of it persists until Group 3 (per-mode cleanup, scheduled after the
-plan that produced this mirror) migrates the roughly 29 remaining files off
-direct `app/state.js` reads/writes onto the host store and services
-directly, at which point Group 3 deletes the mirror block.
-
-```mermaid
-sequenceDiagram
-    participant Store as EditorStore
-    participant Mirror as file-controller.js<br/>(mountFileController's mirror)
-    participant State as app/state.js (legacy, mutable)
-    participant Legacy as not-yet-migrated readers<br/>(layers-panel.js, drawing-engine.js, ...)
-
-    Store-->>Mirror: subscribe() fires (project/session/overlays/view changed)
-    Mirror->>State: state.project = ... / state.overlays.* = ... / state.view = ...
-    Mirror->>Legacy: emit('project' | 'view' | 'history')
-    Legacy-->>Legacy: on(event, fn) listeners re-render
-    Note over Store,Legacy: mostly one-way (host -> legacy);<br/>state.view is the one bidirectional field
-    Legacy->>Store: (state.view writers only) on('view') triggers<br/>updateSession({activeViewId}) back into the store
-```
-
-Undo/redo itself still runs through the one legacy `CommandStack`
-(`core/commands.js`) — `EditorHost` is constructed with `historyStack:
-legacyState.commands`, so `HistoryService` wraps the *same* stack rather
-than a second one.
+There is no compatibility event bus or host-to-legacy mirror. UI modules
+subscribe directly to store selectors, history, or context keys. Bitmap
+mutators call `store.notifyPixelsChanged()` so canvas, preview, and panels can
+invalidate without replacing large bitmap objects.
 
 Two pieces look scaffolded but not yet wired to a real caller: `ExportService`
-(exports still run through `js/app/exports.js` directly) and
+(exports currently run through `js/core/export/*` directly) and
 `js/host/workbench/view-manager.js`'s `ViewManager` (`editor-workbench.js`
 iterates `registries.views.list()` manually instead). Worth treating as
 forward-looking placeholders, not active pipelines, if referencing them.
 
 Palettes, project settings, sheets/maps/frames/animations/tiles/terrain
-sets all live inline on `state.project`, created by `core/model.js`'s
+sets all live inline on `store.getState().project.model`, created by `core/model.js`'s
 `createProject`/`createSheet`/`createMap` and serialized in the same file
 (`serializeGroup`/`deserializeGroup`, with a project-version migration
 path from the old flat `layers[]` to `layerTree`).
@@ -614,10 +527,10 @@ path from the old flat `layers[]` to `layerTree`).
 ## UI layer
 
 No component framework — plain DOM manipulation, organized as **mount
-functions**: `mountXxxPanel(element)` builds DOM once, wires `on(event,
-fn)` subscriptions for legacy-state-driven re-renders (often
-microtask-debounced, as in `presentation/terrain-set-panel.js`), and returns
-`{dispose()}`. Uniform across `js/components/*.js` and `js/modes/*/*.js`.
+functions**: `mountXxxPanel(element)` builds DOM once, wires store/history
+subscriptions for reactive re-renders (often microtask-debounced through
+`components/panel-mount.js`), and returns `{dispose()}`. Uniform across
+`js/components/*.js` and `js/modes/*/*.js`.
 
 The one shared primitive is `js/components/panels/panel-frame.js`'s
 `createPanelFrame({id, title, collapsed, onCollapsedChange})` — collapsible

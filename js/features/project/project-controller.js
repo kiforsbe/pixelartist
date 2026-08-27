@@ -1,11 +1,12 @@
-import { state, newDefaultProject, confirmOrAuto } from '../../app/state.js';
-import { DEFAULT_SETTINGS } from '../../core/model.js';
+import { DEFAULT_SETTINGS, newDefaultProject } from '../../core/model.js';
 import { PLATFORMS } from '../../core/platforms.js';
 import { MAX_PALETTE_COLORS } from '../../core/pixelSnapper.js';
 import { buildBaseDurationControl } from '../../components/panels/base-duration-control.js';
-import { defineAction } from '../../app/actions.js';
+import { defineAction } from '../shell/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { confirmOrAuto } from '../../platform/browser/autotest.js';
+import { resetFileSession } from './file-session.js';
 
 // Shared field coercion for the New Project / Project Settings dialogs.
 function sheetDimField(el) {
@@ -70,7 +71,7 @@ export function mountProjectController() {
       ...dims, durationMs: npDurationValue.durationMs,
       ...(npDurationValue.baseFps != null ? { baseFps: npDurationValue.baseFps, baseStep: npDurationValue.baseStep } : {}),
     };
-    state.fileHandle = null; state.dirHandle = null; state.saveMode = null;
+    resetFileSession();
     getEditorHost().history.clear({ markDirty: false });
     getEditorHost().setProject(newDefaultProject(settings), { dirty: false });
     dlgNewProject.close();
@@ -430,8 +431,8 @@ export function mountProjectController() {
       do() { project.name = afterName; project.settings = { ...afterSettings }; },
       undo() { project.name = beforeName; project.settings = { ...beforeSettings }; },
     });
-    // Onion step colors are live-mutated state (never go through the undo
-    // stack, same as every other onion field -- see state.js's state.onion
+    // Onion step colors are live-mutated project settings (never go through the undo
+    // stack, same as every other onion field
     // comment), applied here alongside the undoable dims/name command so one
     // OK commits everything the dialog showed, on whichever tab it's on.
     const stepColors = { back: {}, ahead: {} };
@@ -444,4 +445,3 @@ export function mountProjectController() {
     dlgProjectSettings.close();
   });
 }
-

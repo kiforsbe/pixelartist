@@ -30,18 +30,9 @@ function makeProject() {
   return { version: 6, name: 'test', settings: { durationMs: 100 }, sheets: [sheet], maps: [], palettes: [], activePaletteId: null };
 }
 
-// activeSheet() (js/app/state.js) reads the legacy global `state`, not
-// `services.projects.project` -- newAnimation's `target === activeSheet()`
-// check only resolves true if state.project/state.activeSheetId point at
-// the same sheet object these tests construct. Mirrors
-// sprite-animation-commands.test.mjs's reset(project) exactly.
-function reset(project) {
-}
-
 test('newAnimation names by animation count, selects it when the sheet is active, and undo/redo restore the same object at the same index', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset(project);
   const sheet = project.sheets[0];
 
   const doc = { kind: 'sprite-sheet', id: 'sheet1' };
@@ -65,7 +56,6 @@ test('newAnimation names by animation count, selects it when the sheet is active
 test('deleteAnimation removes the animation and tears down its layer group; undo restores both at their original positions', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset(project);
   const sheet = project.sheets[0];
   const doc = { kind: 'sprite-sheet', id: 'sheet1' };
   const group = { id: 'g1', type: 'group', name: 'walk', animationId: 'an1', open: true, children: [] };
@@ -89,7 +79,6 @@ test('deleteAnimation removes the animation and tears down its layer group; undo
 test('renameAnimation renames and is undoable; no-ops (no history entry) when the name is unchanged', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset(project);
   const sheet = project.sheets[0];
 
   renameAnimation(services, 'sheet1', 'an1', 'walk');
@@ -104,7 +93,6 @@ test('renameAnimation renames and is undoable; no-ops (no history entry) when th
 test('toggleAnimationLoop toggles and is undoable; no-ops when the value is unchanged', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset(project);
   const sheet = project.sheets[0];
 
   toggleAnimationLoop(services, 'sheet1', 'an1', true);
@@ -119,7 +107,6 @@ test('toggleAnimationLoop toggles and is undoable; no-ops when the value is unch
 test('setAnimationBaseDuration sets ms/fps/step together and is undoable', () => {
   const project = makeProject();
   const services = makeServices(project);
-  reset(project);
   const sheet = project.sheets[0];
 
   setAnimationBaseDuration(services, 'sheet1', 'an1',

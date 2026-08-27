@@ -38,7 +38,7 @@ function storeOn(event, handler) {
 // Shared by this file's double-click handler and the Tiles properties panel's
 // Edit button.
 export function openTileEditor(tileId) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   if (!sheet) return;
   setSheetSelection(sheet, { editingTileId: tileId });
   getEditorHost().store.updateSession({ activeViewId: 'tiles.tile' }, 'view');
@@ -54,7 +54,7 @@ let drag = null;
 let lastClick = null; // { tileId, time }
 
 function handleDown(ev, view) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   if (!sheet) return;
 
   const gridHit = hitGridHandle(view, sheet, ev.sx, ev.sy);
@@ -125,7 +125,7 @@ function handleMove(ev, view) {
       useCenter: isCenterAnchorModifier(ev), shiftHeld: isProportionalModifier(ev),
     });
   } else if (drag.kind === 'gridmove') {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     const bounds = gridBounds(drag.grid);
     drag.dx = sheet ? Math.max(-bounds.x, Math.min(sheet.width - (bounds.x + bounds.w), ev.x - drag.anchor.x)) : ev.x - drag.anchor.x;
     drag.dy = sheet ? Math.max(-bounds.y, Math.min(sheet.height - (bounds.y + bounds.h), ev.y - drag.anchor.y)) : ev.y - drag.anchor.y;
@@ -138,7 +138,7 @@ function handleMove(ev, view) {
       : (drag.axis === 'cols' ? drag.bbox.x - ev.x : drag.bbox.y - ev.y);
     let count = drag.count0 + Math.round(raw / drag.step);
     count = Math.max(1, count);
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (sheet) {
       const maxCount = drag.axis === 'cols'
         ? (drag.side === 'end'
@@ -157,7 +157,7 @@ function handleMove(ev, view) {
 function handleUp(ev, view) {
   if (!drag) return;
   handleMove(ev, view);
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   const d = drag;
   drag = null;
   view.requestRender();
@@ -287,7 +287,7 @@ function drawGridDims(ctx, view, grid, opts = {}) {
 
 function drawTileToolGhost(ctx, view) {
   if (currentModeId() !== 'tiles') return;
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   if (!sheet) return;
 
   if (currentToolId() === 'tiletool') drawGridHandles(ctx, view, sheet);
@@ -354,7 +354,7 @@ function drawTileToolGhost(ctx, view) {
 
 export function drawTileChrome(ctx, view) {
   if (currentModeId() !== 'tiles' || currentToolId() !== 'tiletool' || drag) return;
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   if (!sheet) return;
   const tile = sheet.tiles.find(t => t.id === sheetSelection(sheet).tileId);
   if (!tile) return;
@@ -383,7 +383,7 @@ export function registerTileTool() {
     if (e.key !== 'Delete') return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (currentToolId() !== 'tiletool' || currentModeId() !== 'tiles') return;
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     const tileId = sheet ? (sheetSelection(sheet).tileId ?? null) : null;
     if (!sheet || !tileId) return;
     dispatch('tiles.deleteTile', { sheetId: sheet.id, tileId });
@@ -393,7 +393,7 @@ export function registerTileTool() {
     if (e.key !== 'Escape') return;
     if (document.querySelector('dialog[open]')) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (currentModeId() === 'tiles' && sheet && sheetSelection(sheet).tileId !== null) {
       setSheetSelection(sheet, { tileId: null });
       drag = null;

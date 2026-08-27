@@ -1,5 +1,5 @@
 // Declarative traditional-menu-bar renderer. Knows nothing about business
-// logic -- reads/writes only through js/app/actions.js's getAction/runAction,
+// logic -- reads/writes only through js/features/shell/actions.js's getAction/runAction,
 // so it never needs updating when an action's implementation changes, and
 // silently skips any item whose action id isn't defined yet (lets menus grow
 // incrementally across tasks without ever rendering a broken entry).
@@ -13,7 +13,7 @@
 // current animation) can depend on live app state. An action with a
 // `submenu` never runs on click -- clicking it opens the submenu instead;
 // its own `isEnabled()` still governs whether that submenu can be opened.
-import { getAction, runAction } from '../app/actions.js';
+import { getAction, runAction } from '../features/shell/actions.js';
 
 // Renders `items` into `dropdownEl` (clearing it first). `onLeafClick` is
 // called before any leaf action's own `run` fires -- used to close the

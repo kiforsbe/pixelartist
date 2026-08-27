@@ -1,8 +1,8 @@
 // Builds spritesheet(PNG+JSON)/image-sequence/GIF-ready-frame output for
 // one animation or every animation on a sprite sheet. Actual GIF byte
 // encoding lives in js/core/gif.js -- this module only prepares frame data.
-import { flattenSheet, effectiveDuration } from '../core/model.js';
-import { copyRegion } from '../core/pixels.js';
+import { flattenSheet, effectiveDuration } from '../model.js';
+import { copyRegion } from '../pixels.js';
 
 function animFrameBitmaps(sheet, anim) {
   const flat = flattenSheet(sheet);

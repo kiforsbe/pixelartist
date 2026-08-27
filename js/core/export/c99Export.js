@@ -76,7 +76,7 @@ function packSnes4Tile(tile) {
 // interleaved per row rather than in two 8-byte blocks; genuinely
 // different byte order despite both being "2bpp, 16 bytes/tile"). Game
 // Boy Color uses this identical tile format -- only the palette encoding
-// differs (see packPaletteBgr555 in js/app/platformExport.js), so both
+// differs (see packPaletteBgr555 in js/core/export/platformExport.js), so both
 // 'gb2' and 'gbc2' targets share this packer.
 function packGb2Tile(tile) {
   const bytes = new Uint8Array(16);
@@ -111,7 +111,7 @@ function packC64McTile(tile) {
   return bytes;
 }
 
-// Shared by js/app/platformExport.js, which packs the same GBA4/NES2/
+// Shared by js/core/export/platformExport.js, which packs the same GBA4/NES2/
 // SNES4/GB2/GBC2/C64MC byte layouts into raw native binary files instead
 // of C source.
 export function packItem(item, target) {

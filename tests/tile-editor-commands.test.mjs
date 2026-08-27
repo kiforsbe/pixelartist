@@ -4,7 +4,6 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
-import { state } from '../js/app/state.js';
 import { createBitmap } from '../js/core/pixels.js';
 import { setTileNeighborSlot } from '../js/modes/tiles/application/commands/tile-editor-commands.js';
 
@@ -30,13 +29,7 @@ function makeSheet(overrides = {}) {
 
 function makeProject(sheet) { return { sheets: [sheet] }; }
 
-function resetLegacy() {
-  state.commands = new CommandStack();
-  state.dirty = false;
-}
-
 test('setTileNeighborSlot assigns a "tile" mode slot, and undoes/redoes', () => {
-  resetLegacy();
   const tile = makeTile({ id: 't1' });
   const other = makeTile({ id: 't2' });
   const sheet = makeSheet({ tiles: [tile, other] });
@@ -53,7 +46,6 @@ test('setTileNeighborSlot assigns a "tile" mode slot, and undoes/redoes', () => 
 });
 
 test('setTileNeighborSlot overwrites one slot and preserves the tile\'s other slots on undo', () => {
-  resetLegacy();
   const tile = makeTile({
     id: 't1',
     neighbors: {
@@ -74,7 +66,6 @@ test('setTileNeighborSlot overwrites one slot and preserves the tile\'s other sl
 });
 
 test('setTileNeighborSlot is a silent no-op when the tileId does not resolve', () => {
-  resetLegacy();
   const sheet = makeSheet({ tiles: [] });
   const services = makeServices(makeProject(sheet));
 

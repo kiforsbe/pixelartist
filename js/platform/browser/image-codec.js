@@ -1,4 +1,4 @@
-import { encodePng, decodePng } from '../../app/pngcodec.js';
+import { encodePng, decodePng } from '../../core/pngcodec.js';
 
 export class BrowserImageCodec {
   encode(bitmap) { return encodePng(bitmap); }

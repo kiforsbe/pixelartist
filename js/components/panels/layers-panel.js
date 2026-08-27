@@ -5,28 +5,11 @@ import { activeSheet, activeLayer, activeMap } from '../../host/document-helpers
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { mountStorePanel } from '../panel-mount.js';
 import { documentKey } from '../../host/editor-store.js';
-// `state`/`on`/`emit` from app/state.js are kept for three narrow,
-// already-out-of-scope-for-this-task exceptions -- everything else this
-// file used to read from/write to `state` now goes through the host store,
-// services, or a dispatched Command Handler:
-//  - `state.floating` (the active floating-selection buffer, read only to
-//    composite it onto layer thumbnails) is owned exclusively by
-//    components/canvas/float-session.js; nothing mirrors it onto the host
-//    store yet.
-//  - `on('pixels', ...)` for live-stroke thumbnail redraws: drawing-engine.js
-//    emits this mid-stroke, live, for preview; there is no store equivalent.
-//  - The `emit('pixels'|'view'|'selection')` calls below reach other
-//    still-legacy listeners (tool-palette.js, preview-panel.js, the frame/
-//    tile presenters, document-controller.js's host<->legacy mirror) this
-//    task does not touch. Retiring 'pixels'/'selection' project-wide is
-//    explicitly called out as later Group 3 work, not this task's scope; the
-//    maps-branch `emit('view')` calls stay until Task 10 retires the mirror
-//    (see this task's brief).
-import { state, on, emit } from '../../app/state.js';
+import { activeFloating } from '../canvas/float-session.js';
 import { commitDeleteAnimation } from '../../features/animations/commands.js';
 import { findNode, findParent, sheetLayers, flattenLayers, findGroup, animationGroup, layerAnimationContext } from '../../core/model.js';
 import { compositeFloatOnLayer } from '../../core/floating.js';
-import { defineAction, bindAction } from '../../app/actions.js';
+import { defineAction, bindAction } from '../../features/shell/actions.js';
 
 // Dispatches a Command Handler by id (registered in each mode's
 // contributions.js) rather than importing it directly -- matches the
@@ -49,7 +32,7 @@ function resetBody(el, headingText) {
 
 // ------------------------------------------------------ shared thumb drawing
 //
-// Mirrors js/ui/timeline.js's getScratchCanvas/drawFit pattern: one
+// Uses the timeline preview's scratch-canvas/draw-fit pattern: one
 // module-level scratch canvas reused across every layer-row thumbnail draw,
 // resized only when the source bitmap's dimensions change (a canvas resize
 // resets context state, so imageSmoothingEnabled is reasserted after).
@@ -169,7 +152,7 @@ export function mountLayersPanel(el) {
       const host = getEditorHost();
       const layerId = dispatch('maps.addLayer', { mapId: map.id, type: 'tile' });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
-      emit('view'); return;
+      return;
     }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
@@ -186,7 +169,7 @@ export function mountLayersPanel(el) {
       const host = getEditorHost();
       const layerId = dispatch('maps.addLayer', { mapId: map.id, type: 'sprite' });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId }, { kind: 'map', id: map.id });
-      emit('view'); return;
+      return;
     }
     const sheet = activeSheet();
     const group = targetGroupForInsert();
@@ -207,7 +190,7 @@ export function mountLayersPanel(el) {
       const remainingIndex = Math.min(map.layers.indexOf(layer), map.layers.length - 2);
       dispatch('maps.deleteLayer', { mapId: map.id, layerId: layer.id });
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: map.layers[Math.max(0, remainingIndex)]?.id ?? null }, { kind: 'map', id: map.id });
-      emit('view'); return;
+      return;
     }
     const sheet = activeSheet();
     if (!sheet) return;
@@ -458,9 +441,7 @@ export function mountLayersPanel(el) {
     selectedNodeId = group.id;
     const sheet = activeSheet();
     const animId = group.animationId ?? null;
-    const changed = currentAnimationId() !== animId;
     if (sheet) setSheetSelection(sheet, { layerId: null, animationId: animId });
-    if (changed) emit('selection');
     lastSyncedAnimationId = animId;
   }
 
@@ -472,9 +453,7 @@ export function mountLayersPanel(el) {
     selectedNodeId = layer.id;
     const ctx = sheet ? layerAnimationContext(sheet, layer) : null;
     const animId = ctx?.anim.id ?? null;
-    const changed = currentAnimationId() !== animId;
     if (sheet) setSheetSelection(sheet, { layerId: layer.id, animationId: animId });
-    if (changed) emit('selection');
     lastSyncedAnimationId = animId;
   }
 
@@ -555,7 +534,8 @@ export function mountLayersPanel(el) {
     const thumb = document.createElement('canvas');
     thumb.className = 'layer-thumb';
     thumb.width = LAYER_THUMB_SIZE; thumb.height = LAYER_THUMB_SIZE;
-    const fl = state.floating?.sheetId === sheet.id ? state.floating : null;
+    const currentFloat = activeFloating();
+    const fl = currentFloat?.sheetId === sheet.id ? currentFloat : null;
     drawFit(thumb, (fl && compositeFloatOnLayer(layer.bitmap, fl, layer.id)) || layer.bitmap);
     thumbCanvases.set(layer.id, thumb);
 
@@ -590,7 +570,7 @@ export function mountLayersPanel(el) {
     opacityInput.addEventListener('pointerdown', (e) => { e.stopPropagation(); opacityBefore = layer.opacity; });
     opacityInput.addEventListener('input', () => {
       layer.opacity = Number(opacityInput.value) / 100;
-      emit('pixels');
+      getEditorHost().store.notifyPixelsChanged();
     });
     opacityInput.addEventListener('change', () => {
       if (opacityBefore == null) return;
@@ -618,7 +598,6 @@ export function mountLayersPanel(el) {
     row.style.paddingLeft = '4px'; row.tabIndex = 0;
     row.addEventListener('click', () => {
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: layer.id }, { kind: 'map', id: map.id });
-      emit('view');
     });
     row.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
@@ -630,7 +609,7 @@ export function mountLayersPanel(el) {
       // mutation, but this panel no longer listens on the legacy 'view' bus
       // for its own repaint, so ask mountStorePanel's debounced render for
       // one explicitly or this row's new position would never show up.
-      e.preventDefault(); map.layers.splice(i, 1); map.layers.splice(target, 0, layer); host.projects.markDirty(); emit('view');
+      e.preventDefault(); map.layers.splice(i, 1); map.layers.splice(target, 0, layer); host.projects.markDirty(); host.store.notifyPixelsChanged();
       storePanel.scheduleRender();
     });
     const spacer = document.createElement('span'); spacer.className = 'tree-spacer leaf-spacer';
@@ -638,12 +617,12 @@ export function mountLayersPanel(el) {
     const tctx = thumb.getContext('2d'); tctx.fillStyle = layer.type === 'tile' ? '#466b9c' : '#8a5b98'; tctx.fillRect(0, 0, thumb.width, thumb.height); tctx.fillStyle = '#fff'; tctx.font = '14px sans-serif'; tctx.textAlign = 'center'; tctx.textBaseline = 'middle'; tctx.fillText(layer.type === 'tile' ? '▦' : '♟', thumb.width / 2, thumb.height / 2);
     // Same "no Command Handler, keep it undoable-never but still repaint"
     // reasoning as the keydown reorder handler above.
-    const visBtn = document.createElement('button'); visBtn.type = 'button'; visBtn.textContent = layer.visible ? '👁' : '🚫'; visBtn.title = 'Toggle visibility'; visBtn.addEventListener('click', e => { e.stopPropagation(); layer.visible = !layer.visible; host.projects.markDirty(); emit('view'); storePanel.scheduleRender(); });
+    const visBtn = document.createElement('button'); visBtn.type = 'button'; visBtn.textContent = layer.visible ? '👁' : '🚫'; visBtn.title = 'Toggle visibility'; visBtn.addEventListener('click', e => { e.stopPropagation(); layer.visible = !layer.visible; host.projects.markDirty(); host.store.notifyPixelsChanged(); storePanel.scheduleRender(); });
     const nameEl = document.createElement('span'); nameEl.className = 'layer-name'; nameEl.textContent = layer.name; nameEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(layer, nameEl); });
     const opacityInput = document.createElement('input'); opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100'; opacityInput.value = String(Math.round(layer.opacity * 100)); opacityInput.addEventListener('click', e => e.stopPropagation());
     let before = null;
     opacityInput.addEventListener('pointerdown', e => { e.stopPropagation(); before = layer.opacity; });
-    opacityInput.addEventListener('input', () => { layer.opacity = Number(opacityInput.value) / 100; emit('view'); });
+    opacityInput.addEventListener('input', () => { layer.opacity = Number(opacityInput.value) / 100; host.store.notifyPixelsChanged(); });
     opacityInput.addEventListener('change', () => {
       if (before != null && before !== layer.opacity) {
         // Same before/after ordering fix as renderLayer's opacity handler.
@@ -705,7 +684,8 @@ export function mountLayersPanel(el) {
     if (!sheet) return;
     for (const layer of sheetLayers(sheet)) {
       const canvas = thumbCanvases.get(layer.id);
-      const fl = state.floating?.sheetId === sheet.id ? state.floating : null;
+      const currentFloat = activeFloating();
+      const fl = currentFloat?.sheetId === sheet.id ? currentFloat : null;
       if (canvas) drawFit(canvas, (fl && compositeFloatOnLayer(layer.bitmap, fl, layer.id)) || layer.bitmap);
     }
   }
@@ -750,14 +730,12 @@ export function mountLayersPanel(el) {
   }
 
   const store = getEditorHost().store;
-  // Legacy 'pixels' subscription for live-stroke thumbnail redraws: drawing
-  // engine emits this mid-stroke, and there's no store equivalent yet (see
-  // the import comment above). History-driven redraws (every add/delete/
+  // Pixel revisions redraw live-stroke thumbnails. History-driven redraws (every add/delete/
   // rename/merge/move/opacity dispatch above) reach renderList through
   // host.history.subscribe below instead -- HistoryService's own onChange
   // fires on every do()/undo()/redo() regardless of which store selector (if
   // any) the underlying project mutation happens to touch.
-  const disposePixelSignal = on('pixels', scheduleThumbRedraw);
+  const disposePixelSignal = store.subscribe(s => s.workspace.pixelRevision, scheduleThumbRedraw);
   const disposeHistory = getEditorHost().history.subscribe(() => renderList());
   const storePanel = mountStorePanel(store, [
     s => s.project.model,

@@ -5,7 +5,7 @@ import { flattenSheetLayers } from '../../core/model.js';
 import { copyRegion } from '../../core/pixels.js';
 
 export function renderTilePreview({ overrideLayers = null } = {}) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   if (!sheet) return { bitmap: null };
   const selection = getEditorHost().selections.get({ kind: 'tile-sheet', id: sheet.id }) ?? {};
   const layers = overrideLayers ?? currentContextLayers();

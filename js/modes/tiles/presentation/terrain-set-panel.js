@@ -28,7 +28,7 @@ export function mountAutotilesPanel(element) {
       return;
     }
     element.hidden = false;
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     editor.innerHTML = '';
     if (!sheet) return;
 
@@ -44,7 +44,7 @@ export function mountAutotilesPanel(element) {
   }
 
   function syncSelection() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (sheet) syncSelectedTerrainSetFromTile(sheet, sheet.tiles.find(tile => tile.id === sheetSelection(sheet).tileId));
   }
 

@@ -12,7 +12,7 @@ const ASSET_DIR = path.join(__dirname, '..', 'assets', 'blob47-templates');
 
 // Minimal PNG decoder for exactly the format the bundled reference images
 // use (8-bit indexed color, non-interlaced) -- not a general-purpose
-// decoder. js/app/pngcodec.js can't be reused here: it delegates decoding
+// decoder. js/core/pngcodec.js can't be reused here: it delegates decoding
 // to createImageBitmap, a browser-only API this node:test file can't call.
 // Throws clearly rather than silently misdecoding an unsupported format.
 function decodeIndexedPng(buf) {

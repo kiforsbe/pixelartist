@@ -29,7 +29,7 @@ function currentToolId() { return getEditorHost().store.getState().session.activ
 let autotilePaint = null; // { terrainSetId, brush: 'paint'|'erase', stroke, conflicts:Map<tileId,blobIndex>, hover }
 
 function beginTerrainPaintStroke(ev, view) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   const terrainSet = sheet?.terrainSets.find(ts => ts.id === autotilePaint?.terrainSetId);
   if (!sheet || !terrainSet) return;
   // Secondary-button drags always erase, independent of the selected brush.
@@ -38,7 +38,7 @@ function beginTerrainPaintStroke(ev, view) {
 }
 
 function applyTerrainPaintPoint(ev, view) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   const terrainSet = sheet?.terrainSets.find(ts => ts.id === autotilePaint?.terrainSetId);
   const stroke = autotilePaint?.stroke;
   if (!sheet || !terrainSet || !stroke) return;
@@ -56,7 +56,7 @@ function applyTerrainPaintPoint(ev, view) {
 }
 
 function commitTerrainPaintStroke(view) {
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   const terrainSet = sheet?.terrainSets.find(ts => ts.id === autotilePaint?.terrainSetId);
   const stroke = autotilePaint?.stroke;
   if (!sheet || !terrainSet || !stroke?.masks.size) { if (autotilePaint) autotilePaint.stroke = null; return; }
@@ -69,7 +69,7 @@ function commitTerrainPaintStroke(view) {
 
 function drawAutotilePaintOverlay(ctx, view) {
   if (!autotilePaint || currentToolId() !== 'autotilepaint' || currentModeId() !== 'tiles') return;
-  const sheet = activeSheet();
+  const sheet = activeSheet('tile');
   const terrainSet = sheet?.terrainSets.find(ts => ts.id === autotilePaint.terrainSetId);
   const grid = sheet && terrainSet && terrainPaintGrid(sheet, terrainSet);
   if (!sheet || !terrainSet || !grid) return;
@@ -249,7 +249,7 @@ export function bindAutotilePaintTool(view) {
       else if (ev.type === 'move') {
         if (autotilePaint.stroke) applyTerrainPaintPoint(ev, view);
         else {
-          const sheet = activeSheet();
+          const sheet = activeSheet('tile');
           const terrainSet = sheet?.terrainSets.find(ts => ts.id === autotilePaint.terrainSetId);
           const tile = sheet && terrainSet && paintTileAt(sheet, terrainSet, ev.x, ev.y);
           const cell = tile && paintCellAt(tile, ev.x, ev.y);

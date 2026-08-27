@@ -1,6 +1,6 @@
 // Target-platform hardware constraints for live edit-time compatibility
-// warnings (see js/app/main.js's status-bar wiring) -- NOT export-time
-// packing (js/app/c99Export.js / js/app/platformExport.js own that; the
+// warnings (see editor-workbench.js's status-bar wiring) -- NOT export-time
+// packing (js/core/export/c99Export.js / js/core/export/platformExport.js own that; the
 // numeric caps here intentionally mirror MAX_COLORS there for gba4/nes2/
 // snes4/generic8 so the two don't silently disagree).
 //
@@ -105,7 +105,7 @@ function nearestInPalette(hwPalette, rgb) {
 // in a platform's real, fixed hardware palette (e.g. NES_PALETTE,
 // C64_PALETTE, GB_PALETTE), deduping so two source colors that land on the
 // same hardware color collapse to one palette entry. Used by
-// js/app/main.js's resolveC99Items so exported palettes for these
+// file-controller.js's resolveC99Items so exported palettes for these
 // platforms only ever contain colors the real hardware can actually
 // produce -- not arbitrary source RGB. Order-preserving (first occurrence
 // wins), so it composes with buildPalette's frequency ordering. Platforms

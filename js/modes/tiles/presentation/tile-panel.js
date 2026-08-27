@@ -55,7 +55,7 @@ export function mountTilePanel(element) {
   addTerrainSetButton.textContent = '➕ Autotiles';
   addTerrainSetButton.title = 'Add terrain set';
   addTerrainSetButton.addEventListener('click', () => {
-    if (activeSheet()) addTerrainSetDialog.open();
+    if (activeSheet('tile')) addTerrainSetDialog.open();
   });
 
   const buttonRow = document.createElement('div');
@@ -69,7 +69,7 @@ export function mountTilePanel(element) {
       return;
     }
     panel.hidden = false;
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     selectionRow.innerHTML = '';
     selectionRow.classList.remove('active');
     if (!sheet) return;
@@ -186,7 +186,7 @@ export function mountTilePanel(element) {
   }
 
   function syncSelection() {
-    const sheet = activeSheet();
+    const sheet = activeSheet('tile');
     if (sheet) syncSelectedTerrainSetFromTile(sheet, sheet.tiles.find(tile => tile.id === sheetSelection(sheet).tileId));
   }
 

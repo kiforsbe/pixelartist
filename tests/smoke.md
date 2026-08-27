@@ -3,7 +3,7 @@
 End-to-end manual/Playwright script covering every major feature area
 (condensed from the Task 13/16/18/19/20 verification lists). Run against
 `http://localhost:8080/?autotest` — the `?autotest` query flag
-(`js/app/state.js`'s `AUTOTEST`) suppresses `confirm()`/`beforeunload`
+(`js/platform/browser/autotest.js`) suppresses `confirm()`/`beforeunload`
 prompts and skips the autosave-restore prompt on boot, so automated runs
 don't block on native dialogs.
 
