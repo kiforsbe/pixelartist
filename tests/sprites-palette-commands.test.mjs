@@ -129,3 +129,35 @@ test('remapPaletteColor is a no-op when the color is unchanged', () => {
   remapPaletteColor(services, 0, [255, 0, 0, 255]);
   assert.equal(services.history.canUndo(), false);
 });
+
+test('palette commands keep their original palette target when selection changes before undo and redo', () => {
+  const first = makePalette();
+  const second = { ...makePalette(), id: 'pal2', colors: [[100, 110, 120, 255], ...makePalette().colors.slice(1)] };
+  const project = { sheets: [], maps: [], palettes: [first, second], activePaletteId: first.id };
+  const services = makeServices(project);
+
+  editPaletteColor(services, 0, [10, 20, 30, 255]);
+  project.activePaletteId = second.id;
+  services.history.undo();
+  assert.deepEqual(first.colors[0], [255, 0, 0, 255]);
+  assert.deepEqual(second.colors[0], [100, 110, 120, 255]);
+  project.activePaletteId = null;
+  services.history.redo();
+  assert.deepEqual(first.colors[0], [10, 20, 30, 255]);
+});
+
+test('remapPaletteColor restores its original palette and pixels when selection changes or is cleared', () => {
+  const first = makePalette();
+  const second = { ...makePalette(), id: 'pal2', colors: [[100, 110, 120, 255], ...makePalette().colors.slice(1)] };
+  const bmp = fillBitmap(createBitmap(1, 1), first.colors[0]);
+  const sheet = { id: 'sheet1', width: 1, height: 1, kind: 'sprite', layerTree: { id: 'root', type: 'group', children: [{ id: 'l0', type: 'layer', name: 'L', visible: true, opacity: 1, bitmap: bmp }] }, animations: [] };
+  const project = { sheets: [sheet], maps: [], palettes: [first, second], activePaletteId: first.id };
+  const services = makeServices(project, sheet.id);
+
+  remapPaletteColor(services, 0, [10, 20, 30, 255]);
+  project.activePaletteId = second.id; services.history.undo();
+  assert.deepEqual(first.colors[0], [255, 0, 0, 255]); assert.deepEqual(Array.from(bmp.data), [255, 0, 0, 255]);
+  assert.deepEqual(second.colors[0], [100, 110, 120, 255]);
+  project.activePaletteId = null; services.history.redo();
+  assert.deepEqual(first.colors[0], [10, 20, 30, 255]); assert.deepEqual(Array.from(bmp.data), [10, 20, 30, 255]);
+});

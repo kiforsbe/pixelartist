@@ -11,12 +11,14 @@ export class HistoryService {
   #store;
   #listeners = new Set();
   #suppressDirty = false;
+  #revision = 0;
 
   constructor({ store = null } = {}) {
     this.#stack = new CommandStack();
     this.#store = store;
     const previous = this.#stack.onChange;
     this.#stack.onChange = value => {
+      this.#revision++;
       if (previous) previous(value);
       if (this.#store && !this.#suppressDirty) this.#store.markDirty(true);
       for (const listener of [...this.#listeners]) listener(this.snapshot());
@@ -33,7 +35,7 @@ export class HistoryService {
   }
   canUndo() { return this.#stack.canUndo(); }
   canRedo() { return this.#stack.canRedo(); }
-  snapshot() { return { canUndo: this.canUndo(), canRedo: this.canRedo() }; }
+  snapshot() { return { canUndo: this.canUndo(), canRedo: this.canRedo(), revision: this.#revision }; }
 
   subscribe(listener, { signal, fireImmediately = false } = {}) {
     this.#listeners.add(listener);

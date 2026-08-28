@@ -9,7 +9,7 @@ import {
   paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
   moveMapItem, deleteMapItem,
 } from './application/commands/map-paint-commands.js';
-import { addMapLayer, deleteMapLayer, setMapLayerOpacity } from './application/commands/map-layer-commands.js';
+import { addMapLayer, deleteMapLayer, renameMapLayer, setMapLayerOpacity } from './application/commands/map-layer-commands.js';
 import { editPaletteColor, remapPaletteColor } from './application/commands/palette-commands.js';
 
 function services() { const host = getEditorHost(); return { projects: host.projects, history: host.history }; }
@@ -31,6 +31,7 @@ function registerMapCommands(api) {
   api.commands.register({ id: 'maps.deleteItem', when: whenMaps, execute: (_context, { mapId, layerId, itemId }) => deleteMapItem(services(), mapId, layerId, itemId) });
   api.commands.register({ id: 'maps.addLayer', when: whenMaps, execute: (_context, { mapId, type }) => addMapLayer(services(), mapId, type) });
   api.commands.register({ id: 'maps.deleteLayer', when: whenMaps, execute: (_context, { mapId, layerId }) => deleteMapLayer(services(), mapId, layerId) });
+  api.commands.register({ id: 'maps.renameLayer', when: whenMaps, execute: (_context, { mapId, layerId, name }) => renameMapLayer(services(), mapId, layerId, name) });
   api.commands.register({ id: 'maps.setLayerOpacity', when: whenMaps, execute: (_context, { mapId, layerId, opacity }) => setMapLayerOpacity(services(), mapId, layerId, opacity) });
   api.commands.register({ id: 'maps.editPaletteColor', when: whenMaps, execute: (_context, { index, color }) => editPaletteColor(services(), index, color) });
   api.commands.register({ id: 'maps.remapPaletteColor', when: whenMaps, execute: (_context, { index, color }) => remapPaletteColor(services(), index, color) });

@@ -211,9 +211,8 @@ export function mountLayersPanel(el) {
       // (selection side effects live in the caller, never in a command) is
       // computed here first, from the pre-delete tree, mirroring the old
       // do()'s own all/fallback formula.
-      const idx = loc.index;
-      const all = sheetLayers(sheet);
-      const fallback = all[Math.min(idx, all.length - 1)];
+      const survivors = flattenLayers(parent).filter(candidate => candidate.id !== layer.id);
+      const fallback = survivors[Math.min(loc.index, survivors.length - 1)];
       const fallbackId = fallback ? fallback.id : null;
       dispatch(`${mode}.deleteNode`, { sheetId: sheet.id, nodeId: layer.id });
       setSheetSelection(sheet, { layerId: fallbackId });
@@ -292,7 +291,13 @@ export function mountLayersPanel(el) {
       let v = input.value.trim();
       if (!v) v = autoName(node);
       if (v !== node.name) {
-        dispatch(`${currentModeId()}.renameNode`, { sheetId: activeSheet().id, nodeId: node.id, name: v });
+        if (currentModeId() === 'maps') {
+          const map = activeMap();
+          if (map) dispatch('maps.renameLayer', { mapId: map.id, layerId: node.id, name: v });
+        } else {
+          const sheet = activeSheet();
+          if (sheet) dispatch(`${currentModeId()}.renameNode`, { sheetId: sheet.id, nodeId: node.id, name: v });
+        }
       }
       renderList();
     }
@@ -618,7 +623,9 @@ export function mountLayersPanel(el) {
     // Same "no Command Handler, keep it undoable-never but still repaint"
     // reasoning as the keydown reorder handler above.
     const visBtn = document.createElement('button'); visBtn.type = 'button'; visBtn.textContent = layer.visible ? '👁' : '🚫'; visBtn.title = 'Toggle visibility'; visBtn.addEventListener('click', e => { e.stopPropagation(); layer.visible = !layer.visible; host.projects.markDirty(); host.store.notifyPixelsChanged(); storePanel.scheduleRender(); });
-    const nameEl = document.createElement('span'); nameEl.className = 'layer-name'; nameEl.textContent = layer.name; nameEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(layer, nameEl); });
+    const nameEl = document.createElement('span'); nameEl.className = 'layer-name'; nameEl.textContent = layer.name;
+    nameEl.addEventListener('click', e => { e.stopPropagation(); scheduleNameSelect(() => host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: layer.id }, { kind: 'map', id: map.id })); });
+    nameEl.addEventListener('dblclick', e => { e.stopPropagation(); if (pendingNameClickTimer) { clearTimeout(pendingNameClickTimer); pendingNameClickTimer = null; } startRename(layer, nameEl); });
     const opacityInput = document.createElement('input'); opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100'; opacityInput.value = String(Math.round(layer.opacity * 100)); opacityInput.addEventListener('click', e => e.stopPropagation());
     let before = null;
     opacityInput.addEventListener('pointerdown', e => { e.stopPropagation(); before = layer.opacity; });
@@ -670,6 +677,12 @@ export function mountLayersPanel(el) {
     const sheet = activeSheet();
     if (!sheet) return;
     syncFromAnimationSelection(sheet);
+    const currentId = currentLayerId();
+    if (currentId && !findNode(sheet.layerTree, currentId)) {
+      const context = currentAnimationId() ? animationGroup(sheet, currentAnimationId()) : sheet.layerTree;
+      const fallback = context ? flattenLayers(context)[0] : sheetLayers(sheet)[0];
+      setSheetSelection(sheet, { layerId: fallback?.id ?? null });
+    }
     if (selectedNodeId && !findNode(sheet.layerTree, selectedNodeId)) {
       selectedNodeId = currentLayerId();
     }

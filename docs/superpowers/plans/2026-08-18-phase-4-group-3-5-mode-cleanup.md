@@ -1060,3 +1060,17 @@ git commit -m "chore: delete file-controller.js's legacy mirror and js/app/state
 ## Final Review
 
 Once all 10 tasks are complete: dispatch the plan's final whole-branch review on the most capable available model, per `superpowers:subagent-driven-development`'s process — this plan touches undo-history correctness (Tasks 1, 2, 5) and 42 files' worth of state-access migration, comparable in risk to the Group 4 shell rewrite's own final review (which caught 5 Critical + 3 Important regressions in already-task-reviewed work). Pay particular attention, per that prior review's lesson ("who else reads what this stopped writing?"): does anything besides the files this plan touched still expect `state.js`'s events/fields to exist? Does every `markDirty()` bug-fix site actually fire on the right user action? Does the drag-and-drop layer reorder path (Task 3) actually preserve tree structure correctly across an undo, verified live, not just read from the diff?
+
+### Review checkpoint — 2026-08-28
+
+- [x] Independent whole-plan review of `7a5f1d0..c41355e` completed, covering all ten tasks.
+- [x] One focused fix wave addressed six regressions: palette undo target identity, dangling layer selection, Maps layer rename, stale Maps source rasters, terrain-paint toolbar refresh, and stale tile gestures.
+- [x] Independent scoped re-review found all six addressed, with no new Critical/Important breakage.
+- [x] Fresh verification: `npm test` **716/716 passing**, all **164** production JavaScript files parse, and `git diff --check` passes. Regression fixtures live in `tests/`, without dependencies on ignored review artifacts.
+- [x] Browser checks passed for layer undo/delete and drawing afterward; Maps rename/undo/redo/cancel; terrain Start/Done/restart; and source edits plus Maps-only undo/redo repainting both brush thumbnails and preview. Palette selection changes plus keyboard undo/redo were checked with command-based edit setup, not native-picker interaction. No page/console errors occurred in these checks.
+- [x] Owner-only layer reorder/Undo gate accepted as completed by explicit user instruction on 2026-08-28 ("treat the manual check as completed"). This records user acceptance, not a new observed manual test or automated browser-drag result.
+- [x] Commit the reviewed fix wave with this acceptance checkpoint. The prior approved `docs/ARCHITECTURE.md` edit remains unchanged and separate from this fix wave.
+
+Two plan-sketch corrections were necessary: palette history resolves the originally edited palette ID, and caller-owned layer selection recovery repairs the authoritative selection rather than only row highlighting. Map rename also reuses the sheet rows' narrow click deferral so its repaired commit path is reachable.
+
+Phase 5's optional `sheet.layers` → `sheet.tileLayerNames` polish is separate and has not started. A pre-existing blank-startup-canvas sizing issue (already present at `7a5f1d0`, resolved visually by a mode roundtrip) remains a separate follow-up; it is not one of the six migration regressions fixed here. Phase 4's review and acceptance gates are closed, with the owner-only reorder gate accepted by user instruction as recorded above; no additional manual execution is claimed.

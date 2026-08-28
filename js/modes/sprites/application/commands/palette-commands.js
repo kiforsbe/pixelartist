@@ -19,6 +19,10 @@ function currentPalette(project) {
   return project?.palettes.find(p => p.id === project.activePaletteId) ?? null;
 }
 
+function paletteById(project, id) {
+  return project?.palettes.find(p => p.id === id) ?? null;
+}
+
 function activeSheet(services) {
   const doc = services.store?.getState().session.activeDocument;
   if (!doc || (doc.kind !== 'sprite-sheet' && doc.kind !== 'tile-sheet')) return null;
@@ -28,11 +32,12 @@ function activeSheet(services) {
 export function editPaletteColor(services, index, color) {
   const pal = currentPalette(services.projects.project);
   if (!pal) return;
+  const paletteId = pal.id;
   const before = pal.colors[index];
   if (colorsEqual(before, color)) return;
   runEntityCommand(services, 'edit palette color', project => project,
-    project => { setEntry(currentPalette(project), index, color); },
-    project => { setEntry(currentPalette(project), index, before); });
+    project => { const target = paletteById(project, paletteId); if (target) setEntry(target, index, color); },
+    project => { const target = paletteById(project, paletteId); if (target) setEntry(target, index, before); });
 }
 
 // The palette-entry mutation lives INSIDE the command so undo restores both
@@ -44,6 +49,7 @@ export function editPaletteColor(services, index, color) {
 export function remapPaletteColor(services, index, color) {
   const pal = currentPalette(services.projects.project);
   if (!pal) return;
+  const paletteId = pal.id;
   const old = pal.colors[index];
   if (colorsEqual(old, color)) return;
   const sheet = activeSheet(services);
@@ -55,11 +61,11 @@ export function remapPaletteColor(services, index, color) {
   });
   runEntityCommand(services, 'remap palette color', project => project,
     project => {
-      setEntry(currentPalette(project), index, color);
+      const target = paletteById(project, paletteId); if (target) setEntry(target, index, color);
       for (const lp of layerPatches) blitRegion(lp.bitmap, lp.after, 0, 0);
     },
     project => {
-      setEntry(currentPalette(project), index, old);
+      const target = paletteById(project, paletteId); if (target) setEntry(target, index, old);
       for (const lp of layerPatches) blitRegion(lp.bitmap, lp.before, 0, 0);
     });
 }

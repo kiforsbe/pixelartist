@@ -24,6 +24,16 @@ export function deleteMapLayer(services, mapId, layerId) {
     map => { if (!map.layers.some(l => l.id === layerId)) map.layers.splice(index, 0, layer); });
 }
 
+export function renameMapLayer(services, mapId, layerId, name) {
+  const map = findMap(services.projects.project, mapId);
+  const layer = map?.layers.find(candidate => candidate.id === layerId);
+  if (!layer || layer.name === name) return;
+  const before = layer.name;
+  runCommand(services, mapId, 'rename map layer',
+    target => { const candidate = target.layers.find(item => item.id === layerId); if (candidate) candidate.name = name; },
+    target => { const candidate = target.layers.find(item => item.id === layerId); if (candidate) candidate.name = before; });
+}
+
 // Ports renderMapLayer's opacity change handler (layers-panel.js:746).
 export function setMapLayerOpacity(services, mapId, layerId, opacity) {
   const map = findMap(services.projects.project, mapId);

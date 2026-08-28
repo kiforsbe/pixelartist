@@ -48,7 +48,8 @@ export function mountMapAssetsPanel(container) {
       if (sourceSheet) { asset.spriteSheetId = sourceSheet.id; const kindRow = document.createElement('div'); kindRow.className = 'map-brush-kind'; for (const [value, label] of [['frame', 'Frames'], ['animation', 'Animations']]) { const button = document.createElement('button'); button.type = 'button'; button.className = `btn-sm${asset.spriteKind === value ? ' active' : ''}`; button.textContent = label; button.onclick = () => { asset.spriteKind = value; asset.spriteId = ''; render(); }; kindRow.append(button); } container.append(kindRow); const grid = addBrushGrid(); const items = asset.spriteKind === 'frame' ? sourceSheet.frames : sourceSheet.animations; if (!items.some(item => item.id === asset.spriteId)) asset.spriteId = items[0]?.id ?? ''; for (const item of items) { const frame = asset.spriteKind === 'animation' ? sourceSheet.frames.find(candidate => candidate.id === item.frames?.[0]?.frameId) : item; if (frame) addSwatch(grid, { selected: asset.spriteId === item.id, title: item.name ?? (asset.spriteKind === 'frame' ? `Frame ${sourceSheet.frames.indexOf(item) + 1}` : 'Animation'), sourceSheet, rect: frame, choose: () => { asset.spriteId = item.id; } }); } }
     } else container.append('Select or move placed items on the active layer.');
   };
-  return mountStorePanel(getEditorHost().store, [
+  const host = getEditorHost();
+  const panel = mountStorePanel(host.store, [
     s => s.session.activeViewId,
     s => s.session.activeDocument,
     s => {
@@ -56,6 +57,9 @@ export function mountMapAssetsPanel(container) {
       return document?.kind === 'map' ? s.session.selectionsByDocument[`map:${document.id}`] : null;
     },
     s => s.project.model,
+    s => s.workspace.pixelRevision,
     s => s.session.activeToolId,
   ], render);
+  const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
+  return { ...panel, dispose() { disposeHistory(); panel.dispose(); } };
 }

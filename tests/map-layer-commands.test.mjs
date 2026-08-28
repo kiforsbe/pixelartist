@@ -4,7 +4,7 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
-import { addMapLayer, deleteMapLayer, setMapLayerOpacity } from '../js/modes/maps/application/commands/map-layer-commands.js';
+import { addMapLayer, deleteMapLayer, renameMapLayer, setMapLayerOpacity } from '../js/modes/maps/application/commands/map-layer-commands.js';
 
 function makeServices(project) {
   const store = new EditorStore();
@@ -82,4 +82,17 @@ test('setMapLayerOpacity is a no-op when opacity is unchanged or the layer is mi
 
   setMapLayerOpacity(services, 'map1', 'missing', 0.5);
   assert.equal(services.history.canUndo(), false);
+});
+
+test('renameMapLayer changes the requested map layer and supports undo and redo', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  project.maps[0].layers[0].name = 'Ground';
+
+  renameMapLayer(services, 'map1', 'l0', 'Roads');
+  assert.equal(project.maps[0].layers[0].name, 'Roads');
+  services.history.undo();
+  assert.equal(project.maps[0].layers[0].name, 'Ground');
+  services.history.redo();
+  assert.equal(project.maps[0].layers[0].name, 'Roads');
 });

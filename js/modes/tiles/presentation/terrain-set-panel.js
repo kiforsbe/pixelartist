@@ -55,6 +55,7 @@ export function mountAutotilesPanel(element) {
     [s => s.workspace.pixelRevision, invalidateTileRaster],
     s => s.session.activeModeId,
     s => s.session.activeViewId,
+    s => s.session.activeToolId,
     s => s.session.activeDocument,
     [s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; }, syncSelection],
   ], render);

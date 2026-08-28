@@ -3,9 +3,11 @@ import { flattenSheet, effectiveDuration, refreshMapBounds, DEFAULT_MAP_BOUNDS }
 import { findSheet, snap, selectedTile, selectedTerrain, selectedSprite, itemSize, terrainResolution, MAP_ORIGIN } from '../application/map-geometry.js';
 import { mapBrushState as asset } from '../application/map-brush-state.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
+import { getEditorHost } from '../../../host/runtime.js';
 
 let playing = false, playStarted = 0;
 let rasterCaches = new Map(); // sheet.id -> RasterCache
+let cacheRevision = null;
 let mapPreviewCanvas = null;
 
 export function focusMapCanvas(view) {
@@ -28,12 +30,15 @@ export function focusMapCanvas(view) {
 // parameter so call sites read the same as before.
 export function flatCanvas(sheet, project) {
   if (!sheet) return null;
+  const host = getEditorHost();
+  const revision = `${host.store.getState().workspace.pixelRevision}:${host.history.snapshot().revision}`;
+  if (revision !== cacheRevision) { rasterCaches.clear(); cacheRevision = revision; }
   let cache = rasterCaches.get(sheet.id);
   if (!cache) { cache = createRasterCache(); rasterCaches.set(sheet.id, cache); }
   return cache.getCanvas(sheet, flattenSheet);
 }
 
-export function clearMapRasterCache() { rasterCaches.clear(); }
+export function clearMapRasterCache() { rasterCaches.clear(); cacheRevision = null; }
 export function isMapPlaying() { return playing; }
 export function toggleMapPlayback(onChange) {
   playing = !playing;

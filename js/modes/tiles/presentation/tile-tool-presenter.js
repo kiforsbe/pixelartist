@@ -425,4 +425,15 @@ export function bindTileTool(view) {
     cancel: () => { drag = null; lastClick = null; },
     requestRender: () => view.requestRender(),
   });
+  const cancelStaleGesture = () => {
+    if (!drag) return;
+    drag = null;
+    lastClick = null;
+    view.requestRender();
+  };
+  // Tile commands mutate the existing project object, so cancellation must
+  // observe history as well as project replacement. Keep this tile-local:
+  // map brush strokes intentionally span multiple map commands.
+  getEditorHost().history.subscribe(cancelStaleGesture);
+  getEditorHost().store.subscribe(s => s.session.activeDocument, cancelStaleGesture);
 }
