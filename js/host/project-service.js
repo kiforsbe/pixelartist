@@ -25,7 +25,7 @@ export class ProjectService {
     let result;
     this.#store.transaction(reason, state => {
       result = mutateFn(state.project.model);
-      state.project.dirty = true;
+      this.#store.markDirty();
     });
     return result;
   }

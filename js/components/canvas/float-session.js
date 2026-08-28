@@ -17,7 +17,7 @@ import { activeSheet, activeLayer, activeLayerScope } from '../../host/document-
 
 export { isTypingTarget };
 
-const views = new Map(); // viewKind ('sheet'|'frame'|'tile') -> {getSelection, setSelection, getTargetRect}
+const views = new Map(); // viewKind -> {getSelection, setSelection, getTargetRect, getSelectionContext?}
 // { viewKind, hostViewId, targetRect } frozen at float creation (frame-editor
 // confinement). viewKind stays legacy-space ('sheet'|'frame'|'tile') because
 // `views` is keyed that way; hostViewId is a separate snapshot of the HOST-
@@ -124,7 +124,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
           .filter(Boolean).map(f => ({ id: f.id, x: f.x, y: f.y }))
       : null,
   };
-  const ctx = { viewKind: activeViewKind(), hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
+  const ctx = { viewKind: activeViewKind(), hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target }, selectionContext: viewApi.getSelectionContext?.() };
   const prevSelection = viewApi.getSelection();
   getEditorHost().history.execute({
     label: 'float selection',
@@ -135,7 +135,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
       }
       floating = float;
       floatCtx = ctx;
-      views.get(ctx.viewKind)?.setSelection(null); // float outline replaces the marquee
+      views.get(ctx.viewKind)?.setSelection(null, ctx.selectionContext); // float outline replaces the marquee
       getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
@@ -145,7 +145,7 @@ export function createFloat({ allLayers = false, region = null, frameIds = null,
       }
       floating = null;
       floatCtx = null;
-      views.get(ctx.viewKind)?.setSelection(prevSelection ? { ...prevSelection } : null);
+      views.get(ctx.viewKind)?.setSelection(prevSelection ? { ...prevSelection } : null, ctx.selectionContext);
       getEditorHost().store.notifyPixelsChanged();
     },
   });
@@ -196,7 +196,7 @@ export function commitFloatIfAny() {
       for (const c of frameCoords) { c.frame.x = c.x + dx; c.frame.y = c.y + dy; }
       floating = null;
       floatCtx = null;
-      views.get(ctx.viewKind)?.setSelection(sel ? { ...sel } : null);
+      views.get(ctx.viewKind)?.setSelection(sel ? { ...sel } : null, ctx.selectionContext);
       getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
@@ -204,7 +204,7 @@ export function commitFloatIfAny() {
       for (const c of frameCoords) { c.frame.x = c.x; c.frame.y = c.y; }
       floating = float;
       floatCtx = ctx;
-      views.get(ctx.viewKind)?.setSelection(null);
+      views.get(ctx.viewKind)?.setSelection(null, ctx.selectionContext);
       getEditorHost().store.notifyPixelsChanged();
     },
   });
@@ -235,7 +235,7 @@ export function cancelFloatIfAny() {
       floating = null;
       floatCtx = null;
       // Frame-floats never leave a marquee behind — the frames ARE the shape.
-      views.get(ctx.viewKind)?.setSelection(float.cut && !float.frameIds ? { ...float.srcRect } : null);
+      views.get(ctx.viewKind)?.setSelection(float.cut && !float.frameIds ? { ...float.srcRect } : null, ctx.selectionContext);
       getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
@@ -246,7 +246,7 @@ export function cancelFloatIfAny() {
       for (const c of frameCoords) { c.frame.x = c.x + cdx; c.frame.y = c.y + cdy; }
       floating = float;
       floatCtx = ctx;
-      views.get(ctx.viewKind)?.setSelection(null);
+      views.get(ctx.viewKind)?.setSelection(null, ctx.selectionContext);
       getEditorHost().store.notifyPixelsChanged();
     },
   });
@@ -344,7 +344,7 @@ function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
     sheetId: sheet.id, srcRect: { x: pos.x, y: pos.y, w, h },
     cut: false, layers, transform: makeTransform(),
   };
-  const ctx = { viewKind: activeViewKind(), hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target } };
+  const ctx = { viewKind: activeViewKind(), hostViewId: getEditorHost().store.getState().session.activeViewId, targetRect: { ...target }, selectionContext: viewApi.getSelectionContext?.() };
   const prevSelection = viewApi.getSelection();
   // switch to the move tool BEFORE pushing: initFloatSession's activeToolId
   // subscription skips 'move', so the fresh float survives its own tool switch
@@ -356,13 +356,13 @@ function installPastedFloat(viewApi, sheet, target, layers, w, h, pos) {
     do() {
       floating = float;
       floatCtx = ctx;
-      views.get(ctx.viewKind)?.setSelection(null);
+      views.get(ctx.viewKind)?.setSelection(null, ctx.selectionContext);
       getEditorHost().store.notifyPixelsChanged();
     },
     undo() {
       floating = null;
       floatCtx = null;
-      views.get(ctx.viewKind)?.setSelection(prevSelection ? { ...prevSelection } : null);
+      views.get(ctx.viewKind)?.setSelection(prevSelection ? { ...prevSelection } : null, ctx.selectionContext);
       getEditorHost().store.notifyPixelsChanged();
     },
   });

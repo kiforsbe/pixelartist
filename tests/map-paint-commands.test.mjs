@@ -189,3 +189,62 @@ test('eraseMapTerrain removes a terrain entry at a point and undo restores it', 
   services.history.undo();
   assert.equal(layer.terrain.length, 1);
 });
+
+const coordinateCommands = [
+  ['place tile', (services, at) => paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile1', at)],
+  ['paint terrain', (services, at) => paintMapTerrain(services, 'map1', 'layer1', 'sheet1', 'terrain1', at)],
+  ['place frame', (services, at) => paintMapSprite(services, 'map1', 'layer2', 'sheet1', 'frame', 'frame1', at)],
+  ['place animation', (services, at) => paintMapSprite(services, 'map1', 'layer2', 'sheet1', 'animation', 'animation1', at)],
+  ['move destination', (services, at) => moveMapItem(services, 'map1', 'layer2', 'existing', { x: -8, y: -16 }, at)],
+  ['move undo position', (services, at) => moveMapItem(services, 'map1', 'layer2', 'existing', at, { x: 32, y: 16 })],
+];
+
+for (const [name, execute] of coordinateCommands) {
+  test(`${name} rejects non-finite coordinates without changing the model, dirty state, or history`, () => {
+    for (const axis of ['x', 'y']) {
+      for (const value of [NaN, Infinity, -Infinity]) {
+        const project = makeProject();
+        project.sheets[0].animations.push({ id: 'animation1', frames: [{ frameId: 'frame1' }] });
+        project.maps[0].layers[1].sprites.push({ id: 'existing', sheetId: 'sheet1', kind: 'frame', assetId: 'frame1', x: -8, y: -16 });
+        const services = makeServices(project);
+        // Keep a redo entry: invalid input must not discard existing history either.
+        paintMapTile(services, 'map1', 'layer1', 'sheet1', 'tile2', { x: 16, y: 16 });
+        services.history.undo();
+        services.projects.markSaved();
+        const before = structuredClone(project), historyBefore = services.history.snapshot();
+
+        execute(services, { x: 0, y: 0, [axis]: value });
+
+        assert.deepEqual(project, before, `${axis}=${value} must not mutate placements or bounds`);
+        assert.equal(services.projects.dirty, false);
+        assert.deepEqual(services.history.snapshot(), historyBefore);
+      }
+    }
+  });
+}
+
+test('finite negative tile, terrain, frame, and animation placements survive undo and redo', () => {
+  const project = makeProject(), services = makeServices(project);
+  project.sheets[0].animations.push({ id: 'animation1', frames: [{ frameId: 'frame1' }] });
+  for (const [, execute] of coordinateCommands.slice(0, 4)) execute(services, { x: -24, y: -13 });
+  const positions = () => project.maps[0].layers.flatMap(layer => [...(layer.tiles ?? []), ...(layer.terrain ?? []), ...(layer.sprites ?? [])])
+    .map(item => ({ x: item.x, y: item.y }));
+  const expected = [{ x: -24, y: -13 }, { x: -24, y: -13 }, { x: -24, y: -13 }, { x: -24, y: -13 }];
+  assert.deepEqual(positions(), expected);
+  for (let i = 0; i < 4; i++) services.history.undo();
+  assert.deepEqual(positions(), []);
+  for (let i = 0; i < 4; i++) services.history.redo();
+  assert.deepEqual(positions(), expected);
+});
+
+test('a move between finite negative positions remains undoable and redoable', () => {
+  const project = makeProject(), services = makeServices(project);
+  paintMapSprite(services, 'map1', 'layer2', 'sheet1', 'frame', 'frame1', { x: -8, y: -16 });
+  const item = project.maps[0].layers[1].sprites[0];
+  moveMapItem(services, 'map1', 'layer2', item.id, { x: -8, y: -16 }, { x: -32, y: -48 });
+  assert.deepEqual({ x: item.x, y: item.y }, { x: -32, y: -48 });
+  services.history.undo();
+  assert.deepEqual({ x: item.x, y: item.y }, { x: -8, y: -16 });
+  services.history.redo();
+  assert.deepEqual({ x: item.x, y: item.y }, { x: -32, y: -48 });
+});

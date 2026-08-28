@@ -23,6 +23,7 @@ import { markDefaultAction } from '../../components/dialogs.js';
 import { activeSheet, activeMap } from '../../host/document-helpers.js';
 import { AUTOTEST, confirmOrAuto } from '../../platform/browser/autotest.js';
 import { fileSession } from './file-session.js';
+import { createProjectPersistence } from './project-persistence.js';
 
 function isCancel(error) {
   return error?.name === 'AbortError' || error?.message === 'cancelled';
@@ -35,6 +36,10 @@ function sheetDocument(sheet) {
 function project() { return getEditorHost().projects.project; }
 
 export function mountFileController() {
+  const persistence = createProjectPersistence({
+    host: getEditorHost(), session: fileSession, io,
+    beforeSave: commitFloatIfAny, isFloating: activeFloating,
+  });
   const dlgExportProject = document.getElementById('dlg-export-project');
   const epSheets = document.getElementById('ep-sheets');
   const epDestFolderRow = document.getElementById('ep-dest-folder-row');
@@ -67,12 +72,8 @@ export function mountFileController() {
   
   // ---- file: Save ----
   async function doSave() {
-    commitFloatIfAny();
     try {
-      fileSession.fileHandle = await io.savePacked(project(), fileSession.fileHandle);
-      fileSession.saveMode = 'packed';
-      getEditorHost().projects.markSaved();
-      await io.clearAutosave().catch(() => {});
+      await persistence.save();
     } catch (e) {
       if (!isCancel(e)) alert(`Save failed: ${e.message}`);
     }
@@ -81,13 +82,8 @@ export function mountFileController() {
 
   // ---- file: Save As ----
   async function doSaveAs() {
-    commitFloatIfAny();
     try {
-      fileSession.fileHandle = await io.savePacked(project(), null);
-      fileSession.dirHandle = null;
-      fileSession.saveMode = 'packed';
-      getEditorHost().projects.markSaved();
-      await io.clearAutosave().catch(() => {});
+      await persistence.save({ saveAs: true });
     } catch (e) {
       if (!isCancel(e)) alert(`Save failed: ${e.message}`);
     }
@@ -529,7 +525,7 @@ export function mountFileController() {
   
   // ---- autosave ----
   setInterval(() => {
-    if (getEditorHost().projects.dirty && project() && !activeFloating()) io.autosave(project()).catch(() => {});
+    persistence.autosave().catch(() => {});
   }, 30000);
   
   // ---- boot ----

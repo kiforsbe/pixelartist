@@ -26,6 +26,12 @@ test('snap respects asset-grid mode using the brush size', () => {
   assert.deepEqual(snap(map, { x: 20, y: 33 }, { w: 8, h: 8 }), { x: 16, y: 32 });
 });
 
+test('snap normalizes terrain tile dimensions for asset-grid cells, including negative positions', () => {
+  const map = { snap: { mode: 'asset', gridW: 16, gridH: 16 } };
+  const terrain = { tileW: 8, tileH: 12 };
+  assert.deepEqual(snap(map, { x: 23, y: -13 }, terrain), { x: 16, y: -24 });
+});
+
 test('snap passes through unchanged when off', () => {
   const map = { snap: { mode: 'off', gridW: 16, gridH: 16 } };
   assert.deepEqual(snap(map, { x: 20, y: 33 }, { w: 8, h: 8 }), { x: 20, y: 33 });

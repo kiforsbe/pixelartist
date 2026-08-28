@@ -6,6 +6,7 @@ import { runEntityCommand } from '../../../../host/command-helpers.js';
 
 function findMap(project, mapId) { return project.maps.find(m => m.id === mapId) ?? null; }
 function findLayer(map, layerId) { return map?.layers.find(l => l.id === layerId) ?? null; }
+function finitePoint(point) { return Number.isFinite(point?.x) && Number.isFinite(point?.y); }
 
 export function runCommand(services, mapId, label, apply, revert) {
   runEntityCommand(services, label, project => findMap(project, mapId), apply, revert, {
@@ -14,6 +15,7 @@ export function runCommand(services, mapId, label, apply, revert) {
 }
 
 export function paintMapTile(services, mapId, layerId, sheetId, tileId, at) {
+  if (!finitePoint(at)) return;
   const layer = findLayer(findMap(services.projects.project, mapId), layerId);
   const old = layer?.tiles.find(t => t.x === at.x && t.y === at.y);
   if (old?.sheetId === sheetId && old?.tileId === tileId) return;
@@ -33,6 +35,7 @@ export function eraseMapTile(services, mapId, layerId, at) {
 }
 
 export function paintMapTerrain(services, mapId, layerId, sheetId, terrainSetId, at) {
+  if (!finitePoint(at)) return;
   const project = services.projects.project;
   const layer = findLayer(findMap(project, mapId), layerId);
   const sheet = findSheet(project, sheetId);
@@ -57,6 +60,7 @@ export function eraseMapTerrain(services, mapId, layerId, sheetId, terrainSetId,
 }
 
 export function paintMapSprite(services, mapId, layerId, sheetId, kind, assetId, at) {
+  if (!finitePoint(at)) return;
   const entry = { id: newId('ms'), sheetId, kind, assetId, x: at.x, y: at.y };
   runCommand(services, mapId, 'place map sprite',
     map => { findLayer(map, layerId).sprites.push(entry); },
@@ -80,6 +84,7 @@ function findItemCollectionKey(layer, itemId) {
 }
 
 export function moveMapItem(services, mapId, layerId, itemId, before, after) {
+  if (!finitePoint(before) || !finitePoint(after)) return;
   runCommand(services, mapId, 'move map item',
     map => {
       const layer = findLayer(map, layerId);

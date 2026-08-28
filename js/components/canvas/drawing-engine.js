@@ -27,7 +27,7 @@ import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '..
 import { nearestColor } from '../../core/palettes.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../../core/model.js';
 import { segmentAt } from '../../core/strips.js';
-import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat, activeFloating } from './float-session.js';
+import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat, activeFloating, currentEditRegion } from './float-session.js';
 import { commitAcceptAnimation } from '../../features/animations/commands.js';
 import { stripForFrame as stripOf } from '../../domain/sprites/strips.js';
 import { HANDLES_ALL, handlePoint, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../core/resizeAnchor.js';
@@ -78,26 +78,46 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   // underlying layer bitmaps but represent different visible regions.
   let selection = null;
 
+  function selectionContext(state = getEditorHost().store.getState()) {
+    const doc = state.session.activeDocument;
+    const selected = getEditorHost().selections.get(doc);
+    const regionId = viewKind === 'frame' ? selected?.editingFrameId
+      : viewKind === 'tile' ? selected?.editingTileId : null;
+    return [state.project.model, doc?.kind, doc?.id, regionId];
+  }
+
+  function sameSelectionContext(a, b) {
+    return a.every((value, index) => value === b[index]);
+  }
+
   registerFloatView(viewKind, {
     getSelection: () => (selection ? { ...selection } : null),
-    setSelection: (r) => { selection = r ? { ...r } : null; view.requestRender(); },
+    getSelectionContext: selectionContext,
+    setSelection: (r, context) => {
+      // Float commands may restore a marquee during undo/commit after the
+      // user has moved to another document or frame/tile in the same view.
+      if (context && !sameSelectionContext(context, selectionContext())) return;
+      selection = r ? { ...r } : null;
+      view.requestRender();
+    },
     getTargetRect,
   });
 
   view.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  // A project switch (New/Open) invalidates any selection or in-progress
-  // stroke — bitmaps and layer ids from the old project are gone. Store's
-  // selector-based subscribe already only fires when project.model's
-  // IDENTITY changes, so a committed command's own dirty-mark (a same-model
-  // mutation) can't spuriously wipe a live selection or pending float.
-  getEditorHost().store.subscribe(s => s.project.model, () => {
+  // Marquees are sheet-global, but belong to one document/editing region.
+  // Compare identities, not the whole mutable selection record: ordinary
+  // selection patches, pixel notifications and dirty marks must not erase a
+  // live marquee. Each view observes only its own frame/tile editing context.
+  getEditorHost().store.subscribe(selectionContext, ([project], [previousProject]) => {
     selection = null;
-    stroke = null;
     selStroke = null;
-    moveStroke = null;
+    if (project !== previousProject) {
+      stroke = null;
+      moveStroke = null;
+    }
     view.requestRender();
-  });
+  }, { equals: sameSelectionContext });
 
   // Clamp an image-space point into `target`; null when the target is empty
   // (no sheet, or outside any paintable segment). Live drawing pre-masks
@@ -697,14 +717,18 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       && activeTool() === 'select' && activeViewKind() === viewKind && selection && !activeFloating()) {
       const layer = activeLayer();
       if (!layer) return;
-      const before = copyRegion(layer.bitmap, selection.x, selection.y, selection.w, selection.h);
+      // Geometry can change without changing the editing-region identity.
+      // Use the same current-target intersection as cut and move.
+      const region = currentEditRegion()?.region;
+      if (!region) return;
+      const before = copyRegion(layer.bitmap, region.x, region.y, region.w, region.h);
       const after = cloneBitmap(before);
       fillRegion(after, 0, 0, after.width, after.height, [0, 0, 0, 0]);
       // Avoid adding a no-op history entry for an already-empty selection.
       if (before.data.every((value, index) => value === after.data[index])) return;
       // Same reasoning as finalize() above: direct history.execute(), no
       // separate markDirty() (HistoryService's onChange already marks dirty).
-      getEditorHost().history.execute(makePixelPatch(layer.bitmap, selection, before, after, 'delete selection'));
+      getEditorHost().history.execute(makePixelPatch(layer.bitmap, region, before, after, 'delete selection'));
       notifyPixelsChanged();
       view.requestRender();
       e.preventDefault();

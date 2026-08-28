@@ -12,8 +12,9 @@ export function findSheet(project, id) { return project?.sheets.find(s => s.id =
 export function snap(map, p, size) {
   const mode = map.snap?.mode ?? 'map';
   if (mode === 'off') return p;
-  const w = mode === 'asset' ? Math.max(1, size.w) : Math.max(1, map.snap.gridW);
-  const h = mode === 'asset' ? Math.max(1, size.h) : Math.max(1, map.snap.gridH);
+  // Terrain brushes expose tileW/tileH; tile and sprite footprints use w/h.
+  const w = mode === 'asset' ? Math.max(1, size.w ?? size.tileW) : Math.max(1, map.snap.gridW);
+  const h = mode === 'asset' ? Math.max(1, size.h ?? size.tileH) : Math.max(1, map.snap.gridH);
   return { x: Math.floor(p.x / w) * w, y: Math.floor(p.y / h) * h };
 }
 

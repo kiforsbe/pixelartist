@@ -1,6 +1,7 @@
 # PixelArtist Architecture
 
-Current-state review: **2026-08-28**, runtime baseline **`55602e2`**.
+Current-state review: **2026-08-28**, migration baseline **`55602e2`**, updated
+through the codebase review's R01–R04 remediation batch.
 PixelArtist is a browser-only pixel-art editor for sprite sheets, tile sheets,
 and reference-based map scenes. It uses native JavaScript ES modules, the DOM,
 and Canvas 2D, with no runtime package dependencies or build step.
@@ -36,7 +37,7 @@ identified by the audit are follow-up work, not unfinished migration tasks.
 
 ## Repository structure
 
-There are 164 production JavaScript modules at this snapshot.
+There are 165 production JavaScript modules at this snapshot.
 
 ```text
 index.html                 Static shell, mount points, and most dialogs
@@ -49,10 +50,10 @@ js/
   host/                    25 modules: store/services, registries, workbench helpers
   platform/browser/        7 modules: browser I/O, adapters, preferences, test mode
   modes/                   66 modules in sprites/, tiles/, maps/
-  features/                9 modules: shell/workbench/project/file/filter coordination
+  features/                10 modules: shell/workbench/project/file/filter coordination
   components/              18 shared DOM/canvas/panel modules
 assets/                    Blob-47 reference artwork and documentation screenshot
-tests/                     75 top-level Node test modules
+tests/                     78 top-level Node test modules
   helpers/                 Isolated controller/panel fixtures
   browser/                 Focused Playwright workbench regression checks
   smoke.md                 Broader smoke checklist and manual gates
@@ -112,7 +113,7 @@ modes, commands, panels, tools, views, menus, and previews.
 
 | Store group | Current contents and use |
 |---|---|
-| `project` | Mutable project model and a boolean `dirty` flag. |
+| `project` | Mutable model, boolean `dirty`, edit revision, and replacement generation. |
 | `session` | Active mode/document/view/tool, remembered documents by mode, selections keyed by `kind:id`. |
 | `interaction` | Available transient-state bucket; not a complete store of gestures. |
 | `workspace` | Drawing colors/brush size, overlays, focused surface ID, pixel revision. |
@@ -125,6 +126,8 @@ alone does not observe every edit. Consumers also use history notifications,
 selection values, and `workspace.pixelRevision`.
 
 `ProjectService` handles replacement, dirty/saved state, and named mutations.
+Dirty notifications advance the edit revision even when already dirty;
+replacement also advances the generation, including republishing the same model.
 `DocumentService` resolves `{kind,id}` references through mode providers and
 seeds initial selection. `SelectionService` replaces/patches per-document
 selection records. The document controller also orchestrates creation,
@@ -263,6 +266,10 @@ preview consumers cache their own raster results, invalidating from relevant
 project/selection/history/pixel notifications. There is no single global
 renderer/cache invalidation service.
 
+Marquees are scoped to the project/document and the view's editing frame/tile.
+Destructive selection edits intersect the current target, and floating-selection
+history carries a context token when restoring a marquee.
+
 Filters compute before/after patches and substitute cloned preview layers.
 Accept submits history edits; cancel removes preview overrides. Correct view,
 document, selection, and bitmap-identity synchronization remains important;
@@ -295,8 +302,12 @@ File handles and save mode live in `features/project/file-session.js`, outside
 serialized project data.
 
 Recovery runs every 30 seconds when dirty and no floating selection is active.
-Save clears the recovery slot after writing. The current asynchronous save path
-has no revision/identity guard; its confirmed race is a release follow-up.
+`features/project/project-persistence.js` serializes saves and recovery writes.
+Save completion updates handles only for the same project generation and clears
+dirty/recovery only when both edit and live-pixel revisions still match the
+saved snapshot. Queued requests from replaced projects are discarded; rejected
+writes do not prevent subsequent saves. This does not strengthen IndexedDB
+transaction durability (a separate hardening risk).
 Restore/new-project boot and before-unload behavior are controlled partly by
 `?autotest`, which disables recovery restoration and confirmation gates for
 test sessions. Do not use that mode as evidence for real recovery/picker UX.
@@ -350,7 +361,8 @@ Actual boundaries and exceptions:
 npm test
 ```
 
-The closeout baseline passed **723 tests across 75 top-level test modules**.
+The R01–R04 remediation batch passed **779 tests across 78 top-level test
+modules** (migration closeout baseline: 723 tests across 75 modules).
 Tests cover domain/core algorithms, commands, host/store/registries, boundary
 scans, and isolated DOM/controller fixtures. They do not establish complete
 browser integration coverage.

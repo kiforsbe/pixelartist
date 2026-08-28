@@ -178,40 +178,54 @@ export function moveGrid(services, sheetId, gridId, dx, dy) {
     sheet => { const g = findGrid(sheet, gridId); g.x = before.x; g.y = before.y; relayoutGrid(sheet, g); });
 }
 
+// Grid helpers mutate existing entities as well as array membership. Copy
+// their layout fields, but keep the entities themselves for other commands
+// and callers that hold references to them.
+function captureGridLayout(sheet) {
+  return {
+    grids: sheet.tileGrids.map(grid => ({ grid, x: grid.x, y: grid.y, cols: grid.cols, rows: grid.rows })),
+    tiles: sheet.tiles.map(tile => ({
+      tile, x: tile.x, y: tile.y, w: tile.w, h: tile.h,
+      gridId: tile.gridId, gridCol: tile.gridCol, gridRow: tile.gridRow,
+    })),
+  };
+}
+
+function restoreGridLayout(sheet, snapshot) {
+  sheet.tileGrids = snapshot.grids.map(({ grid, ...layout }) => Object.assign(grid, layout));
+  sheet.tiles = snapshot.tiles.map(({ tile, ...layout }) => Object.assign(tile, layout));
+}
+
 export function growTileIntoGrid(services, sheetId, tileId, axis, side, count) {
   const sheet = findSheet(services.projects.project, sheetId);
   const tile = findTile(sheet, tileId);
-  const beforeGrids = sheet.tileGrids.slice();
-  const beforeTiles = sheet.tiles.slice();
+  const beforeLayout = captureGridLayout(sheet);
   coreGrowTileIntoGrid(sheet, tile, axis, side, count);
-  const afterGrids = sheet.tileGrids.slice();
-  const afterTiles = sheet.tiles.slice();
+  const afterLayout = captureGridLayout(sheet);
   runCommand(services, sheetId, 'grow tile into grid',
-    sheet => { sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice(); setSelection(services, sheet, { tileId }); },
-    sheet => { sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice(); setSelection(services, sheet, { tileId }); });
+    sheet => { restoreGridLayout(sheet, afterLayout); setSelection(services, sheet, { tileId }); },
+    sheet => { restoreGridLayout(sheet, beforeLayout); setSelection(services, sheet, { tileId }); });
 }
 
 export function resizeGridAxis(services, sheetId, gridId, axis, side, count) {
   const sheet = findSheet(services.projects.project, sheetId);
   const grid = findGrid(sheet, gridId);
-  const beforeGrids = sheet.tileGrids.slice();
-  const beforeTiles = sheet.tiles.slice();
+  const beforeLayout = captureGridLayout(sheet);
   const beforeSlotState = captureTerrainSlotState(sheet);
   const beforeSelectedTileId = selection(services, sheet).tileId ?? null;
   coreResizeGridAxis(sheet, grid, axis, side, count);
   let survivorId = null;
   if (grid.cols === 1 && grid.rows === 1) survivorId = collapseGridToTile(sheet, grid).id;
-  const afterGrids = sheet.tileGrids.slice();
-  const afterTiles = sheet.tiles.slice();
+  const afterLayout = captureGridLayout(sheet);
   const afterSlotState = captureTerrainSlotState(sheet);
   runCommand(services, sheetId, 'resize grid',
     sheet => {
-      sheet.tileGrids = afterGrids.slice(); sheet.tiles = afterTiles.slice();
+      restoreGridLayout(sheet, afterLayout);
       restoreTerrainSlotState(sheet, afterSlotState);
       if (survivorId) setSelection(services, sheet, { tileId: survivorId });
     },
     sheet => {
-      sheet.tileGrids = beforeGrids.slice(); sheet.tiles = beforeTiles.slice();
+      restoreGridLayout(sheet, beforeLayout);
       restoreTerrainSlotState(sheet, beforeSlotState);
       if (survivorId) setSelection(services, sheet, { tileId: beforeSelectedTileId });
     });

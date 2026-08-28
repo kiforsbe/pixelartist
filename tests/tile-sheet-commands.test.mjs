@@ -289,6 +289,121 @@ test('growTileIntoGrid converts a standalone tile into a 1-cell grid and selects
   assert.equal(selection(services, sheet).tileId, 'some-other-id', 'undo restores whatever was selected before the collapse');
 });
 
+test('growTileIntoGrid undo restores standalone ownership and redo reuses the original entities', () => {
+  const tile = makeTile({ x: 16, y: 12, name: 'grass', tags: ['ground'] });
+  const sheet = makeSheet({ tiles: [tile] });
+  const services = makeServices(makeProject(sheet));
+
+  growTileIntoGrid(services, sheet.id, tile.id, 'cols', 'start', 2);
+  const grid = sheet.tileGrids[0];
+  const added = sheet.tiles[1];
+  for (let cycle = 0; cycle < 3; cycle++) {
+    services.history.undo();
+    assert.equal(sheet.tileGrids.length, 0);
+    assert.equal(sheet.tiles.length, 1);
+    assert.equal(sheet.tiles[0], tile);
+    assert.deepEqual([tile.gridId, tile.gridCol, tile.gridRow], [null, undefined, undefined]);
+    assert.deepEqual([tile.x, tile.y, tile.w, tile.h], [16, 12, 8, 8]);
+    assert.equal(selection(services, sheet).tileId, tile.id);
+
+    services.history.redo();
+    assert.equal(sheet.tileGrids[0], grid);
+    assert.equal(sheet.tiles[0], tile);
+    assert.equal(sheet.tiles[1], added);
+    assert.deepEqual([grid.x, grid.y, grid.cols, grid.rows], [8, 12, 2, 1]);
+    assert.deepEqual([tile.gridId, tile.gridCol, tile.gridRow], [grid.id, 1, 0]);
+    assert.deepEqual([added.x, added.y, added.gridCol, added.gridRow], [8, 12, 0, 0]);
+    assert.equal(tile.name, 'grass');
+    assert.deepEqual(tile.tags, ['ground']);
+  }
+
+  renameTile(services, sheet.id, added.id, 'water');
+  services.history.undo();
+  services.history.undo();
+  services.history.redo();
+  services.history.redo();
+  assert.equal(sheet.tiles[1], added);
+  assert.equal(added.name, 'water', 'later history commands still edit the original added tile');
+});
+
+function assertGridLayout(sheet, grid, geometry, cells) {
+  assert.equal(sheet.tileGrids.length, 1);
+  assert.equal(sheet.tileGrids[0], grid);
+  assert.deepEqual([grid.x, grid.y, grid.cols, grid.rows], geometry);
+  assert.equal(sheet.tiles.length, cells.length);
+  for (const [index, [tile, x, y, col, row]] of cells.entries()) {
+    assert.equal(sheet.tiles[index], tile, 'history preserves tile identity and ordering');
+    assert.deepEqual([tile.x, tile.y, tile.w, tile.h, tile.gridId, tile.gridCol, tile.gridRow],
+      [x, y, 8, 6, grid.id, col, row]);
+  }
+}
+
+for (const fixture of [
+  { axis: 'cols', side: 'end', cols: 2, rows: 1, grown: [20, 30, 3, 1], cells: [[20, 30, 0, 0], [30, 30, 1, 0]], added: [40, 30, 2, 0] },
+  { axis: 'cols', side: 'start', cols: 2, rows: 1, grown: [10, 30, 3, 1], cells: [[20, 30, 1, 0], [30, 30, 2, 0]], added: [10, 30, 0, 0] },
+  { axis: 'rows', side: 'end', cols: 1, rows: 2, grown: [20, 30, 1, 3], cells: [[20, 30, 0, 0], [20, 39, 0, 1]], added: [20, 48, 0, 2] },
+  { axis: 'rows', side: 'start', cols: 1, rows: 2, grown: [20, 21, 1, 3], cells: [[20, 30, 0, 1], [20, 39, 0, 2]], added: [20, 21, 0, 0] },
+]) {
+  test(`resizeGridAxis ${fixture.axis} ${fixture.side} growth restores geometry across repeated undo/redo`, () => {
+    const sheet = makeSheet();
+    const services = makeServices(makeProject(sheet));
+    const { grid, tiles } = addGrid(services, sheet.id, {
+      x: 20, y: 30, cellW: 8, cellH: 6, spacingX: 2, spacingY: 3, cols: fixture.cols, rows: fixture.rows,
+    });
+    const beforeCells = fixture.axis === 'cols'
+      ? [[tiles[0], 20, 30, 0, 0], [tiles[1], 30, 30, 1, 0]]
+      : [[tiles[0], 20, 30, 0, 0], [tiles[1], 20, 39, 0, 1]];
+
+    resizeGridAxis(services, sheet.id, grid.id, fixture.axis, fixture.side, 3);
+    const added = sheet.tiles[2];
+    const afterCells = [...fixture.cells.map((cell, index) => [tiles[index], ...cell]), [added, ...fixture.added]];
+    assertGridLayout(sheet, grid, fixture.grown, afterCells);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      services.history.undo();
+      assertGridLayout(sheet, grid, [20, 30, fixture.cols, fixture.rows], beforeCells);
+      services.history.redo();
+      assertGridLayout(sheet, grid, fixture.grown, afterCells);
+    }
+  });
+}
+
+for (const fixture of [
+  { axis: 'cols', side: 'end', cols: 3, rows: 1, before: [[20, 30, 0, 0], [30, 30, 1, 0], [40, 30, 2, 0]], shrunk: [20, 30, 2, 1], kept: [0, 1], cells: [[20, 30, 0, 0], [30, 30, 1, 0]], survivor: 0, rect: [20, 30] },
+  { axis: 'cols', side: 'start', cols: 3, rows: 1, before: [[20, 30, 0, 0], [30, 30, 1, 0], [40, 30, 2, 0]], shrunk: [30, 30, 2, 1], kept: [1, 2], cells: [[30, 30, 0, 0], [40, 30, 1, 0]], survivor: 2, rect: [40, 30] },
+  { axis: 'rows', side: 'end', cols: 1, rows: 3, before: [[20, 30, 0, 0], [20, 39, 0, 1], [20, 48, 0, 2]], shrunk: [20, 30, 1, 2], kept: [0, 1], cells: [[20, 30, 0, 0], [20, 39, 0, 1]], survivor: 0, rect: [20, 30] },
+  { axis: 'rows', side: 'start', cols: 1, rows: 3, before: [[20, 30, 0, 0], [20, 39, 0, 1], [20, 48, 0, 2]], shrunk: [20, 39, 1, 2], kept: [1, 2], cells: [[20, 39, 0, 0], [20, 48, 0, 1]], survivor: 2, rect: [20, 48] },
+]) {
+  test(`resizeGridAxis ${fixture.axis} ${fixture.side} shrink and collapse restore ownership across repeated undo/redo`, () => {
+    const sheet = makeSheet();
+    const services = makeServices(makeProject(sheet));
+    const { grid, tiles } = addGrid(services, sheet.id, {
+      x: 20, y: 30, cellW: 8, cellH: 6, spacingX: 2, spacingY: 3, cols: fixture.cols, rows: fixture.rows,
+    });
+    const beforeCells = fixture.before.map((cell, index) => [tiles[index], ...cell]);
+    const afterCells = fixture.cells.map((cell, index) => [tiles[fixture.kept[index]], ...cell]);
+    resizeGridAxis(services, sheet.id, grid.id, fixture.axis, fixture.side, 2);
+    assertGridLayout(sheet, grid, fixture.shrunk, afterCells);
+    resizeGridAxis(services, sheet.id, grid.id, fixture.axis, fixture.side, 1);
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const survivor = tiles[fixture.survivor];
+      assert.equal(sheet.tileGrids.length, 0);
+      assert.equal(sheet.tiles.length, 1);
+      assert.equal(sheet.tiles[0], survivor);
+      assert.deepEqual([survivor.gridId, survivor.gridCol, survivor.gridRow], [null, undefined, undefined]);
+      assert.deepEqual([survivor.x, survivor.y, survivor.w, survivor.h], [...fixture.rect, 8, 6]);
+      assert.equal(selection(services, sheet).tileId, survivor.id);
+      services.history.undo();
+      assertGridLayout(sheet, grid, fixture.shrunk, afterCells);
+      services.history.undo();
+      assertGridLayout(sheet, grid, [20, 30, fixture.cols, fixture.rows], beforeCells);
+      services.history.redo();
+      assertGridLayout(sheet, grid, fixture.shrunk, afterCells);
+      services.history.redo();
+    }
+  });
+}
+
 test('deleteTile restores a surviving terrain set\'s slots map and other tiles\' neighbor overrides on undo', () => {
   const victim = makeTile({ id: 'victim', terrainSetId: 'ts1', blobIndex: 5 });
   const survivor = makeTile({ id: 'survivor', terrainSetId: 'ts1', blobIndex: 6 });
@@ -336,26 +451,54 @@ test('deleteGrid restores a surviving terrain set\'s slots map on undo', () => {
   assert.deepEqual(sheet.terrainSets[0].slots, { 4: 'outsider' });
 });
 
-test('resizeGridAxis shrink restores a surviving terrain set\'s slots map on undo', () => {
+test('resizeGridAxis shrink restores grid and terrain ownership together on undo/redo', () => {
   const sheet = makeSheet({
     terrainSets: [{ id: 'ts1', tileW: 8, tileH: 8, slots: {}, symmetry: { flip: false, rotate: false } }],
   });
   const services = makeServices(makeProject(sheet));
   const { grid, tiles } = addGrid(services, 'sheet1', { x: 0, y: 0, cellW: 8, cellH: 8, cols: 3, rows: 1 });
   const kept = tiles[0];
+  const watcher = tiles[1];
   const dropped = tiles[2];
   kept.terrainSetId = 'ts1'; kept.blobIndex = 2;
   dropped.terrainSetId = 'ts1'; dropped.blobIndex = 1;
+  watcher.duplicateOf = dropped.id;
+  watcher.neighbors = { e: { mode: 'tile', tileId: dropped.id, flipH: true, flipV: false } };
   sheet.terrainSets[0].slots = { 1: dropped.id, 2: kept.id };
+  const terrain = sheet.terrainSets[0];
+
+  const assertTerrainOwnership = () => {
+    assert.equal(sheet.terrainSets[0], terrain);
+    for (const [index, tileId] of Object.entries(terrain.slots)) {
+      const tile = sheet.tiles.find(tile => tile.id === tileId);
+      assert.ok(tile, 'every terrain slot refers to a present tile');
+      assert.equal(tile.terrainSetId, terrain.id);
+      assert.equal(tile.blobIndex, Number(index));
+    }
+    for (const tile of sheet.tiles.filter(tile => tile.terrainSetId === terrain.id)) {
+      assert.equal(terrain.slots[tile.blobIndex], tile.id, 'tile back-reference agrees with terrain slot');
+    }
+  };
 
   resizeGridAxis(services, 'sheet1', grid.id, 'cols', 'end', 2);
-  assert.equal(sheet.tiles.length, 2, 'the third column tile is dropped');
-  assert.deepEqual(sheet.terrainSets[0].slots, { 2: kept.id }, 'the dropped tile\'s slot entry is scrubbed');
+  for (let cycle = 0; cycle < 3; cycle++) {
+    assert.equal(grid.cols, 2);
+    assert.equal(sheet.tiles.length, 2, 'the third column tile is dropped');
+    assert.deepEqual(terrain.slots, { 2: kept.id });
+    assert.equal(watcher.duplicateOf, undefined);
+    assert.deepEqual(watcher.neighbors.e, { mode: 'empty', tileId: null, flipH: true, flipV: false });
+    assertTerrainOwnership();
 
-  services.history.undo();
-  assert.equal(sheet.tiles.length, 3);
-  assert.deepEqual(sheet.terrainSets[0].slots, { 1: dropped.id, 2: kept.id }, 'undo restores the scrubbed slot entry');
-
-  services.history.redo();
-  assert.deepEqual(sheet.terrainSets[0].slots, { 2: kept.id });
+    services.history.undo();
+    assert.equal(grid.cols, 3);
+    assert.equal(sheet.tiles.length, 3);
+    assert.equal(sheet.tiles[2], dropped);
+    assert.equal(dropped.gridId, grid.id);
+    assert.equal(dropped.gridCol, 2);
+    assert.deepEqual(terrain.slots, { 1: dropped.id, 2: kept.id });
+    assert.equal(watcher.duplicateOf, dropped.id);
+    assert.deepEqual(watcher.neighbors.e, { mode: 'tile', tileId: dropped.id, flipH: true, flipV: false });
+    assertTerrainOwnership();
+    services.history.redo();
+  }
 });

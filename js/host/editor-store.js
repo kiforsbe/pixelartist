@@ -5,7 +5,7 @@ export function documentKey(document) {
 export function createEditorState(initial = {}) {
   const initialWorkspace = initial.workspace ?? {};
   return {
-    project: { model: null, dirty: false, ...(initial.project ?? {}) },
+    project: { model: null, dirty: false, revision: 0, generation: 0, ...(initial.project ?? {}) },
     session: {
       activeModeId: null,
       activeDocument: null,
@@ -63,11 +63,17 @@ export class EditorStore {
     this.transaction(reason, state => {
       state.project.model = model;
       state.project.dirty = !!dirty;
+      state.project.revision++;
+      state.project.generation++;
     });
   }
 
   markDirty(dirty = true) {
-    this.transaction('dirty', state => { state.project.dirty = !!dirty; });
+    this.transaction('dirty', state => {
+      state.project.dirty = !!dirty;
+      // Even an already-dirty project can change during an asynchronous save.
+      if (dirty) state.project.revision++;
+    });
   }
 
   updateDrawingSettings(patch) {

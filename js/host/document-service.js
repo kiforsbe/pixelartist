@@ -77,7 +77,7 @@ export class DocumentService {
     let document;
     this.#store.transaction('project', next => {
       document = provider.create(next.project.model, input);
-      next.project.dirty = true;
+      this.#store.markDirty();
     });
     this.setActive({ kind, id: document.id });
     return document;
@@ -90,7 +90,7 @@ export class DocumentService {
     if (!document) throw new Error(`Unknown document "${documentKey(reference)}"`);
     this.#store.transaction('project', next => {
       provider.rename(document, name);
-      next.project.dirty = true;
+      this.#store.markDirty();
     });
   }
 
@@ -100,7 +100,7 @@ export class DocumentService {
     if (!provider || !provider.get(state.project.model, reference.id)) return false;
     this.#store.transaction('project', next => {
       provider.remove(next.project.model, reference.id);
-      next.project.dirty = true;
+      this.#store.markDirty();
       delete next.session.selectionsByDocument[documentKey(reference)];
     });
     const modeId = this.#store.getState().session.activeModeId;

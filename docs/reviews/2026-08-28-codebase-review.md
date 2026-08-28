@@ -1,8 +1,10 @@
 # Codebase and project-structure review — 2026-08-28
 
 Runtime baseline: `55602e2` (`refactor: finish phase 5 polish and workbench follow-ups`).
-Status: **review complete; findings open**. This audit did not implement the
-newly discovered runtime fixes or modify the earlier migration's acceptance.
+Status: **review complete; remediation in progress**. The original audit did
+not implement the findings or modify the earlier migration's acceptance.
+The remediation log below records subsequent changes; the finding descriptions
+remain evidence of the original baseline, not claims about fixed behavior.
 Current implementation: [ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## Outcome and scope
@@ -41,7 +43,22 @@ static palette/template tables were inspected, not independently re-derived
 or fuzzed. Independent reviewers covered three bounded subsystem groups; the
 coordinator checked their source locations and re-ran selected reproductions.
 
-## Priority fixes
+## Remediation log
+
+### First priority batch — 2026-08-28
+
+| Finding | Implemented correction | Retained regression coverage |
+|---|---|---|
+| R01 | Save/recovery writer queue with project identity, generation, edit revision, and live-pixel revision guards. | Delayed Save/Save As, repeated edits, document mutations, replacement, overlapping saves/recovery, and failed writes. |
+| R02 | Marquees belong to a document/editing region; Delete clips to the current target, and float history cannot restore another context's marquee. | Frame/tile/document transitions, overlapping regions, clipping, float undo/redo and normal selections. |
+| R03 | Grid commands snapshot mutable geometry/ownership and restore original entity identities. | Promotion, all growth/shrink edges, collapse, repeated undo/redo, terrain ownership and earlier history references. |
+| R04 | Terrain asset snapping uses tile dimensions; placement/move commands reject non-finite coordinates. | Real brush/hover consumers, finite negative positions, and invalid coordinates preserving history/dirty state. |
+
+Fresh combined Node verification: **779 passed, 0 failed**, across 78 top-level
+test modules. These tests use isolated fixtures, not browser drag/native-picker
+automation. R05–R23 and the separately listed structural risks remain open.
+
+## Priority fixes (original audit)
 
 ### R01 — P1: Save completion can clear newer unsaved edits
 
