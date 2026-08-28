@@ -8,6 +8,38 @@ This document describes the code as it exists *today*. `EditorHost` and its
 services now own application state; the former `js/app` and `js/ui` legacy
 layers have been retired.
 
+## Migration status and follow-ups
+
+The architecture migration described in
+[`2026-08-08-ddd-target-architecture-design.md`](superpowers/specs/2026-08-08-ddd-target-architecture-design.md)
+is complete through Phase 4 as of commit `c41355e`:
+
+| Phase | Status | Result |
+|---|---|---|
+| 0 — Foundation | Complete | Application services and state ownership consolidated in `js/host`. |
+| 1 — Maps | Complete | Maps is an `EditorStore`-backed mode slice. |
+| 2 — Sprites | Complete | Sprites presentation and commands use host services and registries. |
+| 3 — Tiles | Complete | Tiles presentation and commands use host services and registries. |
+| 4 — Shell + legacy retirement | Complete | `js/app`, `js/ui`, the compatibility event bus, and the host-to-legacy mirror are gone. |
+| 5 — Polish | Optional, not started | Rename the in-memory tile metadata field `sheet.layers` to `sheet.tileLayerNames`. |
+
+Phase 5 is naming cleanup, not a prerequisite for further feature work. If it
+is undertaken, keep the persisted project format backward compatible: the
+serializer may continue writing the existing `layers` field, while the model
+uses `tileLayerNames` internally. The deserializer and validator must continue
+to distinguish old flat pixel-layer payloads from current tile-layer-name
+metadata before translating either representation.
+
+Before a release, run the automated suite and the owner-operated `[M]` cases in
+[`tests/smoke.md`](../tests/smoke.md). Those cases cover native file/folder
+pickers and pointer gestures such as frame/strip floating moves, preview
+panning, and tile/grid dragging that are intentionally outside automated
+browser coverage.
+
+`ExportService` and `ViewManager` are forward-looking scaffolding, not an
+unfinished migration phase. Wire or remove them only when a concrete feature
+needs those abstractions; current export and view flows do not depend on them.
+
 ## Layering
 
 ```
@@ -109,7 +141,7 @@ sequenceDiagram
     participant Mounts as mount*() calls<br/>(workbench, filters, project,<br/>document, menu, file controllers)
 
     HTML->>Boot: load module
-    Boot->>Host: new EditorHost({historyStack, preferences, platform})
+    Boot->>Host: new EditorHost({preferences, platform})
     loop for each mode
         Boot->>Host: registerMode(mode)
         Host->>Modes: mode.register(api)
