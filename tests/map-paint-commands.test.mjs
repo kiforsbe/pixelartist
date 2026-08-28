@@ -5,6 +5,7 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { CommandStack } from '../js/core/commands.js';
+import { hitMapItem } from '../js/modes/maps/application/map-geometry.js';
 import {
   paintMapTile, eraseMapTile, paintMapTerrain, eraseMapTerrain, paintMapSprite, eraseMapSprite,
   moveMapItem, deleteMapItem,
@@ -247,4 +248,90 @@ test('a move between finite negative positions remains undoable and redoable', (
   assert.deepEqual({ x: item.x, y: item.y }, { x: -8, y: -16 });
   services.history.redo();
   assert.deepEqual({ x: item.x, y: item.y }, { x: -32, y: -48 });
+});
+
+const placementKinds = [
+  { key: 'tiles', layerIndex: 0, asset: { tileId: 'tile1' },
+    erase: (services, layer, item) => eraseMapTile(services, 'map1', layer.id, item) },
+  { key: 'terrain', layerIndex: 0, asset: { terrainSetId: 'terrain1' },
+    erase: (services, layer, item) => eraseMapTerrain(services, 'map1', layer.id, 'sheet1', 'terrain1', item) },
+  { key: 'sprites', layerIndex: 1, asset: { kind: 'frame', assetId: 'frame1' },
+    erase: (services, layer, item) => eraseMapSprite(services, 'map1', layer.id, item.id) },
+];
+
+function overlappingPlacements({ key, layerIndex, asset }) {
+  const project = makeProject(), services = makeServices(project);
+  const layer = project.maps[0].layers[layerIndex];
+  const original = [
+    { id: 'back', sheetId: 'sheet1', ...asset, x: 0, y: 0 },
+    { id: 'middle', sheetId: 'sheet1', ...asset, x: 4, y: 0 },
+    { id: 'front', sheetId: 'sheet1', ...asset, x: 8, y: 0 },
+  ];
+  layer[key] = original.slice();
+  return { project, services, layer, original };
+}
+
+function assertOriginalPlacements(actual, original) {
+  assert.deepEqual(actual.map(item => item.id), ['back', 'middle', 'front']);
+  original.forEach((item, index) => assert.equal(actual[index], item, `identity at index ${index}`));
+}
+
+for (const kind of placementKinds) {
+  for (const operation of ['erase', 'delete']) {
+    for (const index of [0, 1, 2]) {
+      test(`${operation} ${kind.key} restores index ${index} and identity through repeated undo/redo`, () => {
+        const { project, services, layer, original } = overlappingPlacements(kind);
+        const item = original[index], point = { x: 10, y: 1 };
+        assert.equal(hitMapItem(project, layer, point), original[2]);
+
+        if (operation === 'erase') kind.erase(services, layer, item);
+        else deleteMapItem(services, 'map1', layer.id, item.id);
+
+        const removedIds = [['middle', 'front'], ['back', 'front'], ['back', 'middle']][index];
+        for (let cycle = 0; cycle < 3; cycle++) {
+          assert.deepEqual(layer[kind.key].map(entry => entry.id), removedIds);
+          assert.equal(hitMapItem(project, layer, point), original[index === 2 ? 1 : 2]);
+          services.history.undo();
+          assertOriginalPlacements(layer[kind.key], original);
+          assert.equal(hitMapItem(project, layer, point), original[2]);
+          services.history.redo();
+        }
+      });
+    }
+  }
+
+  test(`multiple ${kind.key} removals restore the original order when history unwinds`, () => {
+    const { services, layer, original } = overlappingPlacements(kind);
+    kind.erase(services, layer, original[1]);
+    deleteMapItem(services, 'map1', layer.id, original[0].id);
+    kind.erase(services, layer, original[2]);
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      assert.deepEqual(layer[kind.key], []);
+      services.history.undo();
+      services.history.undo();
+      services.history.undo();
+      assertOriginalPlacements(layer[kind.key], original);
+      services.history.redo();
+      services.history.redo();
+      services.history.redo();
+    }
+  });
+}
+
+test('tile replacement undo restores its original index, identity, and overlapping hit order', () => {
+  const { project, services, layer, original } = overlappingPlacements(placementKinds[0]);
+  paintMapTile(services, 'map1', layer.id, 'sheet1', 'tile2', { x: 4, y: 0 });
+  const replacement = layer.tiles.find(item => item.tileId === 'tile2');
+  assert.notEqual(replacement, original[1]);
+
+  for (let cycle = 0; cycle < 3; cycle++) {
+    assert.deepEqual(layer.tiles.map(item => item.id), ['back', 'front', replacement.id]);
+    assert.equal(layer.tiles[2], replacement);
+    assert.equal(hitMapItem(project, layer, { x: 10, y: 1 }), replacement);
+    services.history.undo();
+    assertOriginalPlacements(layer.tiles, original);
+    assert.equal(hitMapItem(project, layer, { x: 10, y: 1 }), original[2]);
+    services.history.redo();
+  }
 });

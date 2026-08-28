@@ -346,8 +346,9 @@ export function setTileSize(services, sheetId, tileId, key, value) {
   const sheet = findSheet(services.projects.project, sheetId);
   const tile = findTile(sheet, tileId);
   if (tile[key] === value) return;
-  const before = { size: tile[key], terrainSetId: tile.terrainSetId, blobIndex: tile.blobIndex };
+  const beforeSize = tile[key];
+  const beforeSlotState = captureTerrainSlotState(sheet);
   runCommand(services, sheetId, `edit tile ${key}`,
     sheet => { const t = findTile(sheet, tileId); t[key] = value; detachFromTerrainSetIfMismatched(sheet, t); },
-    sheet => { const t = findTile(sheet, tileId); t[key] = before.size; t.terrainSetId = before.terrainSetId; t.blobIndex = before.blobIndex; });
+    sheet => { findTile(sheet, tileId)[key] = beforeSize; restoreTerrainSlotState(sheet, beforeSlotState); });
 }

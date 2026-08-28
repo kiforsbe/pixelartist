@@ -1,6 +1,7 @@
 import { defineAction } from './actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
 import { mountMenuBar } from '../../components/menubar.js';
+import { APP_VERSION } from '../../version.js';
 
 export function mountApplicationMenu() {
   // ---- help ----
@@ -11,7 +12,7 @@ export function mountApplicationMenu() {
   defineAction('help.about', {
     label: 'About PixelArtist',
     run: () => {
-      document.getElementById('about-version').textContent = 'Version 0.1.0';
+      document.getElementById('about-version').textContent = `Version ${APP_VERSION}`;
       document.getElementById('about-license').textContent = '© 2026 Kim Forsberg. All rights reserved.';
       dlgAbout.showModal();
     },

@@ -18,7 +18,9 @@ export class BrowserPreferences {
   get(key, fallback = null) {
     const fullKey = this.#key(key);
     let raw;
-    try { raw = this.#storage ? this.#storage.getItem(fullKey) : this.#memory.get(fullKey); }
+    // Failed mutations take precedence even when storage reads still work.
+    // A null entry is a tombstone for a remove that could not be persisted.
+    try { raw = this.#memory.has(fullKey) ? this.#memory.get(fullKey) : this.#storage?.getItem(fullKey); }
     catch { raw = this.#memory.get(fullKey); }
     if (raw == null) return fallback;
     try { return JSON.parse(raw); }
@@ -29,7 +31,10 @@ export class BrowserPreferences {
     const fullKey = this.#key(key);
     const raw = JSON.stringify(value);
     try {
-      if (this.#storage) this.#storage.setItem(fullKey, raw);
+      if (this.#storage) {
+        this.#storage.setItem(fullKey, raw);
+        this.#memory.delete(fullKey);
+      }
       else this.#memory.set(fullKey, raw);
     } catch {
       this.#memory.set(fullKey, raw);
@@ -38,7 +43,11 @@ export class BrowserPreferences {
 
   remove(key) {
     const fullKey = this.#key(key);
-    try { this.#storage?.removeItem(fullKey); } catch { /* fall back below */ }
-    this.#memory.delete(fullKey);
+    try {
+      this.#storage?.removeItem(fullKey);
+      this.#memory.delete(fullKey);
+    } catch {
+      this.#memory.set(fullKey, null);
+    }
   }
 }

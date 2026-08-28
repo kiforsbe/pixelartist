@@ -83,6 +83,34 @@ test('hitMapItem finds tiles, terrain, and sprites by point, topmost first', () 
   assert.equal(hitMapItem(project, layer, { x: 100, y: 100 }), null);
 });
 
+test('hitMapItem picks the last terrain above overlapping ordinary tiles and falls through outside terrain', () => {
+  const project = { sheets: [{ id: 's1', tiles: [{ id: 'ti1', w: 16, h: 16 }], terrainSets: [{ id: 'te1', tileW: 8, tileH: 8 }] }] };
+  const tileBack = { id: 'tileBack', sheetId: 's1', tileId: 'ti1', x: 0, y: 0 };
+  const tileFront = { ...tileBack, id: 'tileFront' };
+  const terrainBack = { id: 'terrainBack', sheetId: 's1', terrainSetId: 'te1', x: 0, y: 0 };
+  const terrainFront = { ...terrainBack, id: 'terrainFront' };
+  const layer = { type: 'tile', tiles: [tileBack, tileFront], terrain: [terrainBack, terrainFront] };
+
+  assert.equal(hitMapItem(project, layer, { x: 4, y: 4 }), terrainFront);
+  layer.terrain.pop();
+  assert.equal(hitMapItem(project, layer, { x: 4, y: 4 }), terrainBack);
+  assert.equal(hitMapItem(project, layer, { x: 8, y: 4 }), tileFront);
+  layer.tiles.pop();
+  assert.equal(hitMapItem(project, layer, { x: 8, y: 4 }), tileBack);
+  assert.equal(hitMapItem(project, layer, { x: 16, y: 4 }), null);
+});
+
+test('hitMapItem keeps the last sprite above earlier frame and animation placements', () => {
+  const project = { sheets: [{ id: 's1', frames: [{ id: 'f1', w: 16, h: 16 }], animations: [{ id: 'a1', frames: [{ frameId: 'f1' }] }] }] };
+  const frame = { id: 'back', sheetId: 's1', kind: 'frame', assetId: 'f1', x: 0, y: 0 };
+  const animation = { id: 'front', sheetId: 's1', kind: 'animation', assetId: 'a1', x: 4, y: 0 };
+  const layer = { type: 'sprite', sprites: [frame, animation] };
+
+  assert.equal(hitMapItem(project, layer, { x: 8, y: 4 }), animation);
+  assert.equal(hitMapItem(project, layer, { x: 0, y: 4 }), frame);
+  assert.equal(hitMapItem(project, layer, { x: 20, y: 4 }), null);
+});
+
 test('hitSprite hit-tests using first-frame size', () => {
   const project = { sheets: [{ id: 's1', frames: [{ id: 'f1', w: 20, h: 10 }] }] };
   const entry = { id: 'sp1', sheetId: 's1', kind: 'frame', assetId: 'f1', x: 0, y: 0 };

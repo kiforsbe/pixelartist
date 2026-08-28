@@ -4,6 +4,7 @@
 // <wangset> with exactly one <wangcolor> (wangid index 1 = "this terrain
 // present", index 0 = unset) -- see the export-system design doc.
 import { blobIndexToMask, resolveTerrainSlot } from '../blob47.js';
+import { sheetExportFiles } from './export-files.js';
 
 // wangid order per the TMX spec: top, topright, right, bottomright, bottom,
 // bottomleft, left, topleft -- exactly blob47's N,NE,E,SE,S,SW,W,NW bit
@@ -41,7 +42,7 @@ export function buildTiledTsx(sheet) {
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>'];
   lines.push(`<tileset version="1.10" tiledversion="1.10.2" name="${escapeXml(sheet.name)}" ` +
     `tilewidth="${gridW}" tileheight="${gridH}" tilecount="${cols * rows}" columns="${cols}">`);
-  lines.push(`${indent(1)}<image source="${escapeXml(sheet.name)}.png" width="${sheet.width}" height="${sheet.height}"/>`);
+  lines.push(`${indent(1)}<image source="${escapeXml(sheetExportFiles(sheet).png)}" width="${sheet.width}" height="${sheet.height}"/>`);
 
   const terrainSets = sheet.terrainSets ?? [];
   if (terrainSets.length) {

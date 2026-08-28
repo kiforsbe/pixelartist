@@ -334,7 +334,12 @@ export function mergeDown(sheet, layerId) {
   const dest = loc.parent.children[loc.index - 1];
   if (dest.type !== LAYER) throw new Error('cannot merge into a group');
   const src = loc.parent.children[loc.index];
-  compositeOver(dest.bitmap, src.bitmap, src.opacity);
+  // Bake both layers' effective opacity/visibility, then stop applying the
+  // destination opacity to the newly merged source a second time.
+  const merged = flattenSheetLayers([dest, src], dest.bitmap.width, dest.bitmap.height);
+  blitRegion(dest.bitmap, merged, 0, 0);
+  dest.opacity = 1;
+  dest.visible = dest.visible || src.visible;
   loc.parent.children.splice(loc.index, 1);
 }
 
@@ -537,7 +542,18 @@ function serializeGroup(group, sheetId, images) {
   };
 }
 
-function deserializeGroup(json, sheetId, imagesByPath) {
+function deserializeLayerBitmap(path, sheet, imagesByPath) {
+  const bitmap = imagesByPath.get(path);
+  if (!bitmap) throw new Error(`missing image ${path}`);
+  if (bitmap.width !== sheet.width || bitmap.height !== sheet.height)
+    throw new Error(`image ${path} dimensions must match sheet ${sheet.id} (${sheet.width}x${sheet.height})`);
+  // Rendering and PNG encoding require ImageData-compatible, complete RGBA pixels.
+  if (!(bitmap.data instanceof Uint8ClampedArray) || bitmap.data.length !== sheet.width * sheet.height * 4)
+    throw new Error(`image ${path} has invalid RGBA data`);
+  return bitmap;
+}
+
+function deserializeGroup(json, sheet, imagesByPath) {
   const group = {
     id: json.id, type: GROUP, name: json.name,
     animationId: json.animationId ?? null, open: json.open ?? true,
@@ -545,23 +561,21 @@ function deserializeGroup(json, sheetId, imagesByPath) {
   };
   for (const c of json.children ?? []) {
     if (c.type === LAYER) {
-      const bitmap = imagesByPath.get(c.image);
-      if (!bitmap) throw new Error(`missing image ${c.image}`);
+      const bitmap = deserializeLayerBitmap(c.image, sheet, imagesByPath);
       group.children.push({ id: c.id, type: LAYER, name: c.name, visible: c.visible, opacity: c.opacity, bitmap });
     } else {
-      group.children.push(deserializeGroup(c, sheetId, imagesByPath));
+      group.children.push(deserializeGroup(c, sheet, imagesByPath));
     }
   }
   return group;
 }
 
 // Backward-compat helper: turn a legacy flat `layers[]` into a root group.
-function migrateLegacyLayers(sheetJson, sheetId, imagesByPath) {
+function migrateLegacyLayers(sheetJson, imagesByPath) {
   return {
     id: newId('gp'), type: GROUP, name: sheetJson.name ?? 'root', animationId: null, open: true,
     children: (sheetJson.layers ?? []).map(l => {
-      const bitmap = imagesByPath.get(l.image);
-      if (!bitmap) throw new Error(`missing image ${l.image}`);
+      const bitmap = deserializeLayerBitmap(l.image, sheetJson, imagesByPath);
       return { id: l.id, type: LAYER, name: l.name, visible: l.visible, opacity: l.opacity, bitmap };
     }),
   };
@@ -681,8 +695,8 @@ export function deserializeProject(json, imagesByPath) {
     })),
     sheets: json.sheets.map(s => {
       const layerTree = s.layerTree
-        ? deserializeGroup(s.layerTree, s.id, imagesByPath)
-        : migrateLegacyLayers(s, s.id, imagesByPath);
+        ? deserializeGroup(s.layerTree, s, imagesByPath)
+        : migrateLegacyLayers(s, imagesByPath);
       return {
         id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
         ...(() => {
@@ -703,8 +717,16 @@ export function deserializeProject(json, imagesByPath) {
   };
 }
 
-const SETTINGS_KEYS = ['spriteSheetW', 'spriteSheetH', 'tileSheetW', 'tileSheetH',
-  'tileW', 'tileH', 'frameW', 'frameH', 'durationMs'];
+const SETTINGS_SHEET_DIMENSION_KEYS = ['spriteSheetW', 'spriteSheetH', 'tileSheetW', 'tileSheetH'];
+const SETTINGS_ITEM_DIMENSION_KEYS = ['tileW', 'tileH', 'frameW', 'frameH'];
+
+function validImportDimension(value) {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_DIM;
+}
+
+function validPositiveInteger(value) {
+  return Number.isSafeInteger(value) && value >= 1;
+}
 
 export function validateProjectJson(json) {
   if (!json || typeof json !== 'object') return { ok: false, error: 'not an object' };
@@ -712,11 +734,22 @@ export function validateProjectJson(json) {
     return { ok: false, error: `unsupported version ${json.version} (expected ${PROJECT_VERSION})` };
   if (!json.settings || typeof json.settings !== 'object')
     return { ok: false, error: 'missing settings' };
-  for (const k of SETTINGS_KEYS)
-    if (typeof json.settings[k] !== 'number')
-      return { ok: false, error: `settings.${k} missing or not a number` };
+  for (const k of SETTINGS_SHEET_DIMENSION_KEYS)
+    if (!validImportDimension(json.settings[k]))
+      return { ok: false, error: `settings.${k} must be an integer in 1..${MAX_DIM}` };
+  // Item defaults do not allocate canvases and may exceed the sheet size limit.
+  for (const k of SETTINGS_ITEM_DIMENSION_KEYS)
+    if (!validPositiveInteger(json.settings[k]))
+      return { ok: false, error: `settings.${k} must be a positive safe integer` };
+  if (!Number.isFinite(json.settings.durationMs) || json.settings.durationMs <= 0)
+    return { ok: false, error: 'settings.durationMs must be finite and positive' };
   if (!Array.isArray(json.sheets)) return { ok: false, error: 'missing sheets' };
   for (const s of json.sheets) {
+    if (!validImportDimension(s?.width) || !validImportDimension(s?.height))
+      return { ok: false, error: `sheet ${s?.id} dimensions must be integers in 1..${MAX_DIM}` };
+    if (s.kind === 'tile' && !s.tiles && s.tile &&
+        (!validPositiveInteger(s.tile.tileWidth) || !validPositiveInteger(s.tile.tileHeight)))
+      return { ok: false, error: `sheet ${s.id} legacy tile dimensions must be positive safe integers` };
     const hasTree = s.layerTree && typeof s.layerTree === 'object' && s.layerTree.type === GROUP;
     const hasLayers = Array.isArray(s.layers);
     if (!hasTree && !hasLayers) return { ok: false, error: `sheet ${s.id} missing layerTree` };

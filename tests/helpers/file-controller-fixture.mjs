@@ -13,12 +13,43 @@ export function deferred() {
 // Only external DOM, imaging and storage boundaries are inert. Controllers,
 // host services, bundle snapshots and ZIP encoding are the real implementation.
 export async function mountFileFixture() {
-  const elements = new Map();
+  const observers = new Set();
+  function changed() { for (const observer of [...observers]) observer(); }
+  function waitFor(predicate, description) {
+    if (predicate()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const observer = () => { if (predicate()) { cleanup(); resolve(); } };
+      const timeout = setTimeout(() => { cleanup(); reject(new Error(description)); }, 5000);
+      function cleanup() { clearTimeout(timeout); observers.delete(observer); }
+      observers.add(observer);
+    });
+  }
+  const elements = new Map(), downloads = [], blobs = new Map();
+  class Element {
+    constructor() { this.children = []; this.handlers = {}; this.classList = { add() {} }; }
+    set id(value) { this.elementId = value; elements.set(value, this); }
+    get id() { return this.elementId; }
+    addEventListener(type, callback) { (this.handlers[type] ??= []).push(callback); }
+    emit(type) { return Promise.all((this.handlers[type] ?? []).map(callback => callback())); }
+    set innerHTML(value) { this.children = []; }
+    append(...items) { this.children.push(...items); }
+    appendChild(item) { this.children.push(item); return item; }
+    showModal() {} close() {}
+    click() {
+      if (this.href) { downloads.push({ name: this.download, blob: blobs.get(this.href) }); changed(); }
+      else return this.emit('click');
+    }
+  }
+  URL.createObjectURL = blob => { const url = `blob:fixture-${blobs.size}`; blobs.set(url, blob); return url; };
+  URL.revokeObjectURL = url => blobs.delete(url);
+  globalThis.Option = class extends Element { constructor(text, value) { super(); this.textContent = text; this.value = value; } };
   globalThis.document = {
     getElementById(id) {
-      if (!elements.has(id)) elements.set(id, { classList: { add() {} }, addEventListener() {} });
+      if (!elements.has(id)) { const element = new Element(); element.id = id; }
       return elements.get(id);
     },
+    createElement: () => new Element(),
+    querySelector: () => ({ value: 'zip' }),
   };
   const intervals = [];
   globalThis.location = { search: '?autotest' };
@@ -37,8 +68,8 @@ export async function mountFileFixture() {
       request.result = {
         close() {},
         transaction() { return { objectStore() { return {
-          delete(key) { recovery.push({ kind: 'delete', key }); return succeed(); },
-          put(bytes, key) { recovery.push({ kind: 'put', bytes, key }); return succeed(); },
+          delete(key) { recovery.push({ kind: 'delete', key }); changed(); return succeed(); },
+          put(bytes, key) { recovery.push({ kind: 'put', bytes, key }); changed(); return succeed(); },
         }; } }; },
       };
       request.onsuccess();
@@ -58,6 +89,7 @@ export async function mountFileFixture() {
       async write(bytes) {
         const gate = deferred();
         writes.push({ bytes, gate });
+        changed();
         await gate.promise;
       },
       async close() {},
@@ -65,17 +97,16 @@ export async function mountFileFixture() {
   } };
   window.showSaveFilePicker = async () => handle;
   function reset() {
-    host.history.clear(); resetFileSession(); writes.length = recovery.length = alerts.length = 0;
+    host.history.clear(); resetFileSession(); writes.length = recovery.length = alerts.length = downloads.length = 0;
     const project = createProject('BeforeSave');
     createSheet(project, { kind: 'sprite', name: 'Sheet', width: 1, height: 1 });
     host.setProject(project, { dirty: true });
     return project;
   }
-  async function waitForWrites(count) {
-    for (let i = 0; writes.length < count && i < 100; i++) await new Promise(resolve => setImmediate(resolve));
-    if (writes.length < count) throw new Error(`Expected ${count} writes, received ${writes.length}`);
-  }
-  return { host, runAction, fileSession, reset, writes, recovery, alerts, handle, waitForWrites, autosave: () => intervals[0]() };
+  const waitForWrites = count => waitFor(() => writes.length >= count, `Expected ${count} writes`);
+  const waitForRecovery = kind => waitFor(() => recovery.some(op => op.kind === kind), `Expected recovery ${kind}`);
+  const waitForDownloads = count => waitFor(() => downloads.length >= count, `Expected ${count} downloads`);
+  return { host, runAction, fileSession, reset, writes, recovery, alerts, handle, waitForWrites, waitForRecovery, downloads, waitForDownloads, elements, autosave: () => intervals[0]() };
 }
 
 export async function savedName(bytes) {

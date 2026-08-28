@@ -57,23 +57,16 @@ export function mountDocumentController({ editorHost, workbench }) {
     tabTiles.classList.toggle('active', mode === 'tiles');
     tabMaps.classList.toggle('active', mode === 'maps');
     if (mode === 'maps') {
-      const map = editorHost.projects.project?.maps?.[0] ?? null;
-      editorHost.documents.setActive(map ? { kind: 'map', id: map.id } : null, { modeId: mode, allowMissing: true });
+      // EditorHost has already resolved the remembered document (or fallback)
+      // through DocumentService before this mode-change notification.
       editorHost.store.updateSession({ activeViewId: 'maps.canvas' }, 'view');
       const tool = editorHost.store.getState().session.activeToolId;
       if (!['select', 'move', 'maptile', 'mapsprite'].includes(tool)) editorHost.store.updateSession({ activeToolId: 'select' }, 'tool');
       workbench.focusMap();
       return;
     }
-    const kind = mode === 'sprites' ? 'sprite' : 'tile';
-    const sheet = editorHost.projects.project?.sheets.find(s => s.kind === kind) ?? null;
-    editorHost.documents.setActive(sheet ? sheetDocument(sheet) : null, { modeId: mode, allowMissing: true });
-    // Selections (layer/frame/animation/tile) are per-sheet; a stale id
-    // surviving an active-sheet change lets e.g. timeline's "Add selected
-    // frame" insert one sheet's frameId into another sheet's animation
-    // (blank timeline cell, `"frame": null` on export). Reseed on every path
-    // that reassigns the active document.
-    seedSheetSelection(sheet, sheet ? (sheetLayers(sheet)[0]?.id ?? null) : null);
+    // DocumentService also seeds missing per-document selections. Re-seeding
+    // here would discard a remembered frame/tile/layer selection on return.
     editorHost.store.updateSession({ activeViewId: `${mode}.sheet` }, 'view');
     // frame/tile tools are mode-exclusive (their palette buttons hide via
     // isAvailable()); fall back to pencil so leaving their mode doesn't strand
@@ -136,8 +129,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     const sheet = editorHost.projects.project?.sheets.find(s => s.id === sheetSelect.value);
     if (!sheet) return;
     editorHost.documents.setActive(sheetDocument(sheet), { modeId: mode });
-    // See switchMode's comment above: selections are per-sheet, reseed here too.
-    seedSheetSelection(sheet, sheetLayers(sheet)[0]?.id ?? null);
+    // setActive seeds a new document's own selection and retains an existing one.
   });
   
   // ---- add-sheet command (shared by New Sheet dialog + Import) ----
@@ -146,30 +138,58 @@ export function mountDocumentController({ editorHost, workbench }) {
   // project.sheets, so capture prior selection + insertion index here, then push
   // a command whose do()/undo() replay that structural change idempotently for
   // redo/undo.
+  function selectCreationDocument(reference, modeId) {
+    if (editorHost.activeModeId === modeId) {
+      editorHost.documents.setActive(reference, { modeId, allowMissing: true });
+    } else {
+      // Global history can run while another mode owns the active surface.
+      const remembered = editorHost.store.getState().session.activeDocumentByMode;
+      editorHost.store.updateSession({ activeDocumentByMode: { ...remembered, [modeId]: reference } }, 'document');
+    }
+  }
+
   function commitAddSheet(sheet) {
     const project = editorHost.projects.project;
     const prevDoc = editorHost.store.getState().session.activeDocument;
-    const prevSheet = activeSheet();
-    const prevActiveLayerId = prevSheet ? (editorHost.selections.get(sheetDocument(prevSheet))?.layerId ?? null) : null;
+    const prevSelection = prevDoc ? { ...editorHost.selections.get(prevDoc) } : null;
     const insertIndex = project.sheets.indexOf(sheet);
     const mode = editorHost.store.getState().session.activeModeId;
     const cmd = {
       label: 'new sheet',
       do() {
         if (!project.sheets.includes(sheet)) project.sheets.splice(insertIndex, 0, sheet);
-        editorHost.documents.setActive(sheetDocument(sheet), { modeId: mode });
-        // See switchMode's comment above: selections are per-sheet, reseed them too.
+        selectCreationDocument(sheetDocument(sheet), mode);
         seedSheetSelection(sheet, sheetLayers(sheet)[0]?.id ?? null);
       },
       undo() {
         const i = project.sheets.indexOf(sheet);
         if (i !== -1) project.sheets.splice(i, 1);
-        editorHost.documents.setActive(prevDoc, { modeId: mode, allowMissing: true });
-        if (prevSheet) seedSheetSelection(prevSheet, prevActiveLayerId);
+        selectCreationDocument(prevDoc, mode);
+        if (prevDoc) editorHost.selections.set(prevSelection, prevDoc);
       },
     };
     editorHost.history.execute(cmd);
     editorHost.projects.markDirty();
+  }
+
+  function commitAddMap(map) {
+    const project = editorHost.projects.project;
+    const previousDocument = editorHost.store.getState().session.activeDocument;
+    const previousSelection = previousDocument ? { ...editorHost.selections.get(previousDocument) } : null;
+    const index = project.maps.indexOf(map);
+    editorHost.history.execute({
+      label: 'new map',
+      do() {
+        if (!project.maps.includes(map)) project.maps.splice(index, 0, map);
+        selectCreationDocument({ kind: 'map', id: map.id }, 'maps');
+      },
+      undo() {
+        const current = project.maps.indexOf(map);
+        if (current !== -1) project.maps.splice(current, 1);
+        selectCreationDocument(previousDocument, 'maps');
+        if (previousDocument) editorHost.selections.set(previousSelection, previousDocument);
+      },
+    });
   }
   
   // ---- new sheet dialog ----
@@ -181,8 +201,7 @@ export function mountDocumentController({ editorHost, workbench }) {
       const mode = editorHost.store.getState().session.activeModeId;
       if (mode === 'maps') {
         const map = createMap(project, { name: `Map ${project.maps.length}`, gridW: project.settings.tileW, gridH: project.settings.tileH });
-        editorHost.documents.setActive({ kind: 'map', id: map.id }, { modeId: mode });
-        editorHost.projects.markDirty();
+        commitAddMap(map);
         return;
       }
       const kind = mode === 'sprites' ? 'sprite' : 'tile';
@@ -400,15 +419,12 @@ export function mountDocumentController({ editorHost, workbench }) {
   defineAction('edit.copy', { label: 'Copy', shortcut: 'Ctrl+C', run: () => copySelection(false), isEnabled: hasSelection });
   defineAction('edit.paste', { label: 'Paste', shortcut: 'Ctrl+V', run: paste });
   window.addEventListener('keydown', (e) => {
-    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey)) return;
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement) || document.querySelector('dialog[open]')) return;
     const key = e.key.toLowerCase();
     if (key === 'z' && !e.shiftKey) { e.preventDefault(); runAction('edit.undo'); }
     else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); runAction('edit.redo'); }
     else if (key === 's') {
-      // Gated (unlike undo/redo above): Ctrl+S is a global browser shortcut
-      // users may also press while a text field or dialog has focus, where we
-      // want the browser/native field behavior, not a project save.
-      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
       e.preventDefault();
       runAction('file.save');
     }

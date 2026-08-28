@@ -4,6 +4,7 @@ import { flattenSheet, newDefaultProject } from '../../core/model.js';
 import { copyRegion } from '../../core/pixels.js';
 import { activeFloating, commitFloatIfAny } from '../../components/canvas/float-session.js';
 import { buildFramesJson, buildTilesJson, buildMapJson } from '../../core/export/exports.js';
+import { sheetExportFiles, animationExportFiles } from '../../core/export/export-files.js';
 import { buildTiledTsx } from '../../core/export/tiledExport.js';
 import { buildC99, MAX_COLORS } from '../../core/export/c99Export.js';
 import {
@@ -102,9 +103,10 @@ export function mountFileController() {
     commitFloatIfAny();
     const sheet = activeSheet();
     if (!sheet || !project()) return;
+    const files = sheetExportFiles(sheet);
     const bitmap = flattenSheet(sheet);
     const blob = await io.exportPngBlob(bitmap);
-    io.downloadBlob(blob, `${project().name}-${sheet.name}.png`);
+    io.downloadBlob(blob, files.png);
   }
   function exportFramesJson() {
     commitFloatIfAny();
@@ -112,7 +114,7 @@ export function mountFileController() {
     if (!sheet || sheet.kind !== 'sprite') return;
     const json = buildFramesJson(sheet);
     const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
-    io.downloadBlob(blob, `${sheet.name}.frames.json`);
+    io.downloadBlob(blob, sheetExportFiles(sheet).frames);
   }
   
   function exportMapJson() {
@@ -126,14 +128,14 @@ export function mountFileController() {
     if (!sheet || sheet.kind !== 'tile') return;
     const json = buildTilesJson(sheet);
     const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
-    io.downloadBlob(blob, `${sheet.name}.tiles.json`);
+    io.downloadBlob(blob, sheetExportFiles(sheet).tiles);
   }
   function exportTiledTsxFile() {
     commitFloatIfAny();
     const sheet = activeSheet();
     if (!sheet || sheet.kind !== 'tile') return;
     const xml = buildTiledTsx(sheet);
-    io.downloadBlob(new Blob([xml], { type: 'application/xml' }), `${sheet.name}.tsx`);
+    io.downloadBlob(new Blob([xml], { type: 'application/xml' }), sheetExportFiles(sheet).tsx);
   }
   
   async function exportAnimationsAs(sheet, animId, format) {
@@ -143,9 +145,10 @@ export function mountFileController() {
         const bytes = encodeGif(buildAnimationGifFrames(sheet, anim), { loop: anim.loop });
         io.downloadBlob(new Blob([bytes], { type: 'image/gif' }), `${sheet.name}-${anim.name}.gif`);
       } else if (format === 'spritesheet') {
+        const files = animationExportFiles(sheet, anim);
         const { bitmap, json } = buildAnimationSpritesheet(sheet, anim);
-        io.downloadBlob(new Blob([await encodePng(bitmap)], { type: 'image/png' }), `${sheet.name}-${anim.name}.png`);
-        io.downloadBlob(new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' }), `${sheet.name}-${anim.name}.json`);
+        io.downloadBlob(new Blob([await encodePng(bitmap)], { type: 'image/png' }), files.png);
+        io.downloadBlob(new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' }), files.json);
       } else if (format === 'sequence') {
         const entries = [];
         for (const f of buildAnimationImageSequence(sheet, anim)) entries.push({ path: `${f.name}.png`, data: await encodePng(f.bitmap) });
@@ -160,7 +163,7 @@ export function mountFileController() {
     const sheet = activeSheet();
     const animationId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null) : null;
     const anim = sheet?.animations.find(a => a.id === animationId);
-    if (sheet && anim) exportAnimationsAs(sheet, anim.id, format);
+    if (sheet && anim) return exportAnimationsAs(sheet, anim.id, format);
   }
   defineAction('document.exportAnimation.gif', { label: 'GIF', run: () => runOnSelectedAnimation('gif') });
   defineAction('document.exportAnimation.spritesheet', { label: 'Spritesheet (PNG+JSON)', run: () => runOnSelectedAnimation('spritesheet') });
@@ -238,9 +241,9 @@ export function mountFileController() {
     if (!sheet || !project()) return;
     try {
       const { palette, items } = resolveC99Items(sheet, 'generic8');
-      const { h, c } = buildC99({ projectName: sheet.name, target: 'generic8', palette, items });
-      io.downloadBlob(new Blob([h], { type: 'text/plain' }), `${sheet.name}.h`);
-      io.downloadBlob(new Blob([c], { type: 'text/plain' }), `${sheet.name}.c`);
+      const { h, c, headerFilename, sourceFilename } = buildC99({ projectName: sheet.name, target: 'generic8', palette, items });
+      io.downloadBlob(new Blob([h], { type: 'text/plain' }), headerFilename);
+      io.downloadBlob(new Blob([c], { type: 'text/plain' }), sourceFilename);
     } catch (e) {
       alert(`C header export failed: ${e.message}`);
     }
@@ -384,18 +387,19 @@ export function mountFileController() {
   // still throw, same as the single-sheet Document > Export Sheet path.
   async function buildSheetExportEntries(sheet, format, warnings = null) {
     const flat = flattenSheet(sheet);
+    const files = sheetExportFiles(sheet);
     if (format === 'json') {
       const isSprite = sheet.kind === 'sprite';
       const json = isSprite ? buildFramesJson(sheet) : buildTilesJson(sheet);
       return [
-        { path: `${sheet.name}.png`, data: await encodePng(flat) },
-        { path: `${sheet.name}.${isSprite ? 'frames' : 'tiles'}.json`, data: new TextEncoder().encode(JSON.stringify(json, null, 2)) },
+        { path: files.png, data: await encodePng(flat) },
+        { path: isSprite ? files.frames : files.tiles, data: new TextEncoder().encode(JSON.stringify(json, null, 2)) },
       ];
     }
     if (format === 'tsx') {
       return [
-        { path: `${sheet.name}.png`, data: await encodePng(flat) },
-        { path: `${sheet.name}.tsx`, data: new TextEncoder().encode(buildTiledTsx(sheet)) },
+        { path: files.png, data: await encodePng(flat) },
+        { path: files.tsx, data: new TextEncoder().encode(buildTiledTsx(sheet)) },
       ];
     }
     if (format === 'gif') {
@@ -406,10 +410,10 @@ export function mountFileController() {
     }
     if (format === 'c99') {
       const { palette, items } = resolveC99Items(sheet, 'generic8');
-      const { h, c } = buildC99({ projectName: sheet.name, target: 'generic8', palette, items });
+      const { h, c, headerFilename, sourceFilename } = buildC99({ projectName: sheet.name, target: 'generic8', palette, items });
       return [
-        { path: `${sheet.name}.h`, data: new TextEncoder().encode(h) },
-        { path: `${sheet.name}.c`, data: new TextEncoder().encode(c) },
+        { path: headerFilename, data: new TextEncoder().encode(h) },
+        { path: sourceFilename, data: new TextEncoder().encode(c) },
       ];
     }
     if (format === 'gba') {

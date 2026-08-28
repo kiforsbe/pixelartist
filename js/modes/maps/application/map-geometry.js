@@ -91,13 +91,14 @@ export function hitSprite(project, layer, p) {
 
 export function hitMapItem(project, layer, p) {
   if (layer.type === 'sprite') return hitSprite(project, layer, p);
-  for (let i = layer.tiles.length - 1; i >= 0; i--) {
-    const item = layer.tiles[i], sheet = findSheet(project, item.sheetId), tile = sheet?.tiles.find(t => t.id === item.tileId);
-    if (tile && p.x >= item.x && p.y >= item.y && p.x < item.x + tile.w && p.y < item.y + tile.h) return item;
-  }
+  // The renderer draws terrain after ordinary tiles in each tile layer.
   for (let i = layer.terrain.length - 1; i >= 0; i--) {
     const item = layer.terrain[i], sheet = findSheet(project, item.sheetId), terrain = sheet?.terrainSets.find(t => t.id === item.terrainSetId);
     if (terrain && p.x >= item.x && p.y >= item.y && p.x < item.x + terrain.tileW && p.y < item.y + terrain.tileH) return item;
+  }
+  for (let i = layer.tiles.length - 1; i >= 0; i--) {
+    const item = layer.tiles[i], sheet = findSheet(project, item.sheetId), tile = sheet?.tiles.find(t => t.id === item.tileId);
+    if (tile && p.x >= item.x && p.y >= item.y && p.x < item.x + tile.w && p.y < item.y + tile.h) return item;
   }
   return null;
 }

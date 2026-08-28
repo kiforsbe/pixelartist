@@ -2,6 +2,29 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildC99 } from '../js/core/export/c99Export.js';
 
+for (const projectName of ['Sprite Sheet', '9 sprites', 'écran 日本語', '__reserved', '---']) {
+  test(`C99 symbols are valid and collision-safe for ${projectName}`, () => {
+    const input = { projectName, target: 'generic8', palette: [[0, 0, 0]],
+      items: ['Frame 1', 'Frame-1', 'Frame_1', 'palette', 'palette', '9', '日本語', '__reserved', ''].map(name => ({ name, w: 1, h: 1, indices: new Uint8Array([0]) })) };
+    const output = buildC99(input);
+    const declarations = [...output.h.matchAll(/extern const unsigned char ([^\[]+)\[/g)].map(match => match[1]);
+    assert.equal(declarations.length, input.items.length + 1);
+    assert.equal(new Set(declarations).size, declarations.length);
+    for (const name of declarations) assert.match(name, /^[A-Za-z][A-Za-z0-9_]*$/);
+    const definitions = [...output.c.matchAll(/const unsigned char ([^\[]+)\[/g)].map(match => match[1]);
+    assert.deepEqual(definitions, declarations);
+    assert.deepEqual(buildC99(input), output, 'naming is deterministic');
+    assert.equal(output.headerFilename, `${projectName}.h`);
+    assert.ok(output.c.startsWith(`#include "${output.headerFilename}"`));
+  });
+}
+
+test('C99 header references remain valid when a display name contains filename delimiters', () => {
+  const output = buildC99({ projectName: 'bad"name\n/part', target: 'generic8', palette: [[0, 0, 0]], items: [] });
+  assert.doesNotMatch(output.headerFilename, /["\n/\\]/);
+  assert.ok(output.c.startsWith(`#include "${output.headerFilename}"\n`));
+});
+
 test('buildC99 generic8: one byte per pixel, palette as [r,g,b] rows', () => {
   const { h, c } = buildC99({
     projectName: 'demo', target: 'generic8',

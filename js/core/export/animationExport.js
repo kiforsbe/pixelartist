@@ -3,6 +3,7 @@
 // encoding lives in js/core/gif.js -- this module only prepares frame data.
 import { flattenSheet, effectiveDuration } from '../model.js';
 import { copyRegion } from '../pixels.js';
+import { animationExportFiles } from './export-files.js';
 
 function animFrameBitmaps(sheet, anim) {
   const flat = flattenSheet(sheet);
@@ -41,7 +42,7 @@ export function buildAnimationSpritesheet(sheet, anim) {
   });
 
   const json = {
-    sheet: `${anim.name}.png`, width, height, frames,
+    sheet: animationExportFiles(sheet, anim).png, width, height, frames,
     animations: [{ name: anim.name, loop: anim.loop,
       frames: shots.map((s, i) => ({ frame: frames[i].name, duration: s.delayMs })) }],
   };

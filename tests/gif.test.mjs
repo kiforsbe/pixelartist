@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { encodeGif } from '../js/core/gif.js';
+import { decodeGif } from './helpers/decode-gif.mjs';
 
 function px(r, g, b, a = 255) { return [r, g, b, a]; }
 
@@ -60,4 +61,27 @@ test('encodeGif: loop:true includes a NETSCAPE2.0 extension with loop count 0', 
 
 test('encodeGif: throws on an empty frame list', () => {
   assert.throws(() => encodeGif([], { loop: false }));
+});
+
+test('palette reduction never assigns an opaque dark pixel to the transparent slot', () => {
+  const pixels = new Uint8ClampedArray(257 * 4);
+  for (let i = 0; i < 255; i++) pixels.set([i + 1, 100, 100, 255], i * 4);
+  pixels.set([0, 0, 0, 255], 255 * 4);
+  const { frames } = decodeGif(encodeGif([{ pixels, width: 257, height: 1, delayMs: 100 }]));
+  assert.notEqual(frames[0].indices[255], frames[0].transparent);
+  assert.equal(frames[0].indices[256], frames[0].transparent);
+});
+
+test('large noisy GIF frames decode exactly across code growth and dictionary resets', () => {
+  const pixels = new Uint8ClampedArray(512 * 512 * 4);
+  let seed = 7;
+  for (let i = 0; i < pixels.length; i += 4) {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    const value = seed & 255;
+    pixels.set([value, value, value, 255], i);
+  }
+  const { palette, frames } = decodeGif(encodeGif([{ pixels, width: 512, height: 512, delayMs: 100 }]));
+  assert.equal(frames[0].transparent, -1);
+  const decoded = Uint8Array.from(frames[0].indices, index => palette[index][0]);
+  assert.deepEqual(decoded, Uint8Array.from({ length: 512 * 512 }, (_, i) => pixels[i * 4]));
 });

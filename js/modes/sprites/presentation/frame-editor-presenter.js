@@ -430,15 +430,11 @@ export function mountFrameEditor(hostEl) {
   function goTo(dir) {
     const nf = neighborFrame(dir);
     if (!nf) return;
-    // Prev/Next changes the editing frame without a 'view' emit, so the
-    // floatsession auto-commit hook can't see it — commit here or a pending
-    // float outlives its creation frame's frozen target rect.
+    // Settle the old target before navigation; the selection subscription
+    // below shares the same refresh path with timeline and panel navigation.
     commitFloatIfAny();
     const sheet = activeSheet('sprite');
     if (sheet) getEditorHost().selections.patch({ editingFrameId: nf.id }, sheetDocument(sheet));
-    loadFrame(nf);
-    updateStrip();
-    view.requestRender();
   }
 
   function backToSheet() {
@@ -560,7 +556,7 @@ export function mountFrameEditor(hostEl) {
   editorHost.store.subscribe(s => s.workspace.pixelRevision, () => { invalidateFlat(); if (visible) view.requestRender(); });
   editorHost.store.subscribe(
     s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
-    () => { if (visible) view.requestRender(); },
+    () => { invalidateFlat(); if (visible) refresh(); },
   );
 
   return { show, hide, view };

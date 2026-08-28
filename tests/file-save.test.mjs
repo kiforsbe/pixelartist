@@ -82,7 +82,7 @@ test('autosave queued behind an older save retains the newer edit', async () => 
   f.host.projects.mutate('rename', model => { model.name = 'Recovery'; });
   f.autosave();
   f.writes[0].gate.resolve(); await saving;
-  for (let i = 0; i < 30 && !f.recovery.some(op => op.kind === 'put'); i++) await new Promise(resolve => setImmediate(resolve));
+  await f.waitForRecovery('put');
   const writes = f.recovery.filter(op => op.kind === 'put');
   assert.equal(writes.length, 1);
   assert.equal(await savedName(writes[0].bytes), 'Recovery');

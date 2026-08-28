@@ -19,7 +19,7 @@ import { copyRegion } from '../../../core/pixels.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { activeSheet, currentContextLayers } from '../../../host/document-helpers.js';
 import { confirmOrAuto } from '../../../platform/browser/autotest.js';
-import { activeFloating } from '../../../components/canvas/float-session.js';
+import { activeFloating, commitFloatIfAny } from '../../../components/canvas/float-session.js';
 import { advancePlayback } from '../application/timeline-playback.js';
 import { setPreviewBitmap } from '../../../components/panels/preview-panel.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
@@ -335,6 +335,9 @@ export function mountTimeline(el) {
     if (!sheet || !anim) return;
     if (!confirmOrAuto(`Delete animation "${anim.name}"?`)) return;
     stopPlaying();
+    // The command removes the accepted layer group before changing selection.
+    // Commit here while its float's source layers are still reachable.
+    commitFloatIfAny();
     dispatch('sprites.deleteAnimation', { sheetId: sheet.id, animationId: anim.id });
   });
 

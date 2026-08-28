@@ -135,23 +135,43 @@ function cPaletteArray(name, palette) {
   return `const unsigned char ${name}[${palette.length}][3] = {${rows}};`;
 }
 
+function identifier(value) {
+  const name = String(value ?? '').replace(/[^A-Za-z0-9_]/g, '_');
+  return /^[A-Za-z]/.test(name) ? name : `asset_${name || 'item'}`;
+}
+
 export function buildC99({ projectName, target, palette, items }) {
   const maxColors = MAX_COLORS[target];
   if (!maxColors) throw new Error(`unknown C99 export target "${target}"`);
   if (palette.length > maxColors)
     throw new Error(`${target} supports at most ${maxColors} colors, got ${palette.length}`);
 
-  const guard = `${projectName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_H`;
-  const declarations = [`extern const unsigned char ${projectName}_palette[${palette.length}][3];`];
-  const definitions = [cPaletteArray(`${projectName}_palette`, palette)];
+  const prefix = identifier(projectName);
+  const guard = `${prefix.toUpperCase()}_H`;
+  const used = new Set([guard]);
+  function symbol(name) {
+    const base = `${prefix}_${identifier(name)}`;
+    let unique = base, suffix = 2;
+    while (used.has(unique)) unique = `${base}_${suffix++}`;
+    used.add(unique);
+    return unique;
+  }
+  const paletteName = symbol('palette');
+  const declarations = [`extern const unsigned char ${paletteName}[${palette.length}][3];`];
+  const definitions = [cPaletteArray(paletteName, palette)];
 
   for (const item of items) {
     const packed = packItem(item, target);
-    declarations.push(`extern const unsigned char ${projectName}_${item.name}[${packed.length}];`);
-    definitions.push(cArray(`${projectName}_${item.name}`, packed));
+    const name = symbol(item.name);
+    declarations.push(`extern const unsigned char ${name}[${packed.length}];`);
+    definitions.push(cArray(name, packed));
   }
 
   const h = `#ifndef ${guard}\n#define ${guard}\n\n${declarations.join('\n')}\n\n#endif\n`;
-  const c = `#include "${projectName}.h"\n\n${definitions.join('\n\n')}\n`;
-  return { h, c };
+  // Keep display/file names independent from C symbols, but reject filename
+  // delimiters which could also break the generated include directive.
+  const filename = String(projectName).replace(/[\\/:*?"<>|\x00-\x1f]/g, '_') || 'asset';
+  const headerFilename = `${filename}.h`, sourceFilename = `${filename}.c`;
+  const c = `#include "${headerFilename}"\n\n${definitions.join('\n\n')}\n`;
+  return { h, c, headerFilename, sourceFilename };
 }

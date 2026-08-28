@@ -57,6 +57,7 @@ function nearestIndex(palette, rgb) {
   let best = 0, bestD = Infinity;
   for (let i = 0; i < palette.length; i++) {
     const c = palette[i];
+    if (c[3] === 0) continue; // Opaque pixels must never use the reserved transparent slot.
     const d = (c[0] - rgb[0]) ** 2 + (c[1] - rgb[1]) ** 2 + (c[2] - rgb[2]) ** 2;
     if (d < bestD) { bestD = d; best = i; }
   }
@@ -114,7 +115,7 @@ export function encodeGif(frames, { loop = true } = {}) {
         : nearestIndex(palette, [frame.pixels[i], frame.pixels[i + 1], frame.pixels[i + 2]]);
     }
     out.push(minCodeSize);
-    out.push(...packSubBlocks(lzwEncode(minCodeSize, indices)));
+    for (const byte of packSubBlocks(lzwEncode(minCodeSize, indices))) out.push(byte);
   }
   out.push(0x3b);
   return new Uint8Array(out);

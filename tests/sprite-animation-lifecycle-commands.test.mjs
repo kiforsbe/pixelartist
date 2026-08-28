@@ -74,6 +74,39 @@ test('deleteAnimation removes the animation and tears down its layer group; undo
   assert.equal(sheet.animations[0].layerGroupId, 'g1');
   assert.equal(sheet.layerTree.children[0].id, 'g1');
   assert.equal(services.selections.get(doc)?.animationId, 'an1');
+
+  services.history.redo();
+  assert.equal(sheet.animations.length, 0);
+  assert.equal(sheet.layerTree.children.length, 0);
+  services.history.undo();
+  assert.equal(sheet.animations[0].layerGroupId, 'g1');
+  assert.equal(sheet.layerTree.children[0], group);
+});
+
+test('deleteAnimation restores a new unaccepted animation with null ownership through undo/redo', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  const sheet = project.sheets[0];
+  const doc = { kind: 'sprite-sheet', id: sheet.id };
+  newAnimation(services, sheet.id);
+  const anim = sheet.animations[1];
+  assert.equal(anim.layerGroupId, null);
+
+  deleteAnimation(services, sheet.id, anim.id);
+  assert.equal(sheet.animations.length, 1);
+  assert.doesNotThrow(() => services.history.undo());
+  assert.equal(sheet.animations[1], anim);
+  assert.equal(anim.layerGroupId, null);
+  assert.equal(sheet.layerTree.children.length, 0);
+  assert.equal(services.selections.get(doc).animationId, anim.id);
+  assert.equal(services.history.canRedo(), true);
+
+  services.history.redo();
+  assert.equal(sheet.animations.length, 1);
+  assert.equal(services.selections.get(doc).animationId, null);
+  services.history.undo();
+  assert.equal(sheet.animations[1], anim);
+  assert.equal(anim.layerGroupId, null);
 });
 
 test('renameAnimation renames and is undoable; no-ops (no history entry) when the name is unchanged', () => {

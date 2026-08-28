@@ -1,7 +1,7 @@
 # Codebase and project-structure review — 2026-08-28
 
 Runtime baseline: `55602e2` (`refactor: finish phase 5 polish and workbench follow-ups`).
-Status: **review complete; remediation in progress**. The original audit did
+Status: **review complete; R01–R23 implemented; release checks still required**. The original audit did
 not implement the findings or modify the earlier migration's acceptance.
 The remediation log below records subsequent changes; the finding descriptions
 remain evidence of the original baseline, not claims about fixed behavior.
@@ -14,7 +14,7 @@ startup/sheet-sizing and empty-panel issues are fixed in the baseline and are
 not re-reported here. The remaining plan checkpoint was closed and committed.
 
 The codebase has useful mode boundaries, centralized history/selection services,
-and substantial algorithm/command tests. It still has correctness defects at
+and substantial algorithm/command tests. The audited baseline had defects at
 mutable-state, view-transition, persistence, and export boundaries. **Do not
 interpret the green test suite as a release sign-off.**
 
@@ -54,9 +54,55 @@ coordinator checked their source locations and re-ran selected reproductions.
 | R03 | Grid commands snapshot mutable geometry/ownership and restore original entity identities. | Promotion, all growth/shrink edges, collapse, repeated undo/redo, terrain ownership and earlier history references. |
 | R04 | Terrain asset snapping uses tile dimensions; placement/move commands reject non-finite coordinates. | Real brush/hover consumers, finite negative positions, and invalid coordinates preserving history/dirty state. |
 
-Fresh combined Node verification: **779 passed, 0 failed**, across 78 top-level
+Committed as `e2316b2`. Combined Node verification: **779 passed, 0 failed**, across 78 top-level
 test modules. These tests use isolated fixtures, not browser drag/native-picker
-automation. R05–R23 and the separately listed structural risks remain open.
+automation. Subsequent fixes are recorded below; structural risks remain separate.
+
+### Subsequent remediation — 2026-08-28
+
+| Finding | Implemented correction and regression coverage |
+|---|---|
+| R05 | Animation deletion restores nullable group ownership; accepted/unaccepted undo and redo tested. |
+| R06 | Sheet/map opacity input captures its baseline without requiring pointerdown; keyboard input/change, dirty state, and repeated undo tested. |
+| R07 | Same-view frame changes refresh size, toolbar, and animation-layer raster context; confined floats settle on transitions and before structural UI mutations. Real timeline/layer controls test deletion/merge undo ordering. |
+| R08 | Merge Down bakes effective source/destination opacity and visibility, preserving bitmap identity; both command wrappers restore metadata and pixels. |
+| R09 | Tile-size undo restores the complete terrain slot/back-reference snapshot, including populated slots and duplicate markers. |
+| R10 | Rejected terrain owners retain their slots before dependent moves finalize; mixed success, blocked chains, input order, and swaps tested. |
+| R11 | Placement erase/delete/replacement undo restores the original index and identity; real renderer and overlap hit tests cover stacking. |
+| R12 | Removing a tile-layer name clears and restores terrain assignments as well as tile assignments. |
+| R13 | Hit-testing checks terrain before ordinary tiles, reversing the renderer's draw order. |
+| R19 | Global undo/redo/save respect typing targets, focused controls, dialogs, and default-prevented events; Ctrl and Command variants tested. |
+| R20 | Mode switching retains the service-resolved document and per-document selection, with missing-document fallback tests. |
+| R21 | New Map uses history; creation in all three modes restores previous selections and preserves another active mode during undo/redo. |
+| R14 | Opaque GIF matching excludes the transparency slot; palette-reduced output checked by independent LZW decoding. |
+| R15 | Large GIF streams are appended without unbounded argument spread; noisy 512×512 output decodes to exact source pixels. |
+| R16 | Validated canvas dimensions and decoded RGBA shape before project publication for legacy/current files. Existing oversized frame/tile defaults remain loadable. |
+| R17 | C99 symbols are deterministic, valid, and unique within the export; header references and downloaded filenames agree. |
+| R18 | Shared export descriptors align PNG downloads with JSON/TSX references; actual single-download and batch ZIP paths tested. |
+| R22 | Failed preference writes/removals override stale storage, with recovery after successful persistence and partial-failure tests. |
+| R23 | README/smoke instructions reflect current format/server/grid controls; manual-only gesture labels retained. About uses a shared version with a package-version drift test. |
+
+Verification: **910 passed, 0 failed** across 87 top-level Node test modules.
+All 167 production modules passed `node --check`; 44 local architecture/review
+links resolved, issue IDs/severity totals and code fences validated, and the
+staged diff passed `git diff --cached --check`.
+The save fixtures now await explicit writer/recovery signals rather than a fixed
+number of event-loop ticks, eliminating a load-sensitive test wait.
+
+Independent reviews caught and resolved two integration issues: floats must
+settle before structural source removal, and bounding every item default to
+4096 would reject projects the editor itself can create. Actual/default sheet
+canvases remain bounded; item defaults/legacy cell sizes remain positive safe
+integers to preserve that existing contract.
+
+The final baseline-to-worktree integration review found no actionable issues
+and independently passed 195 focused tests across 14 modules (overlapping the
+full suite, not additional coverage totals).
+
+These are implemented fixes with automated regression coverage, not a new
+manual browser or release sign-off. Rerun the relevant smoke checks before
+release. The structural debt and unverified risks below remain follow-up work;
+no requirement-led refactor or archive/durability hardening is implied complete.
 
 ## Priority fixes (original audit)
 
@@ -413,7 +459,7 @@ These are not additional confirmed runtime findings or reopened migration tasks:
 - No checked-in CI workflow or turnkey browser test runner. `npm test` omits
   browser checks; the development server uses unpinned `npx serve`.
 
-## Verification and limitations
+## Original audit verification and limitations
 
 - Full Node suite at closeout: **723 passed, 0 failed** (75 top-level modules).
 - Final documentation-audit verification reran the full suite: **723 passed,

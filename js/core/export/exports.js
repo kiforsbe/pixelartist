@@ -4,6 +4,7 @@
 import { getPreset, NEIGHBOR_DIRS } from '../neighbors.js';
 import { blobIndexToMask, resolveTerrainSlot } from '../blob47.js';
 import { effectiveDuration, mapContentBounds } from '../model.js';
+import { sheetExportFiles } from './export-files.js';
 
 // Portable reference form for the in-project test scene. Asset ids point at
 // the accompanying PixelArtist sheets rather than duplicating sheet pixels.
@@ -28,7 +29,7 @@ export function buildMapJson(map, project = null) {
 export function buildFramesJson(sheet) {
   const nameById = new Map(sheet.frames.map(f => [f.id, f.name]));
   return {
-    sheet: `${sheet.name}.png`,
+    sheet: sheetExportFiles(sheet).png,
     width: sheet.width,
     height: sheet.height,
     frames: sheet.frames.map((f, index) => ({
@@ -63,7 +64,7 @@ export function buildFramesJson(sheet) {
 export function buildTilesJson(sheet) {
   const indexById = new Map(sheet.tiles.map((t, i) => [t.id, i]));
 
-  const result = { sheet: `${sheet.name}.png`, count: sheet.tiles.length, tiles: [] };
+  const result = { sheet: sheetExportFiles(sheet).png, count: sheet.tiles.length, tiles: [] };
 
   if (sheet.terrainSets?.length) {
     result.terrainSets = sheet.terrainSets.map(ts => {

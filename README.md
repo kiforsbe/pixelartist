@@ -16,8 +16,11 @@ ES modules require a static server (file:// will not work):
 
     ./serve.ps1          # or: python -m http.server 8080
 
-Open http://localhost:8080 in Chrome/Edge (full file-system support) or any
-modern browser (packed .pixelproj download/upload fallback).
+Open the local URL printed by `./serve.ps1`; it chooses an available port
+for each run. With the Python command instead, open
+[localhost:8080](http://localhost:8080). Use Chrome/Edge for full
+file-system support, or any modern browser for the packed `.pixelproj`
+download/upload fallback.
 
 ## Menu bar
 
@@ -44,9 +47,11 @@ Tile Sheets mode tabs.
 
 ## Shortcuts
 
-All shortcuts are ignored while focus is in a text field/checkbox or a
-dialog is open (so typing a layer name or a frame's X/Y never triggers a
-tool switch).
+Editor keyboard shortcuts leave focused inputs (including checkboxes),
+textareas, contenteditable fields, and controls inside an open dialog
+alone, so typing a layer name or a frame's X/Y does not switch tools.
+Undo, Redo, and Save also ignore shortcuts whenever any dialog is open;
+the focused field or dialog retains its own keyboard behavior.
 
 **Tools**
 
@@ -242,12 +247,13 @@ Projects save in one of two layouts, both built from the same
   ZIP archive containing the exact same `project.json` +
   `images/<sheetId>/<layerId>.png` entries as the unpacked folder.
 
-`project.json`'s `version` field is checked on load; a mismatched or
-corrupt file produces a clear error (e.g. `invalid project: unsupported
-version 99 (expected 2)`) shown to the user rather than failing silently.
-The current format is **version 2**, which additionally requires a
-`settings` object with 9 numeric keys (validated on load — any missing
-or non-numeric key is rejected the same way a version mismatch is):
+`project.json`'s `version` field is checked on load. The current save
+format is **version 3**; the loader accepts both versions **2 and 3** and
+migrates version 2 projects to the current in-memory format. Unsupported
+or corrupt files produce a clear error (e.g. `invalid project: unsupported
+version 99 (expected 3)`) rather than failing silently. Both accepted
+versions require a `settings` object with 9 numeric keys (validated on
+load — any missing or non-numeric key is rejected):
 
 - `spriteSheetW`, `spriteSheetH` — default sprite sheet dimensions
 - `tileSheetW`, `tileSheetH` — default tile sheet dimensions

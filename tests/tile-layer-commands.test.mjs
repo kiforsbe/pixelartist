@@ -51,3 +51,21 @@ test('removeTileLayer clears the layer name from every tile that used it, and un
   assert.equal(sheet.tiles[0].layer, undefined);
   assert.equal(sheet.tiles[1].layer, 'decor');
 });
+
+test('removing a tile layer clears terrain-set assignments and restores them on undo', () => {
+  const project = makeProject(), sheet = project.sheets[0];
+  sheet.tileLayerNames = ['Ground', 'Decor'];
+  sheet.terrainSets = [{ id: 'ground', layer: 'Ground' }, { id: 'decor', layer: 'Decor' }, { id: 'empty' }];
+  const services = makeServices(project);
+  removeTileLayer(services, sheet.id, 'Ground');
+  for (let cycle = 0; cycle < 3; cycle++) {
+    assert.deepEqual(sheet.tileLayerNames, ['Decor']);
+    assert.equal(sheet.terrainSets[0].layer, undefined);
+    assert.equal(sheet.terrainSets[1].layer, 'Decor');
+    assert.equal(sheet.terrainSets[2].layer, undefined);
+    services.history.undo();
+    assert.deepEqual(sheet.tileLayerNames, ['Ground', 'Decor']);
+    assert.equal(sheet.terrainSets[0].layer, 'Ground');
+    services.history.redo();
+  }
+});

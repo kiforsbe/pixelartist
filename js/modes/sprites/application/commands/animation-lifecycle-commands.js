@@ -47,6 +47,7 @@ export function deleteAnimation(services, sheetId, animationId) {
   const doc = sheetDocument(sheet);
   const idx = sheet.animations.indexOf(anim);
   const wasSelected = services.selections.get(doc)?.animationId === animationId;
+  const layerGroupId = anim.layerGroupId;
   const groupLoc = anim.layerGroupId ? findParent(sheet.layerTree, anim.layerGroupId) : null;
   const group = groupLoc ? groupLoc.parent.children[groupLoc.index] : null;
   const groupParent = groupLoc ? groupLoc.parent : null;
@@ -61,7 +62,7 @@ export function deleteAnimation(services, sheetId, animationId) {
     target => {
       target.animations.splice(Math.min(idx, target.animations.length), 0, anim);
       if (groupParent) groupParent.children.splice(Math.min(groupIdx, groupParent.children.length), 0, group);
-      anim.layerGroupId = group.id;
+      anim.layerGroupId = layerGroupId;
       if (wasSelected) services.selections.set({ ...services.selections.get(doc), animationId }, doc);
     });
 }

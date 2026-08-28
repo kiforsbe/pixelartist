@@ -18,20 +18,22 @@ export function paintMapTile(services, mapId, layerId, sheetId, tileId, at) {
   if (!finitePoint(at)) return;
   const layer = findLayer(findMap(services.projects.project, mapId), layerId);
   const old = layer?.tiles.find(t => t.x === at.x && t.y === at.y);
+  const oldIndex = old ? layer.tiles.indexOf(old) : -1;
   if (old?.sheetId === sheetId && old?.tileId === tileId) return;
   const entry = { id: newId('mi'), sheetId, tileId, x: at.x, y: at.y };
   runCommand(services, mapId, 'place map tile',
     map => { const layer = findLayer(map, layerId); if (old) layer.tiles = layer.tiles.filter(t => t.id !== old.id); layer.tiles.push(entry); },
-    map => { const layer = findLayer(map, layerId); layer.tiles = layer.tiles.filter(t => t.id !== entry.id); if (old) layer.tiles.push(old); });
+    map => { const layer = findLayer(map, layerId); layer.tiles = layer.tiles.filter(t => t.id !== entry.id); if (old) layer.tiles.splice(oldIndex, 0, old); });
 }
 
 export function eraseMapTile(services, mapId, layerId, at) {
   const layer = findLayer(findMap(services.projects.project, mapId), layerId);
   const found = layer?.tiles.find(t => t.x === at.x && t.y === at.y);
   if (!found) return;
+  const index = layer.tiles.indexOf(found);
   runCommand(services, mapId, 'erase map tile',
     map => { const layer = findLayer(map, layerId); layer.tiles = layer.tiles.filter(t => t.id !== found.id); },
-    map => { const layer = findLayer(map, layerId); if (!layer.tiles.some(t => t.id === found.id)) layer.tiles.push(found); });
+    map => { const layer = findLayer(map, layerId); if (!layer.tiles.some(t => t.id === found.id)) layer.tiles.splice(index, 0, found); });
 }
 
 export function paintMapTerrain(services, mapId, layerId, sheetId, terrainSetId, at) {
@@ -54,9 +56,10 @@ export function eraseMapTerrain(services, mapId, layerId, sheetId, terrainSetId,
   const terrain = sheet?.terrainSets.find(t => t.id === terrainSetId);
   const found = layer && sheet && terrain ? terrainAt(layer, sheet, terrain, at.x, at.y) : null;
   if (!found) return;
+  const index = layer.terrain.indexOf(found);
   runCommand(services, mapId, 'erase map terrain',
     map => { const layer = findLayer(map, layerId); layer.terrain = layer.terrain.filter(t => t.id !== found.id); },
-    map => { const layer = findLayer(map, layerId); if (!layer.terrain.some(t => t.id === found.id)) layer.terrain.push(found); });
+    map => { const layer = findLayer(map, layerId); if (!layer.terrain.some(t => t.id === found.id)) layer.terrain.splice(index, 0, found); });
 }
 
 export function paintMapSprite(services, mapId, layerId, sheetId, kind, assetId, at) {
@@ -71,9 +74,10 @@ export function eraseMapSprite(services, mapId, layerId, itemId) {
   const layer = findLayer(findMap(services.projects.project, mapId), layerId);
   const found = layer?.sprites.find(s => s.id === itemId);
   if (!found) return;
+  const index = layer.sprites.indexOf(found);
   runCommand(services, mapId, 'erase map sprite',
     map => { const layer = findLayer(map, layerId); layer.sprites = layer.sprites.filter(s => s.id !== found.id); },
-    map => { const layer = findLayer(map, layerId); if (!layer.sprites.some(s => s.id === found.id)) layer.sprites.push(found); });
+    map => { const layer = findLayer(map, layerId); if (!layer.sprites.some(s => s.id === found.id)) layer.sprites.splice(index, 0, found); });
 }
 
 function findItemCollectionKey(layer, itemId) {
@@ -105,7 +109,8 @@ export function deleteMapItem(services, mapId, layerId, itemId) {
   const key = layer ? findItemCollectionKey(layer, itemId) : null;
   const found = key ? layer[key].find(i => i.id === itemId) : null;
   if (!found) return;
+  const index = layer[key].indexOf(found);
   runCommand(services, mapId, 'delete map item',
     map => { const layer = findLayer(map, layerId); layer[key] = layer[key].filter(i => i.id !== itemId); },
-    map => { const layer = findLayer(map, layerId); if (!layer[key].some(i => i.id === itemId)) layer[key].push(found); });
+    map => { const layer = findLayer(map, layerId); if (!layer[key].some(i => i.id === itemId)) layer[key].splice(index, 0, found); });
 }

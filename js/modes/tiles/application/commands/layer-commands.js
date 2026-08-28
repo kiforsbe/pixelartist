@@ -128,19 +128,23 @@ export function mergeLayerDownCmd(services, sheetId, layerId) {
   const parentId = parent.id;
   const beforeChildren = parent.children.slice();
   const destBefore = cloneBitmap(dest.bitmap);
+  const destMetadataBefore = { opacity: dest.opacity, visible: dest.visible };
   mergeLayerDown(sheet, layerId);
   const destAfter = cloneBitmap(dest.bitmap);
+  const destMetadataAfter = { opacity: dest.opacity, visible: dest.visible };
   const afterChildren = parent.children.slice();
   runCommand(services, sheetId, 'merge down',
     sheet => {
       const p = findGroup(sheet.layerTree, parentId) ?? sheet.layerTree;
       blitRegion(dest.bitmap, destAfter, 0, 0);
+      Object.assign(dest, destMetadataAfter);
       p.children = afterChildren.slice();
     },
     sheet => {
       const p = findGroup(sheet.layerTree, parentId) ?? sheet.layerTree;
       p.children = beforeChildren.slice();
       blitRegion(dest.bitmap, destBefore, 0, 0);
+      Object.assign(dest, destMetadataBefore);
     });
   return dest.id;
 }

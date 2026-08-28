@@ -493,19 +493,22 @@ export function initFloatSession() {
   const editorHost = getEditorHost();
   editorHost.store.subscribe(s => s.session.activeToolId, toolId => { if (toolId !== 'move') commitFloatIfAny(); });
   editorHost.store.subscribe(
-    s => [s.session.activeDocument, s.session.activeViewId],
-    ([activeDocument, activeViewId]) => {
-      if (!floating || !floatCtx) return;
-      // Compare activeViewId against floatCtx.hostViewId, NOT floatCtx.viewKind:
-      // activeViewId lives in host-space ('sprites.sheet', 'tiles.tile', ...)
-      // while viewKind is legacy-space ('sheet'|'frame'|'tile', kept only for
-      // the views.get() lookups elsewhere in this file) -- comparing across
-      // namespaces made this guard a tautology (always true) before hostViewId
-      // existed. hostViewId snapshots the real activeViewId at float-creation
-      // time, so this now correctly detects "the user left the float's view".
-      if (activeDocument?.id !== floating.sheetId || activeViewId !== floatCtx.hostViewId) commitFloatIfAny();
+    s => {
+      const doc = s.session.activeDocument, view = s.session.activeViewId;
+      const selection = doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null;
+      return [doc?.kind, doc?.id, view,
+        view === 'sprites.frame' ? selection?.editingFrameId : null,
+        view === 'tiles.tile' ? selection?.editingTileId : null,
+        selection?.animationId, selection?.layerId];
     },
-    { equals: (a, b) => a[0]?.id === b[0]?.id && a[1] === b[1] },
+    () => {
+      if (!floating || !floatCtx) return;
+      // A timeline click can change the editing target without changing the
+      // view. Commit using the float's frozen sheet/layers/target rectangle,
+      // never the new selection, before another edit reaches that context.
+      commitFloatIfAny();
+    },
+    { equals: (a, b) => a.every((value, index) => value === b[index]) },
   );
   // project REPLACEMENT (New/Open) drops the float without a command — the
   // command stack was cleared and the old bitmaps are gone

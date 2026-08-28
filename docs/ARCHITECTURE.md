@@ -1,7 +1,7 @@
 # PixelArtist Architecture
 
 Current-state review: **2026-08-28**, migration baseline **`55602e2`**, updated
-through the codebase review's R01–R04 remediation batch.
+through the codebase review's R01–R23 remediation.
 PixelArtist is a browser-only pixel-art editor for sprite sheets, tile sheets,
 and reference-based map scenes. It uses native JavaScript ES modules, the DOM,
 and Canvas 2D, with no runtime package dependencies or build step.
@@ -37,15 +37,16 @@ identified by the audit are follow-up work, not unfinished migration tasks.
 
 ## Repository structure
 
-There are 165 production JavaScript modules at this snapshot.
+There are 167 production JavaScript modules at this snapshot.
 
 ```text
 index.html                 Static shell, mount points, and most dialogs
 css/app.css                Shared desktop workbench and control styling
 js/
   bootstrap.js             Browser composition root
+  version.js               Browser release version, tested against package.json
   domain/                  5 modules: map model, sprite frames/strips/timing, IDs
-  core/                    33 modules: model, pixels, grids, terrain, filters,
+  core/                    34 modules: model, pixels, grids, terrain, filters,
                            history primitives, codecs, ZIP, export builders
   host/                    25 modules: store/services, registries, workbench helpers
   platform/browser/        7 modules: browser I/O, adapters, preferences, test mode
@@ -53,7 +54,7 @@ js/
   features/                10 modules: shell/workbench/project/file/filter coordination
   components/              18 shared DOM/canvas/panel modules
 assets/                    Blob-47 reference artwork and documentation screenshot
-tests/                     78 top-level Node test modules
+tests/                     87 top-level Node test modules
   helpers/                 Isolated controller/panel fixtures
   browser/                 Focused Playwright workbench regression checks
   smoke.md                 Broader smoke checklist and manual gates
@@ -133,6 +134,10 @@ seeds initial selection. `SelectionService` replaces/patches per-document
 selection records. The document controller also orchestrates creation,
 deletion, mode switching, and selection repair directly; these are not all
 routed through the generic document-provider CRUD methods.
+Mode changes retain the document resolved by `DocumentService` and its selection.
+Sheet and map creation are undoable; replay from another mode updates remembered
+documents without replacing that mode's active document. Global history/save
+shortcuts respect editing controls, open dialogs, and already-handled events.
 
 `HistoryService` owns one global `CommandStack`, shared across documents.
 Commands provide `do()` and `undo()`; history changes increment a revision and
@@ -269,6 +274,10 @@ renderer/cache invalidation service.
 Marquees are scoped to the project/document and the view's editing frame/tile.
 Destructive selection edits intersect the current target, and floating-selection
 history carries a context token when restoring a marquee.
+The frame editor refreshes dimensions, controls, and cached animation layers on
+selection changes without resetting pan for an unchanged frame. Float settlement
+observes editing-frame/tile and layer/animation transitions. Structural layer and
+animation UI actions settle floats before removal or merge snapshots are taken.
 
 Filters compute before/after patches and substitute cloned preview layers.
 Accept submits history edits; cancel removes preview overrides. Correct view,
@@ -291,9 +300,12 @@ For tree-based tile sheets the serialized `layers` property maps to runtime
 pixel records, never tile tag names. Tile JSON exports retain `layers` and
 omit it when empty. Phase 5 did not bump the file version.
 
-Import validation is limited; it is not a complete schema or integrity check.
-Malformed dimensions, decoded bitmap sizes, and entity references need stronger
-validation before a project is installed (see review).
+Import validation bounds actual/default sheet canvases to integer dimensions in
+1..4096 and requires each decoded layer to match its sheet and contain a complete
+`Uint8ClampedArray` RGBA buffer. Frame/tile defaults and legacy cell dimensions
+remain positive safe integers, including values above 4096 supported by the UI.
+Invalid imports are rejected before replacing the live project. This is not a
+complete schema, entity-reference, archive-size, or integrity check.
 
 Browser `project-io.js` implements packed open/save, download fallbacks,
 image picking, folder export, and IndexedDB recovery. Unpacked project
@@ -316,11 +328,18 @@ The platform adapter objects are injected into the host, but the current
 controllers mostly call `project-io.js`, codecs, and browser clipboard APIs
 directly. Preferences are actively injected/used; the wider port abstraction
 is incomplete, not a fully isolated I/O boundary.
+Failed preference mutations shadow stale storage in memory; a failed remove
+leaves a tombstone until a later successful mutation or a new in-memory write.
 
 Export builders under `core/export/` produce frame/tile/map JSON, Tiled TSX,
 animation sheets/sequences/GIF frames, C99, and retro-platform binaries.
 `core/gif.js` encodes GIF bytes. The file controller chooses formats,
-quantization/compatibility checks, filenames, and download/folder destinations.
+quantization/compatibility checks and download/folder destinations.
+`core/export/export-files.js` supplies companion filenames for sheet PNG/JSON/TSX
+and animation PNG/JSON, shared by builders and single/batch downloads. C99 output
+derives valid unique symbols separately from display/file names and returns its
+header/source filenames. GIF encoding excludes the transparent palette entry
+from opaque matching and appends large compressed streams without argument spread.
 Project batch export selects sheets; maps have a separate JSON action.
 `ExportService` is scaffolding, not the live exporter dispatch path.
 
@@ -361,8 +380,8 @@ Actual boundaries and exceptions:
 npm test
 ```
 
-The R01–R04 remediation batch passed **779 tests across 78 top-level test
-modules** (migration closeout baseline: 723 tests across 75 modules).
+The R01–R23 remediation passed **910 tests across 87 top-level test modules**
+(migration closeout baseline: 723 tests across 75 modules).
 Tests cover domain/core algorithms, commands, host/store/registries, boundary
 scans, and isolated DOM/controller fixtures. They do not establish complete
 browser integration coverage.

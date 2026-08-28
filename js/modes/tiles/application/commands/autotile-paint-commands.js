@@ -43,7 +43,7 @@ export function paintTerrainStroke(services, sheetId, terrainSetId, strokeMasks)
   if (!terrainSet || !strokeMasks.size) return { conflicts: new Map() };
 
   const beforeSlots = { ...terrainSet.slots };
-  const afterSlots = { ...beforeSlots };
+  let afterSlots;
   const beforeTiles = new Map();
   const afterTiles = new Map();
   const candidates = [];
@@ -52,21 +52,31 @@ export function paintTerrainStroke(services, sheetId, terrainSetId, strokeMasks)
     const tile = sheet.tiles.find(t => t.id === tileId);
     if (!tile || (tile.terrainSetId != null && tile.terrainSetId !== terrainSet.id)) continue;
     beforeTiles.set(tileId, { terrainSetId: tile.terrainSetId, blobIndex: tile.blobIndex, duplicateOf: tile.duplicateOf });
-    for (const idx of Object.keys(afterSlots)) if (afterSlots[idx] === tileId) delete afterSlots[idx];
     candidates.push({ tileId, blobIndex: blobIndexFromPaintMask(mask) });
   }
-  for (const candidate of candidates) {
-    const owner = afterSlots[candidate.blobIndex];
-    if (owner != null && owner !== candidate.tileId) { conflicts.set(candidate.tileId, candidate.blobIndex); continue; }
-    afterSlots[candidate.blobIndex] = candidate.tileId;
-    afterTiles.set(candidate.tileId, { terrainSetId: terrainSet.id, blobIndex: candidate.blobIndex, duplicateOf: undefined });
+  // Rejected owners retain their old slots, which can in turn block dependent
+  // moves. Rebuild until all remaining candidates agree; swaps still work
+  // because every surviving candidate releases its old slot simultaneously.
+  let pending = candidates;
+  while (true) {
+    afterSlots = { ...beforeSlots };
+    const moving = new Set(pending.map(candidate => candidate.tileId));
+    for (const idx of Object.keys(afterSlots)) if (moving.has(afterSlots[idx])) delete afterSlots[idx];
+    const accepted = [];
+    for (const candidate of pending) {
+      const owner = afterSlots[candidate.blobIndex];
+      if (owner != null && owner !== candidate.tileId) {
+        conflicts.set(candidate.tileId, candidate.blobIndex);
+      } else {
+        afterSlots[candidate.blobIndex] = candidate.tileId;
+        accepted.push(candidate);
+      }
+    }
+    if (accepted.length === pending.length) break;
+    pending = accepted;
   }
-  // A conflicted tile was removed from the working slots above only if it had
-  // moved. Restore it exactly, and do not create a history command if every
-  // changed cell was blocked by a duplicate/other terrain set.
-  for (const candidate of candidates) if (conflicts.has(candidate.tileId)) {
-    const before = beforeTiles.get(candidate.tileId);
-    if (before?.terrainSetId === terrainSet.id && before.blobIndex != null) afterSlots[before.blobIndex] = candidate.tileId;
+  for (const { tileId, blobIndex } of pending) {
+    afterTiles.set(tileId, { terrainSetId: terrainSet.id, blobIndex, duplicateOf: undefined });
   }
   if (afterTiles.size) {
     runCommand(services, sheetId, 'paint autotile terrain',

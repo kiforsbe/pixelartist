@@ -2,12 +2,16 @@
 
 End-to-end manual/Playwright script covering every major feature area
 (condensed from the Task 13/16/18/19/20 verification lists). Run against
-`http://localhost:8080/?autotest` — the `?autotest` query flag
+the local URL printed by `./serve.ps1`, with `?autotest` appended (the
+launcher chooses an available port; do not assume 8080). Alternatively,
+`python -m http.server 8080` uses `http://localhost:8080/?autotest`.
+The `?autotest` query flag
 (`js/platform/browser/autotest.js`) suppresses `confirm()`/`beforeunload`
 prompts and skips the autosave-restore prompt on boot, so automated runs
 don't block on native dialogs.
 
 Each item is marked:
+
 - **[A]** automatable via Playwright MCP (dispatch clicks/keys, read
   `state`/DOM/console — no native OS picker involved)
 - **[M]** manual only (native file/folder pickers, requires leaving the
@@ -20,16 +24,24 @@ layers, palettes, frames, animation, the frame/tile editors, tile mode, or
 exports. Check the browser console after every step — zero errors/warnings
 is a pass condition for the whole run, not just the final step.
 
+Where an **[A]** item needs existing artwork, a grid, or a floating selection,
+prepare a disposable fixture through the model/command APIs or use
+owner-prepared state; do not synthesize drag gestures to set it up. The
+**[M]** items remain separate owner-run release gates, not covered by an
+automated pass. This checklist is procedure, not a record of completed checks.
+
 ## 1. Launch
 
 Focused startup/panel regressions are also executable in
 `tests/browser/workbench-regressions.mjs`. With an isolated Playwright `page`
-and a local server already running, invoke these from a Node session at the
-repository root (these browser checks are separate from `npm test`):
+and a local server already running, set `PIXELARTIST_URL` to its printed
+local URL and invoke these from a Node session at the repository root
+(these browser checks are separate from `npm test`):
 
 ```js
 const checks = await import('./tests/browser/workbench-regressions.mjs');
-await checks.verifyInitialSheet(page, 'http://localhost:8080/?autotest');
+const appUrl = new URL('?autotest', process.env.PIXELARTIST_URL).href;
+await checks.verifyInitialSheet(page, appUrl);
 await checks.verifySheetSwitchSizing(page);
 await checks.verifyModePanelVisibility(page);
 ```
@@ -38,7 +50,7 @@ They check the rendered checkerboard before any mode switch, differently sized
 sheets through the document dropdown, and outer panel visibility across modes.
 They use a disposable project and no native pickers or pointer drags.
 
-1. [A] Open `http://localhost:8080/?autotest`. Page loads, no console
+1. [A] Open the server's printed local URL with `?autotest`. Page loads, no console
    errors, a demo project is created automatically (no autosave-restore
    prompt).
 2. [A] Sprite Sheets tab is active by default; canvas shows the demo
@@ -47,10 +59,10 @@ They use a disposable project and no native pickers or pointer drags.
 
 ## 2. Draw (pencil / shapes / fill / eraser) + undo
 
-4. [A] Select Pencil (`B` or click). Draw a short stroke on the canvas.
+4. [M] Select Pencil (`B` or click). Draw a short stroke on the canvas.
    Pixels change; Undo button becomes enabled.
-5. [A] Select Eraser (`E`). Erase part of the stroke. Undo restores it.
-6. [A] Select Line (`L`), drag a line. Select Rect (`U`), drag a
+5. [A] Select Eraser (`E`). Click a painted pixel to erase it. Undo restores it.
+6. [M] Select Line (`L`), drag a line. Select Rect (`U`), drag a
    rectangle (toggle "Filled" once). Select Ellipse (`O`), drag an
    ellipse (toggle "Filled" once).
 7. [A] Select Fill (`G`), click inside a closed shape. Toggle
@@ -65,7 +77,7 @@ They use a disposable project and no native pickers or pointer drags.
    buttons disable at the ends of the stack.
 9. [A] Eyedropper (`I`): click a drawn pixel, primary color swatch
    updates to match.
-10. [A] Select tool (`M`): drag a marquee; dragging from inside it moves the
+10. [M] Select tool (`M`): drag a marquee; dragging from inside it moves the
     RECTANGLE only (contents stay put — verify pixels unchanged); `Escape`
     clears the marquee. Corner/edge handles (8) resize the marquee; while
     dragging, CAD dimension lines (extension lines, arrows, value pills)
@@ -76,7 +88,7 @@ They use a disposable project and no native pickers or pointer drags.
 11. [A] Layers panel: "Add" creates a new layer, becomes active. Undo
     removes it.
 12. [A] Reorder with the ↑/↓ buttons; undo restores prior order.
-13. [A] Drag the opacity slider; layer visibly fades; releasing commits
+13. [M] Drag the opacity slider; layer visibly fades; releasing commits
     one undo step (not one per drag tick).
 14. [A] "Merge Down" combines the active layer into the one below; undo
     restores both layers and pixels.
@@ -86,7 +98,7 @@ They use a disposable project and no native pickers or pointer drags.
 
 16. [A] Colors panel: open "System…", clone a system palette. It becomes
     active and its swatches render in the strip.
-17. [A] Create a new indexed palette (size preset). Draw with pencil —
+17. [A] Create a new indexed palette (size preset). Click with Pencil —
     color snaps to the nearest palette entry.
 18. [A] Double-click an indexed swatch, change its color: if that color
     is used on the active sheet, a remap confirmation is offered and
@@ -97,7 +109,7 @@ They use a disposable project and no native pickers or pointer drags.
 
 ## 5. Frames
 
-20. [A] Switch to frame tool (`F`, sprite mode only). Drag to create a
+20. [M] Switch to frame tool (`F`, sprite mode only). Drag to create a
     frame; it appears as an overlay on the canvas (labels/sequence overlay
     toggles in the top bar affect visibility). The Frames panel shows a
     detail block for the SELECTED frame only (hint text when nothing is
@@ -111,7 +123,7 @@ They use a disposable project and no native pickers or pointer drags.
     `strip` flag off (converting it to loose frame entries) as one undo
     step and then disappears from the row since the selection is no longer
     a strip.
-21. [A] Drag-move a frame with the frame tool: metadata-only — the frame
+21. [M] Drag-move a frame with the frame tool: metadata-only — the frame
     rect moves, pixels stay put (like dragging a marquee); one undo step
     restores the position. Move shows origin (+dx, +dy); create/resize
     drags show W×H pills with Δ on arrowed dimension lines.
@@ -120,7 +132,7 @@ They use a disposable project and no native pickers or pointer drags.
     handles or rotation knob — live-previewing the pixels; committing
     (Enter/click outside) moves frame rects and pixels together; Escape
     cancels both. Undo of the commit restores rects and pixels.
-22. [A] Drag a corner handle to resize the selected frame; undo restores
+22. [M] Drag a corner handle to resize the selected frame; undo restores
     original bounds.
 23. [A] Frame tool (`F`) options row: Slice grid… button (▦, alongside
     Snap/grid-size) opens a dialog that creates a full grid of frames
@@ -136,7 +148,7 @@ They use a disposable project and no native pickers or pointer drags.
 
 25. [A] Timeline: "New" creates an animation; select a frame in the
     Frames panel, "Add selected frame" appends it to the timeline strip.
-26. [A] Drag-reorder two cells in the strip; undo restores original
+26. [M] Drag-reorder two cells in the strip; undo restores original
     order.
 27. [A] Clicking a timeline cell once: scrubs the preview playhead to it,
     sets the active sheet's selected frame (via SelectionService — check
@@ -197,8 +209,9 @@ They use a disposable project and no native pickers or pointer drags.
 32. [A] Click a frame (via its Edit button, or a single click on its
     timeline cell — see item 27) to open the frame editor; canvas
     re-centers on just that frame.
-33. [A] Draw inside the frame editor — same tools as the sheet view,
-    confined to the frame's rect.
+33. [A] Click with Pencil, Eraser, and Fill inside the frame editor;
+    edits stay confined to the frame's rect. Dragged strokes/shapes remain
+    manual checks (items 4 and 6).
 34. [A] Enable Onion skin: defaults to Back 1 / Ahead 0 (no future ghosts
     until Ahead is raised) and Outline on / Mask off. Outline traces a 1px
     edge around each ghost frame's silhouette (hollow interior, not a
@@ -211,7 +224,8 @@ They use a disposable project and no native pickers or pointer drags.
     ghosts appear/disappear accordingly.
 34b. [A] Mask and Outline each have their OWN opacity slider per direction
     (Back group: ■ Mask α, □ Outline α; Ahead group: same, independent
-    values) — raising Back's Outline α without touching Ahead's changes
+    values) — use keyboard input, not a drag, to raise Back's Outline α
+    without touching Ahead's; this changes
     only past ghosts. The Back/Ahead color swatches in the toolbar set each
     direction's default ghost tint; the ⚙ button opens Project Settings
     (Edit menu > Project Settings…) pre-flipped to its "Onion Steps" tab
@@ -231,8 +245,9 @@ They use a disposable project and no native pickers or pointer drags.
     All of the above (`state.onion` — enabled/back/ahead/mask/outline/
     currentAlpha/back·aheadMaskAlpha/back·aheadOutlineAlpha/back·aheadColor/
     stepColors) lives in `project.settings.onion` and round-trips through
-    Save/Open (verify via `serializeProject`/`deserializeProject` or a real
-    save-reload), not just an in-session preference.
+    Save/Open (automate via `serializeProject`/`deserializeProject`, not
+    native pickers; real save-reload stays [M], items 72–73), not just an
+    in-session preference.
 35. [A] Prev/Next step through the animation's frame order (or sheet
     order if the frame isn't in the selected animation).
 36. [A] `Escape` returns to the sheet view (also via "← Back to sheet").
@@ -240,47 +255,48 @@ They use a disposable project and no native pickers or pointer drags.
 ## 8. Tile mode
 
 37. [A] Switch to Tile Sheets tab on a fresh tile sheet: Tiles panel shows
-    "Add Grid…" and "➕ Autotile set" buttons and "No tile selected" — no
-    grid list or tile count (selection-driven, like the Frames panel).
+    "➕ Autotiles" (tooltip "Add terrain set") and "No tile selected" — no
+    Add Grid dialog, grid list, or tile count (selection-driven, like the
+    Frames panel).
 37b. [A] The Tile Sheets tab shows three separate sidebar panels: "Tiles"
-    (Add Grid…/Add Terrain Set… buttons, selected-tile detail), "Autotiles"
+    ("➕ Autotiles" button and selected-tile detail), "Autotiles"
     (terrain sets, view modes, symmetry toggles), and "Tile Layers" (the
     sheet.tileLayerNames name list). On the Sprite Sheets tab, Autotiles and Tile
     Layers are hidden entirely — not just their inner content: the
     `#panel-autotiles`/`#panel-tilelayers` containers themselves have
     `hidden` set (`getComputedStyle(el).display === 'none'`), so no empty
     bordered/padded box is left behind in the sidebar.
-38. [A] Click "Add Grid…": a dialog opens (Cell W/H, Cols, Rows, Spacing
-    X/Y, defaulted from the project's tile size setting) with a live
-    dashed-outline preview on the canvas that updates as fields change and
-    disappears on Cancel. Create adds a grid; selecting any tile inside it
-    afterward shows that grid's info in the Tiles panel (item 39).
+38. [M] Select Tile tool (`T`) and drag empty canvas space to create a
+    standalone tile. Select it: four short grips appear at its edge centers.
+    Drag one grip outward by whole tile widths/heights to grow a grid;
+    repeat on another edge to add rows/columns. Drag inward to shrink it;
+    a 1×1 grid collapses to a standalone tile. Undo/redo restores each
+    change. This gesture-only workflow replaces the removed Add Grid dialog.
 39. [A] Tile tool (`T`, tile mode only): click a tile in the grid to select
-    it — the Tiles panel shows a name field, "Edit tile", the owning grid's
-    Cell W/H fields (editing either re-lays-out every tile in that grid),
-    "Detach from grid", "Delete grid", and a Layer dropdown (item 59).
-40. [M] Drag one tile onto another SAME-SIZE tile (no Shift) to swap them —
+    it — the Tiles panel shows a name field, an "Edit tile" icon, the owning
+    grid's W/H fields (editing either re-lays-out every tile in that grid),
+    "Detach from grid" and "Delete grid" icons, and a Layer dropdown (item 59).
+40. [M] Drag a standalone tile onto another SAME-SIZE tile (no Shift) to swap them —
     pixels, names, and neighbor presets swap on all layers; undo restores
     both. Shift-drag instead moves (source clears to transparent, its
     name/neighbors move to the target); undo restores both tiles.
-41. [M] Drag a grid-owned tile onto empty space (nothing same-size under
-    the cursor): it snaps back — a single grid cell can't move
-    independently. Dragging the grid's own origin-corner handle instead
-    moves the whole grid and every one of its tiles together; undo
-    restores the prior position.
+41. [M] Drag a grid-owned tile's body: the whole grid moves, clamped to
+    the sheet bounds, even when the pointer lands over another tile. A grid
+    cell does not swap or move independently. The grid's origin-corner
+    handle also moves the whole grid; undo restores the prior position.
 42. [M] Click empty canvas space and drag with the tile tool active: creates
     a new standalone tile there (frame-style create-drag); the panel shows
     W/H fields for it (no "Detach" button, since it isn't grid-owned).
     Dragging a standalone tile to empty space (or a different-size tile)
     repositions it; undo restores its prior position.
 43. [A] Select a grid-owned tile, click "Detach from grid" — it becomes a
-    standalone tile (W/H fields appear, resize handles become available);
+    standalone tile (W/H fields now edit only this tile; resize handles appear);
     undo restores its grid membership.
-44. [A] Selecting a tile in a grid and editing that grid's Cell W/H fields
+44. [A] Selecting a tile in a grid and editing that grid's W/H fields
     (Tiles panel, item 39) re-lays-out every owned tile from the grid's
     origin, preserving each cell's name/neighbor preset; each edit is one
-    undo step. (Cols/Rows are fixed at grid creation — no in-panel resize
-    UI as of the Tiles/Autotiles panel cleanup.)
+    undo step. Row/column counts change via edge-grip drags, not panel
+    fields; verify those separately in manual item 38.
 45. [A] "Delete grid" (Tiles panel, item 39) removes the grid and every
     tile it owns; if that empties out a terrain set (no tile references it
     anymore), the terrain set is deleted too and its row disappears from
@@ -294,7 +310,7 @@ They use a disposable project and no native pickers or pointer drags.
 
 46. [A] Double-click a tile (or "Edit tile") to open the tile editor;
     center tile is outlined, neighbor cells render the live composite.
-47. [A] Draw inside the center tile: neighbor cells that mirror it (mode
+47. [M] Draw inside the center tile: neighbor cells that mirror it (mode
     `same`) update live as you draw (drag confinement: strokes cannot
     escape the center tile even if the drag leaves it).
 48. [A] Click a neighbor slot (outside the center tile, no drag) to open
@@ -309,8 +325,8 @@ They use a disposable project and no native pickers or pointer drags.
 
 ## 9a. Terrain sets, layers & tags
 
-50. [A] Terrain Sets list (Autotiles panel) starts empty; the "➕ Autotile
-    set" button — now in the Tiles panel, alongside "Add Grid…" — opens a
+50. [A] Terrain Sets list (Autotiles panel) starts empty; the "➕ Autotiles"
+    button in the Tiles panel (tooltip "Add terrain set") opens a
     dialog that defaults Tile W/H from the project's tile size setting;
     creating one adds a row to the Autotiles panel's list with its name and
     size.
@@ -418,9 +434,12 @@ They use a disposable project and no native pickers or pointer drags.
 
 64. [A] Each tool hotkey (`B E G L U O I M`, plus `F`/`T` in their
     respective modes) selects the matching tool; hotkeys are ignored
-    while a text input/checkbox/select has focus or a dialog is open.
+    while an input (including a checkbox), textarea, contenteditable field,
+    or control inside an open dialog has focus.
 65. [A] `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` undo/redo (already covered
-    in section 2).
+    in section 2). Undo, Redo, and Save must leave input/textarea/
+    contenteditable editing alone and do nothing while any dialog is open;
+    outside those contexts they operate normally.
 66. [A] `Ctrl+S` on a project with no save target yet opens the Save As
     dialog (same as clicking the Save button); close it via Cancel. (A
     project that already has a save target — packed or unpacked — would
@@ -436,8 +455,8 @@ They use a disposable project and no native pickers or pointer drags.
     7, 9).
 70. [A] `Delete` removes the selected frame while the frame tool is
     active (already covered in section 5, item 24).
-71. [A] Mouse wheel zooms the canvas centered on the cursor; `Space`+drag
-    (or middle-mouse drag) pans.
+71. [A] Mouse wheel zooms the canvas centered on the cursor.
+71b. [M] `Space`+drag (or middle-mouse drag) pans.
 
 ## 12. Packed save/open round trip [M]
 
@@ -521,10 +540,10 @@ They use a disposable project and no native pickers or pointer drags.
     (`0.25, 0.5, 0.75, 1, 2, 3, 4, 6, 8, 12, 16, ...`); repeated
     scroll-in/scroll-out reaches both 0.25x and 16x without sticking at
     any intermediate level, and the status bar zoom readout matches.
-80. [A] Pan the canvas (`Space`+drag or middle-mouse drag): the
+80. [M] Pan the canvas (`Space`+drag or middle-mouse drag): the
     checkerboard transparency background scrolls with the content
     (anchored to canvas content, not fixed to the viewport).
-81. [A] Layers panel: each row shows a live thumbnail. Draw a stroke on
+81. [M] Layers panel: each row shows a live thumbnail. Draw a stroke on
     layer 1 — its thumbnail updates continuously during the stroke (not
     just on mouse-up). Add layer 2 and draw different pixels on it — the
     two thumbnails show distinct content, both live while drawing.
@@ -543,19 +562,19 @@ They use a disposable project and no native pickers or pointer drags.
     extension, its dimensions match the image, and layer 0's pixels match
     the PNG's. Undo removes the sheet and restores the prior active
     sheet/layer.
-83. [A] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
+83. [M] Move tool (✋, `V`), no marquee: drag on the canvas — the whole
     target region floats (source hole appears, outline + handles shown);
     the layer bitmap is NOT modified beyond the source cut until commit.
     `Enter` commits at the new position; stepwise undo: Ctrl+Z undoes the
     commit, then the drag, then the float itself.
-84. [A] Move tool with a marquee: only the selected region floats; drag,
+84. [M] Move tool with a marquee: only the selected region floats; drag,
     then `Escape` — pixels restored exactly to the original spot.
-85. [A] Transform handles: drag a corner handle (scale, incl. pull-through
+85. [M] Transform handles: drag a corner handle (scale, incl. pull-through
     flip), drag the rotation knob (free rotate); commit renders the
     nearest-neighbor result; each completed drag is one undo step. Scale
     shows W×H pills with Δ (scaled content size); rotate shows an angle
     pill near the knob.
-86. [A] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
+86. [M] `Alt`+drag floats ALL layers (one buffer per layer); commit writes
     each layer; single-layer default otherwise. In the frame editor a
     committed float is clipped to the frame rect.
 87. [A] Rename sheet: with a sheet active, click ✎ — the Rename Sheet
@@ -652,7 +671,7 @@ They use a disposable project and no native pickers or pointer drags.
      all-layers updates the preview in real time; Cancel reverts the panel
      to the real (unchanged) content; OK commits and the panel matches the
      committed result.
-103. [A] Edit > Filters > Chroma Key…: opens pre-filled with the primary
+103. [M] Edit > Filters > Chroma Key…: opens pre-filled with the primary
      color as Key color; toggling "Replace with color" reveals the
      Replace-with color row; dragging Tolerance/Softness and editing the
      color/hex fields all update the Preview panel live; "← Primary"/
@@ -666,3 +685,5 @@ They use a disposable project and no native pickers or pointer drags.
   errors/warnings across the whole run.
 - `npm test` reports all green (see the suite's own summary line for the
   current total).
+- The owner completes **[M]** release gates separately; an automated pass
+  does not replace native-picker or pointer-gesture checks.

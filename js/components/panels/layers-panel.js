@@ -5,7 +5,7 @@ import { activeSheet, activeLayer, activeMap } from '../../host/document-helpers
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { mountStorePanel } from '../panel-mount.js';
 import { documentKey } from '../../host/editor-store.js';
-import { activeFloating } from '../canvas/float-session.js';
+import { activeFloating, commitFloatIfAny } from '../canvas/float-session.js';
 import { commitDeleteAnimation } from '../../features/animations/commands.js';
 import { findNode, findParent, sheetLayers, flattenLayers, findGroup, animationGroup, layerAnimationContext } from '../../core/model.js';
 import { compositeFloatOnLayer } from '../../core/floating.js';
@@ -214,6 +214,9 @@ export function mountLayersPanel(el) {
       const survivors = flattenLayers(parent).filter(candidate => candidate.id !== layer.id);
       const fallback = survivors[Math.min(loc.index, survivors.length - 1)];
       const fallbackId = fallback ? fallback.id : null;
+      // Settle while the source layers still exist, before the command takes
+      // its undo snapshot; the later selection notification is too late.
+      commitFloatIfAny();
       dispatch(`${mode}.deleteNode`, { sheetId: sheet.id, nodeId: layer.id });
       setSheetSelection(sheet, { layerId: fallbackId });
       selectedNodeId = fallbackId;
@@ -225,6 +228,7 @@ export function mountLayersPanel(el) {
         if (g.animationId) {
           const anim = sheet.animations.find(a => a.id === g.animationId);
           if (!confirmOrAuto(`Delete animation "${anim?.name ?? g.name}" and its frames?`)) return;
+          commitFloatIfAny();
           commitDeleteAnimation(sheet, g.animationId);
           // commitDeleteAnimation lives in js/features/animations/commands.js and has no knowledge
           // of this panel's own local selectedNodeId -- clear it so a stale
@@ -238,6 +242,7 @@ export function mountLayersPanel(el) {
         }
         if (!confirmOrAuto(`Delete group "${g.name}" and its contents?`)) return;
         const beforeActive = currentLayerId();
+        commitFloatIfAny();
         dispatch(`${mode}.deleteNode`, { sheetId: sheet.id, nodeId: g.id });
         selectedNodeId = beforeActive;
       }
@@ -253,6 +258,8 @@ export function mountLayersPanel(el) {
     if (!loc || loc.index <= 0) { alert('Cannot merge the bottom layer down.'); return; }
     const dest = loc.parent.children[loc.index - 1];
     if (dest.type !== 'layer') { alert('Cannot merge into a group.'); return; }
+    // The merge must composite settled pixels and snapshot that same source.
+    commitFloatIfAny();
     const destId = dispatch(`${mode}.mergeDown`, { sheetId: sheet.id, layerId: layer.id });
     if (destId) { setSheetSelection(sheet, { layerId: destId }); selectedNodeId = destId; }
   }
@@ -574,6 +581,7 @@ export function mountLayersPanel(el) {
     let opacityBefore = null;
     opacityInput.addEventListener('pointerdown', (e) => { e.stopPropagation(); opacityBefore = layer.opacity; });
     opacityInput.addEventListener('input', () => {
+      opacityBefore ??= layer.opacity;
       layer.opacity = Number(opacityInput.value) / 100;
       getEditorHost().store.notifyPixelsChanged();
     });
@@ -629,7 +637,7 @@ export function mountLayersPanel(el) {
     const opacityInput = document.createElement('input'); opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100'; opacityInput.value = String(Math.round(layer.opacity * 100)); opacityInput.addEventListener('click', e => e.stopPropagation());
     let before = null;
     opacityInput.addEventListener('pointerdown', e => { e.stopPropagation(); before = layer.opacity; });
-    opacityInput.addEventListener('input', () => { layer.opacity = Number(opacityInput.value) / 100; host.store.notifyPixelsChanged(); });
+    opacityInput.addEventListener('input', () => { before ??= layer.opacity; layer.opacity = Number(opacityInput.value) / 100; host.store.notifyPixelsChanged(); });
     opacityInput.addEventListener('change', () => {
       if (before != null && before !== layer.opacity) {
         // Same before/after ordering fix as renderLayer's opacity handler.
