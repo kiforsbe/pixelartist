@@ -14,7 +14,7 @@ function makeServices(project) {
 }
 
 function makeProject() {
-  return { sheets: [{ id: 'sheet1', layers: [], tiles: [] }] };
+  return { sheets: [{ id: 'sheet1', tileLayerNames: [], tiles: [] }] };
 }
 
 test('addTileLayer appends a layer name and is undoable', () => {
@@ -22,28 +22,32 @@ test('addTileLayer appends a layer name and is undoable', () => {
   const services = makeServices(project);
 
   addTileLayer(services, 'sheet1', 'terrain');
-  assert.deepEqual(project.sheets[0].layers, ['terrain']);
+  assert.deepEqual(project.sheets[0].tileLayerNames, ['terrain']);
 
   services.history.undo();
-  assert.deepEqual(project.sheets[0].layers, []);
+  assert.deepEqual(project.sheets[0].tileLayerNames, []);
 
   services.history.redo();
-  assert.deepEqual(project.sheets[0].layers, ['terrain']);
+  assert.deepEqual(project.sheets[0].tileLayerNames, ['terrain']);
 });
 
 test('removeTileLayer clears the layer name from every tile that used it, and undo restores both', () => {
   const project = makeProject();
   const sheet = project.sheets[0];
-  sheet.layers = ['terrain', 'decor'];
+  sheet.tileLayerNames = ['terrain', 'decor'];
   sheet.tiles = [{ id: 't1', layer: 'terrain' }, { id: 't2', layer: 'decor' }];
   const services = makeServices(project);
 
   removeTileLayer(services, 'sheet1', 'terrain');
-  assert.deepEqual(sheet.layers, ['decor']);
+  assert.deepEqual(sheet.tileLayerNames, ['decor']);
   assert.equal(sheet.tiles[0].layer, undefined);
   assert.equal(sheet.tiles[1].layer, 'decor');
 
   services.history.undo();
-  assert.deepEqual(sheet.layers, ['terrain', 'decor']);
+  assert.deepEqual(sheet.tileLayerNames, ['terrain', 'decor']);
   assert.equal(sheet.tiles[0].layer, 'terrain');
+  services.history.redo();
+  assert.deepEqual(sheet.tileLayerNames, ['decor']);
+  assert.equal(sheet.tiles[0].layer, undefined);
+  assert.equal(sheet.tiles[1].layer, 'decor');
 });

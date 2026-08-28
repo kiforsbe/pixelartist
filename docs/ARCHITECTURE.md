@@ -1,6 +1,6 @@
 # PixelArtist Architecture
 
-Snapshot after the Phase 4 state-ownership migration. No build step, no
+Snapshot after the Phase 5 naming polish. No build step, no
 framework — plain ES modules loaded directly by the browser (see
 [Build & tooling](#build--tooling)).
 
@@ -12,7 +12,9 @@ layers have been retired.
 
 The architecture migration described in
 [`2026-08-08-ddd-target-architecture-design.md`](superpowers/specs/2026-08-08-ddd-target-architecture-design.md)
-is complete through Phase 4 as of commit `c41355e`:
+is complete through Phase 5. Phase 4 retired the legacy architecture in
+commit `c41355e`; Phase 5 renamed the tile metadata field without changing
+the saved or exported format:
 
 | Phase | Status | Result |
 |---|---|---|
@@ -21,14 +23,14 @@ is complete through Phase 4 as of commit `c41355e`:
 | 2 — Sprites | Complete | Sprites presentation and commands use host services and registries. |
 | 3 — Tiles | Complete | Tiles presentation and commands use host services and registries. |
 | 4 — Shell + legacy retirement | Complete | `js/app`, `js/ui`, the compatibility event bus, and the host-to-legacy mirror are gone. |
-| 5 — Polish | Optional, not started | Rename the in-memory tile metadata field `sheet.layers` to `sheet.tileLayerNames`. |
+| 5 — Polish | Complete | Renamed the in-memory tile metadata field to `sheet.tileLayerNames`; saved/exported `layers` keys remain unchanged. |
 
-Phase 5 is naming cleanup, not a prerequisite for further feature work. If it
-is undertaken, keep the persisted project format backward compatible: the
-serializer may continue writing the existing `layers` field, while the model
-uses `tileLayerNames` internally. The deserializer and validator must continue
-to distinguish old flat pixel-layer payloads from current tile-layer-name
-metadata before translating either representation.
+Phase 5 is internal naming cleanup: project files still use version 3 and
+the existing `layers` key, while the model uses `tileLayerNames`. Tile exports
+also retain `layers` (omitted when empty). The deserializer and validator
+continue to support version 2 files and distinguish old flat pixel-layer
+payloads from current tile-layer-name metadata: without `layerTree`, `layers`
+contains pixel records to migrate into the tree, not tile names.
 
 Before a release, run the automated suite and the owner-operated `[M]` cases in
 [`tests/smoke.md`](../tests/smoke.md). Those cases cover native file/folder
@@ -454,7 +456,7 @@ one `defineAction` call per id, consumed by both a toolbar button
 (`bindAction`) and a menu item (`getAction`/`runAction`), so they can never
 drift out of sync with each other.
 
-## Rendering & the `layerTree` / `layers` split
+## Rendering & the `layerTree` / `tileLayerNames` split
 
 Core rendering lives in `js/core/model.js` / `js/core/pixels.js`.
 `flattenSheet(sheet, floating, overrideLayers)` is the master compositor:
@@ -470,26 +472,23 @@ Consumers cache their own flattened canvas, invalidated by store selectors,
 (main canvas), `modes/tiles/presentation/tile-raster-cache.js` (tile sheet +
 thumbnails), and `modes/{sprites,tiles}/preview.js` (Preview panel).
 
-**`sheet.layerTree` and `sheet.layers` are two unrelated fields that
-happen to share a naming root** — worth flagging explicitly since it's a
-common trap when reading this code:
+`sheet.layerTree` and `sheet.tileLayerNames` serve separate purposes:
 
 - `sheet.layerTree` — the actual pixel-layer hierarchy (a tree of
   `GROUP`/`LAYER` nodes, a group can own an animation via `animationId`).
   Exists on every sheet. `sheetLayers(sheet) = flattenLayers(sheet.layerTree)`
   is what actually gets rendered.
-- `sheet.layers` — a flat array of plain strings, tile-only (`null` on
+- `sheet.tileLayerNames` — a flat array of plain strings, tile-only (`null` on
   sprite sheets). Arbitrary "layer name" tags (e.g. "Ground", "Decor")
   used to categorize individual `tile` objects (`tile.layer = name`),
   managed entirely by `application/commands/tile-layer-commands.js` +
   `presentation/tile-layers-panel.js`.
   Has nothing to do with pixel compositing.
 
-`model.js` documents the history: *"A sheet now stores its layers inside a
-hierarchical `layerTree` instead of a flat `layers[]` array... Every
-operation that used to read `sheet.layers` now goes through
-`sheetLayers(sheet)`..."* — `sheet.layers` was repurposed for tile-tag
-names rather than removed, which is why the name collides.
+Historically, `sheet.layers` held pixels before `layerTree`, then was
+repurposed for tile-tag names. Phase 5 removed this runtime naming collision.
+The serialized `layers` key remains for compatibility; loading older flat
+pixel-layer records never populates `tileLayerNames` with those records.
 
 ```mermaid
 classDiagram
@@ -497,7 +496,7 @@ classDiagram
         +id: string
         +kind: 'sprite' | 'tile'
         +layerTree: GroupNode
-        +layers: string[] | null
+        +tileLayerNames: string[] | null
         +tiles: Tile[]
     }
     class GroupNode {
@@ -518,9 +517,9 @@ classDiagram
     GroupNode "1" o-- "*" GroupNode
     GroupNode "1" o-- "*" LayerNode
     Sheet "1" o-- "*" Tile : tile-kind only
-    Tile "*" ..> "*" Sheet : layer references a name in sheet.layers[]
+    Tile "*" ..> "*" Sheet : layer references a name in sheet.tileLayerNames[]
 
-    note for Sheet "layerTree = real bitmaps, rendered.\nlayers = tile tag names, unrelated to compositing."
+    note for Sheet "layerTree = real bitmaps, rendered.\ntileLayerNames = tile tag names, unrelated to compositing."
 ```
 
 ## State model

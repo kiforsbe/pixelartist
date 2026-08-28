@@ -711,7 +711,7 @@ export function mountLayersPanel(el) {
   // sheet.layerTree (bitmap layers: visibility, opacity, groups) is shared
   // by sprite and tile sheets alike -- see activeLayer() in
   // host/document-helpers.js and flattenSheet() in core/model.js, which
-  // never branch on sheet.kind. It's unrelated to sheet.layers (tilemode.js's
+  // never branch on sheet.kind. It's unrelated to sheet.tileLayerNames (the
   // flat named-tag array for categorizing tiles, mounted separately as the
   // "Tile Layers" panel). Groups only ever gain an animationId via frames.js's
   // commitAcceptAnimation, which is gated to sprite mode, so these actions

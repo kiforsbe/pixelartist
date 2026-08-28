@@ -1074,3 +1074,22 @@ Once all 10 tasks are complete: dispatch the plan's final whole-branch review on
 Two plan-sketch corrections were necessary: palette history resolves the originally edited palette ID, and caller-owned layer selection recovery repairs the authoritative selection rather than only row highlighting. Map rename also reuses the sheet rows' narrow click deferral so its repaired commit path is reachable.
 
 Phase 5's optional `sheet.layers` → `sheet.tileLayerNames` polish is separate and has not started. A pre-existing blank-startup-canvas sizing issue (already present at `7a5f1d0`, resolved visually by a mode roundtrip) remains a separate follow-up; it is not one of the six migration regressions fixed here. Phase 4's review and acceptance gates are closed, with the owner-only reorder gate accepted by user instruction as recorded above; no additional manual execution is claimed.
+
+### Migration closeout — 2026-08-28 (supersedes the follow-up status above)
+
+- [x] Phase 5 is complete: runtime tile metadata uses `sheet.tileLayerNames`;
+  project/export JSON retains `layers`, version 3, and legacy v2/flat-layer loading.
+- [x] The separate startup blank-canvas issue is fixed. Canvas refresh observes
+  active-document changes, including switches between differently sized sheets.
+- [x] Inactive Tile Layers/Autotiles containers now hide completely. Shared
+  panel mount points remain visible while another active panel uses them.
+- [x] Independent reviews of Phase 5 and the workbench fixes reported no issues.
+  Latest full verification: **723/723 tests passing**; focused browser checks
+  cover startup, sheet switching, mode visibility, and drawing undo/redo at
+  1600×900 and 1280×800. Native pickers and pointer drags were not simulated.
+- [x] Plan implementation and the identified follow-up fixes are closed. The
+  accepted owner-only reorder gate remains closed as recorded above; this does
+  not replace release-time manual smoke checks.
+
+`docs/ARCHITECTURE.md` is the current-state reference. This plan retains its
+dated implementation instructions and checkpoints as historical context.

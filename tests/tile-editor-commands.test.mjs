@@ -22,7 +22,7 @@ function makeSheet(overrides = {}) {
   return {
     id: 'sheet1', width: 32, height: 32,
     layerTree: { type: 'group', id: 'root', children: [{ type: 'layer', id: 'l0', bitmap: createBitmap(32, 32), visible: true, opacity: 1 }] },
-    tiles: [], tileGrids: [], terrainSets: [], layers: [],
+    tiles: [], tileGrids: [], terrainSets: [], tileLayerNames: [],
     ...overrides,
   };
 }

@@ -125,12 +125,15 @@ test('buildTilesJson: terrainSets export resolved {tileIndex,flipH,flipV,rotate}
 test('buildTilesJson: layers export as an ordered array, per-tile layer/tags included, omitted when unset', () => {
   const p = createProject('t');
   const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
-  sheet.layers.push('Ground', 'Props');
+  sheet.tileLayerNames.push('Ground', 'Props');
   sheet.tiles.push({ id: 't0', x: 0, y: 0, w: 16, h: 16, name: 'grass', gridId: null, neighbors: undefined, terrainSetId: undefined, blobIndex: undefined, layer: 'Ground', tags: ['nature'] });
   const json = buildTilesJson(sheet);
   assert.deepEqual(json.layers, ['Ground', 'Props']);
+  assert.equal(Object.hasOwn(json, 'tileLayerNames'), false);
   assert.equal(json.tiles[0].layer, 'Ground');
   assert.deepEqual(json.tiles[0].tags, ['nature']);
+  json.layers.push('Above');
+  assert.deepEqual(sheet.tileLayerNames, ['Ground', 'Props']);
 });
 
 test('buildTilesJson: a terrain-set tile omits the manual neighbors block', () => {

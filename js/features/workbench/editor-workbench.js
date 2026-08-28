@@ -183,6 +183,10 @@ export function mountEditorWorkbench() {
     { fireImmediately: true },
   );
   editorHost.store.subscribe(s => s.session.activeViewId, refreshCanvasView, { fireImmediately: true });
+  // Project replacement activates its document after notifying project subscribers.
+  // Also refresh when switching sheets within the same view; repaint alone leaves
+  // CanvasView's logical dimensions at zero (startup) or at the previous sheet size.
+  editorHost.store.subscribe(s => documentKey(s.session.activeDocument), refreshCanvasView);
   // Show Labels / Show Sequences: repaint directly off the host store rather than the
   // legacy 'view' bus — file-controller.js's overlays mirror still emits 'view' for the
   // benefit of not-yet-migrated files, but nothing in this file listens for it anymore.

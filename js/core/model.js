@@ -177,7 +177,7 @@ export function createSheet(project, { name, width, height, kind }) {
     tiles: kind === 'tile' ? [] : null,
     terrainSets: kind === 'tile' ? [] : null,
     terrainLayoutPresets: kind === 'tile' ? [] : null,
-    layers: kind === 'tile' ? [] : null,
+    tileLayerNames: kind === 'tile' ? [] : null,
   };
   project.sheets.push(sheet);
   return sheet;
@@ -637,7 +637,8 @@ export function serializeProject(project) {
       terrainLayoutPresets: s.terrainLayoutPresets
         ? s.terrainLayoutPresets.map(p => ({ ...p, cells: p.cells.map(c => ({ ...c })) }))
         : null,
-      layers: s.layers ? s.layers.slice() : null,
+      // Keep the existing project-file key; only the runtime name changed.
+      layers: s.tileLayerNames ? s.tileLayerNames.slice() : null,
       frames: s.frames.map(f => ({ ...f })),
       animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })), breaks: (a.breaks ?? []).slice(), layerGroupId: a.layerGroupId ?? null })),
       layerTree: serializeGroup(s.layerTree, s.id, images),
@@ -685,12 +686,13 @@ export function deserializeProject(json, imagesByPath) {
       return {
         id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
         ...(() => {
-          if (s.kind !== 'tile') return { tileGrids: null, tiles: null, terrainSets: null, terrainLayoutPresets: null, layers: null };
-          if (!s.tiles && s.tile) return { ...migrateLegacyTile(s), terrainSets: [], terrainLayoutPresets: [], layers: [] };
+          if (s.kind !== 'tile') return { tileGrids: null, tiles: null, terrainSets: null, terrainLayoutPresets: null, tileLayerNames: null };
+          if (!s.tiles && s.tile) return { ...migrateLegacyTile(s), terrainSets: [], terrainLayoutPresets: [], tileLayerNames: [] };
           return {
             tileGrids: s.tileGrids ?? [], tiles: s.tiles ?? [],
             terrainSets: s.terrainSets ?? [], terrainLayoutPresets: s.terrainLayoutPresets ?? [],
-            layers: s.layers ?? [],
+            // Without a tree, saved `layers` are legacy pixels, not tile names.
+            tileLayerNames: s.layerTree ? (s.layers ?? []) : [],
           };
         })(),
         frames: s.frames ?? [],

@@ -62,9 +62,9 @@ export function mountTileLayersPanel(element, { showVisibility = false, showOpac
     const sheet = activeSheet('tile');
     list.innerHTML = '';
     if (!sheet) return;
-    if (selectedName != null && !sheet.layers.includes(selectedName)) selectedName = null;
+    if (selectedName != null && !sheet.tileLayerNames.includes(selectedName)) selectedName = null;
 
-    for (const name of sheet.layers) {
+    for (const name of sheet.tileLayerNames) {
       const row = document.createElement('div');
       row.className = `layer-row${name === selectedName ? ' active' : ''}`;
       row.tabIndex = 0;

@@ -294,7 +294,7 @@ export function terrainSetLayerField(sheet, terrainSet) {
   const select = document.createElement('select');
   const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '(none)';
   select.appendChild(noneOpt);
-  sheet.layers.forEach((name) => {
+  sheet.tileLayerNames.forEach((name) => {
     const opt = document.createElement('option');
     opt.value = name; opt.textContent = name;
     select.appendChild(opt);

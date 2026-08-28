@@ -30,7 +30,7 @@ function makeSheet(overrides = {}) {
   return {
     id: 'sheet1', width: 16, height: 8,
     layerTree: { type: 'group', id: 'root', children: [{ type: 'layer', id: 'l0', bitmap: createBitmap(16, 8), visible: true, opacity: 1 }] },
-    tiles: [], tileGrids: [], terrainSets: [], layers: [],
+    tiles: [], tileGrids: [], terrainSets: [], tileLayerNames: [],
     ...overrides,
   };
 }

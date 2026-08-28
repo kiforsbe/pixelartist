@@ -80,7 +80,7 @@ export function buildTilesJson(sheet) {
     });
   }
 
-  if (sheet.layers?.length) result.layers = sheet.layers.slice();
+  if (sheet.tileLayerNames?.length) result.layers = sheet.tileLayerNames.slice();
 
   sheet.tiles.forEach((tile, index) => {
     if (!tile.name && !tile.neighbors && tile.terrainSetId == null && tile.layer == null && !tile.tags?.length) return;

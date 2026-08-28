@@ -143,7 +143,7 @@ export function mountTilePanel(element) {
       noneOption.value = '';
       noneOption.textContent = '(none)';
       layerSelect.appendChild(noneOption);
-      for (const name of sheet.layers) {
+      for (const name of sheet.tileLayerNames) {
         const option = document.createElement('option');
         option.value = name;
         option.textContent = name;

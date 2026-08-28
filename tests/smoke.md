@@ -22,6 +22,22 @@ is a pass condition for the whole run, not just the final step.
 
 ## 1. Launch
 
+Focused startup/panel regressions are also executable in
+`tests/browser/workbench-regressions.mjs`. With an isolated Playwright `page`
+and a local server already running, invoke these from a Node session at the
+repository root (these browser checks are separate from `npm test`):
+
+```js
+const checks = await import('./tests/browser/workbench-regressions.mjs');
+await checks.verifyInitialSheet(page, 'http://localhost:8080/?autotest');
+await checks.verifySheetSwitchSizing(page);
+await checks.verifyModePanelVisibility(page);
+```
+
+They check the rendered checkerboard before any mode switch, differently sized
+sheets through the document dropdown, and outer panel visibility across modes.
+They use a disposable project and no native pickers or pointer drags.
+
 1. [A] Open `http://localhost:8080/?autotest`. Page loads, no console
    errors, a demo project is created automatically (no autosave-restore
    prompt).
@@ -229,7 +245,7 @@ is a pass condition for the whole run, not just the final step.
 37b. [A] The Tile Sheets tab shows three separate sidebar panels: "Tiles"
     (Add Grid…/Add Terrain Set… buttons, selected-tile detail), "Autotiles"
     (terrain sets, view modes, symmetry toggles), and "Tile Layers" (the
-    sheet.layers name list). On the Sprite Sheets tab, Autotiles and Tile
+    sheet.tileLayerNames name list). On the Sprite Sheets tab, Autotiles and Tile
     Layers are hidden entirely — not just their inner content: the
     `#panel-autotiles`/`#panel-tilelayers` containers themselves have
     `hidden` set (`getComputedStyle(el).display === 'none'`), so no empty

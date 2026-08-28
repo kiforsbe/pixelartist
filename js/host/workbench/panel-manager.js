@@ -46,6 +46,19 @@ export class PanelManager {
       const disposable = toDisposable(panel.create(frame.body, context));
       this.#mounted.set(panel.id, { definition: panel, frame, disposable });
     }
+    // A hidden contribution must not leave its padded/bordered mount point empty.
+    // Include not-yet-mounted panels (initial mode) and combine shared mount points:
+    // hiding Tiles must not hide the Frames/Map panel using the same container.
+    const visibleMounts = new Map();
+    for (const panel of this.#registry.list()) {
+      if (!panel.mountPoint) continue;
+      const visible = wanted.has(panel.id) && this.#mounted.has(panel.id);
+      visibleMounts.set(panel.mountPoint, visibleMounts.get(panel.mountPoint) || visible);
+    }
+    for (const [id, visible] of visibleMounts) {
+      const mount = document.getElementById(id);
+      if (mount) mount.hidden = !visible;
+    }
   }
 
   dispose() {

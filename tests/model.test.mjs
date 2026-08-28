@@ -345,34 +345,37 @@ test('createSheet sprite kind has null tileGrids/tiles', () => {
   assert.equal(s.tiles, null);
 });
 
-test('createSheet: tile-kind sheet gets empty terrainSets/terrainLayoutPresets/layers, non-tile gets null', () => {
+test('createSheet: tile-kind sheet gets empty terrain metadata, non-tile gets null', () => {
   const p = createProject('t');
   const tileSheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
   assert.deepEqual(tileSheet.terrainSets, []);
   assert.deepEqual(tileSheet.terrainLayoutPresets, []);
-  assert.deepEqual(tileSheet.layers, []);
+  assert.deepEqual(tileSheet.tileLayerNames, []);
   const spriteSheet = createSheet(p, { name: 'Sprites', width: 32, height: 32, kind: 'sprite' });
   assert.equal(spriteSheet.terrainSets, null);
   assert.equal(spriteSheet.terrainLayoutPresets, null);
-  assert.equal(spriteSheet.layers, null);
+  assert.equal(spriteSheet.tileLayerNames, null);
 });
 
-test('serializeProject/deserializeProject round-trips terrainSets/terrainLayoutPresets/layers and per-tile fields', () => {
+test('serializeProject/deserializeProject keeps the layers wire key for tileLayerNames and preserves per-tile metadata', () => {
   const p = createProject('t');
   const sheet = createSheet(p, { name: 'Tiles', width: 32, height: 32, kind: 'tile' });
   sheet.terrainSets.push({ id: 'ts1', name: 'Grass', tileW: 16, tileH: 16, slots: { 0: 'ti1' }, symmetry: { flip: true, rotate: false } });
   sheet.terrainLayoutPresets.push({ id: 'tlp1', name: 'My layout', cols: 4, rows: 4, cells: [{ col: 0, row: 0, blobIndex: 0 }] });
-  sheet.layers.push('Ground', 'Props');
+  sheet.tileLayerNames.push('Ground', 'Props');
   sheet.tiles.push({ id: 'ti1', x: 0, y: 0, w: 16, h: 16, name: 'grass', gridId: null, gridCol: undefined, gridRow: undefined, neighbors: undefined, terrainSetId: 'ts1', blobIndex: 0, layer: 'Ground', tags: ['nature', 'walkable'] });
 
   const { json, images } = serializeProject(p);
+  assert.equal(json.version, 3);
+  assert.deepEqual(json.sheets[0].layers, ['Ground', 'Props']);
+  assert.equal(Object.hasOwn(json.sheets[0], 'tileLayerNames'), false);
   const imagesByPath = new Map(images.map(i => [i.path, i.bitmap]));
   const reloaded = deserializeProject(json, imagesByPath);
   const rt = reloaded.sheets.find(s => s.name === 'Tiles');
 
   assert.deepEqual(rt.terrainSets, [{ id: 'ts1', name: 'Grass', tileW: 16, tileH: 16, slots: { 0: 'ti1' }, symmetry: { flip: true, rotate: false } }]);
   assert.deepEqual(rt.terrainLayoutPresets, [{ id: 'tlp1', name: 'My layout', cols: 4, rows: 4, cells: [{ col: 0, row: 0, blobIndex: 0 }] }]);
-  assert.deepEqual(rt.layers, ['Ground', 'Props']);
+  assert.deepEqual(rt.tileLayerNames, ['Ground', 'Props']);
   const rtTile = rt.tiles.find(t => t.id === 'ti1');
   assert.equal(rtTile.terrainSetId, 'ts1');
   assert.equal(rtTile.blobIndex, 0);
@@ -382,8 +385,67 @@ test('serializeProject/deserializeProject round-trips terrainSets/terrainLayoutP
   // Mutating the reload must not alias the original sheet's nested objects.
   rt.terrainSets[0].slots[1] = 'ti2';
   rtTile.tags.push('extra');
+  rt.tileLayerNames.push('Above');
+  assert.deepEqual(sheet.tileLayerNames, ['Ground', 'Props']);
   assert.deepEqual(sheet.terrainSets[0].slots, { 0: 'ti1' });
   assert.deepEqual(sheet.tiles[0].tags, ['nature', 'walkable']);
+});
+
+test('deserializeProject reads existing layers metadata and defaults missing tile/sprite metadata', () => {
+  for (const version of [2, 3]) {
+    for (const { kind, metadata, want } of [
+      { kind: 'tile', metadata: { layers: ['Ground', 'Props'] }, want: ['Ground', 'Props'] },
+      { kind: 'tile', metadata: {}, want: [] },
+      { kind: 'sprite', metadata: { layers: null }, want: null },
+      { kind: 'sprite', metadata: {}, want: null },
+    ]) {
+      const json = { version, name: 'saved', settings: DEFAULT_SETTINGS, sheets: [{
+        id: 's1', name: 'Sheet', width: 8, height: 8, kind, ...metadata,
+        layerTree: { id: 'root', type: GROUP, name: 'root', children: [] },
+      }] };
+      assert.equal(validateProjectJson(json).ok, true);
+      const project = deserializeProject(json, new Map());
+      assert.deepEqual(project.sheets[0].tileLayerNames, want);
+      const saved = serializeProject(project).json;
+      assert.deepEqual(saved.sheets[0].layers, want);
+      assert.equal(Object.hasOwn(saved.sheets[0], 'tileLayerNames'), false);
+    }
+  }
+});
+
+test('legacy flat pixel layers migrate into the tree without becoming tile metadata', () => {
+  for (const version of [2, 3]) {
+    for (const kind of ['tile', 'sprite']) {
+      const bitmap = createBitmap(8, 8);
+      setPixel(bitmap, 1, 2, [10, 20, 30, 255]);
+      const json = { version, name: 'legacy', settings: DEFAULT_SETTINGS, sheets: [{
+        id: 's1', name: 'Sheet', width: 8, height: 8, kind,
+        tiles: kind === 'tile' ? [{ id: 't1', x: 0, y: 0, w: 8, h: 8, name: 'grass' }] : null,
+        layers: [{ id: 'ly1', name: 'Ink', visible: true, opacity: 1, image: 'images/s1/ly1.png' }],
+      }] };
+      assert.equal(validateProjectJson(json).ok, true);
+      const project = deserializeProject(json, new Map([['images/s1/ly1.png', bitmap]]));
+      const sheet = project.sheets[0];
+      assert.deepEqual(sheet.tileLayerNames, kind === 'tile' ? [] : null);
+      assert.equal(sheetLayers(sheet)[0].name, 'Ink');
+      assert.deepEqual(getPixel(flattenSheet(sheet), 1, 2), [10, 20, 30, 255]);
+      if (kind === 'tile') assert.equal(sheet.tiles[0].name, 'grass');
+      const saved = serializeProject(project).json.sheets[0];
+      assert.deepEqual(saved.layers, kind === 'tile' ? [] : null);
+      assert.equal(saved.layerTree.children[0].image, 'images/s1/ly1.png');
+      assert.throws(() => deserializeProject(json, new Map()), /missing image/);
+      delete json.sheets[0].layers[0].image;
+      assert.equal(validateProjectJson(json).ok, false);
+    }
+  }
+});
+
+test('metadata names cannot substitute for pixel layers when the saved sheet has no layer tree', () => {
+  const json = { version: 3, name: 'invalid', settings: DEFAULT_SETTINGS, sheets: [{
+    id: 's1', name: 'Sheet', width: 8, height: 8, kind: 'tile', layers: ['Ground'],
+  }] };
+  assert.equal(validateProjectJson(json).ok, false);
+  assert.throws(() => deserializeProject(json, new Map()), /missing image path/);
 });
 
 test('scrubTileReferences clears dangling neighbors slots and terrain-set slots pointing at a removed tile', () => {
@@ -437,6 +499,7 @@ test('deserializeProject migrates legacy sheet.tile shape into one grid + tiles'
   const p2 = deserializeProject(legacy, new Map([['images/s1/ly1.png', bitmap]]));
   const s2 = p2.sheets[0];
   assert.equal(s2.tileGrids.length, 1);
+  assert.deepEqual(s2.tileLayerNames, []);
   assert.deepEqual(s2.tileGrids[0], { id: s2.tileGrids[0].id, x: 0, y: 0, cellW: 16, cellH: 16, cols: 2, rows: 1, spacingX: 0, spacingY: 0 });
   assert.equal(s2.tiles.length, 2);
   const t0 = s2.tiles.find(t => t.gridCol === 0 && t.gridRow === 0);
