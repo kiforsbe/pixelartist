@@ -1,627 +1,392 @@
 # PixelArtist Architecture
 
-Snapshot after the Phase 5 naming polish. No build step, no
-framework — plain ES modules loaded directly by the browser (see
-[Build & tooling](#build--tooling)).
+Current-state review: **2026-08-28**, runtime baseline **`55602e2`**.
+PixelArtist is a browser-only pixel-art editor for sprite sheets, tile sheets,
+and reference-based map scenes. It uses native JavaScript ES modules, the DOM,
+and Canvas 2D, with no runtime package dependencies or build step.
 
-This document describes the code as it exists *today*. `EditorHost` and its
-services now own application state; the former `js/app` and `js/ui` legacy
-layers have been retired.
+This document describes the implemented system, including its remaining
+coupling and limitations. The [codebase review](reviews/2026-08-28-codebase-review.md)
+records confirmed defects and follow-up work; completion of the architecture
+migration does **not** mean the application is defect-free.
 
-## Migration status and follow-ups
+## Migration status
 
-The architecture migration described in
-[`2026-08-08-ddd-target-architecture-design.md`](superpowers/specs/2026-08-08-ddd-target-architecture-design.md)
-is complete through Phase 5. Phase 4 retired the legacy architecture in
-commit `c41355e`; Phase 5 renamed the tile metadata field without changing
-the saved or exported format:
+The [DDD target design](superpowers/specs/2026-08-08-ddd-target-architecture-design.md)
+is complete through its agreed Phase 5 scope:
 
-| Phase | Status | Result |
+| Phase | Implemented result |
+|---|---|
+| 0 — Foundation | Host services, registries, and `EditorStore`. |
+| 1 — Maps | Map domain model, commands, presenters, and contributions. |
+| 2 — Sprites | Sprite commands and presentation separated around host services. |
+| 3 — Tiles | Tile/grid/terrain commands and presentation separated. |
+| 4 — Shell and legacy retirement | `js/app`, `js/ui`, the compatibility event bus, and the host-to-legacy mirror removed. |
+| 5 — Polish | Runtime tile metadata renamed to `sheet.tileLayerNames`; saved/exported `layers` remains compatible. |
+
+The [final Phase 4 plan](superpowers/plans/2026-08-18-phase-4-group-3-5-mode-cleanup.md)
+contains a dated closeout superseding its older follow-up notes. The owner
+accepted the outstanding manual layer-reorder check; that is an acceptance
+decision, not a claim that automation observed the gesture. Phase 5 and the
+startup canvas/panel follow-ups were committed in `55602e2`.
+
+Historical plans/specifications preserve the decisions and intermediate states.
+Use this document and the dated review for current-state status. New defects
+identified by the audit are follow-up work, not unfinished migration tasks.
+
+## Repository structure
+
+There are 164 production JavaScript modules at this snapshot.
+
+```text
+index.html                 Static shell, mount points, and most dialogs
+css/app.css                Shared desktop workbench and control styling
+js/
+  bootstrap.js             Browser composition root
+  domain/                  5 modules: map model, sprite frames/strips/timing, IDs
+  core/                    33 modules: model, pixels, grids, terrain, filters,
+                           history primitives, codecs, ZIP, export builders
+  host/                    25 modules: store/services, registries, workbench helpers
+  platform/browser/        7 modules: browser I/O, adapters, preferences, test mode
+  modes/                   66 modules in sprites/, tiles/, maps/
+  features/                9 modules: shell/workbench/project/file/filter coordination
+  components/              18 shared DOM/canvas/panel modules
+assets/                    Blob-47 reference artwork and documentation screenshot
+tests/                     75 top-level Node test modules
+  helpers/                 Isolated controller/panel fixtures
+  browser/                 Focused Playwright workbench regression checks
+  smoke.md                 Broader smoke checklist and manual gates
+docs/
+  ARCHITECTURE.md           This implementation snapshot
+  reviews/                 Dated findings and follow-up register
+  superpowers/specs/       Design history
+  superpowers/plans/       Implementation and acceptance history
+package.json               Native-module package and Node test command
+serve.ps1 / serve.json     Development server launcher / no-store cache policy
+```
+
+There is no backend, database server, bundler, generated application output, or
+checked-in CI workflow. IndexedDB is used locally in the browser for recovery.
+`.superpowers`, `.playwright-mcp`, `.worktrees`, test output, coverage, and
+`node_modules` are ignored scratch/tooling directories, not application layers.
+
+## Runtime composition and lifecycle
+
+[`js/bootstrap.js`](../js/bootstrap.js) is the composition root, capped at
+60 lines by an architecture test. Startup runs in this order:
+
+1. Construct `EditorHost` with browser preferences and file/autosave/clipboard/
+   image-codec adapters.
+2. Register the three built-in modes and their document providers/contributions.
+3. Start `sprites`, then publish the host through `host/runtime.js`.
+4. Mount workbench, filters, project controls, document controls, menu, and file
+   controller, in that order.
+5. The file controller asynchronously restores an autosave or creates a default
+   project after the other controllers have installed their subscriptions.
+
+The workbench handle supplies canvas-preview, zoom, and navigation operations
+to the filter and document controllers. Project replacement notifies project
+subscribers **before** `EditorHost.setProject()` activates a document. Canvas
+sizing therefore also subscribes to the active document key, rather than
+assuming the project-change notification already has the new document.
+
+Mode definitions register contributions once. `activateMode()` updates session
+and context keys, invokes a synchronous activation hook, and aborts/disposes the
+previous activation result on success. The built-in activation hooks are empty:
+their presenters and tools are constructed by the shared workbench and generally
+live for the page lifetime. Mode changes mostly hide/show existing views and
+persistent panels; they do not remount the whole application.
+
+This is a single-host application. `getEditorHost()` is a module singleton used
+by shared UI and features. Root mounts do not expose a unified teardown, and
+not every listener/controller is scoped to a mode's abort signal. Do not assume
+hot reload, multiple simultaneous editors, or dynamic plug-in unloading works.
+
+## Host, state, and commands
+
+[`EditorHost`](../js/host/editor-host.js) owns `EditorStore`, context keys,
+document/project/selection/history/export/focus services, and seven registries:
+modes, commands, panels, tools, views, menus, and previews.
+
+### State ownership
+
+| Store group | Current contents and use |
+|---|---|
+| `project` | Mutable project model and a boolean `dirty` flag. |
+| `session` | Active mode/document/view/tool, remembered documents by mode, selections keyed by `kind:id`. |
+| `interaction` | Available transient-state bucket; not a complete store of gestures. |
+| `workspace` | Drawing colors/brush size, overlays, focused surface ID, pixel revision. |
+
+`EditorStore.transaction(reason, mutate)` batches synchronous notifications;
+it is not an immutable reducer or a rollback transaction. Selectors use
+`Object.is` unless a custom comparator is supplied. In-place domain mutations
+do not change the project reference, so a subscription to `project.model`
+alone does not observe every edit. Consumers also use history notifications,
+selection values, and `workspace.pixelRevision`.
+
+`ProjectService` handles replacement, dirty/saved state, and named mutations.
+`DocumentService` resolves `{kind,id}` references through mode providers and
+seeds initial selection. `SelectionService` replaces/patches per-document
+selection records. The document controller also orchestrates creation,
+deletion, mode switching, and selection repair directly; these are not all
+routed through the generic document-provider CRUD methods.
+
+`HistoryService` owns one global `CommandStack`, shared across documents.
+Commands provide `do()` and `undo()`; history changes increment a revision and
+normally mark the project dirty. Dirty state is not a history savepoint:
+undoing back to a previously saved state does not automatically mark it clean.
+
+Floating selection/clipboard state lives in
+[`components/canvas/float-session.js`](../js/components/canvas/float-session.js).
+Marquees, pointer gestures, playback state, raster caches, and some tool options
+also live in modules or view closures. The store is the central application
+state source, **not** the owner of every transient object.
+
+### Dispatch and mutation
+
+`ContributionRegistry` validates identifiers, tracks owners, filters by
+`when(context)`, sorts by order/ID, and returns disposal handles.
+`CommandRegistry.execute(id, context, args)` checks availability/enabled
+predicates before invoking a handler.
+
+Mode presenters dispatch commands by ID. Registered application handlers use
+host services and often `runEntityCommand()`, which resolves the top-level
+entity and calls `projects.mutate()` on both do and undo. Some handlers still
+capture nested mutable objects or eagerly mutate then snapshot arrays. This is
+not a universal immutable-command implementation; snapshot correctness is a
+specific audit risk.
+
+[`features/shell/actions.js`](../js/features/shell/actions.js) exposes
+`defineAction`, `runAction`, and `bindAction` over the same host command
+registry. Buttons refresh from store/history/context changes. Menus use a
+static action-ID tree from `menu-controller.js`; the menu contribution
+registry is not the active menu-building pipeline.
+
+Shared drawing and filters still submit raw pixel/history commands.
+`features/animations/commands.js` is a small ID-dispatch facade used by shared
+drawing/layer UI; it is not a resurrected legacy state bus.
+
+Context keys are used chiefly for mode-level panel/preview visibility.
+They are not a fully synchronized mirror of every session field: view/tool
+changes frequently update the store directly, and the focus service is not
+wired to all DOM surfaces.
+
+## Mode slices and shared shell
+
+Each mode has `index.js`, `documents.js`, `contributions.js`, and `preview.js`,
+plus `application/` and `presentation/` folders. Modes do not import siblings.
+
+| Mode / document kind | Views | Principal presentation and application work |
 |---|---|---|
-| 0 — Foundation | Complete | Application services and state ownership consolidated in `js/host`. |
-| 1 — Maps | Complete | Maps is an `EditorStore`-backed mode slice. |
-| 2 — Sprites | Complete | Sprites presentation and commands use host services and registries. |
-| 3 — Tiles | Complete | Tiles presentation and commands use host services and registries. |
-| 4 — Shell + legacy retirement | Complete | `js/app`, `js/ui`, the compatibility event bus, and the host-to-legacy mirror are gone. |
-| 5 — Polish | Complete | Renamed the in-memory tile metadata field to `sheet.tileLayerNames`; saved/exported `layers` keys remain unchanged. |
+| `sprites` / `sprite-sheet` | `sprites.sheet`, `sprites.frame` | Frame tool, frames/animations panels, timeline, frame editor; frame/strip geometry and movement, playback/onion skin, animation/frame/layer/palette commands. |
+| `tiles` / `tile-sheet` | `tiles.sheet`, `tiles.tile` | Tile tool/panel, tile-layer tags, terrain editor/panel, autotile painter, tile neighbor editor; grid/tile/terrain commands and geometry. |
+| `maps` / `map` | `maps.canvas` | `map-tool-presenter.js`, `map-renderer.js`, `map-panel.js`, `map-assets-panel.js`; brush state/geometry, placement/layer/palette commands. |
 
-Phase 5 is internal naming cleanup: project files still use version 3 and
-the existing `layers` key, while the model uses `tileLayerNames`. Tile exports
-also retain `layers` (omitted when empty). The deserializer and validator
-continue to support version 2 files and distinguish old flat pixel-layer
-payloads from current tile-layer-name metadata: without `layerTree`, `layers`
-contains pixel records to migrate into the tree, not tile names.
+Sprites use domain modules for frames, strips, and timing, while substantial
+layer/model logic remains in `core/model.js`. Tiles use core grids, neighbor
+rules, Blob-47 terrain, and slot/back-reference snapshots. Maps reference source
+sheets/assets by ID; they do not copy sheet bitmaps into placements. Their
+renderer resolves tile, terrain, frame, and animation sources at paint time.
+Map coordinates may be signed; the CanvasView work area is a finite 8192-square
+surface centered at offset 4096, not an unbounded rendering surface.
 
-Before a release, run the automated suite and the owner-operated `[M]` cases in
-[`tests/smoke.md`](../tests/smoke.md). Those cases cover native file/folder
-pickers and pointer gestures such as frame/strip floating moves, preview
-panning, and tile/grid dragging that are intentionally outside automated
-browser coverage.
+`features/` contains cross-cutting shell orchestration:
 
-`ExportService` and `ViewManager` are forward-looking scaffolding, not an
-unfinished migration phase. Wire or remove them only when a concrete feature
-needs those abstractions; current export and view flows do not depend on them.
+- `workbench/editor-workbench.js`: canvases, status, zoom, tool/view/panel composition.
+- `project/document-controller.js`: mode tabs, document selector/CRUD, image import, edit shortcuts.
+- `project/project-controller.js`: new project and project settings.
+- `project/file-controller.js` and `file-session.js`: open/save/export/recovery and native handles.
+- `transforms/filter-controller.js`: quantize, chroma-key, checkerboard-removal dialogs and live previews.
+- `shell/actions.js` and `shell/menu-controller.js`: shared action facade and menus/help.
+- `animations/commands.js`: shared UI's sprite-command dispatch bridge.
 
-## Layering
+The workbench has no concrete mode imports, but still recognizes the built-in
+mode/view IDs for routing. Adding a fourth mode is not purely declarative.
 
-```
-js/domain      pure, dependency-free document-kind logic (maps, sprites)
-js/core        generic engine: bitmap ops, sheet/layer model, undo stack,
-               palettes, autotiling, filters, encoders
-js/host        framework: EditorHost, contribution registries, workbench
-               primitives, and application services on EditorStore
-               (documents, history, selection, project, export)
-js/platform    concrete adapters (preferences, file-system, clipboard,
-               image-codec) injected into EditorHost
-js/modes       one self-contained vertical slice per document kind:
-               sprites, tiles, maps
-js/features    cross-cutting shell chrome that composes host + modes:
-               workbench, menu bar, document tabs, file I/O, filters
-js/components  shared DOM/canvas controls and panel primitives
-```
+### Panels and views
 
-`tests/architecture.test.mjs` encodes the intended dependency direction as
-executable tests — it is the most authoritative source for these rules and
-is worth reading directly. Rules it enforces include: `core` never imports
-`components`/`features`/`host`/`platform`/`modes`; `domain` imports nothing outside
-itself; no mode imports a sibling mode's files; the shared workbench
-(`features/workbench`) never imports concrete mode UI; and per-mode
-pointer/geometry controllers never define `mount*Panel(` or import the
-panel-UI modules — contributions register independently instead.
+`index.html` defines left, center, right, and bottom workbench regions.
+Tools/colors occupy the left; the canvas center; layers, contextual panels,
+animations, terrain, preview, and map assets the right; timeline the bottom.
 
-Allowed dependency direction (arrows = "imports from"):
+`PanelManager` reconciles registered panels against context keys. Persistent
+panels are hidden rather than disposed. It aggregates visibility for shared
+fixed mount points, including contributions never mounted in the initial mode,
+so hidden tile panels leave no empty padded containers.
 
-```mermaid
-graph TD
-    COMPONENTS["js/components<br/>(shared DOM/canvas UI)"]
-    FEATURES["js/features<br/>(shell: workbench, menu, file I/O)"]
-    MODES["js/modes<br/>(sprites, tiles, maps)"]
-    PLATFORM["js/platform<br/>(browser adapters)"]
-    HOST["js/host<br/>(EditorHost, registries, application services)"]
-    CORE["js/core<br/>(engine: model, undo, palettes)"]
-    DOMAIN["js/domain<br/>(pure doc-kind logic)"]
+`mountStorePanel()` shares microtask-debounced rendering and subscription
+disposal. Some components remain page-lifetime mounts. Generic collapsible
+panel frames/preferences apply to generated panel chrome; fixed mount-point
+contributions do not all use that chrome.
 
-    FEATURES --> MODES
-    FEATURES --> HOST
-    FEATURES --> COMPONENTS
-    MODES --> HOST
-    MODES --> CORE
-    MODES --> COMPONENTS
-    COMPONENTS --> HOST
-    COMPONENTS --> CORE
-    HOST --> CORE
-    PLATFORM --> HOST
-    CORE --> DOMAIN
+The workbench eagerly creates registered views and explicitly shows/hides the
+frame/tile editors. `ViewManager` exists but is not used in this path.
+Dialogs are native `<dialog>` elements, mostly static in HTML; the movable
+filter dialogs use non-modal `.show()`, while many other dialogs use
+`.showModal()`.
+
+## Model and rendering
+
+A project owns settings, palettes, sheets, and maps. Each sheet owns dimensions,
+frames/animations, a pixel `layerTree`, and (for tile sheets) explicit tiles,
+grids, terrain sets/presets, and tile-layer-name metadata.
+
+```text
+sheet.layerTree
+  group { type: 'group', children, animationId? }
+    group ...
+    layer { type: 'layer', visible, opacity, bitmap }
+      bitmap { width, height, data: Uint8ClampedArray }  // RGBA bytes
+
+sheet.tileLayerNames = ['Ground', 'Decor', ...]         // tile sheets only
+tile.layer = 'Ground'                                  // metadata, not pixels
+
+map.layers = [{ type: 'tile', tiles, terrain }, ...]   // map placements
+          or [{ type: 'sprite', sprites }, ...]
 ```
 
-`core` and `domain` sit at the bottom and import nothing above themselves
-(test-enforced); `host` knows nothing about concrete modes; modes never
-import each other.
+`sheetLayers()` traverses pixel-layer leaves. `flattenSheet()` composites
+sheet layers and accepted animation groups into frame rectangles; floating
+buffers and filter override layers can alter the rendered result without
+committing the underlying pixels. `ImageData` is created at the canvas
+boundary; stored bitmaps are ordinary objects containing typed arrays.
 
-## Bootstrapping
+`sheet.tileLayerNames` is an array on tile sheets and `null` on sprite sheets.
+It is unrelated to compositing and unrelated to `map.layers`. Tile IDs and
+coordinates define tile identity/placement; export array indexes are derived.
 
-Entry point: `index.html` loads `<script type="module" src="js/bootstrap.js">`.
+`CanvasView` owns device-pixel sizing, camera transforms, checkerboard drawing,
+pointer conversion, and scheduled render callbacks. Shared `drawing-engine.js`
+handles pixel tools and region selection; frame/tile presenters adapt the same
+drawing engine to their editing region. Main, frame, tile, map, thumbnail, and
+preview consumers cache their own raster results, invalidating from relevant
+project/selection/history/pixel notifications. There is no single global
+renderer/cache invalidation service.
 
-`js/bootstrap.js` (~50 lines, capped at 60 by `architecture.test.mjs`) is
-the **entire** composition root. It runs, top to bottom:
+Filters compute before/after patches and substitute cloned preview layers.
+Accept submits history edits; cancel removes preview overrides. Correct view,
+document, selection, and bitmap-identity synchronization remains important;
+the audit records cases not covered by the current subscriptions.
 
-1. Construct `EditorHost`, whose `HistoryService` owns the application
-   `CommandStack`, and inject the browser platform adapters
-   (`js/platform/browser/*`).
-2. `editorHost.registerMode(spriteMode | tileMode | mapMode)` — each mode's
-   `register()` hook fires synchronously, registering its document
-   provider and contributions.
-3. `editorHost.start('sprites')` activates the sprite mode.
-4. `setEditorHost(editorHost)` publishes it through `js/host/runtime.js`'s
-   module-level singleton getter so shared components and feature modules can
-   reach the one `EditorHost` instance without a DI container.
-5. Mounts DOM directly, synchronously, in module-load order (no dynamic
-   `import()` — everything below is a plain function call):
+## Persistence, browser boundaries, and exports
 
-```js
-const workbench = mountEditorWorkbench();
-mountFilterController(workbench);
-mountProjectController();
-mountDocumentController({ editorHost, workbench });
-mountApplicationMenu();
-mountFileController();
+`.pixelproj` is a ZIP containing `project.json` and PNGs for pixel layers.
+`core/model.js` serializes/deserializes metadata; `core/bundle.js` joins that
+metadata with encoded layer images; `core/zip.js` handles the archive.
+`core/pngcodec.js` uses browser `OffscreenCanvas`, `ImageData`, and
+`createImageBitmap`; consequently **not every core module is Node-only or
+independent of browser APIs**. Bundle tests can inject codecs.
+
+Current saves use **project version 3**. Loading accepts version 2 and 3, migrates
+old flat pixel `layers[]` into `layerTree`, and migrates older uniform tile grids.
+For tree-based tile sheets the serialized `layers` property maps to runtime
+`tileLayerNames`. Without `layerTree`, `layers` is interpreted as legacy
+pixel records, never tile tag names. Tile JSON exports retain `layers` and
+omit it when empty. Phase 5 did not bump the file version.
+
+Import validation is limited; it is not a complete schema or integrity check.
+Malformed dimensions, decoded bitmap sizes, and entity references need stronger
+validation before a project is installed (see review).
+
+Browser `project-io.js` implements packed open/save, download fallbacks,
+image picking, folder export, and IndexedDB recovery. Unpacked project
+open/save helpers exist but are not connected to the current Open/Save UI.
+File handles and save mode live in `features/project/file-session.js`, outside
+serialized project data.
+
+Recovery runs every 30 seconds when dirty and no floating selection is active.
+Save clears the recovery slot after writing. The current asynchronous save path
+has no revision/identity guard; its confirmed race is a release follow-up.
+Restore/new-project boot and before-unload behavior are controlled partly by
+`?autotest`, which disables recovery restoration and confirmation gates for
+test sessions. Do not use that mode as evidence for real recovery/picker UX.
+
+The platform adapter objects are injected into the host, but the current
+controllers mostly call `project-io.js`, codecs, and browser clipboard APIs
+directly. Preferences are actively injected/used; the wider port abstraction
+is incomplete, not a fully isolated I/O boundary.
+
+Export builders under `core/export/` produce frame/tile/map JSON, Tiled TSX,
+animation sheets/sequences/GIF frames, C99, and retro-platform binaries.
+`core/gif.js` encodes GIF bytes. The file controller chooses formats,
+quantization/compatibility checks, filenames, and download/folder destinations.
+Project batch export selects sheets; maps have a separate JSON action.
+`ExportService` is scaffolding, not the live exporter dispatch path.
+
+## Dependency boundaries and known structural debt
+
+[`tests/architecture.test.mjs`](../tests/architecture.test.mjs) uses source
+scans to guard the migration: retired imports, sibling-mode imports, selected
+DOM-free application files, command dispatch separation, and registry-based
+workbench composition. These are useful targeted checks, **not** a complete
+dependency graph or proof of purity. In particular, host `workbench/` is
+excluded from the DOM ban, and core's import regex does not cover every upper
+layer name or browser global.
+
+Actual boundaries and exceptions:
+
+- `domain/` contains small browser-independent modules; core imports it.
+- Host services depend on core, while host workbench helpers may use DOM/shared UI.
+- Mode application code uses core/domain/host; presentation uses shared controls,
+  geometry, and ID-based command dispatch.
+- Shared components reach host/core and some feature/platform helpers, so the
+  folders do not form a strict acyclic clean-architecture stack.
+- `modes/tiles/terrain-preset-art.js` is the explicitly tracked exception:
+  browser artwork import and a raw pixel-patch command outside
+  `application/`/`presentation/`. Its exact import exception is test-pinned.
+- Large mixed-responsibility modules remain: layer panel, drawing engine,
+  model, filters, frame editor, timeline, and file controller. Splitting folders
+  did not remove all state/lifecycle coupling.
+- `ViewManager`, `ExportService`, menu registry, focus plumbing, and portions
+  of the platform ports are unused or partially wired extension mechanisms.
+  Integrate or remove them only for a concrete requirement, not to reopen a
+  completed migration phase.
+
+## Verification and development
+
+`package.json` requires Node >=18 and runs:
+
+```sh
+npm test
 ```
 
-`mountEditorWorkbench()` runs first because it returns the `workbench`
-handle the next three mounts need, and because it calls `initFloatSession()`.
-`mountFileController()` runs last: its own `boot()` IIFE performs the
-project's first `setProject()`, and by then every other mount's store
-subscriptions exist to observe it.
+The closeout baseline passed **723 tests across 75 top-level test modules**.
+Tests cover domain/core algorithms, commands, host/store/registries, boundary
+scans, and isolated DOM/controller fixtures. They do not establish complete
+browser integration coverage.
 
-```mermaid
-sequenceDiagram
-    participant HTML as index.html
-    participant Boot as bootstrap.js
-    participant Host as EditorHost
-    participant Modes as sprite/tile/mapMode
-    participant Runtime as host/runtime.js
-    participant Mounts as mount*() calls<br/>(workbench, filters, project,<br/>document, menu, file controllers)
+`tests/browser/workbench-regressions.mjs` exports three focused checks:
+startup checkerboard, sheet-switch canvas sizing, and mode-panel visibility.
+It requires a caller-provided Playwright page/server and is **not run by
+`npm test`**. Prior closeout checks passed at 1600×900 and 1280×800, including
+a pencil click and undo/redo; this audit's isolated diagnostics are not a fresh
+full browser smoke pass.
 
-    HTML->>Boot: load module
-    Boot->>Host: new EditorHost({preferences, platform})
-    loop for each mode
-        Boot->>Host: registerMode(mode)
-        Host->>Modes: mode.register(api)
-        Modes->>Host: documents.register(provider) + contributions
-    end
-    Boot->>Host: start('sprites')
-    Host->>Modes: spriteMode.activate(context)
-    Boot->>Runtime: setEditorHost(host)
-    Boot->>Mounts: mountEditorWorkbench() / mountFileController() / ...
-```
+Serve the repository over HTTP. `serve.ps1` runs unpinned `npx --yes serve`
+on an ephemeral port (use the URL it prints); it can need network access.
+`serve.json` disables caching for that server. A separately available static
+server is also sufficient. Native module loading is not supported by opening
+`index.html` directly with `file://`.
 
-## The host — `EditorHost`
+Before release, rerun automated tests, the focused browser checks, and the
+owner-operated manual cases. [`tests/smoke.md`](../tests/smoke.md) contains
+outdated Add Grid instructions and inconsistent automation labels; its stated
+manual-only rule takes precedence for pointer drags/native pickers. Correct
+those instructions before treating the checklist as an executable release gate.
 
-`js/host/editor-host.js` is the central object modes and features register
-against. It owns:
+## Extending the implementation
 
-- `store` — an `EditorStore` (see [State model](#state-model))
-- `contextKeys` — a pub-sub map (`modeId`, `documentKind`, `viewId`,
-  `toolId`, ...) used to gate panels/menus/commands
-- `registries` — frozen object of 7 `ContributionRegistry` subclasses:
-  `modes, commands, panels, tools, views, menus, previews`
-- `documents/history/projects/selections/exports/focus` — the application
-  services (now colocated in `js/host/*`), exposed individually and
-  bundled as `services`
+For new mode behavior, follow the existing document provider/contribution/
+application/presentation shape, dispatch commands by ID, and test undo after
+mutations that replace or reshape nested entities. Check shell mode/view
+routing as well as registration.
 
-Key methods:
+For a new menu/button action, register one action and consume its ID from both
+surfaces. For a panel, define its region, predicate, mount point and lifetime;
+test inactive startup and shared-container visibility. For any asynchronous
+file work, preserve project identity/revision across awaits and verify that
+completion cannot overwrite newer session state.
 
-- **`registerMode(definition)`** validates via `ModeRegistry`, then calls
-  `definition.register(api)`. `api` exposes *owner-scoped*
-  `commands/panels/tools/views/menus/previews.register()` (auto-tagged
-  `owner: modeId`, so `removeOwner` can retract everything a mode
-  contributed in one call) plus `documents.register(provider)`.
-- **`start(modeId)` / `activateMode(modeId)`** transactionally updates
-  `store.session` and context keys, then synchronously calls
-  `mode.activate(context)` (async activation is disallowed — throws).
-  Rolls back on error; disposes the previous mode's activation result on
-  success; fires `onDidChangeMode`.
-- Every `ContributionRegistry` (`js/host/contributions/registry.js`) is
-  generic: `register(definition, {owner})` validates `{id, when?}`,
-  `list(context)` filters by `when(context)` and sorts by `order` then
-  `id`, `removeOwner(owner)` bulk-retracts. `CommandRegistry` adds
-  `execute(id, context, args)`; `PreviewRegistry` requires `render()`;
-  `MenuRegistry` requires `items`; `ModeRegistry` requires `label`,
-  `documentKinds`, `defaultViewId`.
-
-So: modes register contributions once, at `registerMode` time, and get a
-fresh activation context each time they become active.
-
-```mermaid
-classDiagram
-    class EditorHost {
-        +store: EditorStore
-        +contextKeys: ContextKeys
-        +registries: RegistryBundle
-        +documents: DocumentService
-        +history: HistoryService
-        +projects: ProjectService
-        +selections: SelectionService
-        +exports: ExportService
-        +registerMode(definition) Disposable
-        +start(modeId)
-        +activateMode(modeId)
-        +setProject(project, opts)
-        +onDidChangeMode(listener)
-    }
-    class RegistryBundle {
-        +modes: ModeRegistry
-        +commands: CommandRegistry
-        +panels: PanelRegistry
-        +tools: ToolRegistry
-        +views: ViewRegistry
-        +menus: MenuRegistry
-        +previews: PreviewRegistry
-    }
-    class ContributionRegistry {
-        <<abstract>>
-        +register(definition, owner) Disposable
-        +list(context) definition[]
-        +removeOwner(owner)
-    }
-    class CommandRegistry {
-        +execute(id, context, args)
-    }
-    class ModeDefinition {
-        <<frozen object>>
-        +id: string
-        +label: string
-        +order: number
-        +documentKinds: string[]
-        +defaultViewId: string
-        +register(api)
-        +activate(context)
-    }
-    class DocumentProvider {
-        <<per mode>>
-        +kind: string
-        +list(project)
-        +get(project, id)
-        +create(project, input)
-        +rename(document, name)
-        +remove(project, id)
-    }
-
-    EditorHost *-- RegistryBundle
-    RegistryBundle o-- ContributionRegistry : 7 instances
-    ContributionRegistry <|-- CommandRegistry
-    ContributionRegistry <|-- ModeRegistry
-    EditorHost ..> ModeDefinition : registerMode()
-    ModeDefinition ..> DocumentProvider : register(api) registers
-```
-
-## Modes (`js/modes/`)
-
-Three modes — `sprites` (order 10), `tiles` (order 20), `maps` (order 30) —
-each `Object.freeze`d with an identical shape:
-
-```js
-export const tileMode = Object.freeze({
-  id: 'tiles', label: 'Tile Sheets', order: 20,
-  documentKinds: ['tile-sheet'], defaultViewId: 'tiles.sheet',
-  register(api) { api.documents.register(tileDocumentProvider); registerTileContributions(api); },
-  activate() {},
-});
-```
-
-Every mode has the same file shape: `index.js` (the definition above),
-`documents.js` (a document provider: `{kind, list, get, create, rename,
-remove}`), `contributions.js` (registers previews/tools/panels/views),
-plus mode-specific controllers.
-
-**Tiles mode** (`js/modes/tiles/`) — this is the mode the autotiles panel
-belongs to. It has fully migrated to the Application/Presentation split
-(see the Sprites/Maps note below), except for one deliberate exception:
-`terrain-preset-art.js` (below), which by design sits outside both layers:
-
-- `contributions.js` registers: a preview provider (`preview.js`); one
-  tools contribution whose `createController` wires
-  `registerTileTool()`/`registerAutotilePaintTool()` and returns
-  `{decorateOverlay}` to layer tile chrome onto the shared canvas; three
-  panels gated `when: keys => keys.modeId === 'tiles'` — `tiles.tiles` →
-  `#panel-context` (`presentation/tile-panel.js`), `tiles.autotiles` →
-  `#panel-autotiles` (`presentation/terrain-set-panel.js`), `tiles.layers` →
-  `#panel-tilelayers` (`presentation/tile-layers-panel.js`); two views —
-  `tiles.sheet` (shared canvas) and `tiles.tile` (per-tile zoomed editor,
-  `presentation/tile-editor-presenter.js`).
-- `application/commands/tile-sheet-commands.js` (299 lines) and
-  `tile-layer-commands.js` (32 lines) — Command Handlers, resolve their
-  sheet by id each call (no captured object references across undo/redo),
-  registered by id in `contributions.js`. A test asserts these never touch
-  `document/window/alert/confirm/prompt` directly.
-- `application/geometry/tile-geometry.js` (79 lines) — pure hit-testing/
-  resize math (tile/handle hit-testing, grid bounds, ghost-grid layout) for
-  the tile tool, no DOM or state access.
-- `presentation/tile-tool-presenter.js` (375 lines) — the tile tool's
-  Humble Object: pointer routing and overlay rendering for create/resize/
-  move of tiles and grid ownership. Dispatches Commands by id through
-  `CommandRegistry`; never imports `application/commands/` directly
-  (test-enforced), and never imports the contextual panels or terrain UI
-  (also test-enforced).
-- `presentation/tile-panel.js` (173 lines), `tile-layers-panel.js`
-  (71 lines), `tile-tags-field.js` (69 lines) — panel mount functions for
-  the Tiles/Tile-Layers side panels and the shared tag-editing field.
-- `presentation/tile-raster-cache.js` (35 lines) — caches a flattened-sheet
-  canvas + per-tile thumbnails, invalidated via `invalidateTileRaster()`.
-- `application/commands/autotile-paint-commands.js` — Command Handlers
-  for the Blob-47 terrain painter: `prepareTerrainPaint`,
-  `paintTerrainStroke`, `resolveAutotilePaintConflict`. Resolve-by-id,
-  registered by id in `contributions.js`. Wraps `core/terrainsets.js`'s
-  pure `assignSlot` directly, via the shared `terrain-slot-snapshot.js`
-  helper also used by `terrain-set-commands.js`.
-- `application/geometry/autotile-geometry.js` — pure paint-grid/cell/mask
-  helpers (`terrainPaintGrid`, `paintTileAt`, `paintCellAt`,
-  `strokePaintMask`, `planTerrainPaintCells`, `describeMask`), no DOM or
-  state access. `core/blob47.js`'s Blob-47 bitmask/canonicalization
-  algorithm itself remains untouched, already pure Domain code.
-- `presentation/autotile-paint-presenter.js` — the autotile paint tool's
-  Humble Object: pointer/stroke routing, conflict resolution, and all
-  Canvas overlay/preview rendering (including the Blob-47 artwork
-  reference strip). Dispatches Commands by id; never imports
-  `application/commands/` directly (test-enforced).
-- `presentation/blob47-coverage-dialog.js` — the standalone Blob-47
-  coverage-review `<dialog>`, split out of the painter so the Presenter
-  doesn't also own an unrelated `document.createElement` side-panel.
-- `application/commands/terrain-set-commands.js` — Command Handlers for
-  terrain-set CRUD and slot assignment: `createTerrainSet`,
-  `deleteTerrainSet`, `renameTerrainSet`, `assignTerrainSlot`,
-  `clearTerrainSlot`, `setTerrainSymmetry`, `applyTerrainLayoutPreset`,
-  `setTerrainSetLayer`. Resolve-by-id, registered by id in
-  `contributions.js`. Wraps `core/terrainsets.js`'s pure
-  `assignSlot`/`applyLayoutPreset` via the shared
-  `terrain-slot-snapshot.js` helper below.
-- `application/commands/terrain-slot-snapshot.js` — `captureTerrainSlotState`/
-  `restoreTerrainSlotState`, shared by `terrain-set-commands.js`,
-  `autotile-paint-commands.js`'s `resolveAutotilePaintConflict`, and (since
-  3d) `tile-sheet-commands.js`'s `deleteTile`/`deleteGrid`/`resizeGridAxis`.
-  Captures every terrain set's `slots` plus every tile's back-reference
-  fields (`terrainSetId`/`blobIndex`/`duplicateOf`/`neighbors`) — both
-  `assignSlot` and `core/model.js`'s `scrubTileReferences` can mutate a
-  terrain set or tile other than the one a caller is directly acting on, so
-  the snapshot always covers the whole sheet.
-- `application/geometry/terrain-set-geometry.js` — pure view-arrangement
-  helpers (`blobStaircaseGroups`, `gridFromRawTemplate`,
-  `slotGroupsForViewMode`) for the terrain-set editor's cosmetic slot
-  layout, no DOM or state access.
-- `presentation/terrain-set-editor.js` — the terrain-set editor's dialogs
-  (add-terrain-set, tile-picker) and `renderTerrainSetEditor`, plus the
-  Name/Layer/Delete field helpers shared with `tile-panel.js`. Dispatches
-  Commands by id; never imports `application/commands/` directly
-  (test-enforced).
-- `presentation/terrain-set-panel.js` — a thin **panel mount function**:
-  builds the tile-picker dialog + editor container, delegates rendering to
-  `terrain-set-editor.js`, subscribes to `EditorStore` selectors and history
-  to schedule `queueMicrotask`-debounced re-renders, and syncs the selected
-  terrain-set id from the active tile's per-document selection.
-- `terrain-preset-art.js` — **outside both `application/` and
-  `presentation/`**, deliberately. Contains `importPresetArtOntoLayer`,
-  which paints a terrain-set preset's reference art onto the active layer
-  when a new terrain set is created from that preset. Pushes a raw
-  pixel-patch undo entry directly via `core/commands.js`'s `makePixelPatch`
-  (the same cross-mode-shared paint-commit idiom
-  `js/components/canvas/drawing-engine.js` uses elsewhere), which is exactly why it can't live in
-  `presentation/`: `tests/architecture.test.mjs`'s presentation-layer scan
-  forbids importing `core/commands.js` from anywhere under `presentation/`.
-  This is now an enforced, tracked exception — a dedicated architecture
-  test pins the exact set of non-application/presentation mode files
-  allowed to import `core/commands.js` to this one file — not an
-  accidental layering gap.
-- `application/commands/tile-editor-commands.js` — one resolve-by-id
-  Command Handler, `setTileNeighborSlot`, for the tile editor's manual
-  neighbor-slot dialog. Registered by id in `contributions.js`.
-- `application/geometry/tile-editor-geometry.js` — pure offset/hit-testing
-  math for the tile editor's neighbor grid (`computeOffset`,
-  `mapEditorPoint`, `cellAt`, `insideCenter`, `dirForCell`), no DOM or state
-  access.
-- `presentation/tile-editor-presenter.js` — the tile editor's Humble
-  Object: a second `CanvasView` showing a zoomed, single-tile view with a
-  live neighbor preview (redrawn from the same flattened-sheet cache
-  pattern as `tile-raster-cache.js`) and the neighbor-slot config dialog.
-  Dispatches Commands by id; never imports `application/commands/` directly
-  (test-enforced).
-
-**Sprites mode** follows the same Application/Presentation split (see
-`js/modes/sprites/application/` and `js/modes/sprites/presentation/`):
-`frame-tool-presenter.js` + `frame-chrome-geometry.js`/`frame-geometry.js`/
-`frame-pixel-motion.js`/`frame-tool-state.js` (frame/strip tool),
-`frames-panel.js`, `timeline-presenter.js` + `timeline-playback.js`
-(Timeline dock), `animations-panel.js`, and `frame-editor-presenter.js` +
-`onion-skin.js`/`frame-navigation.js` (frame editor + onion skin), backed by
-Command Handlers under `application/commands/`. **Maps mode**: `map-editor.js`,
-`map-panels.js`.
-
-## Features (`js/features/`)
-
-Orthogonal to modes — one slice per cross-cutting shell concern, not per
-document kind. This is what actually mounts DOM at startup (called directly
-from `js/bootstrap.js` — see [Bootstrapping](#bootstrapping)):
-
-- `workbench/editor-workbench.js` (289 lines) — builds the shared
-  `CanvasView`s, status bar, zoom shortcuts, and **generically iterates
-  the host's registries** (`registries.tools.list().map(def =>
-  def.createController(...))`, a `PanelManager` reconciling
-  `registries.panels` against DOM, `registries.views.list()` populating
-  view controllers). Zero mode-specific imports (test-enforced).
-- `project/document-controller.js` — mode-tab switching, sheet/map CRUD,
-  and undo/redo/cut/copy/paste actions.
-- `project/file-controller.js` — open/save/import/export flows and autosave.
-- `project/project-controller.js` (443 lines) — project settings, new
-  project.
-- `shell/menu-controller.js` (93 lines) — builds the `MENUS` array,
-  mounts the menu bar.
-- `transforms/filter-controller.js` (743 lines) — filter dialogs
-  (Chroma Key, Quantize, Checkerboard removal) with live preview.
-
-In short: **modes** = what document kind is being edited plus its
-tool/panel/view contributions; **features** = the always-present shell
-that composes the host and all registered modes together. Features import
-from `js/host`, `js/components`, `js/core`, and `js/platform`; modes stay
-self-contained and are driven generically through the registries.
-
-## Commands — `defineAction`
-
-`js/features/shell/actions.js` is a **thin facade over the host's
-`CommandRegistry`**, not a separate system:
-
-```js
-export function defineAction(id, def) {
-  registrations.get(id)?.dispose();               // idempotent redefinition
-  const action = { id, label:'', shortcut:null, isEnabled:()=>true, ...def };
-  const registration = registry().register({
-    ...action,
-    when: context => action.isAvailable(context),
-    execute: (context, args) => action.run(context, args),
-  }, { owner: 'shell-actions' });
-}
-```
-
-`bindAction(el, id)` wires a toolbar button: click → `runAction(id)`. The
-facade subscribes to store, history, and context-key changes to refresh
-`hidden`/`disabled`/`checked` state.
-
-`js/components/menubar.js`'s `mountMenuBar(el, menus)` renders a declarative
-`MENUS` array (built in `features/shell/menu-controller.js`) whose items
-are only `{action: 'id'}` or `{separator: true}` — read exclusively
-through `getAction`/`runAction`, silently skipping unknown ids so menus
-can be built incrementally. Nested submenus via `action.submenu`
-(`items | () => items`, re-evaluated on each open).
-
-Actions are defined near the logic they trigger, all over the codebase —
-one `defineAction` call per id, consumed by both a toolbar button
-(`bindAction`) and a menu item (`getAction`/`runAction`), so they can never
-drift out of sync with each other.
-
-## Rendering & the `layerTree` / `tileLayerNames` split
-
-Core rendering lives in `js/core/model.js` / `js/core/pixels.js`.
-`flattenSheet(sheet, floating, overrideLayers)` is the master compositor:
-gathers `sheetLayers(sheet)` (walks `layerTree`), excludes layers owned by
-an "accepted strip" animation, composites the rest bottom-to-top
-(`flattenSheetLayers`), then hard-blits each accepted strip's own layer
-group into just its animation frames' rects. `overrideLayers` lets filter
-previews and the Preview panel substitute hypothetical bitmaps without
-touching real data.
-
-Consumers cache their own flattened canvas, invalidated by store selectors,
-`workspace.pixelRevision`, and history subscriptions: `editor-workbench.js`
-(main canvas), `modes/tiles/presentation/tile-raster-cache.js` (tile sheet +
-thumbnails), and `modes/{sprites,tiles}/preview.js` (Preview panel).
-
-`sheet.layerTree` and `sheet.tileLayerNames` serve separate purposes:
-
-- `sheet.layerTree` — the actual pixel-layer hierarchy (a tree of
-  `GROUP`/`LAYER` nodes, a group can own an animation via `animationId`).
-  Exists on every sheet. `sheetLayers(sheet) = flattenLayers(sheet.layerTree)`
-  is what actually gets rendered.
-- `sheet.tileLayerNames` — a flat array of plain strings, tile-only (`null` on
-  sprite sheets). Arbitrary "layer name" tags (e.g. "Ground", "Decor")
-  used to categorize individual `tile` objects (`tile.layer = name`),
-  managed entirely by `application/commands/tile-layer-commands.js` +
-  `presentation/tile-layers-panel.js`.
-  Has nothing to do with pixel compositing.
-
-Historically, `sheet.layers` held pixels before `layerTree`, then was
-repurposed for tile-tag names. Phase 5 removed this runtime naming collision.
-The serialized `layers` key remains for compatibility; loading older flat
-pixel-layer records never populates `tileLayerNames` with those records.
-
-```mermaid
-classDiagram
-    class Sheet {
-        +id: string
-        +kind: 'sprite' | 'tile'
-        +layerTree: GroupNode
-        +tileLayerNames: string[] | null
-        +tiles: Tile[]
-    }
-    class GroupNode {
-        +type: 'GROUP'
-        +children: (GroupNode|LayerNode)[]
-        +animationId?: string
-    }
-    class LayerNode {
-        +type: 'LAYER'
-        +id: string
-        +bitmap: ImageData
-    }
-    class Tile {
-        +index: number
-        +layer: string
-    }
-    Sheet "1" *-- "1" GroupNode : layerTree (pixel layers)
-    GroupNode "1" o-- "*" GroupNode
-    GroupNode "1" o-- "*" LayerNode
-    Sheet "1" o-- "*" Tile : tile-kind only
-    Tile "*" ..> "*" Sheet : layer references a name in sheet.tileLayerNames[]
-
-    note for Sheet "layerTree = real bitmaps, rendered.\ntileLayerNames = tile tag names, unrelated to compositing."
-```
-
-## State model
-
-`js/host/editor-store.js`'s `EditorStore` is the single application store. It
-provides `getState()`, named `transaction()` boundaries, selector-based
-`subscribe()`, shared drawing settings, overlay settings, and a monotonic
-`workspace.pixelRevision` signal for bitmap mutations. Its state is grouped
-as `{project, session, interaction, workspace}`.
-
-`ProjectService`, `DocumentService`, `SelectionService`, and `HistoryService`
-own writes in their respective areas. Selections are keyed per document in
-`session.selectionsByDocument`; document providers supply `initialSelection`
-so activation can atomically seed a valid first layer. Undo/redo runs through
-the `CommandStack` owned by `HistoryService`. Floating selection is deliberately
-module-owned by `components/canvas/float-session.js` and exposed only through
-narrow accessors.
-
-There is no compatibility event bus or host-to-legacy mirror. UI modules
-subscribe directly to store selectors, history, or context keys. Bitmap
-mutators call `store.notifyPixelsChanged()` so canvas, preview, and panels can
-invalidate without replacing large bitmap objects.
-
-Two pieces look scaffolded but not yet wired to a real caller: `ExportService`
-(exports currently run through `js/core/export/*` directly) and
-`js/host/workbench/view-manager.js`'s `ViewManager` (`editor-workbench.js`
-iterates `registries.views.list()` manually instead). Worth treating as
-forward-looking placeholders, not active pipelines, if referencing them.
-
-Palettes, project settings, sheets/maps/frames/animations/tiles/terrain
-sets all live inline on `store.getState().project.model`, created by `core/model.js`'s
-`createProject`/`createSheet`/`createMap` and serialized in the same file
-(`serializeGroup`/`deserializeGroup`, with a project-version migration
-path from the old flat `layers[]` to `layerTree`).
-
-## UI layer
-
-No component framework — plain DOM manipulation, organized as **mount
-functions**: `mountXxxPanel(element)` builds DOM once, wires store/history
-subscriptions for reactive re-renders (often microtask-debounced through
-`components/panel-mount.js`), and returns `{dispose()}`. Uniform across
-`js/components/*.js` and `js/modes/*/*.js`.
-
-The one shared primitive is `js/components/panels/panel-frame.js`'s
-`createPanelFrame({id, title, collapsed, onCollapsedChange})` — collapsible
-chrome used exclusively by `PanelManager`
-(`js/host/workbench/panel-manager.js`) for panels with no fixed
-`mountPoint`. `PanelManager.reconcile(context)` diffs
-`registries.panels.list(contextKeys)` against currently-mounted panels:
-hides/disposes ones no longer wanted, mounts new ones either into a fixed
-DOM id (`panel.mountPoint`, e.g. `#panel-context`, `#panel-autotiles`) or
-into an auto-generated frame docked into a `[data-workbench-region]`
-(`js/host/workbench/layout.js`). Per-panel collapsed/hidden state persists
-through the injected `preferences` port.
-
-Menus: `js/components/menubar.js` (see [Commands](#commands--defineaction)).
-Dialogs: native `<dialog>` elements in `index.html`, `.showModal()`, with
-`js/components/dialogs.js` giving one button Enter-to-submit behavior. Toolbar:
-`js/components/tool-palette.js`'s `mountToolPalette`.
-
-`index.html` lays out explicit regions: `#tool-palette` (left),
-`#canvas-host` (center), `#side-panels` (right, holds `#panel-layers`,
-`#panel-context`, `#panel-animation`, `#panel-autotiles`,
-`#panel-tilelayers`, `#panel-preview`, `#panel-map-assets`),
-`#timeline-dock` (bottom).
-
-## Build & tooling
-
-No bundler, no TypeScript — plain native ES modules
-(`"type": "module"` in `package.json`). `npm test` runs `node --test
-tests/*.mjs` (Node's built-in test runner, ~45 files, including the
-layering-enforcing `tests/architecture.test.mjs`). `serve.ps1` runs
-`npx serve` on an ephemeral port with `Cache-Control: no-store` forced
-(`serve.json`) — a dev-run mechanism, not a build step, needed only
-because ES modules require an HTTP server (`file://` won't work).
-
-## Extension points
-
-- **New mode**: `js/modes/<name>/{index.js, documents.js,
-  contributions.js, ...}` following the shape in
-  [Modes](#modes-jsmodes). Register a document provider, register
-  contributions via the scoped `api.{commands,panels,tools,views,menus,
-  previews}.register(...)` inside `register(api)`, then call
-  `editorHost.registerMode(...)` in `js/bootstrap.js`. Must not import
-  another mode's files (test-enforced); keep pointer/geometry logic
-  separate from panel-mounting code (test-enforced for the existing
-  modes).
-- **New tool**: a `tools` contribution
-  (`{id, label, order, createController(context)}`) in a mode's
-  `contributions.js`, whose controller typically calls a
-  `registerXTool()` pair and optionally returns `{decorateOverlay()}` to
-  hook `canvasView.onOverlay`.
-- **New menu command**: `defineAction('namespace.verb', {label, shortcut,
-  run(context, args), isEnabled(), isChecked(), isAvailable(),
-  submenu})` near the logic it belongs to, then add
-  `{action: 'namespace.verb'}` to the relevant menu's `items` in
-  `features/shell/menu-controller.js`'s `MENUS`, and/or
-  `bindAction(buttonEl, 'namespace.verb')` for a toolbar button.
-  `menubar.js` silently skips unregistered ids, so ordering across files
-  doesn't matter.
-- **New panel**: `api.panels.register({id, title, region, order, when,
-  mountPoint?, persistent?, create(element, context)})` inside a mode's
-  (or a feature's) contributions — either a fixed DOM id already in
-  `index.html`, or an auto-generated `PanelManager`/`createPanelFrame`
-  docked into a `data-workbench-region`.
+The [review and issue register](reviews/2026-08-28-codebase-review.md) is the
+next-work list: prioritize data integrity, selection/undo correctness, and
+export contracts before additional architectural abstraction.
