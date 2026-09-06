@@ -66,6 +66,27 @@ test('medianCutPalette: a lopsided outlier color still gets its own palette entr
   assert.deepEqual(medianCutPalette([b], 3), [[249, 0, 0], [0, 0, 255], [254, 0, 0]]);
 });
 
+test('medianCutPalette: weightExponent 0 treats 3 rare distinct shades as equal to 1 populous one, shifting the split', () => {
+  // 3 distinct, rarely-used shades (count 1 each) vs. one populous
+  // background shade (count 27) -- the same shape as a few real sprite
+  // colors sitting next to a big flat/dithered region.
+  const pixels = [
+    [0, 0, 0, 255], [10, 10, 10, 255], [20, 20, 20, 255],
+    ...Array(27).fill([100, 100, 100, 255]),
+  ];
+  const b = bmp(pixels.length, 1, pixels);
+  // Default (exponent 1, unchanged): the background's real weight (27) so
+  // outweighs the 3 rare shades (1 each) that the cut falls right after
+  // them, merging all 3 into one slot and leaving the background pure.
+  assert.deepEqual(medianCutPalette([b], 2), [[10, 10, 10], [100, 100, 100]]);
+  // weightExponent 0: every distinct shade counts as 1 vote regardless of
+  // population, so the background no longer automatically wins the whole
+  // right-hand side of the cut -- the split point moves, and the
+  // background's slot average shifts to include some of what would
+  // otherwise have been merged away with the rare shades.
+  assert.deepEqual(medianCutPalette([b], 2, 0), [[5, 5, 5], [97, 97, 97]]);
+});
+
 test('resolveAlphaForQuantize: heavily transparent pixels (>=75% transparent) snap to fully transparent', () => {
   const b = bmp(1, 1, [[10, 20, 30, 32]]); // alpha 32 -> ~87.5% transparent
   const [out] = resolveAlphaForQuantize([b], 4);

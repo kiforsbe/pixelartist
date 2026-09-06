@@ -59,7 +59,7 @@ export function mountFilterController(workbench) {
   // { region, patches } with no-op layers filtered out -- shared by the real
   // commit (quantizeToPalette) and the dialog's live preview. Returns null
   // when there's no sheet/region/layer/color to operate on.
-  function computeQuantizePatches(mode, param, allLayers, preferOpaque = false) {
+  function computeQuantizePatches(mode, param, allLayers, preferOpaque = false, weightExponent = 1) {
     const sheet = activeSheet();
     if (!sheet) return null;
     const rr = currentEditRegion();
@@ -70,7 +70,7 @@ export function mountFilterController(workbench) {
     const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
     const quantizeSource = (mode === 'count' && preferOpaque) ? resolveAlphaForQuantize(befores, param) : befores;
     const colors = mode === 'count'
-      ? medianCutPalette(quantizeSource, param).map(c => [c[0], c[1], c[2], 255])
+      ? medianCutPalette(quantizeSource, param, weightExponent).map(c => [c[0], c[1], c[2], 255])
       : param;
     if (!colors.length) return null;
     const palette = { colors };
@@ -80,12 +80,12 @@ export function mountFilterController(workbench) {
       quantizeBitmapToPalette(after, palette);
       return { layer: l, before, after };
     }).filter(p => !bitmapsEqual(p.before, p.after));
-    return { region, patches };
+    return { region, patches, colors };
   }
   
-  function quantizeToPalette(mode, param, allLayers, preferOpaque = false) {
+  function quantizeToPalette(mode, param, allLayers, preferOpaque = false, weightExponent = 1) {
     commitFloatIfAny();
-    const result = computeQuantizePatches(mode, param, allLayers, preferOpaque);
+    const result = computeQuantizePatches(mode, param, allLayers, preferOpaque, weightExponent);
     if (!result || !result.patches.length) return;
     const { region, patches } = result;
     getEditorHost().history.execute({
@@ -101,6 +101,10 @@ export function mountFilterController(workbench) {
   const qzModeCount = document.getElementById('qz-mode-count');
   const qzPaletteRow = document.getElementById('qz-palette-row');
   const qzCountRow = document.getElementById('qz-count-row');
+  const qzBalanceRow = document.getElementById('qz-balance-row');
+  const qzBalance = document.getElementById('qz-balance');
+  const qzCountPreviewRow = document.getElementById('qz-count-preview-row');
+  const qzCountPreview = document.getElementById('qz-count-preview');
   const qzPreferOpaqueRow = document.getElementById('qz-prefer-opaque-row');
   const qzPalette = document.getElementById('qz-palette');
   const qzCount = document.getElementById('qz-count');
@@ -115,13 +119,42 @@ export function mountFilterController(workbench) {
     const isCount = qzModeCount.checked;
     qzPaletteRow.hidden = isCount;
     qzCountRow.hidden = !isCount;
+    qzBalanceRow.hidden = !isCount;
+    qzCountPreviewRow.hidden = !isCount;
     qzPreferOpaqueRow.hidden = !isCount;
+  }
+  // Smallest power-of-two column count (capped at 32) whose square covers
+  // `n` cells -- i.e. the grid is never more than twice as wide as it is
+  // tall. Since cols is the first power of two >= sqrt(n), rows (=
+  // ceil(n/cols)) always lands in (cols/4, cols], so the grid normally comes
+  // out square (rows == cols) or a 2:1 rectangle (rows == cols/2).
+  function maxCellsPerRow(n) {
+    let cols = 1;
+    while (cols < 32 && cols < Math.sqrt(n)) cols *= 2;
+    return cols;
+  }
+  // Renders the median-cut result as a grid of color chips -- in Count mode
+  // the palette is computed on the fly and otherwise invisible until commit,
+  // unlike Palette mode where the user already picked a known, inspectable
+  // palette.
+  function renderQuantizeCountSwatches(colors) {
+    qzCountPreview.innerHTML = '';
+    qzCountPreview.style.gridTemplateColumns = `repeat(${maxCellsPerRow(colors.length)}, 14px)`;
+    for (const c of colors) {
+      const sw = document.createElement('span');
+      sw.className = 'sys-palette-swatch';
+      const hex = rgbaToHex(c);
+      sw.style.background = hex;
+      sw.title = hex;
+      qzCountPreview.appendChild(sw);
+    }
   }
   function previewQuantize() {
     let result;
     if (qzModeCount.checked) {
       const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
-      result = computeQuantizePatches('count', n, qzAllLayers.checked, qzPreferOpaque.checked);
+      result = computeQuantizePatches('count', n, qzAllLayers.checked, qzPreferOpaque.checked, Number(qzBalance.value));
+      renderQuantizeCountSwatches(result?.colors ?? []);
     } else {
       const pal = resolveQuantizePalette(qzPalette.value);
       result = pal && pal.colors.length ? computeQuantizePatches('palette', pal.colors, qzAllLayers.checked) : null;
@@ -132,6 +165,7 @@ export function mountFilterController(workbench) {
   qzModeCount.addEventListener('change', () => { updateQuantizeModeUI(); previewQuantize(); });
   qzPalette.addEventListener('change', previewQuantize);
   qzCount.addEventListener('input', previewQuantize);
+  qzBalance.addEventListener('change', previewQuantize);
   qzPreferOpaque.addEventListener('change', previewQuantize);
   qzAllLayers.addEventListener('change', previewQuantize);
   
@@ -184,6 +218,7 @@ export function mountFilterController(workbench) {
       refreshQuantizePaletteOptions();
       qzModePalette.checked = true;
       updateQuantizeModeUI();
+      qzBalance.value = '0.5';
       qzAllLayers.checked = false;
       qzPreferOpaque.checked = false;
       // All filter dialogs are non-modal and share the Preview panel --
@@ -207,7 +242,7 @@ export function mountFilterController(workbench) {
     if (qzModeCount.checked) {
       const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
       dlgQuantize.close();
-      quantizeToPalette('count', n, qzAllLayers.checked, qzPreferOpaque.checked);
+      quantizeToPalette('count', n, qzAllLayers.checked, qzPreferOpaque.checked, Number(qzBalance.value));
     } else {
       const pal = resolveQuantizePalette(qzPalette.value);
       dlgQuantize.close();

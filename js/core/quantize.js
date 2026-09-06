@@ -81,24 +81,52 @@ function channelRange(box, ch) {
   return max - min;
 }
 
-// Index of the box (of length >= 2) with the widest range on any RGB
-// channel; -1 when every box has length 1 (nothing left to split -- this
-// is what lets medianCutPalette return fewer than maxColors entries when
-// the source has few distinct colors).
-function widestBoxIndex(boxes) {
-  let idx = -1, bestRange = -1;
+// Each entry's pull on box selection/splitting, as count^exponent -- see
+// medianCutPalette's "Color balance" note for what exponent means. Kept
+// separate from a color's real pixel count (used unweighted in
+// averageColor) so the exponent decides which colors WIN a palette slot
+// without also distorting the representative shade chosen for that slot.
+function weight(c, exponent) { return exponent === 1 ? c.count : Math.pow(c.count, exponent); }
+
+// Weighted sum-of-squared-error a box would contribute at its current
+// weighted mean, summed across all 3 channels -- a lightweight Wu-style
+// substitute for "biggest raw range" (see widestErrorBoxIndex): a box only
+// scores high here if it's both spread out AND made of colors that matter
+// under the current weighting, so a huge but visually-flat dithered region
+// no longer automatically outranks a smaller, more distinct cluster just
+// because its raw numeric range happens to be wider.
+function weightedSSE(box, exponent) {
+  let sse = 0;
+  for (let ch = 0; ch < 3; ch++) {
+    let sumW = 0, sumWV = 0, sumWV2 = 0;
+    for (const c of box) {
+      const v = ch === 0 ? c.r : ch === 1 ? c.g : c.b;
+      const w = weight(c, exponent);
+      sumW += w; sumWV += w * v; sumWV2 += w * v * v;
+    }
+    if (sumW > 0) sse += sumWV2 - (sumWV * sumWV) / sumW;
+  }
+  return sse;
+}
+
+// Index of the box (of length >= 2) with the highest weighted SSE; -1 when
+// every box has length 1 (nothing left to split -- this is what lets
+// medianCutPalette return fewer than maxColors entries when the source has
+// few distinct colors).
+function widestErrorBoxIndex(boxes, exponent) {
+  let idx = -1, best = -1;
   boxes.forEach((box, i) => {
     if (box.length < 2) return;
-    for (let ch = 0; ch < 3; ch++) {
-      const range = channelRange(box, ch);
-      if (range > bestRange) { bestRange = range; idx = i; }
-    }
+    const sse = weightedSSE(box, exponent);
+    if (sse > best) { best = sse; idx = i; }
   });
   return idx;
 }
 
-// Splits `box` on its widest channel at the count-weighted median.
-function splitBox(box) {
+// Splits `box` on its widest channel (still plain numeric range -- which
+// AXIS to cut along doesn't need reweighting, only which box and where
+// along it) at the weighted median.
+function splitBox(box, exponent) {
   let widestCh = 0, bestRange = -1;
   for (let ch = 0; ch < 3; ch++) {
     const range = channelRange(box, ch);
@@ -109,10 +137,10 @@ function splitBox(box) {
     const vb = widestCh === 0 ? b.r : widestCh === 1 ? b.g : b.b;
     return va - vb;
   });
-  const total = sorted.reduce((s, c) => s + c.count, 0);
+  const total = sorted.reduce((s, c) => s + weight(c, exponent), 0);
   let acc = 0, splitAt = 1;
   for (let i = 0; i < sorted.length; i++) {
-    acc += sorted[i].count;
+    acc += weight(sorted[i], exponent);
     if (acc >= total / 2) { splitAt = i + 1; break; }
   }
   splitAt = Math.min(Math.max(splitAt, 1), sorted.length - 1);
@@ -133,14 +161,28 @@ function averageColor(box) {
 // only the source pixel's, so it would only add noise). Returns up to
 // maxColors [r,g,b] triples, fewer if there are fewer distinct RGB values
 // than maxColors in the input.
-export function medianCutPalette(bitmaps, maxColors) {
+//
+// `weightExponent` is the "Color balance" knob (see filter-controller.js's
+// qz-balance UI): each histogram entry pulls on box selection/splitting as
+// count^weightExponent. At 1 (Favor common colors, the historical default)
+// a color's real pixel count is its full weight, so a large flat/dithered
+// region -- many pixels spread across many near-duplicate shades -- can
+// dominate every split and leave few slots for smaller, more visually
+// distinct clusters. At 0 (Favor distinct colors) every unique shade counts
+// equally regardless of population, so that region competes on equal
+// footing, one slot at a time, against everything else. 0.5 (Balanced)
+// splits the difference. The final representative color for each box is
+// still its true count-weighted average (see averageColor) regardless of
+// exponent -- this only decides which clusters WIN a slot, never distorts
+// the shade chosen to represent one once it has.
+export function medianCutPalette(bitmaps, maxColors, weightExponent = 1) {
   const hist = rgbHistogram(bitmaps);
   if (hist.length <= maxColors) return hist.map(c => [c.r, c.g, c.b]);
   let boxes = [hist];
   while (boxes.length < maxColors) {
-    const idx = widestBoxIndex(boxes);
+    const idx = widestErrorBoxIndex(boxes, weightExponent);
     if (idx === -1) break;
-    const [left, right] = splitBox(boxes[idx]);
+    const [left, right] = splitBox(boxes[idx], weightExponent);
     boxes.splice(idx, 1, left, right);
   }
   return boxes.map(averageColor);

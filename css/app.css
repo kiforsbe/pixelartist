@@ -279,6 +279,7 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .sys-palette-header { font-size: 12px; margin-bottom: 4px; }
 .sys-palette-preview { display: flex; flex-wrap: wrap; gap: 1px; }
 .sys-palette-swatch { width: 14px; height: 14px; flex: none; border-radius: 1px; }
+.qz-count-preview { display: grid; gap: 1px; max-height: 96px; overflow-y: auto; justify-content: start; }
 
 /* layers panel */
 .layer-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
