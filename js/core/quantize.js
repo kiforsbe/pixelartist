@@ -175,7 +175,15 @@ function averageColor(box) {
 // still its true count-weighted average (see averageColor) regardless of
 // exponent -- this only decides which clusters WIN a slot, never distorts
 // the shade chosen to represent one once it has.
-export function medianCutPalette(bitmaps, maxColors, weightExponent = 1) {
+//
+// `refine` runs the box-split result through refinePalette's perceptual
+// Lloyd/K-means pass (see its own comment for why box-splitting alone can
+// leave a slot's average dragged away from the color that actually
+// dominates it). It's the "Perceptual refinement" UI checkbox -- on by
+// default since it never makes the match worse, but it costs extra passes
+// over the histogram, which matters when findMinimalColorCount calls this
+// once per candidate count.
+export function medianCutPalette(bitmaps, maxColors, weightExponent = 1, refine = true) {
   const hist = rgbHistogram(bitmaps);
   if (hist.length <= maxColors) return hist.map(c => [c.r, c.g, c.b]);
   let boxes = [hist];
@@ -185,7 +193,47 @@ export function medianCutPalette(bitmaps, maxColors, weightExponent = 1) {
     const [left, right] = splitBox(boxes[idx], weightExponent);
     boxes.splice(idx, 1, left, right);
   }
-  return boxes.map(averageColor);
+  const initial = boxes.map(averageColor);
+  return refine ? refinePalette(hist, initial) : initial;
+}
+
+// Lloyd/K-means relaxation over medianCutPalette's box-split centroids.
+// Median-cut makes each split once and never revisits it, so a box can end
+// up "contaminated" by a handful of unrelated, low-count colors that simply
+// happened to fall inside its boundary -- e.g. a checkerboard's true
+// (0,0,0) squares coming out as something like (39,39,39) because a few
+// unrelated dark sprite pixels got lumped into the same box and dragged its
+// average away from the value that actually dominates it. Each round
+// reassigns every distinct histogram color to whichever CURRENT centroid it
+// is nearest to (ignoring weightExponent -- that only decided which
+// clusters WON a slot; this step just finds the truest center for the slots
+// already won) and recomputes each centroid as the real count-weighted mean
+// of its new members, same as averageColor. Stops as soon as no color's
+// assignment changes, or after `maxIterations` rounds.
+function refinePalette(hist, initialColors, maxIterations = 6) {
+  let centroids = initialColors.map(c => [...c]);
+  let assignments = null;
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const next = hist.map(c => {
+      let best = 0, bestD = Infinity;
+      for (let k = 0; k < centroids.length; k++) {
+        const cc = centroids[k];
+        const d = (c.r - cc[0]) ** 2 + (c.g - cc[1]) ** 2 + (c.b - cc[2]) ** 2;
+        if (d < bestD) { bestD = d; best = k; }
+      }
+      return best;
+    });
+    const converged = assignments !== null && next.every((v, i) => v === assignments[i]);
+    assignments = next;
+    const sums = centroids.map(() => ({ r: 0, g: 0, b: 0, w: 0 }));
+    for (let i = 0; i < hist.length; i++) {
+      const c = hist[i], s = sums[assignments[i]];
+      s.r += c.r * c.count; s.g += c.g * c.count; s.b += c.b * c.count; s.w += c.count;
+    }
+    centroids = sums.map((s, k) => s.w > 0 ? [Math.round(s.r / s.w), Math.round(s.g / s.w), Math.round(s.b / s.w)] : centroids[k]);
+    if (converged) break;
+  }
+  return centroids;
 }
 
 // Transparency-cleanup pass for the "prefer opaque colors" quantize option:
@@ -223,4 +271,44 @@ export function resolveAlphaForQuantize(bitmaps, maxColors) {
     }
     return { width: bmp.width, height: bmp.height, data };
   });
+}
+
+// 0-100 "match" score for one candidate palette against its source bitmap:
+// 100 = every opaque pixel landed exactly on its original color, 0 = as far
+// off (on average) as black vs. white can get. Fully-transparent pixels are
+// excluded, mirroring quantizeBitmapToPalette's own alpha-skip rule --
+// `indices` still has one entry per pixel (quantizeBitmap always assigns
+// one, ignoring alpha), only the scoring ignores the transparent ones.
+const MAX_RGB_DISTANCE = Math.sqrt(3 * 255 * 255);
+function matchScore(original, indices, palette) {
+  const d = original.data;
+  let sum = 0, count = 0;
+  for (let p = 0; p < indices.length; p++) {
+    const i = p * 4;
+    if (d[i + 3] === 0) continue;
+    const c = palette[indices[p]];
+    const dr = d[i] - c[0], dg = d[i + 1] - c[1], db = d[i + 2] - c[2];
+    sum += Math.sqrt(dr * dr + dg * dg + db * db);
+    count++;
+  }
+  return count === 0 ? 100 : 100 * (1 - (sum / count) / MAX_RGB_DISTANCE);
+}
+
+// Finds the smallest color count in [1, ceiling] whose median-cut palette
+// reproduces `bitmaps` at or above `targetPercent` match (see matchScore) --
+// mirrors pngquant's "quality" option (search for the least colors that
+// still hit a quality bar) rather than committing to a fixed count up
+// front. Falls back to `ceiling` itself when even the full budget can't
+// reach the target. `weightExponent` is passed straight through to
+// medianCutPalette so the Color-balance setting still applies to every
+// candidate the sweep tries.
+export function findMinimalColorCount(bitmaps, ceiling, weightExponent, targetPercent, refine = true) {
+  for (let n = 1; n <= ceiling; n++) {
+    const palette = medianCutPalette(bitmaps, n, weightExponent, refine);
+    if (!palette.length) continue;
+    const scores = bitmaps.map(bmp => matchScore(bmp, quantizeBitmap(bmp, palette), palette));
+    const avg = scores.reduce((s, v) => s + v, 0) / scores.length;
+    if (avg >= targetPercent) return n;
+  }
+  return ceiling;
 }

@@ -82,3 +82,43 @@ test('quantizeBitmapToPalette: exact palette match is left byte-identical', () =
   quantizeBitmapToPalette(b, { colors: [[255, 0, 0, 255], [0, 0, 255, 255]] });
   assert.deepEqual(getPixel(b, 0, 0), [0, 0, 255, 255]);
 });
+
+test('quantizeBitmapToPalette ordered dither: mid-gray against black/white splits 8/8 per the Bayer matrix', () => {
+  const b = createBitmap(4, 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(b, x, y, [128, 128, 128, 255]);
+  const palette = { colors: [[0, 0, 0, 255], [255, 255, 255, 255]] };
+  quantizeBitmapToPalette(b, palette, 'ordered');
+  let black = 0, white = 0;
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+    const [r] = getPixel(b, x, y);
+    r === 0 ? black++ : white++;
+  }
+  assert.equal(black, 8);
+  assert.equal(white, 8);
+});
+
+test('quantizeBitmapToPalette floyd-steinberg dither: diffuses error forward along a uniform row', () => {
+  const b = createBitmap(4, 1);
+  for (let x = 0; x < 4; x++) setPixel(b, x, 0, [100, 100, 100, 255]);
+  const palette = { colors: [[0, 0, 0, 255], [255, 255, 255, 255]] };
+  quantizeBitmapToPalette(b, palette, 'floyd-steinberg');
+  assert.deepEqual([0, 1, 2, 3].map(x => getPixel(b, x, 0)[0]), [0, 255, 0, 0]);
+});
+
+test('quantizeBitmapToPalette atkinson dither: only diffuses 6/8 of the error, so it converges differently than Floyd-Steinberg', () => {
+  const b = createBitmap(4, 1);
+  for (let x = 0; x < 4; x++) setPixel(b, x, 0, [100, 100, 100, 255]);
+  const palette = { colors: [[0, 0, 0, 255], [255, 255, 255, 255]] };
+  quantizeBitmapToPalette(b, palette, 'atkinson');
+  assert.deepEqual([0, 1, 2, 3].map(x => getPixel(b, x, 0)[0]), [0, 0, 0, 255]);
+});
+
+test('quantizeBitmapToPalette error-diffusion dither: a fully transparent pixel stays untouched and does not leak error to/from its neighbor', () => {
+  const b = createBitmap(2, 1);
+  setPixel(b, 0, 0, [10, 10, 10, 0]);   // fully transparent
+  setPixel(b, 1, 0, [100, 100, 100, 255]);
+  const palette = { colors: [[0, 0, 0, 255], [255, 255, 255, 255]] };
+  quantizeBitmapToPalette(b, palette, 'floyd-steinberg');
+  assert.deepEqual(getPixel(b, 0, 0), [10, 10, 10, 0]);
+  assert.deepEqual(getPixel(b, 1, 0), [0, 0, 0, 255]);
+});

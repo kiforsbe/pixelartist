@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { colorFrequency, buildPalette, quantizeBitmap, medianCutPalette, resolveAlphaForQuantize } from '../js/core/quantize.js';
+import { colorFrequency, buildPalette, quantizeBitmap, medianCutPalette, resolveAlphaForQuantize, findMinimalColorCount } from '../js/core/quantize.js';
 
 function bmp(width, height, pixels) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -66,25 +66,93 @@ test('medianCutPalette: a lopsided outlier color still gets its own palette entr
   assert.deepEqual(medianCutPalette([b], 3), [[249, 0, 0], [0, 0, 255], [254, 0, 0]]);
 });
 
-test('medianCutPalette: weightExponent 0 treats 3 rare distinct shades as equal to 1 populous one, shifting the split', () => {
-  // 3 distinct, rarely-used shades (count 1 each) vs. one populous
-  // background shade (count 27) -- the same shape as a few real sprite
-  // colors sitting next to a big flat/dithered region.
+test('medianCutPalette: weightExponent changes which colors get merged when slots are scarce', () => {
+  // 4 genuinely distinct, evenly-populous sprite hues (40px each) plus two
+  // noisy bands -- 10 slightly-different near-black shades and 10
+  // slightly-different near-white shades (6px each, the shape of
+  // dithering/anti-aliasing) -- squeezed into only 5 palette slots. There
+  // aren't enough slots to keep every hue AND both noise bands distinct, so
+  // which two hues get merged together (and how much budget the noisy
+  // bands get) depends on how population is weighted.
+  const pixels = [];
+  for (let i = 0; i < 10; i++) { const v = i * 4; for (let k = 0; k < 6; k++) pixels.push([v, v, v, 255]); }
+  for (let i = 0; i < 10; i++) { const v = 216 + i * 4; for (let k = 0; k < 6; k++) pixels.push([v, v, v, 255]); }
+  for (let i = 0; i < 40; i++) pixels.push([200, 40, 40, 255]);   // red
+  for (let i = 0; i < 40; i++) pixels.push([40, 180, 60, 255]);   // green
+  for (let i = 0; i < 40; i++) pixels.push([40, 60, 200, 255]);   // blue
+  for (let i = 0; i < 40; i++) pixels.push([210, 200, 40, 255]);  // yellow
+  const b = bmp(pixels.length, 1, pixels);
+  const sorted = (colors) => [...colors].sort((a, c) => a[0] - c[0] || a[1] - c[1] || a[2] - c[2]);
+  // Default (exponent 1): boxes are weighted by raw pixel count, so the
+  // 4 evenly-populous hues (40px each) outweigh any single noise shade
+  // (6px each) -- red and yellow (the closest pair) merge, blue and green
+  // each keep their own slot, and the noise bands collapse to one
+  // representative shade apiece.
+  assert.deepEqual(sorted(medianCutPalette([b], 5, 1)), [
+    [18, 18, 18], [40, 60, 200], [40, 180, 60], [205, 120, 40], [234, 234, 234],
+  ]);
+  // weightExponent 0: every distinct shade counts as 1 vote regardless of
+  // population, so the 20 distinct noise shades (10 black + 10 white)
+  // collectively outvote the 4 hues -- one extra slot shifts to splitting
+  // the near-white band into two shades, leaving only 2 slots for hues,
+  // which forces blue and green (rather than red and yellow) to merge.
+  assert.deepEqual(sorted(medianCutPalette([b], 5, 0)), [
+    [18, 18, 18], [40, 120, 130], [205, 120, 40], [224, 224, 224], [244, 244, 244],
+  ]);
+});
+
+test('medianCutPalette: perceptual refinement (default) rescues a slot contaminated by a few off-cluster pixels; refine=false leaves it contaminated', () => {
+  // A big black cluster and a big white cluster, plus a small contaminating
+  // shade (150) that the box split's weighted median happens to lump in with
+  // black -- the same shape as a checkerboard's true black squares coming
+  // out as e.g. (39,39,39) because a handful of unrelated pixels landed in
+  // the same box. 150 is actually closer to the white cluster than to black,
+  // so a perceptual reassignment pass pulls it out.
   const pixels = [
-    [0, 0, 0, 255], [10, 10, 10, 255], [20, 20, 20, 255],
-    ...Array(27).fill([100, 100, 100, 255]),
+    ...Array(1000).fill([0, 0, 0, 255]),
+    ...Array(50).fill([150, 150, 150, 255]),
+    ...Array(1000).fill([255, 255, 255, 255]),
   ];
   const b = bmp(pixels.length, 1, pixels);
-  // Default (exponent 1, unchanged): the background's real weight (27) so
-  // outweighs the 3 rare shades (1 each) that the cut falls right after
-  // them, merging all 3 into one slot and leaving the background pure.
-  assert.deepEqual(medianCutPalette([b], 2), [[10, 10, 10], [100, 100, 100]]);
-  // weightExponent 0: every distinct shade counts as 1 vote regardless of
-  // population, so the background no longer automatically wins the whole
-  // right-hand side of the cut -- the split point moves, and the
-  // background's slot average shifts to include some of what would
-  // otherwise have been merged away with the rare shades.
-  assert.deepEqual(medianCutPalette([b], 2, 0), [[5, 5, 5], [97, 97, 97]]);
+  assert.deepEqual(medianCutPalette([b], 2, 1, false), [[7, 7, 7], [255, 255, 255]]);
+  assert.deepEqual(medianCutPalette([b], 2, 1, true), [[0, 0, 0], [250, 250, 250]]);
+  // refine defaults to true.
+  assert.deepEqual(medianCutPalette([b], 2, 1), [[0, 0, 0], [250, 250, 250]]);
+});
+
+test('findMinimalColorCount: returns the smallest count that reaches a 100% match, not the ceiling', () => {
+  const pixels = [
+    ...Array(5).fill([255, 0, 0, 255]),
+    ...Array(5).fill([0, 255, 0, 255]),
+    ...Array(5).fill([0, 0, 255, 255]),
+  ];
+  const b = bmp(pixels.length, 1, pixels);
+  // 3 genuinely distinct colors -- fewer than 3 slots forces some blending
+  // (< 100% match), so 3 is the minimum that hits a 100% target, even
+  // though the search is allowed up to 5.
+  assert.equal(findMinimalColorCount([b], 5, 1, 100), 3);
+});
+
+test('findMinimalColorCount: a trivially low target is satisfied by a single color', () => {
+  const pixels = [
+    ...Array(5).fill([255, 0, 0, 255]),
+    ...Array(5).fill([0, 255, 0, 255]),
+    ...Array(5).fill([0, 0, 255, 255]),
+  ];
+  const b = bmp(pixels.length, 1, pixels);
+  assert.equal(findMinimalColorCount([b], 5, 1, 1), 1);
+});
+
+test('findMinimalColorCount: falls back to the ceiling when the target is unreachable within budget', () => {
+  const pixels = [
+    ...Array(5).fill([255, 0, 0, 255]),
+    ...Array(5).fill([0, 255, 0, 255]),
+    ...Array(5).fill([0, 0, 255, 255]),
+  ];
+  const b = bmp(pixels.length, 1, pixels);
+  // 3 distinct colors need 3 slots for a perfect match; capped at 2, the
+  // best the search can do is return the ceiling itself.
+  assert.equal(findMinimalColorCount([b], 2, 1, 100), 2);
 });
 
 test('resolveAlphaForQuantize: heavily transparent pixels (>=75% transparent) snap to fully transparent', () => {

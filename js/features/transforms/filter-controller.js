@@ -3,7 +3,7 @@ import { copyRegion, cloneBitmap, blitRegion } from '../../core/pixels.js';
 import { commitFloatIfAny, currentEditRegion } from '../../components/canvas/float-session.js';
 import { getEditorHost } from '../../host/runtime.js';
 import { activeSheet, activeLayer, activeLayerScope, currentContextLayers } from '../../host/document-helpers.js';
-import { medianCutPalette, resolveAlphaForQuantize } from '../../core/quantize.js';
+import { medianCutPalette, resolveAlphaForQuantize, findMinimalColorCount } from '../../core/quantize.js';
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
 import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../../core/checkerboard.js';
@@ -59,7 +59,7 @@ export function mountFilterController(workbench) {
   // { region, patches } with no-op layers filtered out -- shared by the real
   // commit (quantizeToPalette) and the dialog's live preview. Returns null
   // when there's no sheet/region/layer/color to operate on.
-  function computeQuantizePatches(mode, param, allLayers, preferOpaque = false, weightExponent = 1) {
+  function computeQuantizePatches(mode, param, allLayers, preferOpaque = false, weightExponent = 1, dither = 'none', refine = true) {
     const sheet = activeSheet();
     if (!sheet) return null;
     const rr = currentEditRegion();
@@ -70,22 +70,40 @@ export function mountFilterController(workbench) {
     const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
     const quantizeSource = (mode === 'count' && preferOpaque) ? resolveAlphaForQuantize(befores, param) : befores;
     const colors = mode === 'count'
-      ? medianCutPalette(quantizeSource, param, weightExponent).map(c => [c[0], c[1], c[2], 255])
+      ? medianCutPalette(quantizeSource, param, weightExponent, refine).map(c => [c[0], c[1], c[2], 255])
       : param;
     if (!colors.length) return null;
     const palette = { colors };
     const patches = layers.map((l, i) => {
       const before = befores[i];
       const after = cloneBitmap(quantizeSource[i]);
-      quantizeBitmapToPalette(after, palette);
+      quantizeBitmapToPalette(after, palette, dither);
       return { layer: l, before, after };
     }).filter(p => !bitmapsEqual(p.before, p.after));
     return { region, patches, colors };
   }
-  
-  function quantizeToPalette(mode, param, allLayers, preferOpaque = false, weightExponent = 1) {
+
+  // Duplicates computeQuantizePatches's own region/layer resolution (matching
+  // computeChromaKeyPatches/computeCheckerboardPatches, which each do the
+  // same) so the auto-count search can run before the color count it needs
+  // even exists. Falls back to `ceiling` itself whenever there's nothing to
+  // search against.
+  function findAutoColorCount(ceiling, allLayers, preferOpaque, weightExponent, targetPercent, refine) {
+    const sheet = activeSheet();
+    if (!sheet) return ceiling;
+    const rr = currentEditRegion();
+    if (!rr) return ceiling;
+    const { region } = rr;
+    const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+    if (!layers.length) return ceiling;
+    const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
+    const quantizeSource = preferOpaque ? resolveAlphaForQuantize(befores, ceiling) : befores;
+    return findMinimalColorCount(quantizeSource, ceiling, weightExponent, targetPercent, refine);
+  }
+
+  function quantizeToPalette(mode, param, allLayers, preferOpaque = false, weightExponent = 1, dither = 'none', refine = true) {
     commitFloatIfAny();
-    const result = computeQuantizePatches(mode, param, allLayers, preferOpaque, weightExponent);
+    const result = computeQuantizePatches(mode, param, allLayers, preferOpaque, weightExponent, dither, refine);
     if (!result || !result.patches.length) return;
     const { region, patches } = result;
     getEditorHost().history.execute({
@@ -101,14 +119,21 @@ export function mountFilterController(workbench) {
   const qzModeCount = document.getElementById('qz-mode-count');
   const qzPaletteRow = document.getElementById('qz-palette-row');
   const qzCountRow = document.getElementById('qz-count-row');
+  const qzAutoCount = document.getElementById('qz-auto-count');
+  const qzAutoTargetRow = document.getElementById('qz-auto-target-row');
+  const qzAutoTarget = document.getElementById('qz-auto-target');
+  const qzAutoTargetVal = document.getElementById('qz-auto-target-val');
   const qzBalanceRow = document.getElementById('qz-balance-row');
   const qzBalance = document.getElementById('qz-balance');
+  const qzPerceptualRow = document.getElementById('qz-perceptual-row');
+  const qzPerceptual = document.getElementById('qz-perceptual');
   const qzCountPreviewRow = document.getElementById('qz-count-preview-row');
   const qzCountPreview = document.getElementById('qz-count-preview');
   const qzPreferOpaqueRow = document.getElementById('qz-prefer-opaque-row');
   const qzPalette = document.getElementById('qz-palette');
   const qzCount = document.getElementById('qz-count');
   const qzPreferOpaque = document.getElementById('qz-prefer-opaque');
+  const qzDither = document.getElementById('qz-dither');
   const qzAllLayers = document.getElementById('qz-alllayers');
   const qzOk = document.getElementById('qz-ok');
   const qzCancel = document.getElementById('qz-cancel');
@@ -120,8 +145,23 @@ export function mountFilterController(workbench) {
     qzPaletteRow.hidden = isCount;
     qzCountRow.hidden = !isCount;
     qzBalanceRow.hidden = !isCount;
+    qzPerceptualRow.hidden = !isCount;
     qzCountPreviewRow.hidden = !isCount;
     qzPreferOpaqueRow.hidden = !isCount;
+    qzAutoTargetRow.hidden = !(isCount && qzAutoCount.checked);
+    // Auto and a fixed count are mutually exclusive, not "manual count as a
+    // ceiling for the search" -- the field just becomes a read-only readout
+    // of whatever count the search settled on.
+    qzCount.disabled = isCount && qzAutoCount.checked;
+  }
+  // Auto mode searches all the way up to MAX_PALETTE_COLORS on its own; the
+  // Colors field plays no part in the search, it only displays the result
+  // afterwards (see previewQuantize).
+  function resolveQuantizeCount() {
+    if (qzAutoCount.checked) {
+      return findAutoColorCount(MAX_PALETTE_COLORS, qzAllLayers.checked, qzPreferOpaque.checked, Number(qzBalance.value), Number(qzAutoTarget.value), qzPerceptual.checked);
+    }
+    return Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
   }
   // Smallest power-of-two column count (capped at 32) whose square covers
   // `n` cells -- i.e. the grid is never more than twice as wide as it is
@@ -152,12 +192,16 @@ export function mountFilterController(workbench) {
   function previewQuantize() {
     let result;
     if (qzModeCount.checked) {
-      const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
-      result = computeQuantizePatches('count', n, qzAllLayers.checked, qzPreferOpaque.checked, Number(qzBalance.value));
+      const n = resolveQuantizeCount();
+      // The Colors field plays no part in the auto search -- once it
+      // resolves, write the count back in so the field (disabled in this
+      // mode) shows what was actually found instead of a stale number.
+      if (qzAutoCount.checked) qzCount.value = n;
+      result = computeQuantizePatches('count', n, qzAllLayers.checked, qzPreferOpaque.checked, Number(qzBalance.value), qzDither.value, qzPerceptual.checked);
       renderQuantizeCountSwatches(result?.colors ?? []);
     } else {
       const pal = resolveQuantizePalette(qzPalette.value);
-      result = pal && pal.colors.length ? computeQuantizePatches('palette', pal.colors, qzAllLayers.checked) : null;
+      result = pal && pal.colors.length ? computeQuantizePatches('palette', pal.colors, qzAllLayers.checked, false, 1, qzDither.value) : null;
     }
     pushLivePreview(result);
   }
@@ -165,8 +209,12 @@ export function mountFilterController(workbench) {
   qzModeCount.addEventListener('change', () => { updateQuantizeModeUI(); previewQuantize(); });
   qzPalette.addEventListener('change', previewQuantize);
   qzCount.addEventListener('input', previewQuantize);
+  qzAutoCount.addEventListener('change', () => { updateQuantizeModeUI(); previewQuantize(); });
+  qzAutoTarget.addEventListener('input', () => { qzAutoTargetVal.textContent = `${qzAutoTarget.value}%`; previewQuantize(); });
   qzBalance.addEventListener('change', previewQuantize);
+  qzPerceptual.addEventListener('change', previewQuantize);
   qzPreferOpaque.addEventListener('change', previewQuantize);
+  qzDither.addEventListener('change', previewQuantize);
   qzAllLayers.addEventListener('change', previewQuantize);
   
   function refreshQuantizePaletteOptions() {
@@ -217,10 +265,15 @@ export function mountFilterController(workbench) {
     run: () => {
       refreshQuantizePaletteOptions();
       qzModePalette.checked = true;
-      updateQuantizeModeUI();
       qzBalance.value = '0.5';
+      qzPerceptual.checked = true;
       qzAllLayers.checked = false;
       qzPreferOpaque.checked = false;
+      qzAutoCount.checked = false;
+      qzAutoTarget.value = '97';
+      qzAutoTargetVal.textContent = '97%';
+      qzDither.value = 'none';
+      updateQuantizeModeUI();
       // All filter dialogs are non-modal and share the Preview panel --
       // having more than one open at once would be confusing (whichever
       // dialog's control was touched last "wins" the preview), so opening
@@ -240,14 +293,14 @@ export function mountFilterController(workbench) {
     refreshPreviewPanel();
     workbench.clearCanvasPreview();
     if (qzModeCount.checked) {
-      const n = Math.max(1, Math.min(256, parseInt(qzCount.value, 10) || 16));
+      const n = resolveQuantizeCount();
       dlgQuantize.close();
-      quantizeToPalette('count', n, qzAllLayers.checked, qzPreferOpaque.checked, Number(qzBalance.value));
+      quantizeToPalette('count', n, qzAllLayers.checked, qzPreferOpaque.checked, Number(qzBalance.value), qzDither.value, qzPerceptual.checked);
     } else {
       const pal = resolveQuantizePalette(qzPalette.value);
       dlgQuantize.close();
       if (!pal || !pal.colors.length) return;
-      quantizeToPalette('palette', pal.colors, qzAllLayers.checked);
+      quantizeToPalette('palette', pal.colors, qzAllLayers.checked, false, 1, qzDither.value);
     }
   });
   
