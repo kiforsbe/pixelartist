@@ -80,6 +80,39 @@ test('checkerboardRemoveBitmap: minRegionSize protects a small enclosed pattern 
   assert.equal(ungated.data[enclosedPixel + 3], 0, 'sanity: with the gate disabled (minRegionSize: 0), the same enclosed pattern IS wrongly removed -- proving the gate, not something else, is what protects it above');
 });
 
+test('checkerboardRemoveBitmap: connectivityBridge stops a thin (jagged-silhouette-width) gap from fragmenting the real background into wrongly-protected pockets, while a thick wall around genuinely enclosed content is unaffected', () => {
+  // Same shape as the walled-enclosure test above, but the wall is only
+  // just wide enough to leave a 2px margin around the inner pattern instead
+  // of 8px -- the real-world equivalent of a jagged diagonal sprite edge
+  // pinching off a sliver of checkerboard rather than a sprite's solid
+  // interior fully enclosing something. A 2px margin is exactly the kind of
+  // gap connectivityBridge (default 2) is meant to see past: the inner
+  // pattern is genuinely still part of the same sprawling checkerboard, cut
+  // off from it by only a hairline, so it should be removed right along
+  // with the rest -- unlike the existing enclosed-pattern test's 8px-thick
+  // wall, which stays well beyond the bridge and keeps protecting its
+  // content regardless.
+  const w = 64, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [192, 192, 192];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB, [26, 26, 12, 12, [90, 60, 30]]);
+  const { data } = bmp;
+  for (let y = 28; y < 36; y++) {
+    for (let x = 28; x < 36; x++) {
+      const parity = (((x - 28) / 2) | 0) + (((y - 28) / 2) | 0);
+      const c = parity % 2 === 0 ? colorA : colorB;
+      const i = (y * w + x) * 4;
+      data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
+    }
+  }
+  const enclosedPixel = (31 * w + 31) * 4; // inside the 8x8 pattern, 2px from the thin wall
+
+  const bridged = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: 4, minMixFraction: 0.1 });
+  assert.equal(bridged.data[enclosedPixel + 3], 0, 'default connectivityBridge sees past the 2px gap -- this is really just more background, so it gets removed');
+
+  const unbridged = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: 4, minMixFraction: 0.1, connectivityBridge: 0 });
+  assert.deepEqual([unbridged.data[enclosedPixel], unbridged.data[enclosedPixel + 1], unbridged.data[enclosedPixel + 2], unbridged.data[enclosedPixel + 3]], [...colorA, 255], 'sanity: with bridging disabled, the thin gap alone is (wrongly) enough to protect it -- proving the bridge is what fixes this, not something else');
+});
+
 test('checkerboardRemoveBitmap: colorA/colorB accept a list of samples, covering multiple distinct checker shades a single anchor + tolerance would miss', () => {
   // Simulates a sheet assembled from two separately-exported sprites, each
   // baked with its own dark checker shade (confirmed against a real asset:
@@ -275,6 +308,37 @@ test('checkerboardRemoveBitmap: protectColor shields real content even when tole
     protectColor: [150, 150, 150], protectTolerance: 20, protectSoftness: 0,
   });
   assert.deepEqual([protectedOut.data[lineIdx], protectedOut.data[lineIdx + 1], protectedOut.data[lineIdx + 2], protectedOut.data[lineIdx + 3]], [150, 150, 150, 255]);
+});
+
+test('checkerboardRemoveBitmap: blendTolerance catches an anti-aliased pixel that sits ON the line between colorA and colorB even though it is far from both individually, without flagging an off-axis near-miss at the same distance', () => {
+  // A checker of near-white/near-black, plus one pixel that's a straight-line
+  // blend between the two shades at t=0.3 along colorA->colorB (178,178,178)
+  // -- 72 from colorA and 168 from colorB, far past any tolerance/softness
+  // anyone would actually use without also reaching real content, but it
+  // sits exactly on the segment between them, which is the geometric
+  // signature of genuine checker-cell antialiasing (confirmed against a real
+  // asset: its own diagonal zigzag seam artifact was exactly this -- a pixel
+  // ~17 from the nearest single sample, ~4.5 perpendicular from the A-B
+  // line). A second pixel at the SAME distance-from-the-line-ish position
+  // but offset perpendicular to it (198,168,168 -- an off-axis, mildly
+  // colorful tone) must survive, proving the check is genuinely directional
+  // and not just a wider distance-to-either-endpoint net.
+  const w = 16, h = 16;
+  const colorA = [250, 250, 250], colorB = [10, 10, 10];
+  const bmp = checkerBitmap(w, h, 4, colorA, colorB);
+
+  const seamIdx = (8 * w + 8) * 4;
+  bmp.data[seamIdx] = 178; bmp.data[seamIdx + 1] = 178; bmp.data[seamIdx + 2] = 178; bmp.data[seamIdx + 3] = 255;
+
+  const offAxisIdx = (8 * w + 4) * 4;
+  bmp.data[offAxisIdx] = 198; bmp.data[offAxisIdx + 1] = 168; bmp.data[offAxisIdx + 2] = 168; bmp.data[offAxisIdx + 3] = 255;
+
+  const out = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 14, softness: 0, windowRadius: 6, minMixFraction: 0.1 });
+  assert.equal(out.data[seamIdx + 3], 0, 'the on-line blend pixel is fully removed by the blend check even though tolerance/softness alone would never reach it');
+  assert.equal(out.data[offAxisIdx + 3], 255, 'the off-axis near-miss survives -- it is not a blend of colorA/colorB, just coincidentally similar distance');
+
+  const noBlend = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 14, softness: 0, windowRadius: 6, minMixFraction: 0.1, blendTolerance: 0 });
+  assert.equal(noBlend.data[seamIdx + 3], 255, 'sanity: with blendTolerance disabled, the same seam pixel survives -- proving the blend check, not something else, is what catches it above');
 });
 
 // Draws full-span guide lines into an existing checker bitmap at the given

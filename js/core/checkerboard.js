@@ -149,16 +149,71 @@ function boxSum(sat, w, h, cx, cy, radius) {
 // between the two -- softness === 0 collapses this to a hard cutoff at
 // `tolerance` (mirrors chromaKeyBitmap's own matchStrength). Feathering
 // this instead of using a hard cutoff is what lets a pixel just outside
-// the strict tolerance -- a common spot for the anti-aliased seam between
-// two checker cells -- fade out gracefully instead of surviving at full
-// opacity as a stray pixel.
-function matchStrength(r, g, b, color, tolerance, softness) {
-  const dist = channelDist(r, g, b, color);
+// the strict tolerance fade out gracefully instead of surviving at full
+// opacity as a stray pixel. NOTE: softness alone cannot fully clear a
+// pixel whose distance exceeds tolerance -- the falloff is asymptotic, it
+// only approaches 0 as softness grows, never reaches it exactly (confirmed
+// against a real asset: pushing softness far past what any reasonable UI
+// slider would offer still left the worst anti-aliased seam pixels at
+// dozens of alpha levels, and widened how much of the image was touched
+// along the way). See blendMatchStrength below for what actually clears
+// that case.
+function fadeFromDistance(dist, tolerance, softness) {
   if (dist <= tolerance) return 1;
   if (softness <= 0) return 0;
   const edge = tolerance + softness;
   if (dist >= edge) return 0;
   return (edge - dist) / softness;
+}
+
+function matchStrength(r, g, b, color, tolerance, softness) {
+  return fadeFromDistance(channelDist(r, g, b, color), tolerance, softness);
+}
+
+// Perpendicular (Euclidean) distance from (r,g,b) to the infinite line
+// through endA/endB, plus how far along the endA->endB segment the
+// projection falls (0 at endA, 1 at endB, outside [0,1] means the
+// projection overshoots past one of the two real checker colors).
+function segmentProjection(r, g, b, endA, endB) {
+  const ex = endB[0] - endA[0], ey = endB[1] - endA[1], ez = endB[2] - endA[2];
+  const len2 = ex * ex + ey * ey + ez * ez;
+  if (len2 === 0) return { t: 0, perp: channelDist(r, g, b, endA) };
+  const vx = r - endA[0], vy = g - endA[1], vz = b - endA[2];
+  const t = (vx * ex + vy * ey + vz * ez) / len2;
+  const px = endA[0] + t * ex, py = endA[1] + t * ey, pz = endA[2] + t * ez;
+  const perp = Math.sqrt((r - px) ** 2 + (g - py) ** 2 + (b - pz) ** 2);
+  return { t, perp };
+}
+
+// Catches the anti-aliased blend BETWEEN a colorA sample and a colorB
+// sample -- distinct from matchStrength, which only measures distance to
+// one endpoint on its own. A checker's own cell-to-cell antialiasing seam
+// is, by construction, a linear mix of its two colors, so it sits almost
+// exactly ON the segment between them (confirmed against a real asset: a
+// seam pixel that measured 17 away from the nearest single color sample --
+// well outside a safe tolerance -- measured under 5 perpendicular from the
+// A-B segment itself). Raising tolerance/softness far enough to absorb
+// that 17 independently reintroduced edge-nibbling on real content
+// (coal/ore icons, rock, a lizard figure) that doesn't lie on this line at
+// all; restricting the check to the segment itself is far more targeted,
+// since real content of a different hue is nowhere near the (near-)grey
+// line between two checker colors, while genuine checker anti-aliasing
+// always is. t is clamped to [0,1] (no extrapolation past either real
+// checker color -- that would just be tolerance by another name), and
+// perp uses its own tight tolerance/softness, independent of the caller's
+// main tolerance/softness.
+function blendMatchStrength(r, g, b, colorsA, colorsB, blendTolerance, blendSoftness) {
+  if (blendTolerance <= 0) return { strength: 0, closerToA: true };
+  let best = 0, closerToA = true;
+  for (const a of colorsA) {
+    for (const bCol of colorsB) {
+      const { t, perp } = segmentProjection(r, g, b, a, bCol);
+      if (t < 0 || t > 1) continue;
+      const s = fadeFromDistance(perp, blendTolerance, blendSoftness);
+      if (s > best) { best = s; closerToA = t < 0.5; }
+    }
+  }
+  return { strength: best, closerToA };
 }
 
 // Best (strongest) match against any color in a role's sample list --
@@ -198,6 +253,40 @@ function labelComponents(mask, w, h) {
     sizes.push(size);
   }
   return { labels, sizes };
+}
+
+// Dilates a boolean mask by `radius` (box dilation: a pixel is set if any
+// pixel within `radius` in either axis is set). Used only to decide which
+// pixels count as one CONNECTED region for minRegionSize -- never to expand
+// which pixels are actually removal-eligible (that stays gated by isA/isB
+// alone). Bridges thin (a few px) notches a jagged real-content silhouette
+// cuts into the checkerboard -- without it, minRegionSize sees each sliver
+// the notch pinches off as its own tiny isolated island and wrongly
+// protects it as if it were enclosed content, leaving a visible stair-step
+// of un-removed background tracing the silhouette (confirmed against a
+// real asset: a diagonal grass edge's jagged 1-2px notches fragmented the
+// background into dozens of small protected pockets). A real wall around
+// genuinely enclosed content (rock around a coal chunk, a house wall
+// around a window) is many pixels thick, far wider than this radius, so it
+// still isolates that content correctly.
+function dilateMask(mask, w, h, radius) {
+  if (radius <= 0) return mask;
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (mask[y * w + x]) { out[y * w + x] = 1; continue; }
+      let hit = false;
+      for (let dy = -radius; dy <= radius && !hit; dy++) {
+        const yy = y + dy; if (yy < 0 || yy >= h) continue;
+        for (let dx = -radius; dx <= radius; dx++) {
+          const xx = x + dx; if (xx < 0 || xx >= w) continue;
+          if (mask[yy * w + xx]) { hit = true; break; }
+        }
+      }
+      out[y * w + x] = hit ? 1 : 0;
+    }
+  }
+  return out;
 }
 
 // Removes (or recolors) checkerboard-background pixels. A pixel's removal
@@ -254,7 +343,18 @@ function labelComponents(mask, w, h) {
 // matches. Defaults to an area tied to windowRadius (the size of the
 // neighborhood already being trusted to judge "real checkerboard"), so it
 // requires no separate tuning in the common case; pass 0 to disable.
-export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+// connectivityBridge: dilates the checker mask by this many pixels before
+// grouping it into components for minRegionSize (see dilateMask) -- bridges
+// thin jagged-silhouette notches so they don't fragment the real
+// background into lots of small wrongly-protected pockets, without
+// bridging genuinely thick walls around enclosed content.
+// blendTolerance/blendSoftness: see blendMatchStrength above -- catches the
+// anti-aliased blend BETWEEN colorA and colorB (a real seam between two
+// checker cells), independent of tolerance/softness. A pixel caught only
+// by this check joins isA/isB (whichever endpoint it's nearer, for the
+// window-mix test and connectivity below) exactly as if it had matched by
+// distance. Pass blendTolerance: 0 to disable.
+export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, connectivityBridge = 2, blendTolerance = 6, blendSoftness = 3, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
   const colorsA = toColorList(colorA);
   const colorsB = toColorList(colorB);
   const { width: w, height: h } = bmp;
@@ -266,13 +366,31 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (src[i + 3] === 0) continue;
     const r = src[i], g = src[i + 1], b = src[i + 2];
-    if (minChannelDist(r, g, b, colorsA) <= edge) { isA[p] = 1; isChecker[p] = 1; }
-    else if (minChannelDist(r, g, b, colorsB) <= edge) { isB[p] = 1; isChecker[p] = 1; }
+    if (minChannelDist(r, g, b, colorsA) <= edge) { isA[p] = 1; isChecker[p] = 1; continue; }
+    if (minChannelDist(r, g, b, colorsB) <= edge) { isB[p] = 1; isChecker[p] = 1; continue; }
+    const blend = blendMatchStrength(r, g, b, colorsA, colorsB, blendTolerance, blendSoftness);
+    if (blend.strength > 0) {
+      if (blend.closerToA) isA[p] = 1; else isB[p] = 1;
+      isChecker[p] = 1;
+    }
   }
   const satA = buildIntegral(isA, w, h);
   const satB = buildIntegral(isB, w, h);
   let componentLabels = null, componentSizes = null;
-  if (minRegionSize > 0) ({ labels: componentLabels, sizes: componentSizes } = labelComponents(isChecker, w, h));
+  if (minRegionSize > 0) {
+    // Label on the dilated mask (bridges thin notches into one group), but
+    // size each group by its REAL isChecker pixel count, not the dilated
+    // one -- otherwise a small enclosed island's own dilation halo could
+    // inflate its reported size past the threshold and defeat the gate for
+    // the exact small islands it exists to protect.
+    ({ labels: componentLabels } = labelComponents(dilateMask(isChecker, w, h, connectivityBridge), w, h));
+    componentSizes = [];
+    for (let p = 0; p < w * h; p++) {
+      if (!isChecker[p]) continue;
+      const id = componentLabels[p];
+      componentSizes[id] = (componentSizes[id] || 0) + 1;
+    }
+  }
   const data = new Uint8ClampedArray(src);
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (!isA[p] && !isB[p]) continue;
@@ -285,7 +403,11 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
     if (total === 0 || minorityCount / total < minMixFraction) continue;
 
     const r = data[i], g = data[i + 1], b = data[i + 2];
-    let strength = Math.max(maxMatchStrength(r, g, b, colorsA, tolerance, softness), maxMatchStrength(r, g, b, colorsB, tolerance, softness));
+    let strength = Math.max(
+      maxMatchStrength(r, g, b, colorsA, tolerance, softness),
+      maxMatchStrength(r, g, b, colorsB, tolerance, softness),
+      blendMatchStrength(r, g, b, colorsA, colorsB, blendTolerance, blendSoftness).strength,
+    );
     if (strength <= 0) continue;
     if (protectColor) {
       const protectStrength = matchStrength(r, g, b, protectColor, protectTolerance, protectSoftness);
