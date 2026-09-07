@@ -341,6 +341,50 @@ test('checkerboardRemoveBitmap: blendTolerance catches an anti-aliased pixel tha
   assert.equal(noBlend.data[seamIdx + 3], 255, 'sanity: with blendTolerance disabled, the same seam pixel survives -- proving the blend check, not something else, is what catches it above');
 });
 
+test('checkerboardRemoveBitmap: the lattice gate protects a checker-coloured detail inside a sprite even when a dark crack connects it to the real background, which defeats minRegionSize', () => {
+  // The real-world failure this exists for: a coal chunk inside a rock shares
+  // the dark checker shade exactly, and the rock's own dark outline plus a
+  // crack join it to the background, so the checker-colour mask sees ONE
+  // sprawling component and minRegionSize can't tell them apart (measured on
+  // a real sheet: the coal's component spanned the entire 512x512 canvas).
+  // The lattice gate separates them on structure instead of colour: the
+  // background follows the checker grid, the coal does not.
+  const w = 64, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [40, 40, 40];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB);
+  const { data } = bmp;
+  const put = (x, y, c) => { const i = (y * w + x) * 4; data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255; };
+
+  // a sprite body in a colour unrelated to either checker shade, kept small
+  // enough that a windowRadius neighbourhood centred on the detail still
+  // reaches real background -- which is what makes minMixFraction pass and
+  // leaves the detail defenceless without the lattice gate
+  for (let y = 26; y < 38; y++) for (let x = 26; x < 38; x++) put(x, y, [150, 100, 60]);
+  // its own dark outline, in the checker's dark shade, touching the background
+  for (let x = 25; x <= 38; x++) { put(x, 25, colorB); put(x, 38, colorB); }
+  for (let y = 25; y <= 38; y++) { put(25, y, colorB); put(38, y, colorB); }
+  // an enclosed dark detail ("coal") plus a crack joining it to that outline,
+  // so the whole thing is one connected checker-coloured blob
+  for (let y = 30; y < 34; y++) for (let x = 30; x < 34; x++) put(x, y, colorB);
+  for (let y = 26; y < 30; y++) put(31, y, colorB);
+
+  const coal = (31 * w + 31) * 4;
+  const background = (4 * w + 4) * 4;
+  const opts = { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1 };
+
+  const gated = checkerboardRemoveBitmap(bmp, opts);
+  assert.equal(gated.data[background + 3], 0, 'the real checkerboard background is still removed');
+  assert.deepEqual(
+    [gated.data[coal], gated.data[coal + 1], gated.data[coal + 2], gated.data[coal + 3]],
+    [...colorB, 255],
+    'the enclosed detail survives: it does not follow the checker grid, so the lattice gate vetoes removing it',
+  );
+
+  const ungated = checkerboardRemoveBitmap(bmp, { ...opts, latticeGate: false });
+  assert.equal(ungated.data[background + 3], 0, 'background still removed with the gate off');
+  assert.equal(ungated.data[coal + 3], 0, 'sanity: with latticeGate disabled the same detail IS destroyed -- neither colour nor minRegionSize can save it, which is exactly why the gate exists');
+});
+
 // Draws full-span guide lines into an existing checker bitmap at the given
 // row (axis='row') or column (axis='col') positions. `colorAt(index)` lets
 // a test vary each line's color slightly, simulating a guide line that's

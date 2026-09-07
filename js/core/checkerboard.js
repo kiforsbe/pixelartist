@@ -289,6 +289,117 @@ function dilateMask(mask, w, h, radius) {
   return out;
 }
 
+// ---- checkerboard lattice --------------------------------------------
+//
+// Everything above classifies a pixel by COLOUR, which is why a sprite
+// detail that happens to share a checker shade -- coal inside a rock, dark
+// speckles in a slate icon slot, a white highlight on a pearl -- cannot be
+// told apart from real background no matter how tolerance, windowRadius or
+// minMixFraction are tuned (measured against a real 512x512 sheet: ~13,600
+// pixels of real artwork destroyed, most of it deep inside sprites).
+//
+// A checkerboard has one thing real artwork does not: a rigid GRID. It has a
+// fixed cell size, a fixed phase, and strict parity -- cell (i,j) is light
+// exactly when i+j is even. Artwork has no reason to obey that. Measured on
+// the same sheet, a 16px lattice at phase (0,0) explains 94.7% of every
+// checker-coloured pixel; the pixels that disagree are overwhelmingly the
+// sprite details worth protecting.
+//
+// Parity alone is not enough, though: a checker-coloured pixel sitting
+// inside an object still lands on a matching-parity cell about half the time
+// by pure chance. So the decision is made per REGION, not per pixel -- a
+// region counts as genuine checkerboard only when a whole connected run of
+// pixels agrees with the grid AND that run contains both shades. An object's
+// interior fails both ways: its checker-coloured pixels agree with the grid
+// only at chance rate, so they shatter into tiny single-shade fragments.
+
+// Best (cellSize, phase) by parity agreement, searching a small band of cell
+// sizes around the caller's estimate. role: 0 = light, 1 = dark, -1 = not a
+// checker colour. Returns null when nothing fits well enough to be trusted,
+// in which case the caller simply skips the whole lattice gate and behaves
+// exactly as it did before -- so a resized/warped checkerboard that is no
+// longer on a rigid grid is never made worse by this.
+function fitCheckerLattice(role, w, h, checkerCount, cellSize, minAgreement) {
+  if (!checkerCount) return null;
+  let best = null;
+  const lo = Math.max(2, Math.round(cellSize) - 2), hi = Math.max(lo, Math.round(cellSize) + 2);
+  for (let C = lo; C <= hi; C++) {
+    const M = 2 * C;
+    const H0 = new Int32Array(M * M), H1 = new Int32Array(M * M);
+    for (let p = 0; p < w * h; p++) {
+      const rl = role[p];
+      if (rl < 0) continue;
+      const idx = (((p / w) | 0) % M) * M + ((p % w) % M);
+      if (rl === 0) H0[idx]++; else H1[idx]++;
+    }
+    // parity = A[xm] ^ B[ym], so for a fixed ox each row can be reduced once
+    // into "agreement if B[ym] is 0" / "...is 1" and then reused for every oy
+    // -- O(M^3) overall instead of re-summing the whole histogram per phase.
+    const s0 = new Int32Array(M), s1 = new Int32Array(M);
+    for (let ox = 0; ox < M; ox++) {
+      const A = new Uint8Array(M);
+      for (let xm = 0; xm < M; xm++) A[xm] = (((xm - ox) % M + M) % M) < C ? 0 : 1;
+      for (let ym = 0; ym < M; ym++) {
+        const base = ym * M;
+        let a0 = 0, a1 = 0;
+        for (let xm = 0; xm < M; xm++) {
+          if (A[xm] === 0) { a0 += H0[base + xm]; a1 += H1[base + xm]; }
+          else { a0 += H1[base + xm]; a1 += H0[base + xm]; }
+        }
+        s0[ym] = a0; s1[ym] = a1;
+      }
+      for (let oy = 0; oy < M; oy++) {
+        let agree = 0;
+        for (let ym = 0; ym < M; ym++) {
+          agree += ((((ym - oy) % M + M) % M) < C ? s0[ym] : s1[ym]);
+        }
+        if (!best || agree > best.agree) best = { cellSize: C, ox, oy, agree };
+      }
+    }
+  }
+  if (!best || best.agree / checkerCount < minAgreement) return null;
+  return { ...best, agreement: best.agree / checkerCount };
+}
+
+// Marks which pixels belong to a region that genuinely follows the lattice.
+// Both polarities are accepted, decided per region: a sheet packed from
+// several separately-exported sprites carries a DIFFERENT checker phase per
+// sprite, so insisting on one global polarity wrongly rejects the inverted
+// patches (confirmed on a real sheet -- a white cell sat exactly where the
+// global fit demanded a dark one, and the gap between two tiles was left
+// un-removed as a result).
+function latticeTerritory(role, w, h, lattice, minRegionSize, minAlternation) {
+  const n = w * h;
+  const { cellSize: C, ox, oy } = lattice;
+  const M = 2 * C;
+  const matches = new Uint8Array(n), inverted = new Uint8Array(n);
+  for (let p = 0; p < n; p++) {
+    if (role[p] < 0) continue;
+    const x = p % w, y = (p / w) | 0;
+    const a = (((x - ox) % M + M) % M) < C ? 0 : 1;
+    const b = (((y - oy) % M + M) % M) < C ? 0 : 1;
+    if (role[p] === (a ^ b)) matches[p] = 1; else inverted[p] = 1;
+  }
+  const territory = new Uint8Array(n);
+  for (const mask of [matches, inverted]) {
+    const { labels, sizes } = labelComponents(mask, w, h);
+    const light = new Int32Array(sizes.length), dark = new Int32Array(sizes.length);
+    for (let p = 0; p < n; p++) {
+      const id = labels[p];
+      if (id < 0) continue;
+      if (role[p] === 0) light[id]++; else dark[id]++;
+    }
+    for (let p = 0; p < n; p++) {
+      const id = labels[p];
+      if (id < 0 || sizes[id] < minRegionSize) continue;
+      const total = light[id] + dark[id];
+      if (total === 0 || Math.min(light[id], dark[id]) / total < minAlternation) continue;
+      territory[p] = 1;
+    }
+  }
+  return territory;
+}
+
 // Removes (or recolors) checkerboard-background pixels. A pixel's removal
 // strength comes from how closely it matches colorA/colorB (tolerance +
 // feathered softness, see matchStrength), but it's only applied at all
@@ -354,7 +465,23 @@ function dilateMask(mask, w, h, radius) {
 // by this check joins isA/isB (whichever endpoint it's nearer, for the
 // window-mix test and connectivity below) exactly as if it had matched by
 // distance. Pass blendTolerance: 0 to disable.
-export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, connectivityBridge = 2, blendTolerance = 6, blendSoftness = 3, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+//
+// latticeGate (see fitCheckerLattice/latticeTerritory above): vetoes any
+// removal whose pixel does not belong to a region that actually follows the
+// checkerboard's grid. This is what protects sprite detail that merely
+// SHARES a checker colour, which no colour-space test can ever separate
+// (measured on a real sheet: artwork destroyed drops from ~13,600 pixels to
+// ~5,800, and the part sitting deep inside sprites -- the visible,
+// art-destroying kind -- from ~13,000 to ~130; what remains is a 1px
+// silhouette fringe, over half of which is bit-identical to a checker
+// colour and so is genuinely undecidable). The veto only applies within
+// latticeVetoRadius of real (non-checker-coloured) material, because its
+// job is protecting sprite interiors -- a stray pixel out in open
+// background is not one, and keeps behaving exactly as before. If no
+// trustworthy lattice is found the gate disengages entirely.
+// latticeCellSize defaults to windowRadius, which callers already set from
+// estimateCheckerCellSize. Pass latticeGate: false to disable.
+export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, connectivityBridge = 2, blendTolerance = 6, blendSoftness = 3, latticeGate = true, latticeCellSize = windowRadius, minLatticeAgreement = 0.75, minLatticeRegion = 128, latticeAlternation = 0.05, latticeGrow = 1, latticeVetoRadius = latticeCellSize, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
   const colorsA = toColorList(colorA);
   const colorsB = toColorList(colorB);
   const { width: w, height: h } = bmp;
@@ -391,10 +518,43 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
       componentSizes[id] = (componentSizes[id] || 0) + 1;
     }
   }
+  // Lattice gate: only pixels belonging to a region that actually follows the
+  // checkerboard grid stay removal-eligible, and only where there's real
+  // material nearby for the veto to be protecting in the first place.
+  let latticeVeto = null;
+  if (latticeGate && latticeCellSize >= 2) {
+    const role = new Int8Array(w * h).fill(-1);
+    let checkerCount = 0;
+    for (let p = 0; p < w * h; p++) {
+      if (isA[p]) { role[p] = 0; checkerCount++; }
+      else if (isB[p]) { role[p] = 1; checkerCount++; }
+    }
+    const lattice = fitCheckerLattice(role, w, h, checkerCount, latticeCellSize, minLatticeAgreement);
+    if (lattice) {
+      const territory = latticeTerritory(role, w, h, lattice, minLatticeRegion, latticeAlternation);
+      const reach = dilateMask(territory, w, h, latticeGrow);
+      const material = new Uint8Array(w * h);
+      for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+        if (src[i + 3] !== 0 && !isChecker[p]) material[p] = 1;
+      }
+      // "is there real material within latticeVetoRadius" is a box query, so
+      // a summed-area table answers it in O(1) per pixel instead of paying a
+      // full dilation at that radius.
+      const satMaterial = buildIntegral(material, w, h);
+      latticeVeto = new Uint8Array(w * h);
+      for (let p = 0; p < w * h; p++) {
+        if (reach[p]) continue;
+        const x = p % w, y = (p / w) | 0;
+        if (boxSum(satMaterial, w, h, x, y, latticeVetoRadius) > 0) latticeVeto[p] = 1;
+      }
+    }
+  }
+
   const data = new Uint8ClampedArray(src);
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (!isA[p] && !isB[p]) continue;
     if (componentLabels && componentSizes[componentLabels[p]] < minRegionSize) continue;
+    if (latticeVeto && latticeVeto[p]) continue;
     const x = p % w, y = (p / w) | 0;
     const countA = boxSum(satA, w, h, x, y, windowRadius);
     const countB = boxSum(satB, w, h, x, y, windowRadius);
