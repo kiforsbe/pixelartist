@@ -41,6 +41,45 @@ test('checkerboardRemoveBitmap: removes a regular checker background, leaves a s
   assert.deepEqual([out.data[i], out.data[i + 1], out.data[i + 2], out.data[i + 3]], [200, 40, 40, 255]);
 });
 
+test('checkerboardRemoveBitmap: minRegionSize protects a small enclosed pattern that locally alternates like a checkerboard but is walled off from the real background', () => {
+  // A real checkerboard covers the whole sheet, but a 24x24 "wall" of an
+  // unrelated solid color (simulating a real sprite, e.g. a rock) sits in
+  // the middle, and INSIDE that wall a tiny 8x8 decorative pattern (e.g. a
+  // scale/checker-print texture on the sprite) alternates between the exact
+  // same colorA/colorB shades as the real checkerboard. Colorwise and even
+  // neighborhood-wise (windowRadius reaches only the pattern's own cells,
+  // not the real background) it looks exactly like valid checkerboard, so
+  // the tolerance+alternation test alone removes it -- it's walled off from
+  // the real background by the unrelated wall color, though, so it should
+  // never be reachable from it, and minRegionSize is what actually catches
+  // that (this is the general form of the real-world failure where a small
+  // checker-colored detail sits fully enclosed inside real art).
+  const w = 64, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [192, 192, 192];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB, [20, 20, 24, 24, [90, 60, 30]]);
+  const { data } = bmp;
+  for (let y = 28; y < 36; y++) {
+    for (let x = 28; x < 36; x++) {
+      const parity = (((x - 28) / 2) | 0) + (((y - 28) / 2) | 0);
+      const c = parity % 2 === 0 ? colorA : colorB;
+      const i = (y * w + x) * 4;
+      data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
+    }
+  }
+
+  // Deep in the pattern (not the image's own edge, where a small windowRadius
+  // can't see an adjacent cell at all -- a different, unrelated effect).
+  const backgroundMid = (50 * w + 50) * 4;
+  const enclosedPixel = (31 * w + 31) * 4; // inside the 8x8 enclosed pattern, colorA
+
+  const gated = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: 4, minMixFraction: 0.1 });
+  assert.equal(gated.data[backgroundMid + 3], 0, 'the real, sprawling checkerboard is still fully removed');
+  assert.deepEqual([gated.data[enclosedPixel], gated.data[enclosedPixel + 1], gated.data[enclosedPixel + 2], gated.data[enclosedPixel + 3]], [...colorA, 255], 'the small enclosed pattern survives -- its own connected blob (64px) is far smaller than the real background');
+
+  const ungated = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: 4, minMixFraction: 0.1, minRegionSize: 0 });
+  assert.equal(ungated.data[enclosedPixel + 3], 0, 'sanity: with the gate disabled (minRegionSize: 0), the same enclosed pattern IS wrongly removed -- proving the gate, not something else, is what protects it above');
+});
+
 test('checkerboardRemoveBitmap: colorA/colorB accept a list of samples, covering multiple distinct checker shades a single anchor + tolerance would miss', () => {
   // Simulates a sheet assembled from two separately-exported sprites, each
   // baked with its own dark checker shade (confirmed against a real asset:
@@ -69,6 +108,60 @@ test('checkerboardRemoveBitmap: colorA/colorB accept a list of samples, covering
   const multiSample = checkerboardRemoveBitmap(bmp, { colorA: [255, 255, 255], colorB: [[40, 40, 40], [8, 8, 8]], tolerance: 18, windowRadius: 12, minMixFraction: 0.1 });
   assert.equal(multiSample.data[leftDarkCorner + 3], 0, 'left half still removed with the sample list');
   assert.equal(multiSample.data[rightDarkCorner + 3], 0, 'right half now removed too -- covered by its own sample');
+});
+
+test('checkerboardRemoveBitmap: real content survives when colorB is a sample list, whether its color is unrelated to every sample or happens to exactly match one', () => {
+  // Same two-shade sheet as the coverage test above, but now also checks the
+  // OTHER half of the safety story: adding more samples to catch more real
+  // checker shades must not weaken the neighborhood/alternation guard that
+  // protects flat real content -- a real sprite outline drawn in a color
+  // near (but not one of) the sampled shades, or a flat fill that happens to
+  // exactly match one of them, must both survive as long as neither
+  // alternates with the checkerboard nearby.
+  const w = 80, h = 40, cell = 8;
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dark = x < w / 2 ? [40, 40, 40] : [8, 8, 8];
+      const parity = ((x / cell) | 0) + ((y / cell) | 0);
+      const c = parity % 2 === 0 ? [255, 255, 255] : dark;
+      const i = (y * w + x) * 4;
+      data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
+    }
+  }
+  // A flat 8x8 outline-colored rect, unrelated to any sample, in the left
+  // half's checker region.
+  const outlineColor = [90, 60, 30];
+  for (let y = 4; y < 12; y++) for (let x = 4; x < 12; x++) {
+    const i = (y * w + x) * 4;
+    data[i] = outlineColor[0]; data[i + 1] = outlineColor[1]; data[i + 2] = outlineColor[2]; data[i + 3] = 255;
+  }
+  // A flat 20x20 rect that exactly matches the SECOND sample ([8,8,8]), in
+  // the right half -- same color as a checkerboard shade, but never
+  // alternates. It has to be bigger than the windowRadius=5 sampling box
+  // (11x11) so its center pixel's neighborhood doesn't leak into the real
+  // checkerboard just outside its edges.
+  for (let y = 10; y < 30; y++) for (let x = 50; x < 70; x++) {
+    const i = (y * w + x) * 4;
+    data[i] = 8; data[i + 1] = 8; data[i + 2] = 8; data[i + 3] = 255;
+  }
+  const bmp = { width: w, height: h, data };
+
+  const out = checkerboardRemoveBitmap(bmp, { colorA: [255, 255, 255], colorB: [[40, 40, 40], [8, 8, 8]], tolerance: 18, windowRadius: 5, minMixFraction: 0.1 });
+
+  const outlineCenter = (8 * w + 8) * 4;
+  assert.deepEqual([out.data[outlineCenter], out.data[outlineCenter + 1], out.data[outlineCenter + 2], out.data[outlineCenter + 3]], [...outlineColor, 255], 'unrelated outline color is untouched');
+
+  const matchingFillCenter = (20 * w + 60) * 4;
+  assert.deepEqual([out.data[matchingFillCenter], out.data[matchingFillCenter + 1], out.data[matchingFillCenter + 2], out.data[matchingFillCenter + 3]], [8, 8, 8, 255], 'flat fill exactly matching a sample, but never alternating, survives');
+
+  // Sanity: the checkerboard itself (away from both rects) is still removed
+  // on both halves, so the guard above isn't just a windowRadius too small
+  // to reach the checkerboard at all.
+  const leftDarkCorner = (16 * w + 8) * 4;
+  const rightDarkCorner = (16 * w + 44) * 4;
+  assert.equal(out.data[leftDarkCorner + 3], 0);
+  assert.equal(out.data[rightDarkCorner + 3], 0);
 });
 
 test('checkerboardRemoveBitmap: a large solid white/grey area (no alternation nearby) survives even though its color matches a checker shade', () => {

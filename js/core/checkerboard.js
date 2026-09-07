@@ -172,6 +172,34 @@ function maxMatchStrength(r, g, b, colors, tolerance, softness) {
   return best;
 }
 
+// Labels 4-connected components of a boolean mask (iterative flood fill,
+// no recursion so it's safe on large bitmaps). Returns { labels, sizes }:
+// labels[p] is the component id for a set pixel (-1 if unset), sizes[id] is
+// that component's pixel count.
+function labelComponents(mask, w, h) {
+  const labels = new Int32Array(w * h).fill(-1);
+  const sizes = [];
+  const stack = [];
+  for (let start = 0; start < w * h; start++) {
+    if (!mask[start] || labels[start] !== -1) continue;
+    const id = sizes.length;
+    let size = 0;
+    stack.push(start);
+    labels[start] = id;
+    while (stack.length) {
+      const p = stack.pop();
+      size++;
+      const x = p % w, y = (p / w) | 0;
+      if (x > 0 && mask[p - 1] && labels[p - 1] === -1) { labels[p - 1] = id; stack.push(p - 1); }
+      if (x < w - 1 && mask[p + 1] && labels[p + 1] === -1) { labels[p + 1] = id; stack.push(p + 1); }
+      if (y > 0 && mask[p - w] && labels[p - w] === -1) { labels[p - w] = id; stack.push(p - w); }
+      if (y < h - 1 && mask[p + w] && labels[p + w] === -1) { labels[p + w] = id; stack.push(p + w); }
+    }
+    sizes.push(size);
+  }
+  return { labels, sizes };
+}
+
 // Removes (or recolors) checkerboard-background pixels. A pixel's removal
 // strength comes from how closely it matches colorA/colorB (tolerance +
 // feathered softness, see matchStrength), but it's only applied at all
@@ -207,7 +235,26 @@ function maxMatchStrength(r, g, b, colors, tolerance, softness) {
 // tint once composited over something else). mode 'replace': RGB is
 // lerped toward replacementColor by strength instead, alpha left
 // untouched.
-export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+//
+// minRegionSize (connectivity gate): a pixel is only removal-eligible if
+// the 4-connected blob of checker-colored pixels (isA or isB, either role)
+// it belongs to has at least this many pixels. The real background is
+// always one sprawling blob spanning much of the sheet; a small enclosed
+// detail that merely happens to share a checker shade -- a coal chunk
+// inside a grey rock, a shadowed doorway inside a house wall -- forms its
+// OWN tiny, isolated blob, walled off on every side by the surrounding
+// sprite's non-matching material. No tolerance/windowRadius/minMixFraction
+// combination can tell those apart by color+local-neighborhood alone
+// (confirmed against a real asset: widening tolerance enough to fully
+// clear the checkerboard also swept up ~40% of a coal chunk's pixels, and
+// no windowRadius/minMixFraction setting recovered the coal without also
+// leaving large patches of real background behind) -- but the enclosed
+// detail's blob is reliably much smaller than the background's, so gating
+// on component size protects it regardless of how closely its color
+// matches. Defaults to an area tied to windowRadius (the size of the
+// neighborhood already being trusted to judge "real checkerboard"), so it
+// requires no separate tuning in the common case; pass 0 to disable.
+export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
   const colorsA = toColorList(colorA);
   const colorsB = toColorList(colorB);
   const { width: w, height: h } = bmp;
@@ -215,17 +262,21 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
   const edge = tolerance + softness;
   const isA = new Uint8Array(w * h);
   const isB = new Uint8Array(w * h);
+  const isChecker = new Uint8Array(w * h);
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (src[i + 3] === 0) continue;
     const r = src[i], g = src[i + 1], b = src[i + 2];
-    if (minChannelDist(r, g, b, colorsA) <= edge) isA[p] = 1;
-    else if (minChannelDist(r, g, b, colorsB) <= edge) isB[p] = 1;
+    if (minChannelDist(r, g, b, colorsA) <= edge) { isA[p] = 1; isChecker[p] = 1; }
+    else if (minChannelDist(r, g, b, colorsB) <= edge) { isB[p] = 1; isChecker[p] = 1; }
   }
   const satA = buildIntegral(isA, w, h);
   const satB = buildIntegral(isB, w, h);
+  let componentLabels = null, componentSizes = null;
+  if (minRegionSize > 0) ({ labels: componentLabels, sizes: componentSizes } = labelComponents(isChecker, w, h));
   const data = new Uint8ClampedArray(src);
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (!isA[p] && !isB[p]) continue;
+    if (componentLabels && componentSizes[componentLabels[p]] < minRegionSize) continue;
     const x = p % w, y = (p / w) | 0;
     const countA = boxSum(satA, w, h, x, y, windowRadius);
     const countB = boxSum(satB, w, h, x, y, windowRadius);
