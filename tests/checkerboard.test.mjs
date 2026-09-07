@@ -41,6 +41,36 @@ test('checkerboardRemoveBitmap: removes a regular checker background, leaves a s
   assert.deepEqual([out.data[i], out.data[i + 1], out.data[i + 2], out.data[i + 3]], [200, 40, 40, 255]);
 });
 
+test('checkerboardRemoveBitmap: colorA/colorB accept a list of samples, covering multiple distinct checker shades a single anchor + tolerance would miss', () => {
+  // Simulates a sheet assembled from two separately-exported sprites, each
+  // baked with its own dark checker shade (confirmed against a real asset:
+  // #080807 in one region, #272727 in another, both flat with no gradient
+  // between them). Left half uses dark=[40,40,40], right half dark=[8,8,8] --
+  // 32 apart, further than a tolerance of 18 can bridge from either alone.
+  const w = 64, h = 32, cell = 8;
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dark = x < w / 2 ? [40, 40, 40] : [8, 8, 8];
+      const parity = ((x / cell) | 0) + ((y / cell) | 0);
+      const c = parity % 2 === 0 ? [255, 255, 255] : dark;
+      const i = (y * w + x) * 4;
+      data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
+    }
+  }
+  const bmp = { width: w, height: h, data };
+  const leftDarkCorner = (0 * w + 8) * 4; // x=8 lands on a dark cell on the left half
+  const rightDarkCorner = (0 * w + 40) * 4; // x=40 lands on a dark cell on the right half
+
+  const singleSample = checkerboardRemoveBitmap(bmp, { colorA: [255, 255, 255], colorB: [40, 40, 40], tolerance: 18, windowRadius: 12, minMixFraction: 0.1 });
+  assert.equal(singleSample.data[leftDarkCorner + 3], 0, 'left half (matches the single sample) is removed');
+  assert.equal(singleSample.data[rightDarkCorner + 3], 255, 'right half (32 away from the single sample) survives -- the bug');
+
+  const multiSample = checkerboardRemoveBitmap(bmp, { colorA: [255, 255, 255], colorB: [[40, 40, 40], [8, 8, 8]], tolerance: 18, windowRadius: 12, minMixFraction: 0.1 });
+  assert.equal(multiSample.data[leftDarkCorner + 3], 0, 'left half still removed with the sample list');
+  assert.equal(multiSample.data[rightDarkCorner + 3], 0, 'right half now removed too -- covered by its own sample');
+});
+
 test('checkerboardRemoveBitmap: a large solid white/grey area (no alternation nearby) survives even though its color matches a checker shade', () => {
   const w = 64, h = 64;
   const data = new Uint8ClampedArray(w * h * 4);

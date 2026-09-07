@@ -153,6 +153,16 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 #dlg-chromakey, #dlg-checkerboard { width: 360px; }
 .ck-color-field { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ck-color-actions { margin-top: -2px; }
+/* Remove Checkerboard's Color A/B rows -- one role is: a label, a single
+   "Pick from canvas" button (armColorSample in drawing-engine.js; see its own
+   note on why this samples in-dialog instead of routing through the main
+   Eyedropper tool/drawingSettings), and the resulting sampled shades as
+   removable swatch chips -- one mechanism per role instead of a separate
+   free-standing color+hex field alongside an additive sample list. */
+.cb-color-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.cb-color-label { min-width: 56px; }
+.cb-swatch-list { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cb-swatch-list .sys-palette-swatch { cursor: pointer; border: 1px solid var(--border); }
 /* Live distance-from-key/-protect-color histogram (see distanceHistogram
    in js/core/chromakey.js): a plain bitmap canvas, so it needs its own
    background/border since it isn't a themed control like the rest of the

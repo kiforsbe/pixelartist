@@ -20,6 +20,30 @@ function channelDist(r, g, b, color) {
   return Math.max(Math.abs(r - color[0]), Math.abs(g - color[1]), Math.abs(b - color[2]));
 }
 
+// Every colorA/colorB parameter below accepts either a single [r,g,b] or a
+// list of them ([[r,g,b], ...]) -- real checkerboards are often not one flat
+// pair: a sheet assembled from several separately-exported sprites can bake
+// in a different light/dark shade per sprite (confirmed against a real
+// asset: distinct flat regions at both #080807 and #272727, both "the dark
+// checker color", never a smooth gradient between them). A single anchor +
+// tolerance radius can't cover that without widening the radius enough to
+// also risk swallowing real dark artwork that never appears in the
+// checkerboard at all. Accepting several exact samples per role instead
+// lets each one keep a tight tolerance while the role as a whole covers
+// every shade the user has actually pointed at.
+function toColorList(color) {
+  return Array.isArray(color[0]) ? color : [color];
+}
+
+function minChannelDist(r, g, b, colors) {
+  let best = Infinity;
+  for (const c of colors) {
+    const d = channelDist(r, g, b, c);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 // Scans opaque, near-neutral (low chroma) pixels across the given bitmaps
 // and finds the two most common luma levels, provided they're far enough
 // apart to plausibly be a light/dark checker pair rather than noise around
@@ -63,11 +87,13 @@ export function detectCheckerboardColors(bitmaps, { chromaMax = 14, minSeparatio
 // cells (that's exactly what motivated this function, see the dedicated
 // test below). Returns null if no confident estimate could be made.
 export function estimateCheckerCellSize(bitmaps, colorA, colorB, { tolerance = 18, sampleStride = 7 } = {}) {
+  const colorsA = toColorList(colorA);
+  const colorsB = toColorList(colorB);
   const runLengths = new Map();
   const record = (len) => { if (len >= 2) runLengths.set(len, (runLengths.get(len) ?? 0) + 1); };
   const classify = (r, g, b) => {
-    if (channelDist(r, g, b, colorA) <= tolerance) return 1;
-    if (channelDist(r, g, b, colorB) <= tolerance) return 2;
+    if (minChannelDist(r, g, b, colorsA) <= tolerance) return 1;
+    if (minChannelDist(r, g, b, colorsB) <= tolerance) return 2;
     return 0;
   };
   for (const bmp of bitmaps) {
@@ -135,6 +161,17 @@ function matchStrength(r, g, b, color, tolerance, softness) {
   return (edge - dist) / softness;
 }
 
+// Best (strongest) match against any color in a role's sample list --
+// a pixel only needs to sit close to ONE sampled shade to count as that role.
+function maxMatchStrength(r, g, b, colors, tolerance, softness) {
+  let best = 0;
+  for (const c of colors) {
+    const s = matchStrength(r, g, b, c, tolerance, softness);
+    if (s > best) best = s;
+  }
+  return best;
+}
+
 // Removes (or recolors) checkerboard-background pixels. A pixel's removal
 // strength comes from how closely it matches colorA/colorB (tolerance +
 // feathered softness, see matchStrength), but it's only applied at all
@@ -171,6 +208,8 @@ function matchStrength(r, g, b, color, tolerance, softness) {
 // lerped toward replacementColor by strength instead, alpha left
 // untouched.
 export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+  const colorsA = toColorList(colorA);
+  const colorsB = toColorList(colorB);
   const { width: w, height: h } = bmp;
   const src = bmp.data;
   const edge = tolerance + softness;
@@ -179,8 +218,8 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (src[i + 3] === 0) continue;
     const r = src[i], g = src[i + 1], b = src[i + 2];
-    if (channelDist(r, g, b, colorA) <= edge) isA[p] = 1;
-    else if (channelDist(r, g, b, colorB) <= edge) isB[p] = 1;
+    if (minChannelDist(r, g, b, colorsA) <= edge) isA[p] = 1;
+    else if (minChannelDist(r, g, b, colorsB) <= edge) isB[p] = 1;
   }
   const satA = buildIntegral(isA, w, h);
   const satB = buildIntegral(isB, w, h);
@@ -195,7 +234,7 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
     if (total === 0 || minorityCount / total < minMixFraction) continue;
 
     const r = data[i], g = data[i + 1], b = data[i + 2];
-    let strength = Math.max(matchStrength(r, g, b, colorA, tolerance, softness), matchStrength(r, g, b, colorB, tolerance, softness));
+    let strength = Math.max(maxMatchStrength(r, g, b, colorsA, tolerance, softness), maxMatchStrength(r, g, b, colorsB, tolerance, softness));
     if (strength <= 0) continue;
     if (protectColor) {
       const protectStrength = matchStrength(r, g, b, protectColor, protectTolerance, protectSoftness);
@@ -251,6 +290,8 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
 // mostly colorful content) get -1, treated as "not deviant" everywhere
 // this is consumed.
 function axisDeviation(bitmaps, colorA, colorB, axis, { tolerance = 18, chromaMax = 14, minCoverage = 0.5 } = {}) {
+  const colorsA = toColorList(colorA);
+  const colorsB = toColorList(colorB);
   const { width: w, height: h } = bitmaps[0];
   const length = axis === 'row' ? h : w;
   const span = axis === 'row' ? w : h;
@@ -266,7 +307,7 @@ function axisDeviation(bitmaps, colorA, colorB, axis, { tolerance = 18, chromaMa
         const r = d[i], g = d[i + 1], b = d[i + 2];
         if (chroma(r, g, b) > chromaMax) continue;
         neutral++;
-        if (channelDist(r, g, b, colorA) > tolerance && channelDist(r, g, b, colorB) > tolerance) deviant++;
+        if (minChannelDist(r, g, b, colorsA) > tolerance && minChannelDist(r, g, b, colorsB) > tolerance) deviant++;
       }
     }
     if (neutral >= span * minCoverage) dev[pos] = deviant / neutral;

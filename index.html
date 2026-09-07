@@ -277,8 +277,17 @@
   <h3>Remove Checkerboard</h3>
   <div class="dlg-body">
     <div class="row"><button type="button" id="cb-autodetect" class="btn-sm">Auto-detect from image</button></div>
-    <div class="row"><label class="ck-color-field">Color A <input type="color" id="cb-colora"> <input type="text" id="cb-colora-hex" size="7"></label></div>
-    <div class="row"><label class="ck-color-field">Color B <input type="color" id="cb-colorb"> <input type="text" id="cb-colorb-hex" size="7"></label></div>
+    <div class="row hint">If the checkerboard uses more than one shade (e.g. a sheet packed from several sprites), pick the extra shades below instead of widening tolerance -- that keeps real dark/light artwork protected.</div>
+    <div class="row cb-color-row">
+      <span class="cb-color-label">Color A</span>
+      <button type="button" id="cb-colora-pick" class="btn-sm">💉 Pick from canvas</button>
+      <span id="cb-colora-swatches" class="cb-swatch-list"></span>
+    </div>
+    <div class="row cb-color-row">
+      <span class="cb-color-label">Color B</span>
+      <button type="button" id="cb-colorb-pick" class="btn-sm">💉 Pick from canvas</button>
+      <span id="cb-colorb-swatches" class="cb-swatch-list"></span>
+    </div>
     <div class="row">
       <label><input type="radio" name="cb-mode" id="cb-mode-transparent" checked> Make transparent</label>
       <label><input type="radio" name="cb-mode" id="cb-mode-replace"> Replace with color</label>

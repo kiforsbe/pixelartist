@@ -38,6 +38,41 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
+// ---- one-shot canvas color sampling, for dialogs (not the main Eyedropper
+// tool/drawing settings) --------------------------------------------------
+//
+// Filter dialogs (e.g. Remove Checkerboard's Color A/B) need to sample exact
+// pixels straight off the sheet without forcing the user out to the main
+// toolbar, switching to the Eyedropper tool, clicking, then coming back --
+// that round trip through drawingSettings().primary/secondary was the whole
+// point of moving this in-dialog instead. armColorSample arms every bound
+// CanvasView (module-level, not per-view, since only one is ever visibly
+// interactive at a time) to intercept its NEXT pointer-down -- ahead of
+// mapPoint and the normal tool dispatch below, so it fires regardless of
+// whichever tool happens to be selected and never reaches that tool -- reads
+// the pixel there via the same flattenSheet/getPixel path handleEyedropper
+// uses, and disarms itself. onCancel (Escape, or a second arm superseding
+// this one) restores whatever affordance the caller showed while armed
+// (e.g. a button's "click on canvas..." label) without a sample happening.
+const sampleBoundCanvases = new Set();
+let pendingColorSample = null; // { onSample, onCancel } | null
+function setSampleCursor(cursor) { for (const c of sampleBoundCanvases) c.style.cursor = cursor; }
+function sampleEscapeHandler(e) { if (e.key === 'Escape') cancelColorSample(); }
+export function armColorSample(onSample, onCancel) {
+  cancelColorSample();
+  pendingColorSample = { onSample, onCancel };
+  setSampleCursor('crosshair');
+  window.addEventListener('keydown', sampleEscapeHandler);
+}
+export function cancelColorSample() {
+  if (!pendingColorSample) return;
+  const { onCancel } = pendingColorSample;
+  pendingColorSample = null;
+  setSampleCursor('');
+  window.removeEventListener('keydown', sampleEscapeHandler);
+  onCancel?.();
+}
+
 function activeTool() {
   return getEditorHost().store.getState().session.activeToolId;
 }
@@ -67,6 +102,7 @@ function activePalette() {
 // (clampPoint, maskOutsideTarget, finalize, flood fill, selection storage)
 // stays sheet-global and unaware of which view produced the event.
 export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
+  sampleBoundCanvases.add(view.canvas);
   let stroke = null;   // pencil/eraser/line/rect/ellipse in-progress state
   let selStroke = null; // select tool in-progress state
   let moveStroke = null; // move tool in-progress state
@@ -585,6 +621,23 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   // ---- dispatch ----
 
   view.onPointer = (ev) => {
+    if (pendingColorSample) {
+      if (ev.type === 'down') {
+        const { onSample, onCancel } = pendingColorSample;
+        pendingColorSample = null;
+        setSampleCursor('');
+        window.removeEventListener('keydown', sampleEscapeHandler);
+        const sheet = activeSheet();
+        const flat = sheet ? flattenSheet(sheet, activeFloating()) : null;
+        const p = flat ? getPixel(flat, ev.x, ev.y) : null;
+        // A click that lands outside the sheet (or with nothing to sample)
+        // still needs to resolve the armed state -- falling through to
+        // onCancel keeps the caller's UI (e.g. a "Click on canvas..."
+        // button) from getting stuck armed with nothing left listening.
+        if (p) onSample(p); else onCancel?.();
+      }
+      return;
+    }
     if (mapPoint) {
       const p = mapPoint(ev.x, ev.y);
       ev = { ...ev, x: p.x, y: p.y };

@@ -7,6 +7,7 @@ import { medianCutPalette, resolveAlphaForQuantize, findMinimalColorCount } from
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
 import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../../core/checkerboard.js';
+import { armColorSample, cancelColorSample } from '../../components/canvas/drawing-engine.js';
 import { rgbaToHex, hexToRgb } from '../../components/color-utils.js';
 import { SYSTEM_PALETTES } from '../../core/systempalettes.js';
 import { previewWithOverride, refreshPreviewPanel } from '../../components/panels/preview-panel.js';
@@ -633,10 +634,10 @@ export function mountFilterController(workbench) {
   
   const dlgCheckerboard = document.getElementById('dlg-checkerboard');
   const cbAutodetect = document.getElementById('cb-autodetect');
-  const cbColorA = document.getElementById('cb-colora');
-  const cbColorAHex = document.getElementById('cb-colora-hex');
-  const cbColorB = document.getElementById('cb-colorb');
-  const cbColorBHex = document.getElementById('cb-colorb-hex');
+  const cbColorAPick = document.getElementById('cb-colora-pick');
+  const cbColorASwatches = document.getElementById('cb-colora-swatches');
+  const cbColorBPick = document.getElementById('cb-colorb-pick');
+  const cbColorBSwatches = document.getElementById('cb-colorb-swatches');
   const cbModeTransparent = document.getElementById('cb-mode-transparent');
   const cbModeReplace = document.getElementById('cb-mode-replace');
   const cbReplaceRow = document.getElementById('cb-replace-row');
@@ -676,11 +677,55 @@ export function mountFilterController(workbench) {
   const cbCancel = document.getElementById('cb-cancel');
   markDefaultAction(dlgCheckerboard, cbOk);
   makeDialogMovable(dlgCheckerboard, dlgCheckerboard.querySelector('h3'));
-  
+
+  // Each checker color role (A/B) is just a list of sampled shades -- one
+  // representation, not a single color+hex field alongside a separate
+  // additive list. Auto-detect seeds one swatch per role; "Pick from canvas"
+  // (armColorSample, see its own note in drawing-engine.js) samples the
+  // sheet directly, in-dialog, without routing through the main toolbar's
+  // Eyedropper tool/drawingSettings; clicking an existing swatch removes it.
+  // At least one swatch per role is kept -- checkerboardRemoveBitmap treats
+  // an empty role as "never matches", which would silently no-op the filter
+  // rather than error, but that's a confusing dead end so the UI never lets
+  // a role go empty.
+  let cbSamplesA = [];
+  let cbSamplesB = [];
+  function renderCbSwatches(listEl, colors, onRemove) {
+    listEl.innerHTML = '';
+    colors.forEach((c, idx) => {
+      const sw = document.createElement('span');
+      sw.className = 'sys-palette-swatch';
+      const hex = rgbaToHex(c);
+      sw.style.background = hex;
+      sw.title = colors.length > 1 ? `${hex} (click to remove)` : hex;
+      if (colors.length > 1) sw.addEventListener('click', () => onRemove(idx));
+      listEl.appendChild(sw);
+    });
+  }
+  function renderCbSwatchLists() {
+    renderCbSwatches(cbColorASwatches, cbSamplesA, (idx) => { cbSamplesA.splice(idx, 1); renderCbSwatchLists(); previewCheckerboard(); });
+    renderCbSwatches(cbColorBSwatches, cbSamplesB, (idx) => { cbSamplesB.splice(idx, 1); renderCbSwatchLists(); previewCheckerboard(); });
+  }
+  function addCbSample(samples, rgb) {
+    const c = [rgb[0], rgb[1], rgb[2]];
+    if (!samples.some(s => s[0] === c[0] && s[1] === c[1] && s[2] === c[2])) samples.push(c);
+    renderCbSwatchLists();
+    previewCheckerboard();
+  }
+  function armCbPick(button, samples) {
+    const label = button.textContent;
+    button.textContent = 'Click on canvas…';
+    button.classList.add('active');
+    const restore = () => { button.textContent = label; button.classList.remove('active'); };
+    armColorSample((rgba) => { addCbSample(samples, rgba); restore(); }, restore);
+  }
+  cbColorAPick.addEventListener('click', () => armCbPick(cbColorAPick, cbSamplesA));
+  cbColorBPick.addEventListener('click', () => armCbPick(cbColorBPick, cbSamplesB));
+
   function currentCheckerboardParams() {
     return {
-      colorA: hexToRgb(cbColorA.value),
-      colorB: hexToRgb(cbColorB.value),
+      colorA: cbSamplesA.slice(),
+      colorB: cbSamplesB.slice(),
       tolerance: Number(cbTolerance.value),
       softness: Number(cbSoftness.value),
       windowRadius: Number(cbCellSize.value),
@@ -717,28 +762,15 @@ export function mountFilterController(workbench) {
   // positional, see computeCheckerboardPatches/detectGuideLines -- so there's
   // nothing for Auto-detect to fill in for it beyond re-running the preview.)
   cbAutodetect.addEventListener('click', () => {
+    cancelColorSample();
     const rl = checkerboardRegionAndLayers(cbAllLayers.checked);
     if (!rl) return;
     const befores = rl.layers.map(l => copyRegion(l.bitmap, rl.region.x, rl.region.y, rl.region.w, rl.region.h));
     const detected = detectCheckerboardColors(befores);
     if (!detected) return;
-    setColorInputs(cbColorA, cbColorAHex, detected.colorA);
-    setColorInputs(cbColorB, cbColorBHex, detected.colorB);
+    cbSamplesA = [detected.colorA]; cbSamplesB = [detected.colorB]; renderCbSwatchLists();
     const cellSize = estimateCheckerCellSize(befores, detected.colorA, detected.colorB, { tolerance: Number(cbTolerance.value) });
     if (cellSize) { cbCellSize.value = String(Math.min(128, Math.max(2, cellSize))); cbCellSizeVal.textContent = cbCellSize.value; }
-    previewCheckerboard();
-  });
-  
-  cbColorA.addEventListener('input', () => { cbColorAHex.value = cbColorA.value; previewCheckerboard(); });
-  cbColorAHex.addEventListener('input', () => {
-    if (!/^#[0-9a-fA-F]{6}$/.test(cbColorAHex.value)) return;
-    cbColorA.value = cbColorAHex.value.toLowerCase();
-    previewCheckerboard();
-  });
-  cbColorB.addEventListener('input', () => { cbColorBHex.value = cbColorB.value; previewCheckerboard(); });
-  cbColorBHex.addEventListener('input', () => {
-    if (!/^#[0-9a-fA-F]{6}$/.test(cbColorBHex.value)) return;
-    cbColorB.value = cbColorBHex.value.toLowerCase();
     previewCheckerboard();
   });
   
@@ -791,8 +823,8 @@ export function mountFilterController(workbench) {
   defineAction('edit.filters.checkerboard', {
     label: 'Remove Checkerboard…',
     run: () => {
-      setColorInputs(cbColorA, cbColorAHex, [255, 255, 255]);
-      setColorInputs(cbColorB, cbColorBHex, [192, 192, 192]);
+      cancelColorSample();
+      cbSamplesA = [[255, 255, 255]]; cbSamplesB = [[192, 192, 192]]; renderCbSwatchLists();
       cbModeTransparent.checked = true;
       updateCheckerboardModeUI();
       setColorInputs(cbReplaceColor, cbReplaceHex, drawingSettings().secondary);
@@ -823,10 +855,11 @@ export function mountFilterController(workbench) {
     },
     isEnabled: () => !!activeLayer(),
   });
-  function cancelCheckerboardDialog() { refreshPreviewPanel(); workbench.clearCanvasPreview(); dlgCheckerboard.close(); }
+  function cancelCheckerboardDialog() { cancelColorSample(); refreshPreviewPanel(); workbench.clearCanvasPreview(); dlgCheckerboard.close(); }
   cbCancel.addEventListener('click', cancelCheckerboardDialog);
   closeOnEscape(dlgCheckerboard, cancelCheckerboardDialog);
   cbOk.addEventListener('click', () => {
+    cancelColorSample();
     refreshPreviewPanel();
     workbench.clearCanvasPreview();
     const params = currentCheckerboardParams();
