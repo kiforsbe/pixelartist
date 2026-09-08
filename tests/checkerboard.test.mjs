@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../js/core/checkerboard.js';
+import { checkerboardRemoveBitmap, checkerboardObjectHint, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../js/core/checkerboard.js';
 
 // Builds a w x h bitmap that's a checkerboard of `cell`-px squares
 // alternating colorA/colorB, with an opaque solid-colored rect of `fill`
@@ -466,6 +466,131 @@ test('checkerboardRemoveBitmap: an anti-aliased edge of artwork drawn over the c
 
   const noSeamRule = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1, blendSeamOnly: false });
   assert.equal(noSeamRule.data[artEdge + 3], 0, "sanity: without the seam rule the strand's edge IS eaten -- by colour alone it is identical to a seam blend");
+});
+
+// Paints a filled rect and a 1px ring around it into an existing bitmap,
+// which is the shape every one of the hint tests below needs: a sprite whose
+// silhouette is an outline in one of the two checker colors, so it goes
+// invisible on every cell that happens to be that same color.
+function outlinedBox(bmp, x0, y0, x1, y1, fill, outline) {
+  const { width: w, data } = bmp;
+  const put = (x, y, c) => {
+    const i = (y * w + x) * 4;
+    data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
+  };
+  for (let y = y0 - 1; y <= y1 + 1; y++) for (let x = x0 - 1; x <= x1 + 1; x++) put(x, y, outline);
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(x, y, fill);
+}
+
+test('checkerboardObjectHint: one click inside a sprite restores the half of its outline that is invisible, because the same outline is provable where it crosses a cell of the other shade', () => {
+  // The one case no per-pixel rule can reach. A dark outline crossing a DARK
+  // cell is bit-identical to the background it covers -- but the same stroke
+  // crossing the LIGHT cell next door is provably foreground, and an outline
+  // is one continuous stroke in one color. The hint says which object; the
+  // image supplies the outline.
+  const w = 64, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [40, 40, 40];
+  const green = [60, 160, 60];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB);
+  outlinedBox(bmp, 20, 20, 31, 31, green, colorB);
+  // Along the top edge (y=19): x 20..23 sits in cell (2,2), which has even
+  // parity and is therefore LIGHT -- a dark outline there is the wrong shade
+  // and already survives. x 24..31 sits in cell (3,2), a DARK cell, where the
+  // identical outline is indistinguishable from background.
+  const provable = (19 * w + 22) * 4;
+  const invisible = (19 * w + 28) * 4;
+  const background = (4 * w + 4) * 4;
+  const opts = { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1 };
+
+  const plain = checkerboardRemoveBitmap(bmp, opts);
+  assert.equal(plain.data[provable + 3], 255, 'the outline survives where it crosses a light cell, with no hint at all');
+  assert.equal(plain.data[invisible + 3], 0, 'and is destroyed where it crosses a dark cell -- the gap a hint has to close');
+
+  const mask = checkerboardObjectHint(bmp, [{ x: 25, y: 25 }], { colorA, colorB, tolerance: 10, latticeCellSize: cell });
+  const hinted = checkerboardRemoveBitmap(bmp, { ...opts, protectMask: mask });
+  assert.deepEqual(
+    [hinted.data[invisible], hinted.data[invisible + 1], hinted.data[invisible + 2], hinted.data[invisible + 3]],
+    [...colorB, 255],
+    'one click inside the sprite carries its outline through the cell where it went invisible',
+  );
+  assert.equal(hinted.data[background + 3], 0, 'checkerboard away from the hinted object is still removed');
+
+  assert.deepEqual(checkerboardObjectHint(bmp, [], { colorA, colorB }), new Uint8Array(w * h), 'no seeds is a no-op mask, not a protected image');
+});
+
+test('checkerboardObjectHint: two sprites outlined in OPPOSITE checker colors, touching so one flood covers both, each get their own color back and neither gets the other as a halo', () => {
+  // The regression that forced the walk. On a packed sheet sprites touch, so
+  // a single flood spans several of them; deciding one outline color for the
+  // whole blob means the majority wins and everything else is handed the
+  // wrong one -- a white spiderweb next to dark-outlined trees came back with
+  // a black halo around it. Growth therefore walks out from proven outline
+  // pixels, per shade, instead of voting once for the object.
+  const w = 80, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [40, 40, 40];
+  const green = [60, 160, 60];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB);
+  outlinedBox(bmp, 12, 24, 27, 39, green, colorB);   // dark-outlined
+  outlinedBox(bmp, 52, 24, 67, 39, green, colorA);   // light-outlined
+  for (let y = 30; y <= 33; y++) {                   // a bridge, so it is all one blob
+    for (let x = 28; x <= 51; x++) {
+      const i = (y * w + x) * 4;
+      bmp.data[i] = green[0]; bmp.data[i + 1] = green[1]; bmp.data[i + 2] = green[2]; bmp.data[i + 3] = 255;
+    }
+  }
+  // Top edges at y=23. Left sprite: x 16..23 is light cell (2,2) so its dark
+  // outline is provable there, x 12..15 is dark cell (1,2) so it is not.
+  // Right sprite is the mirror image: x 56..63 is dark cell (7,2) where its
+  // white outline is provable, x 52..55 is light cell (6,2) where it is not.
+  const darkGap = (23 * w + 13) * 4;
+  const lightGap = (23 * w + 53) * 4;
+  const lightBgOverDarkOutline = (22 * w + 20) * 4;  // white background, one px above the proven dark outline
+  const darkBgOverLightOutline = (22 * w + 60) * 4;  // dark background, one px above the proven white outline
+  const opts = { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1 };
+
+  const plain = checkerboardRemoveBitmap(bmp, opts);
+  assert.equal(plain.data[darkGap + 3], 0, 'without a hint the dark outline is gone where it crosses a dark cell');
+  assert.equal(plain.data[lightGap + 3], 0, 'and the white outline is gone where it crosses a light cell');
+
+  const mask = checkerboardObjectHint(bmp, [{ x: 20, y: 32 }], { colorA, colorB, tolerance: 10, latticeCellSize: cell });
+  const out = checkerboardRemoveBitmap(bmp, { ...opts, protectMask: mask });
+  assert.deepEqual(
+    [out.data[darkGap], out.data[darkGap + 1], out.data[darkGap + 2], out.data[darkGap + 3]],
+    [...colorB, 255],
+    'the dark-outlined sprite gets dark back',
+  );
+  assert.deepEqual(
+    [out.data[lightGap], out.data[lightGap + 1], out.data[lightGap + 2], out.data[lightGap + 3]],
+    [...colorA, 255],
+    'the light-outlined sprite gets light back, from the same single click on the other sprite',
+  );
+  assert.equal(out.data[lightBgOverDarkOutline + 3], 0, 'the dark-outlined sprite gains no white halo -- there is no proven white outline on it to walk from');
+  assert.equal(out.data[darkBgOverLightOutline + 3], 0, 'and the light-outlined sprite gains no dark halo');
+});
+
+test('checkerboardObjectHint: a sprite with no checker-colored outline gains nothing, and a click on bare background protects only a small disc', () => {
+  // Two ways for a hint to do damage, both refused. An object with no proven
+  // outline anywhere has nothing to walk from, so it must not be dilated into
+  // the background "just in case". And a click that finds no object material
+  // near it must not flood -- it means what it says and no more.
+  const w = 64, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [40, 40, 40];
+  const green = [60, 160, 60];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB, [20, 20, 12, 12, green]);
+  const opts = { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1 };
+  const hintOpts = { colorA, colorB, tolerance: 10, latticeCellSize: cell };
+
+  const mask = checkerboardObjectHint(bmp, [{ x: 25, y: 25 }], hintOpts);
+  const out = checkerboardRemoveBitmap(bmp, { ...opts, protectMask: mask });
+  const fill = (25 * w + 25) * 4;
+  assert.equal(out.data[fill + 3], 255, 'the sprite itself is kept, as it always was');
+  assert.equal(out.data[(19 * w + 22) * 4 + 3], 0, 'no halo above it in the light cell');
+  assert.equal(out.data[(19 * w + 28) * 4 + 3], 0, 'and none in the dark cell either');
+
+  const stray = checkerboardObjectHint(bmp, [{ x: 4, y: 52 }], hintOpts);
+  const strayCount = stray.reduce((a, v) => a + v, 0);
+  assert.ok(strayCount > 0, 'a click on bare background still means something');
+  assert.ok(strayCount <= 49, `a click on bare background stays a small disc, got ${strayCount}px`);
+  assert.equal(stray[25 * w + 25], 0, 'and does not reach the sprite on the other side of the image');
 });
 
 // Draws full-span guide lines into an existing checker bitmap at the given

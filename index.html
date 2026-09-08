@@ -313,6 +313,18 @@
       <div class="row"><label>Protect tolerance <input type="range" id="cb-protect-tolerance" min="0" max="100" value="15"> <span id="cb-protect-tolerance-val">15</span></label></div>
       <div class="row"><label>Protect softness <input type="range" id="cb-protect-softness" min="0" max="100" value="20"> <span id="cb-protect-softness-val">20</span></label></div>
     </div>
+    <div class="row"><label><input type="checkbox" id="cb-protect-objects-enabled"> Protect objects I point at</label></div>
+    <div id="cb-protect-objects-row" hidden>
+      <div class="row hint">Click anywhere inside an object -- no tracing needed. The click identifies which object to keep; its outline is worked out from the image, including the parts drawn in a checker color that vanish into a cell of that same shade.</div>
+      <div class="row">
+        <button type="button" id="cb-objects-pick" class="btn-sm">🎯 Mark objects on canvas</button>
+        <button type="button" id="cb-objects-clear" class="btn-sm">Clear</button>
+      </div>
+      <div class="row hint" id="cb-objects-status"></div>
+      <div class="row"><label>Outline width <input type="range" id="cb-objects-outline" min="0" max="4" value="1"> <span id="cb-objects-outline-val">1</span>px</label></div>
+      <div class="row"><label><input type="checkbox" id="cb-objects-fillholes"> Fill enclosed areas</label></div>
+      <div class="row"><label><input type="checkbox" id="cb-objects-showmask"> Highlight protected pixels (preview only)</label></div>
+    </div>
     <div class="row"><label><input type="checkbox" id="cb-gridlines-enabled"> Remove grid guide lines</label></div>
     <div id="cb-gridlines-row" hidden>
       <div class="row hint">Detects thin design-grid lines that recur at a regular pixel interval (e.g. sprite-slot dividers) and removes only those exact rows/columns -- everything else is left alone, regardless of color.</div>

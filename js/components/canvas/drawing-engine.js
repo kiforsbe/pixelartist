@@ -58,9 +58,14 @@ const sampleBoundCanvases = new Set();
 let pendingColorSample = null; // { onSample, onCancel } | null
 function setSampleCursor(cursor) { for (const c of sampleBoundCanvases) c.style.cursor = cursor; }
 function sampleEscapeHandler(e) { if (e.key === 'Escape') cancelColorSample(); }
-export function armColorSample(onSample, onCancel) {
+// onSample(rgba, { x, y }) -- the second argument is the sheet-space pixel
+// that was clicked, for callers that care WHERE rather than what color (see
+// checkerboardObjectHint's object hints). repeat:true keeps the arm live
+// across clicks so the user can mark several things in a row without
+// re-pressing the button; Escape (or another arm) still ends it via onCancel.
+export function armColorSample(onSample, onCancel, { repeat = false } = {}) {
   cancelColorSample();
-  pendingColorSample = { onSample, onCancel };
+  pendingColorSample = { onSample, onCancel, repeat };
   setSampleCursor('crosshair');
   window.addEventListener('keydown', sampleEscapeHandler);
 }
@@ -623,18 +628,23 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   view.onPointer = (ev) => {
     if (pendingColorSample) {
       if (ev.type === 'down') {
-        const { onSample, onCancel } = pendingColorSample;
-        pendingColorSample = null;
-        setSampleCursor('');
-        window.removeEventListener('keydown', sampleEscapeHandler);
+        const { onSample, onCancel, repeat } = pendingColorSample;
+        if (!repeat) {
+          pendingColorSample = null;
+          setSampleCursor('');
+          window.removeEventListener('keydown', sampleEscapeHandler);
+        }
         const sheet = activeSheet();
         const flat = sheet ? flattenSheet(sheet, activeFloating()) : null;
         const p = flat ? getPixel(flat, ev.x, ev.y) : null;
         // A click that lands outside the sheet (or with nothing to sample)
         // still needs to resolve the armed state -- falling through to
         // onCancel keeps the caller's UI (e.g. a "Click on canvas..."
-        // button) from getting stuck armed with nothing left listening.
-        if (p) onSample(p); else onCancel?.();
+        // button) from getting stuck armed with nothing left listening. A
+        // repeating arm has nothing to resolve: it stays live, so a stray
+        // click off the sheet is simply ignored.
+        if (p) onSample(p, { x: ev.x, y: ev.y });
+        else if (!repeat) onCancel?.();
       }
       return;
     }

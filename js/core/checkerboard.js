@@ -572,6 +572,274 @@ function checkerTerritory(matches, role, w, h, minRegionSize, minAlternation, br
   return territory;
 }
 
+// Strict membership on purpose -- NOT the isA/isB masks the removal loop
+// uses. Those deliberately also take in the softness band and the
+// anti-aliased blends between the two checker colors (see
+// blendMatchStrength), and a seam blend gets filed under whichever endpoint
+// it happens to sit nearer. Those pixels lie exactly ON cell boundaries and
+// split near 50/50, so feeding them to the grid fit drags cell purity down
+// far enough to fail the trust check and silently disengage the whole gate.
+// They are also genuinely ambiguous: a blend is not evidence of a shade, so
+// it must not be judged wrong-shade either. Leaving them unroled (-1, same
+// as transparent and as any non-checker color) keeps them out of both.
+function buildCheckerRoles(src, w, h, colorsA, colorsB, tolerance) {
+  const role = new Int8Array(w * h).fill(-1);
+  for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+    if (src[i + 3] === 0) continue;
+    const r = src[i], g = src[i + 1], b = src[i + 2];
+    if (minChannelDist(r, g, b, colorsA) <= tolerance) role[p] = 0;
+    else if (minChannelDist(r, g, b, colorsB) <= tolerance) role[p] = 1;
+  }
+  return role;
+}
+
+// Fit the lattice and judge every checker-colored pixel against its own
+// cell. Returns null when no trustworthy lattice is present (the caller
+// then has no shade evidence at all and must fall back to color alone).
+function analyseCheckerLattice(role, w, h, { latticeCellSize, minLatticePurity, latticeSmooth }) {
+  const grid = fitCheckerGrid(role, w, h, {
+    maxCell: Math.max(4, Math.round(latticeCellSize * 2)),
+    minPurity: minLatticePurity,
+  });
+  if (!grid) return null;
+  const cells = cellBackgroundShades(role, w, h, grid, latticeSmooth);
+  const { matches, wrongShade } = classifyByCellShade(role, w, h, cells);
+  return { grid, cells, matches, wrongShade };
+}
+
+function nearCellBoundary(grid, x, y, radius) {
+  const { cellW, cellH, ox, oy } = grid;
+  const dx = (x + ox) % cellW, dy = (y + oy) % cellH;
+  return dx <= radius || dx >= cellW - 1 - radius || dy <= radius || dy >= cellH - 1 - radius;
+}
+
+// ---- hint-driven object identification -------------------------------
+//
+// The lattice gate decides each pixel on its own evidence, and for one
+// class of pixel there is none to be had: artwork painted in a checker
+// color, sitting on a cell of THAT SAME shade, is bit-identical to the
+// background it covers. No amount of local analysis recovers it, because
+// the information is not in the image.
+//
+// What IS in the image is the same artwork's identity somewhere else.
+// Wherever an outline crosses a cell of the OPPOSITE shade it is provably
+// foreground (wrongShade), and a sprite's outline is one continuous stroke
+// in one color. So a single click inside an object is enough to close the
+// gap: flood the material the lattice is already certain about, read the
+// outline's color off the wrong-shade half of that object's own border,
+// then carry that outline through the cells where it went invisible.
+//
+// The division of labour is the point. The user says WHICH object -- one
+// click, no tracing, no mask to get right. The image says what that
+// object's outline is made of and how far it extends. That's why a rough
+// hint is enough: nothing about the result's shape comes from where
+// exactly the click landed.
+
+// BFS so that hitting the size cap yields the pixels NEAREST the seed
+// (a runaway flood then still returns a sane blob around the click)
+// rather than one arbitrary DFS tendril.
+function floodFrom(mask, w, h, start, limit) {
+  const out = new Uint8Array(w * h);
+  if (!mask[start]) return out;
+  const queue = new Int32Array(w * h);
+  let head = 0, tail = 0, taken = 0;
+  queue[tail++] = start; out[start] = 1;
+  while (head < tail) {
+    const p = queue[head++];
+    if (++taken > limit) break;
+    const x = p % w, y = (p / w) | 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = y + dy;
+      if (ny < 0 || ny >= h) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = x + dx;
+        if (nx < 0 || nx >= w) continue;
+        const q = ny * w + nx;
+        if (mask[q] && !out[q]) { out[q] = 1; queue[tail++] = q; }
+      }
+    }
+  }
+  return out;
+}
+
+function nearestSet(mask, w, h, sx, sy, radius) {
+  if (mask[sy * w + sx]) return sy * w + sx;
+  for (let r = 1; r <= radius; r++) {
+    let best = -1, bestD = Infinity;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const nx = sx + dx, ny = sy + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const q = ny * w + nx;
+        if (!mask[q]) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = q; }
+      }
+    }
+    if (best >= 0) return best;
+  }
+  return -1;
+}
+
+function stampDisc(mask, w, h, cx, cy, radius) {
+  for (let y = Math.max(0, cy - radius); y <= Math.min(h - 1, cy + radius); y++) {
+    for (let x = Math.max(0, cx - radius); x <= Math.min(w - 1, cx + radius); x++) {
+      const dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy <= radius * radius) mask[y * w + x] = 1;
+    }
+  }
+}
+
+// Carry each outline into the cells where it went invisible.
+//
+// This is a WALK ALONG THE OUTLINE, not a dilation of the object, and the
+// difference is the whole design. It starts only from pixels the lattice
+// already proved are foreground (wrongShade), and steps only into ambiguous
+// pixels of that same shade -- the ones sitting on a cell whose background
+// happens to be their own color, which is exactly the set nothing else can
+// rule on. So a dark tree outline propagates dark and a white spiderweb
+// propagates white, even when one flood spans both, and neither is handed
+// the other's color. Deciding a single outline shade for the object as a
+// whole gets this badly wrong on a packed sheet, where sprites touch and
+// one flood covers several: the majority says "dark", and the web in that
+// same blob comes back with a black halo around it.
+//
+// Two bounds keep the walk honest:
+//
+//   reach -- a grown pixel must lie within `width` of the object as it was
+//     BEFORE growth. An outline hugs its own silhouette, so that is where
+//     it can be, and the worst case (an object's border sitting in a cell
+//     of its own outline color) is then a `width`-thick halo rather than an
+//     escape into open background.
+//   steps -- how far the walk may travel from proven evidence, so a lone
+//     proven pixel of the other shade cannot seed a ribbon all the way
+//     around the object.
+//
+// An object with no checker-colored outline anywhere on it has nothing to
+// walk from and simply doesn't grow, which is the right answer for it.
+function growOutline(core, role, wrongShade, w, h, width, steps) {
+  const n = w * h;
+  const reach = dilateMask(core, w, h, width);
+  const grown = new Uint8Array(n);
+  const queue = new Int32Array(n);
+  const depth = new Int32Array(n);
+  for (const shade of [0, 1]) {
+    const seen = new Uint8Array(n);
+    let head = 0, tail = 0;
+    for (let p = 0; p < n; p++) {
+      if (core[p] && wrongShade[p] && role[p] === shade) { seen[p] = 1; depth[p] = 0; queue[tail++] = p; }
+    }
+    while (head < tail) {
+      const p = queue[head++], d = depth[p];
+      if (d >= steps) continue;
+      const x = p % w, y = (p / w) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          const q = ny * w + nx;
+          if (seen[q] || core[q] || !reach[q] || wrongShade[q] || role[q] !== shade) continue;
+          seen[q] = 1; depth[q] = d + 1; grown[q] = 1; queue[tail++] = q;
+        }
+      }
+    }
+  }
+  for (let p = 0; p < n; p++) if (grown[p]) core[p] = 1;
+}
+
+// Pockets fully enclosed by the object. 4-connected on the OUTSIDE flood so
+// a diagonal chain of object pixels counts as a seal, matching the
+// 8-connected flood that built the object in the first place.
+function fillEnclosed(core, w, h) {
+  const n = w * h;
+  const outside = new Uint8Array(n);
+  const queue = new Int32Array(n);
+  let head = 0, tail = 0;
+  const push = (p) => { if (!core[p] && !outside[p]) { outside[p] = 1; queue[tail++] = p; } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (head < tail) {
+    const p = queue[head++], x = p % w, y = (p / w) | 0;
+    if (x > 0) push(p - 1);
+    if (x < w - 1) push(p + 1);
+    if (y > 0) push(p - w);
+    if (y < h - 1) push(p + w);
+  }
+  for (let p = 0; p < n; p++) if (!core[p] && !outside[p]) core[p] = 1;
+}
+
+// Turns user hints -- one click anywhere inside each object to keep -- into
+// a protect mask for checkerboardRemoveBitmap's protectMask option. See the
+// section note above for why a click is enough and where the outline
+// actually comes from.
+//
+// seeds: [{ x, y }] in bitmap coordinates. Returns a Uint8Array of
+// width*height, 1 = protected. Unknown/empty seeds give an all-zero mask,
+// which is exactly a no-op for the caller.
+export function checkerboardObjectHint(bmp, seeds, {
+  colorA,
+  colorB,
+  tolerance = 18,
+  blendTolerance = 6,
+  latticeCellSize = 12,
+  minLatticePurity = 0.8,
+  latticeSmooth = 1,
+  blendSeamRadius = 1,
+  snapRadius = 3,
+  outlineWidth = 1,
+  outlineTrace = latticeCellSize * 2,
+  maxObjectFraction = 0.4,
+  fillHoles = false,
+} = {}) {
+  const w = bmp.width, h = bmp.height, n = w * h, src = bmp.data;
+  const mask = new Uint8Array(n);
+  if (!seeds || !seeds.length) return mask;
+  const colorsA = toColorList(colorA), colorsB = toColorList(colorB);
+  if (!colorsA.length || !colorsB.length) return mask;
+
+  const role = buildCheckerRoles(src, w, h, colorsA, colorsB, tolerance);
+  const analysis = analyseCheckerLattice(role, w, h, { latticeCellSize, minLatticePurity, latticeSmooth });
+  const grid = analysis?.grid ?? null;
+  const wrongShade = analysis?.wrongShade ?? new Uint8Array(n);
+
+  // "Material the remover would otherwise take": a checker color that fits
+  // its cell, a seam blend sitting on a cell boundary, or nothing at all.
+  // Everything else is the object, and that is what a hint floods through.
+  // Excluding seam blends matters -- they form a connected web across the
+  // whole sheet, so counting them as material would let one click leak into
+  // every object at once.
+  const solid = new Uint8Array(n);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    if (src[i + 3] === 0) continue;
+    if (role[p] >= 0) { if (wrongShade[p]) solid[p] = 1; continue; }
+    if (grid && nearCellBoundary(grid, p % w, (p / w) | 0, blendSeamRadius)
+      && blendMatchStrength(src[i], src[i + 1], src[i + 2], colorsA, colorsB, blendTolerance, 0).strength > 0) continue;
+    solid[p] = 1;
+  }
+
+  const limit = Math.max(1, Math.floor(n * maxObjectFraction));
+  for (const seed of seeds) {
+    const sx = Math.round(seed.x), sy = Math.round(seed.y);
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+    const start = nearestSet(solid, w, h, sx, sy, snapRadius);
+    // A click with no object material anywhere near it still has to mean
+    // something -- the one case the lattice genuinely cannot see (artwork in
+    // a checker color, on a cell of that same color, not touching anything
+    // provable) looks exactly like this. Protect what the user pointed at.
+    if (start < 0) { stampDisc(mask, w, h, sx, sy, snapRadius); continue; }
+    const core = floodFrom(solid, w, h, start, limit);
+    if (outlineWidth > 0 && outlineTrace > 0) growOutline(core, role, wrongShade, w, h, outlineWidth, outlineTrace);
+    if (fillHoles) fillEnclosed(core, w, h);
+    for (let p = 0; p < n; p++) if (core[p]) mask[p] = 1;
+  }
+  return mask;
+}
+
 // Removes (or recolors) checkerboard-background pixels. A pixel's removal
 // strength comes from how closely it matches colorA/colorB (tolerance +
 // feathered softness, see matchStrength), but it's only applied at all
@@ -597,6 +865,12 @@ function checkerTerritory(matches, role, w, h, minRegionSize, minAlternation, br
 // concern -- see detectGuideLines/removeGuideLines below; they're not a
 // color near colorA/colorB at all, so widening tolerance/softness here
 // can't reach them, and shouldn't try to.)
+//
+// protectMask (optional): a Uint8Array of width*height where a 1 means
+// "never touch this pixel". Unlike protectColor this is positional, not a
+// color rule, so it can shield artwork drawn in the checker colors
+// themselves -- see checkerboardObjectHint, which builds one from a click
+// per object.
 //
 // mode 'transparent': full-strength match zeroes RGBA (mirrors the eraser
 // tool's convention); a partial match scales alpha down by (1 - strength)
@@ -665,7 +939,7 @@ function checkerTerritory(matches, role, w, h, minRegionSize, minAlternation, br
 // latticeSmooth is how many cells out the polarity vote reaches.
 // latticeCellSize defaults to windowRadius, which callers already set from
 // estimateCheckerCellSize; it only bounds the period search.
-export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, connectivityBridge = 2, blendTolerance = 6, blendSoftness = 3, latticeGate = true, shadeGate = true, latticeCellSize = windowRadius, minLatticePurity = 0.8, latticeSmooth = 1, minLatticeRegion = 128, latticeAlternation = 0.05, latticeGrow = 1, latticeBridge = connectivityBridge, blendSeamOnly = true, blendSeamRadius = 1, latticeVetoRadius = latticeCellSize, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, connectivityBridge = 2, blendTolerance = 6, blendSoftness = 3, latticeGate = true, shadeGate = true, latticeCellSize = windowRadius, minLatticePurity = 0.8, latticeSmooth = 1, minLatticeRegion = 128, latticeAlternation = 0.05, latticeGrow = 1, latticeBridge = connectivityBridge, blendSeamOnly = true, blendSeamRadius = 1, latticeVetoRadius = latticeCellSize, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0, protectMask = null }) {
   const colorsA = toColorList(colorA);
   const colorsB = toColorList(colorB);
   const { width: w, height: h } = bmp;
@@ -711,29 +985,10 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
   //                  to be protecting in the first place.
   let latticeVeto = null, shadeVeto = null, blendVeto = null;
   if (latticeGate && latticeCellSize >= 2) {
-    // Strict membership on purpose -- NOT isA/isB. Those deliberately also
-    // take in the softness band and the anti-aliased blends between the two
-    // checker colours (see blendMatchStrength), and a seam blend gets filed
-    // under whichever endpoint it happens to sit nearer. Those pixels lie
-    // exactly ON cell boundaries and split near 50/50, so feeding them to the
-    // grid fit drags cell purity down far enough to fail the trust check and
-    // silently disengage the whole gate. They are also genuinely ambiguous:
-    // a blend is not evidence of a shade, so it must not be judged
-    // wrong-shade either. Leaving them unroled keeps them out of both.
-    const role = new Int8Array(w * h).fill(-1);
-    for (let p = 0, i = 0; p < w * h; p++, i += 4) {
-      if (src[i + 3] === 0) continue;
-      const r = src[i], g = src[i + 1], b = src[i + 2];
-      if (minChannelDist(r, g, b, colorsA) <= tolerance) role[p] = 0;
-      else if (minChannelDist(r, g, b, colorsB) <= tolerance) role[p] = 1;
-    }
-    const grid = fitCheckerGrid(role, w, h, {
-      maxCell: Math.max(4, Math.round(latticeCellSize * 2)),
-      minPurity: minLatticePurity,
-    });
-    if (grid) {
-      const cells = cellBackgroundShades(role, w, h, grid, latticeSmooth);
-      const { matches, wrongShade } = classifyByCellShade(role, w, h, cells);
+    const role = buildCheckerRoles(src, w, h, colorsA, colorsB, tolerance);
+    const analysis = analyseCheckerLattice(role, w, h, { latticeCellSize, minLatticePurity, latticeSmooth });
+    if (analysis) {
+      const { grid, matches, wrongShade } = analysis;
       if (shadeGate) shadeVeto = wrongShade;
       // A checker cell's own anti-aliased seam is a linear mix of the two
       // checker colours -- but so is the edge of WHITE ARTWORK drawn over a
@@ -781,6 +1036,7 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
   const data = new Uint8ClampedArray(src);
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (!isA[p] && !isB[p]) continue;
+    if (protectMask && protectMask[p]) continue;
     if (shadeVeto && shadeVeto[p]) continue;
     if (blendVeto && blendVeto[p]) continue;
     if (componentLabels && componentSizes[componentLabels[p]] < minRegionSize) continue;

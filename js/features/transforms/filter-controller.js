@@ -6,13 +6,39 @@ import { activeSheet, activeLayer, activeLayerScope, currentContextLayers } from
 import { medianCutPalette, resolveAlphaForQuantize, findMinimalColorCount } from '../../core/quantize.js';
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
-import { checkerboardRemoveBitmap, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../../core/checkerboard.js';
+import { checkerboardRemoveBitmap, checkerboardObjectHint, detectCheckerboardColors, estimateCheckerCellSize, detectGuideLines, removeGuideLines } from '../../core/checkerboard.js';
 import { armColorSample, cancelColorSample } from '../../components/canvas/drawing-engine.js';
 import { rgbaToHex, hexToRgb } from '../../components/color-utils.js';
 import { SYSTEM_PALETTES } from '../../core/systempalettes.js';
 import { previewWithOverride, refreshPreviewPanel } from '../../components/panels/preview-panel.js';
 import { defineAction } from '../shell/actions.js';
 import { markDefaultAction, makeDialogMovable, centerDialog, closeOnEscape } from '../../components/dialogs.js';
+
+// Overlay used to show which pixels an object hint is protecting. Blended
+// rather than painted flat, so the artwork stays readable underneath -- the
+// whole question the overlay answers is "did my mark catch the outline",
+// which you cannot see if the outline is hidden under solid color. Pixels
+// the filter cleared but the mask still covers (a mark dropped on bare
+// background) are painted solid, since there is nothing left to blend with.
+const PROTECT_OVERLAY_COLOR = [0, 224, 255];
+const PROTECT_OVERLAY_STRENGTH = 0.45;
+function tintProtectedPixels(bmp, mask) {
+  const out = cloneBitmap(bmp);
+  if (!mask) return out;
+  const [tr, tg, tb] = PROTECT_OVERLAY_COLOR;
+  const { data } = out;
+  for (let p = 0, i = 0; p < mask.length; p++, i += 4) {
+    if (!mask[p]) continue;
+    if (data[i + 3] === 0) {
+      data[i] = tr; data[i + 1] = tg; data[i + 2] = tb; data[i + 3] = 255;
+      continue;
+    }
+    data[i] = Math.round(data[i] + (tr - data[i]) * PROTECT_OVERLAY_STRENGTH);
+    data[i + 1] = Math.round(data[i + 1] + (tg - data[i + 1]) * PROTECT_OVERLAY_STRENGTH);
+    data[i + 2] = Math.round(data[i + 2] + (tb - data[i + 2]) * PROTECT_OVERLAY_STRENGTH);
+  }
+  return out;
+}
 
 function project() { return getEditorHost().projects.project; }
 function drawingSettings() { return getEditorHost().store.getState().workspace.drawing; }
@@ -597,6 +623,14 @@ export function mountFilterController(workbench) {
   // checker cells transparent, the "is this near-neutral and NOT
   // colorA/colorB" comparison detection depends on no longer means anything.
   // removeGuideLines then only touches pixels inside the confirmed bands.
+  //
+  // params.objectHints holds the user's object marks (see checkerboardObjectHint).
+  // Its seeds arrive in SHEET coordinates, because that's what a canvas click
+  // gives, and every bitmap here is a region crop -- so they're rebased onto
+  // the region before use, and marks outside it are simply dropped. The mask
+  // is built per layer from that layer's own pixels: an object only exists on
+  // the layer it was drawn on, and a mark that lands on empty space elsewhere
+  // should protect nothing there rather than guess.
   function computeCheckerboardPatches(params, allLayers) {
     const rl = checkerboardRegionAndLayers(allLayers);
     if (!rl) return null;
@@ -606,8 +640,19 @@ export function mountFilterController(workbench) {
     if (params.guideLines && befores.length) {
       ({ rowBands, colBands } = detectGuideLines(befores, params.colorA, params.colorB, { threshold: params.guideLines.threshold }));
     }
-    const afters = befores.map(before => {
-      const after = checkerboardRemoveBitmap(before, params);
+    const hintSeeds = (params.objectHints?.seeds ?? [])
+      .map(s => ({ x: s.x - region.x, y: s.y - region.y }))
+      .filter(s => s.x >= 0 && s.y >= 0 && s.x < region.w && s.y < region.h);
+    const protectMasks = befores.map(before => (hintSeeds.length ? checkerboardObjectHint(before, hintSeeds, {
+      colorA: params.colorA,
+      colorB: params.colorB,
+      tolerance: params.tolerance,
+      latticeCellSize: params.windowRadius,
+      outlineWidth: params.objectHints.outlineWidth,
+      fillHoles: params.objectHints.fillHoles,
+    }) : null));
+    const afters = befores.map((before, i) => {
+      const after = checkerboardRemoveBitmap(before, { ...params, protectMask: protectMasks[i] });
       if (!rowBands.length && !colBands.length) return after;
       return removeGuideLines(after, {
         rowBands, colBands, action: params.guideLines.action, healStrength: params.guideLines.healStrength, mode: params.mode, replacementColor: params.replacementColor,
@@ -616,7 +661,34 @@ export function mountFilterController(workbench) {
     });
     const patches = layers.map((l, i) => ({ layer: l, before: befores[i], after: afters[i] }))
       .filter(p => !bitmapsEqual(p.before, p.after));
-    return { region, patches, befores, guideLineBands: { rowBands, colBands } };
+    return { region, layers, patches, befores, protectMasks, guideLineBands: { rowBands, colBands } };
+  }
+
+  // Preview-only view of a result: the protected pixels tinted so the user can
+  // SEE what their marks actually caught, rather than inferring it from what
+  // survived. Deliberately built as a separate result rather than folded into
+  // computeCheckerboardPatches -- commitCheckerboard calls that same function,
+  // and a tint that reached it would be written into the layer.
+  //
+  // A layer with a mask but no pixel change still gets a patch here (nothing
+  // was removed, but there is still something to show); those synthetic
+  // patches exist only for the duration of this preview, so they can't turn
+  // into a no-op history entry.
+  function withProtectOverlay(result) {
+    if (!result) return result;
+    const changed = new Map(result.patches.map(p => [p.layer.id, p]));
+    const patches = [];
+    result.layers.forEach((layer, i) => {
+      const mask = result.protectMasks[i];
+      const patch = changed.get(layer.id);
+      if (!patch && !(mask && mask.some(Boolean))) return;
+      patches.push({
+        layer,
+        before: result.befores[i],
+        after: tintProtectedPixels(patch ? patch.after : result.befores[i], mask),
+      });
+    });
+    return { ...result, patches };
   }
   
   function commitCheckerboard(params, allLayers) {
@@ -663,6 +735,15 @@ export function mountFilterController(workbench) {
   const cbProtectToleranceVal = document.getElementById('cb-protect-tolerance-val');
   const cbProtectSoftness = document.getElementById('cb-protect-softness');
   const cbProtectSoftnessVal = document.getElementById('cb-protect-softness-val');
+  const cbProtectObjectsEnabled = document.getElementById('cb-protect-objects-enabled');
+  const cbProtectObjectsRow = document.getElementById('cb-protect-objects-row');
+  const cbObjectsPick = document.getElementById('cb-objects-pick');
+  const cbObjectsClear = document.getElementById('cb-objects-clear');
+  const cbObjectsStatus = document.getElementById('cb-objects-status');
+  const cbObjectsOutline = document.getElementById('cb-objects-outline');
+  const cbObjectsOutlineVal = document.getElementById('cb-objects-outline-val');
+  const cbObjectsFillHoles = document.getElementById('cb-objects-fillholes');
+  const cbObjectsShowMask = document.getElementById('cb-objects-showmask');
   const cbGridLinesEnabled = document.getElementById('cb-gridlines-enabled');
   const cbGridLinesRow = document.getElementById('cb-gridlines-row');
   const cbGridLinesThreshold = document.getElementById('cb-gridlines-threshold');
@@ -722,6 +803,48 @@ export function mountFilterController(workbench) {
   cbColorAPick.addEventListener('click', () => armCbPick(cbColorAPick, cbSamplesA));
   cbColorBPick.addEventListener('click', () => armCbPick(cbColorBPick, cbSamplesB));
 
+  // Object marks: sheet-space points, one per object the user wants kept.
+  // Unlike the color pickers this arm REPEATS -- marking objects is a
+  // several-clicks job, and having to re-press the button between each one
+  // is the kind of friction that makes people give up and widen tolerance
+  // instead. Clicking near an existing mark removes it, so a misclick costs
+  // one click rather than a Clear and a fresh start.
+  const OBJECT_MARK_HIT_RADIUS = 4;
+  let cbObjectSeeds = [];
+  let cbObjectsArmed = false;
+  function renderCbObjectsStatus() {
+    const n = cbObjectSeeds.length;
+    cbObjectsStatus.textContent = n === 0
+      ? (cbObjectsArmed ? 'Click objects on the canvas to keep them.' : 'No objects marked.')
+      : `${n} object${n === 1 ? '' : 's'} marked${cbObjectsArmed ? ' -- click a mark again to remove it' : ''}.`;
+  }
+  function toggleCbObjectSeed(x, y) {
+    const hit = cbObjectSeeds.findIndex(s => Math.abs(s.x - x) <= OBJECT_MARK_HIT_RADIUS && Math.abs(s.y - y) <= OBJECT_MARK_HIT_RADIUS);
+    if (hit >= 0) cbObjectSeeds.splice(hit, 1); else cbObjectSeeds.push({ x, y });
+    renderCbObjectsStatus();
+    previewCheckerboard();
+  }
+  function disarmCbObjects() {
+    cbObjectsArmed = false;
+    cbObjectsPick.textContent = '🎯 Mark objects on canvas';
+    cbObjectsPick.classList.remove('active');
+    renderCbObjectsStatus();
+  }
+  cbObjectsPick.addEventListener('click', () => {
+    if (cbObjectsArmed) { cancelColorSample(); return; }
+    cbObjectsArmed = true;
+    cbObjectsPick.textContent = 'Marking… (Esc to stop)';
+    cbObjectsPick.classList.add('active');
+    renderCbObjectsStatus();
+    armColorSample((_rgba, at) => toggleCbObjectSeed(at.x, at.y), disarmCbObjects, { repeat: true });
+  });
+  cbObjectsClear.addEventListener('click', () => {
+    if (!cbObjectSeeds.length) return;
+    cbObjectSeeds = [];
+    renderCbObjectsStatus();
+    previewCheckerboard();
+  });
+
   function currentCheckerboardParams() {
     return {
       colorA: cbSamplesA.slice(),
@@ -735,13 +858,19 @@ export function mountFilterController(workbench) {
       protectColor: cbProtectEnabled.checked ? hexToRgb(cbProtectColor.value) : null,
       protectTolerance: Number(cbProtectTolerance.value),
       protectSoftness: Number(cbProtectSoftness.value),
+      objectHints: cbProtectObjectsEnabled.checked ? {
+        seeds: cbObjectSeeds.map(s => ({ ...s })),
+        outlineWidth: Number(cbObjectsOutline.value),
+        fillHoles: cbObjectsFillHoles.checked,
+      } : null,
       guideLines: cbGridLinesEnabled.checked ? { threshold: Number(cbGridLinesThreshold.value) / 100, action: cbGridLinesAction.value, healStrength: Number(cbGridLinesHealStrength.value) / 100 } : null,
     };
   }
   
   function previewCheckerboard() {
     const result = computeCheckerboardPatches(currentCheckerboardParams(), cbAllLayers.checked);
-    pushLivePreview(result);
+    const showMask = cbProtectObjectsEnabled.checked && cbObjectsShowMask.checked;
+    pushLivePreview(showMask ? withProtectOverlay(result) : result);
     if (cbGridLinesEnabled.checked) {
       const { rowBands, colBands } = result?.guideLineBands ?? { rowBands: [], colBands: [] };
       cbGridLinesStatus.textContent = (rowBands.length || colBands.length)
@@ -809,6 +938,15 @@ export function mountFilterController(workbench) {
   cbProtectTolerance.addEventListener('input', () => { cbProtectToleranceVal.textContent = cbProtectTolerance.value; previewCheckerboard(); });
   cbProtectSoftness.addEventListener('input', () => { cbProtectSoftnessVal.textContent = cbProtectSoftness.value; previewCheckerboard(); });
   
+  function updateCheckerboardObjectsUI() {
+    cbProtectObjectsRow.hidden = !cbProtectObjectsEnabled.checked;
+    if (!cbProtectObjectsEnabled.checked && cbObjectsArmed) cancelColorSample();
+  }
+  cbProtectObjectsEnabled.addEventListener('change', () => { updateCheckerboardObjectsUI(); previewCheckerboard(); });
+  cbObjectsOutline.addEventListener('input', () => { cbObjectsOutlineVal.textContent = cbObjectsOutline.value; previewCheckerboard(); });
+  cbObjectsFillHoles.addEventListener('change', previewCheckerboard);
+  cbObjectsShowMask.addEventListener('change', previewCheckerboard);
+
   function updateCheckerboardGridLinesUI() {
     cbGridLinesRow.hidden = !cbGridLinesEnabled.checked;
     cbGridLinesHealStrengthRow.hidden = cbGridLinesAction.value !== 'heal';
@@ -837,6 +975,13 @@ export function mountFilterController(workbench) {
       setColorInputs(cbProtectColor, cbProtectHex, [0, 0, 0]);
       cbProtectTolerance.value = '15'; cbProtectToleranceVal.textContent = '15';
       cbProtectSoftness.value = '20'; cbProtectSoftnessVal.textContent = '20';
+      cbProtectObjectsEnabled.checked = false;
+      cbObjectSeeds = [];
+      disarmCbObjects();
+      updateCheckerboardObjectsUI();
+      cbObjectsOutline.value = '1'; cbObjectsOutlineVal.textContent = '1';
+      cbObjectsFillHoles.checked = false;
+      cbObjectsShowMask.checked = false;
       cbGridLinesEnabled.checked = false;
       cbGridLinesThreshold.value = '70'; cbGridLinesThresholdVal.textContent = '70';
       cbGridLinesAction.value = 'heal';
