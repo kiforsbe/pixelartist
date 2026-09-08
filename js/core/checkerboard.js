@@ -293,109 +293,281 @@ function dilateMask(mask, w, h, radius) {
 //
 // Everything above classifies a pixel by COLOUR, which is why a sprite
 // detail that happens to share a checker shade -- coal inside a rock, dark
-// speckles in a slate icon slot, a white highlight on a pearl -- cannot be
-// told apart from real background no matter how tolerance, windowRadius or
-// minMixFraction are tuned (measured against a real 512x512 sheet: ~13,600
-// pixels of real artwork destroyed, most of it deep inside sprites).
+// speckles in a slate icon slot, a white highlight on a pearl, a white
+// spiderweb drawn straight over the background, the sheet's own black-on-
+// white row labels -- cannot be told apart from real background no matter
+// how tolerance, windowRadius or minMixFraction are tuned (measured against
+// a real 512x512 sheet: ~13,600 pixels of real artwork destroyed).
 //
-// A checkerboard has one thing real artwork does not: a rigid GRID. It has a
-// fixed cell size, a fixed phase, and strict parity -- cell (i,j) is light
-// exactly when i+j is even. Artwork has no reason to obey that. Measured on
-// the same sheet, a 16px lattice at phase (0,0) explains 94.7% of every
-// checker-coloured pixel; the pixels that disagree are overwhelmingly the
-// sprite details worth protecting.
+// A checkerboard has one thing real artwork does not: a rigid GRID, on which
+// every background pixel is bit-exactly the one shade its own cell carries.
+// So a checker-coloured pixel that is the WRONG SHADE FOR ITS CELL cannot be
+// background at all. That is an exact constraint rather than a heuristic,
+// and it is what recovers artwork drawn in a checker colour directly over
+// the pattern -- black digits on a white cell, a white web strand over a
+// dark one, a sprite's dark outline crossing a light cell.
 //
-// Parity alone is not enough, though: a checker-coloured pixel sitting
-// inside an object still lands on a matching-parity cell about half the time
-// by pure chance. So the decision is made per REGION, not per pixel -- a
+// Using it needs the grid, and a packed sheet is the awkward case: it is
+// assembled from several separately-exported sprites, each baking in its own
+// checker PHASE, so no single global parity ("cell (i,j) is light exactly
+// when i+j is even") describes the whole image -- on the sheet above, the
+// best global parity explains only 94.7% of checker-coloured pixels, and the
+// 5% it gets wrong are whole regions of ordinary background.
+//
+// The fix is to fit only the cell GRID (period + offset) globally, and then
+// let EACH CELL vote for its own background shade from the pixels inside it.
+// Phase inversion then costs nothing, because no cell depends on a global
+// parity: the same sheet's cells explain 95.8% of checker-coloured pixels,
+// and what now disagrees is overwhelmingly real artwork rather than whole
+// mis-phased background regions.
+//
+// Wrong-shade pixels are only half the problem. A checker-coloured pixel
+// inside an object that happens to land on a MATCHING shade is still
+// ambiguous by colour, so that half is decided per REGION, not per pixel: a
 // region counts as genuine checkerboard only when a whole connected run of
-// pixels agrees with the grid AND that run contains both shades. An object's
-// interior fails both ways: its checker-coloured pixels agree with the grid
-// only at chance rate, so they shatter into tiny single-shade fragments.
+// matching-shade pixels contains both shades. An object's interior fails
+// that -- its checker-coloured pixels match the grid only at chance rate, so
+// they shatter into tiny single-shade fragments.
 
-// Best (cellSize, phase) by parity agreement, searching a small band of cell
-// sizes around the caller's estimate. role: 0 = light, 1 = dark, -1 = not a
-// checker colour. Returns null when nothing fits well enough to be trusted,
-// in which case the caller simply skips the whole lattice gate and behaves
-// exactly as it did before -- so a resized/warped checkerboard that is no
-// longer on a rigid grid is never made worse by this.
-function fitCheckerLattice(role, w, h, checkerCount, cellSize, minAgreement) {
-  if (!checkerCount) return null;
-  let best = null;
-  const lo = Math.max(2, Math.round(cellSize) - 2), hi = Math.max(lo, Math.round(cellSize) + 2);
-  for (let C = lo; C <= hi; C++) {
-    const M = 2 * C;
-    const H0 = new Int32Array(M * M), H1 = new Int32Array(M * M);
-    for (let p = 0; p < w * h; p++) {
-      const rl = role[p];
-      if (rl < 0) continue;
-      const idx = (((p / w) | 0) % M) * M + ((p % w) % M);
-      if (rl === 0) H0[idx]++; else H1[idx]++;
-    }
-    // parity = A[xm] ^ B[ym], so for a fixed ox each row can be reduced once
-    // into "agreement if B[ym] is 0" / "...is 1" and then reused for every oy
-    // -- O(M^3) overall instead of re-summing the whole histogram per phase.
-    const s0 = new Int32Array(M), s1 = new Int32Array(M);
-    for (let ox = 0; ox < M; ox++) {
-      const A = new Uint8Array(M);
-      for (let xm = 0; xm < M; xm++) A[xm] = (((xm - ox) % M + M) % M) < C ? 0 : 1;
-      for (let ym = 0; ym < M; ym++) {
-        const base = ym * M;
-        let a0 = 0, a1 = 0;
-        for (let xm = 0; xm < M; xm++) {
-          if (A[xm] === 0) { a0 += H0[base + xm]; a1 += H1[base + xm]; }
-          else { a0 += H1[base + xm]; a1 += H0[base + xm]; }
+// Cell period by autocorrelation of the role signal. Background obeys
+// role(x + C) = 1 - role(x) exactly, so it ANTI-agrees with itself one cell
+// over and agrees again two cells over. Anti-aliased seams can't corrupt
+// this: a blend sits near neither checker colour, so it has no role and is
+// skipped. role: 0 = light, 1 = dark, -1 = not a checker colour.
+//
+// Scored as agree(2d) - agree(d) rather than just "wherever agreement
+// bottoms out". That bare minimum is far too fragile to pick a period with:
+// on a real 512x512 sheet the true 16px cell scored 0.0679 while 17px scored
+// 0.0651, so the wrong period won by a hair, its cells came out mixed-shade,
+// and the trust check below then silently disengaged the whole gate. The
+// two-term score separates them properly, because a near-miss period slips
+// by one pixel per cell and so fails to line back up at 2d, and it also
+// rejects harmonics for free: d = C/2 agrees about half the time at d and
+// anti-agrees at 2d (a strongly negative score), while d = 2C agrees at both
+// (about zero).
+function fitCheckerPeriod(role, w, h, minCell, maxCell, subsample) {
+  const scan = (horiz) => {
+    const agree = new Float64Array(2 * maxCell + 1).fill(NaN);
+    for (let d = minCell; d <= 2 * maxCell; d++) {
+      let same = 0, total = 0;
+      const yEnd = horiz ? h : h - d;
+      const xEnd = horiz ? w - d : w;
+      for (let y = 0; y < yEnd; y += subsample) {
+        const base = y * w, otherBase = horiz ? base : base + d * w;
+        for (let x = 0; x < xEnd; x += subsample) {
+          const a = role[base + x];
+          if (a < 0) continue;
+          const b = role[otherBase + (horiz ? x + d : x)];
+          if (b < 0) continue;
+          total++;
+          if (a === b) same++;
         }
-        s0[ym] = a0; s1[ym] = a1;
       }
-      for (let oy = 0; oy < M; oy++) {
-        let agree = 0;
-        for (let ym = 0; ym < M; ym++) {
-          agree += ((((ym - oy) % M + M) % M) < C ? s0[ym] : s1[ym]);
-        }
-        if (!best || agree > best.agree) best = { cellSize: C, ox, oy, agree };
-      }
+      if (total) agree[d] = same / total;
     }
-  }
-  if (!best || best.agree / checkerCount < minAgreement) return null;
-  return { ...best, agreement: best.agree / checkerCount };
+    let bestCell = 0, bestScore = -Infinity, bestAgree = 1;
+    for (let d = minCell; d <= maxCell; d++) {
+      if (Number.isNaN(agree[d]) || Number.isNaN(agree[2 * d])) continue;
+      const score = agree[2 * d] - agree[d];
+      if (score > bestScore) { bestScore = score; bestCell = d; bestAgree = agree[d]; }
+    }
+    return { cell: bestCell, agree: bestAgree, score: bestScore };
+  };
+  return { x: scan(true), y: scan(false) };
 }
 
-// Marks which pixels belong to a region that genuinely follows the lattice.
-// Both polarities are accepted, decided per region: a sheet packed from
-// several separately-exported sprites carries a DIFFERENT checker phase per
-// sprite, so insisting on one global polarity wrongly rejects the inverted
-// patches (confirmed on a real sheet -- a white cell sat exactly where the
-// global fit demanded a dark one, and the gap between two tiles was left
-// un-removed as a result).
-function latticeTerritory(role, w, h, lattice, minRegionSize, minAlternation) {
+// Grid offset by cell PURITY: the right (ox, oy) is the one that stops cells
+// from straddling a shade boundary. Purity is phase-agnostic -- it never asks
+// which shade a cell should be, only that it be one shade -- so a sheet whose
+// sprites carry different checker phases still fits cleanly. Reduced through
+// per-column strips so the cost is O(cellW*N + cellW*cellH*cols*h) rather
+// than re-binning every pixel for all cellW*cellH offset pairs.
+function fitCheckerPhase(role, w, h, cellW, cellH) {
+  let best = null;
+  for (let ox = 0; ox < cellW; ox++) {
+    const cols = Math.ceil((w + ox) / cellW);
+    const stripLight = new Int32Array(cols * h), stripDark = new Int32Array(cols * h);
+    for (let y = 0; y < h; y++) {
+      const base = y * w;
+      for (let x = 0; x < w; x++) {
+        const r = role[base + x];
+        if (r < 0) continue;
+        const c = ((x + ox) / cellW) | 0;
+        if (r === 0) stripLight[c * h + y]++; else stripDark[c * h + y]++;
+      }
+    }
+    for (let oy = 0; oy < cellH; oy++) {
+      const rows = Math.ceil((h + oy) / cellH);
+      const light = new Int32Array(cols * rows), dark = new Int32Array(cols * rows);
+      for (let c = 0; c < cols; c++) {
+        for (let y = 0; y < h; y++) {
+          const row = ((y + oy) / cellH) | 0;
+          light[row * cols + c] += stripLight[c * h + y];
+          dark[row * cols + c] += stripDark[c * h + y];
+        }
+      }
+      let pure = 0, total = 0;
+      for (let k = 0; k < cols * rows; k++) { pure += Math.max(light[k], dark[k]); total += light[k] + dark[k]; }
+      const purity = total > 0 ? pure / total : 0;
+      if (!best || purity > best.purity) best = { ox, oy, purity };
+    }
+  }
+  return best;
+}
+
+// Returns null when nothing fits well enough to be trusted, in which case
+// the caller skips the whole gate and behaves exactly as it did before -- so
+// a resized/warped checkerboard that is no longer on a rigid grid is never
+// made worse by this.
+function fitCheckerGrid(role, w, h, { minCell = 2, maxCell = 64, maxPeriodAgreement = 0.3, minPurity = 0.8 }) {
+  // The period scan is the one O(pixels x periods) step here, so it samples a
+  // sparse grid on big images -- a 512x512 sheet still leaves ~29k pairs per
+  // candidate period, far more than the fit needs -- while small images, where
+  // there is little to spare, are scanned whole.
+  const subsample = Math.max(1, Math.round(Math.sqrt(w * h) / 200));
+  const cap = Math.max(minCell, Math.min(maxCell, Math.floor(Math.min(w, h) / 2)));
+  if (cap < minCell) return null;
+  const period = fitCheckerPeriod(role, w, h, minCell, cap, subsample);
+  if (!period.x.cell || !period.y.cell) return null;
+  // A real checkerboard ANTI-agrees with itself one cell over. If the best
+  // period still agrees this often there's no alternating pattern here.
+  if (period.x.agree > maxPeriodAgreement || period.y.agree > maxPeriodAgreement) return null;
+  const phase = fitCheckerPhase(role, w, h, period.x.cell, period.y.cell);
+  if (!phase || phase.purity < minPurity) return null;
+  return { cellW: period.x.cell, cellH: period.y.cell, ox: phase.ox, oy: phase.oy, purity: phase.purity };
+}
+
+// Each cell's background shade.
+//
+// NOT an independent per-cell majority: a cell that a sprite covers most of
+// votes for the SPRITE's shade, and the sliver of real background left in it
+// is then judged wrong-shade and wrongly protected (seen on a real sheet as
+// white patches stranded around the bases of dark trees). Cells are not
+// independent -- a checkerboard forces neighbouring cells to be opposite --
+// so what gets voted on is the local POLARITY: whether this patch of the grid
+// has light where (i + j) is even, or the other way round. Every cell in a
+// `smooth`-radius neighbourhood contributes, so one swamped cell is outvoted
+// by its neighbours, while a genuine phase change between two packed sprites
+// still flips the polarity because it moves whole regions at once.
+//
+// A cell with no evidence at all in reach stays -1, and its pixels are then
+// treated as ambiguous rather than judged, so the shade rule simply does not
+// apply there.
+function cellBackgroundShades(role, w, h, grid, smooth) {
+  const { cellW, cellH, ox, oy } = grid;
+  const cols = Math.ceil((w + ox) / cellW), rows = Math.ceil((h + oy) / cellH);
+  const light = new Int32Array(cols * rows), dark = new Int32Array(cols * rows);
+  for (let y = 0; y < h; y++) {
+    const row = ((y + oy) / cellH) | 0, base = y * w;
+    for (let x = 0; x < w; x++) {
+      const r = role[base + x];
+      if (r < 0) continue;
+      const c = row * cols + (((x + ox) / cellW) | 0);
+      if (r === 0) light[c]++; else dark[c]++;
+    }
+  }
+  // Per cell, how strongly its own pixels favour polarity 0 (light where
+  // (i + j) is even) over polarity 1.
+  const evidence = new Float64Array(cols * rows);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const c = j * cols + i;
+      evidence[c] = ((i + j) & 1) === 0 ? light[c] - dark[c] : dark[c] - light[c];
+    }
+  }
+  const shade = new Int8Array(cols * rows).fill(-1);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      let sum = 0;
+      const j0 = Math.max(0, j - smooth), j1 = Math.min(rows - 1, j + smooth);
+      const i0 = Math.max(0, i - smooth), i1 = Math.min(cols - 1, i + smooth);
+      for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) sum += evidence[jj * cols + ii];
+      if (sum === 0) continue;                       // nothing to go on -- stay unjudged
+      const polarity = sum > 0 ? 0 : 1;
+      shade[j * cols + i] = ((i + j) & 1) ^ polarity;
+    }
+  }
+  return { cols, rows, shade, cellW, cellH, ox, oy };
+}
+
+// Splits the checkerboard-coloured pixels into the two halves the gate treats
+// differently.
+//
+// wrongShade: strict evidence only -- a pixel confidently one checker colour
+// while its cell demands the other. Provably not background.
+//
+// matches: confidently the shade its cell demands -- still ambiguous, since a
+// sprite detail lands on a matching shade about half the time by chance, so
+// it goes on to the region test below. Kept strict (a seam blend is NOT a
+// member) because that is exactly what fragments a sprite's interior: its
+// checker-coloured pixels agree with the grid only at chance rate, so they
+// break into tiny single-shade islands that the region test then rejects.
+// The 1-2px seam gaps this leaves along real cell boundaries are closed by
+// connectivityBridge, which is the same mechanism minRegionSize already uses.
+function classifyByCellShade(role, w, h, cells) {
+  const matches = new Uint8Array(w * h), wrongShade = new Uint8Array(w * h);
+  const { cols, shade, cellW, cellH, ox, oy } = cells;
+  for (let y = 0; y < h; y++) {
+    const row = ((y + oy) / cellH) | 0, base = y * w;
+    for (let x = 0; x < w; x++) {
+      const p = base + x, r = role[p];
+      if (r < 0) continue;
+      const want = shade[row * cols + (((x + ox) / cellW) | 0)];
+      if (want < 0) { matches[p] = 1; continue; }   // no evidence either way
+      if (r === want) matches[p] = 1; else wrongShade[p] = 1;
+    }
+  }
+  return { matches, wrongShade };
+}
+
+// Marks which matching-shade pixels belong to a region that is genuinely
+// checkerboard: big enough, and carrying BOTH shades. A sprite's interior
+// fails the second test -- an enclosed detail is essentially all one shade.
+//
+// A jagged sprite edge also pinches hairline-thin slivers off the real
+// background, and such a sliver judged on its own is too small to qualify and
+// would be wrongly protected. `bridge` handles those, but NOT by grouping
+// everything on a dilated mask the way minRegionSize does: inside a busy
+// sprite that fuses dozens of unrelated fragments into one blob big and mixed
+// enough to qualify, which hands the sprite's own interior straight back to
+// the remover (measured on a real sheet: artwork destroyed went from 6,350
+// pixels to 9,326). Instead each component is judged strictly on its own, and
+// only then are unqualified ones PROMOTED if they sit within `bridge` of a
+// component that already qualified. A pinched-off sliver touches the real
+// background and gets promoted; a sprite's enclosed detail is walled off by
+// material far thicker than the bridge, so it never touches territory and
+// stays protected however many fragments surround it.
+function checkerTerritory(matches, role, w, h, minRegionSize, minAlternation, bridge) {
   const n = w * h;
-  const { cellSize: C, ox, oy } = lattice;
-  const M = 2 * C;
-  const matches = new Uint8Array(n), inverted = new Uint8Array(n);
+  const { labels, sizes } = labelComponents(matches, w, h);
+  const light = new Int32Array(sizes.length), dark = new Int32Array(sizes.length);
   for (let p = 0; p < n; p++) {
-    if (role[p] < 0) continue;
-    const x = p % w, y = (p / w) | 0;
-    const a = (((x - ox) % M + M) % M) < C ? 0 : 1;
-    const b = (((y - oy) % M + M) % M) < C ? 0 : 1;
-    if (role[p] === (a ^ b)) matches[p] = 1; else inverted[p] = 1;
+    const id = labels[p];
+    if (id < 0) continue;
+    if (role[p] === 0) light[id]++; else if (role[p] === 1) dark[id]++;
+  }
+  const qualified = new Uint8Array(sizes.length);
+  for (let id = 0; id < sizes.length; id++) {
+    if (sizes[id] < minRegionSize) continue;
+    const total = light[id] + dark[id];
+    if (total === 0 || Math.min(light[id], dark[id]) / total < minAlternation) continue;
+    qualified[id] = 1;
   }
   const territory = new Uint8Array(n);
-  for (const mask of [matches, inverted]) {
-    const { labels, sizes } = labelComponents(mask, w, h);
-    const light = new Int32Array(sizes.length), dark = new Int32Array(sizes.length);
+  for (let p = 0; p < n; p++) if (labels[p] >= 0 && qualified[labels[p]]) territory[p] = 1;
+  if (bridge > 0) {
+    // 2*bridge, because dilating a mask by `bridge` before labelling (what
+    // minRegionSize does) closes gaps of twice that -- both sides grow toward
+    // each other. Promotion only grows the territory side, so it has to cover
+    // the whole gap itself to bridge the same hairline.
+    const reachable = dilateMask(territory, w, h, 2 * bridge);
+    const promoted = new Uint8Array(sizes.length);
     for (let p = 0; p < n; p++) {
       const id = labels[p];
-      if (id < 0) continue;
-      if (role[p] === 0) light[id]++; else dark[id]++;
+      if (id < 0 || qualified[id] || !reachable[p]) continue;
+      promoted[id] = 1;
     }
-    for (let p = 0; p < n; p++) {
-      const id = labels[p];
-      if (id < 0 || sizes[id] < minRegionSize) continue;
-      const total = light[id] + dark[id];
-      if (total === 0 || Math.min(light[id], dark[id]) / total < minAlternation) continue;
-      territory[p] = 1;
-    }
+    for (let p = 0; p < n; p++) if (labels[p] >= 0 && promoted[labels[p]]) territory[p] = 1;
   }
   return territory;
 }
@@ -466,22 +638,34 @@ function latticeTerritory(role, w, h, lattice, minRegionSize, minAlternation) {
 // window-mix test and connectivity below) exactly as if it had matched by
 // distance. Pass blendTolerance: 0 to disable.
 //
-// latticeGate (see fitCheckerLattice/latticeTerritory above): vetoes any
-// removal whose pixel does not belong to a region that actually follows the
-// checkerboard's grid. This is what protects sprite detail that merely
-// SHARES a checker colour, which no colour-space test can ever separate
-// (measured on a real sheet: artwork destroyed drops from ~13,600 pixels to
-// ~5,800, and the part sitting deep inside sprites -- the visible,
-// art-destroying kind -- from ~13,000 to ~130; what remains is a 1px
-// silhouette fringe, over half of which is bit-identical to a checker
-// colour and so is genuinely undecidable). The veto only applies within
-// latticeVetoRadius of real (non-checker-coloured) material, because its
-// job is protecting sprite interiors -- a stray pixel out in open
-// background is not one, and keeps behaving exactly as before. If no
-// trustworthy lattice is found the gate disengages entirely.
+// latticeGate (see the lattice section above): protects sprite detail that
+// merely SHARES a checker colour, which no colour-space test can ever
+// separate. It works on the checkerboard's grid rather than its palette, in
+// two parts.
+//
+// shadeGate is the exact half: a checker-coloured pixel carrying the wrong
+// shade for the cell it sits in cannot be background, so it is never
+// removed. This is what recovers artwork drawn in a checker colour directly
+// on top of the pattern -- black-on-white row labels, a white spiderweb over
+// dark cells, a sprite's dark outline crossing a light cell -- none of which
+// any colour test or region test can reach. Pass shadeGate: false to disable
+// just this half (latticeGate: false disables both).
+//
+// latticeVeto is the ambiguous half, for pixels whose shade DOES match their
+// cell: those are only removable inside a region that behaves like real
+// checkerboard (big, and carrying both shades). It applies within
+// latticeVetoRadius of real (non-checker-coloured) material, because its job
+// is protecting sprite interiors -- a stray pixel out in open background is
+// not one, and keeps behaving exactly as before.
+//
+// Both depend on fitCheckerGrid finding a trustworthy grid; if it doesn't,
+// the whole gate disengages and behaviour is exactly as it was without it,
+// so a resized/warped checkerboard is never made worse. minLatticePurity is
+// how cleanly cells must come out single-shaded to be believed;
+// latticeSmooth is how many cells out the polarity vote reaches.
 // latticeCellSize defaults to windowRadius, which callers already set from
-// estimateCheckerCellSize. Pass latticeGate: false to disable.
-export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, connectivityBridge = 2, blendTolerance = 6, blendSoftness = 3, latticeGate = true, latticeCellSize = windowRadius, minLatticeAgreement = 0.75, minLatticeRegion = 128, latticeAlternation = 0.05, latticeGrow = 1, latticeVetoRadius = latticeCellSize, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
+// estimateCheckerCellSize; it only bounds the period search.
+export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, softness = 0, windowRadius = 12, minMixFraction = 0.12, minRegionSize = (windowRadius * 2 + 1) ** 2, connectivityBridge = 2, blendTolerance = 6, blendSoftness = 3, latticeGate = true, shadeGate = true, latticeCellSize = windowRadius, minLatticePurity = 0.8, latticeSmooth = 1, minLatticeRegion = 128, latticeAlternation = 0.05, latticeGrow = 1, latticeBridge = connectivityBridge, blendSeamOnly = true, blendSeamRadius = 1, latticeVetoRadius = latticeCellSize, mode = 'transparent', replacementColor = [255, 255, 255], protectColor = null, protectTolerance = 0, protectSoftness = 0 }) {
   const colorsA = toColorList(colorA);
   const colorsB = toColorList(colorB);
   const { width: w, height: h } = bmp;
@@ -518,20 +702,64 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
       componentSizes[id] = (componentSizes[id] || 0) + 1;
     }
   }
-  // Lattice gate: only pixels belonging to a region that actually follows the
-  // checkerboard grid stay removal-eligible, and only where there's real
-  // material nearby for the veto to be protecting in the first place.
-  let latticeVeto = null;
+  // Lattice gate, in two parts (see the section comment above):
+  //   shadeVeto   -- the exact rule: a checker-coloured pixel carrying the
+  //                  wrong shade for its own cell is provably not background.
+  //   latticeVeto -- the ambiguous half: a matching-shade pixel that isn't
+  //                  part of a region actually behaving like checkerboard,
+  //                  and only where there's real material nearby for the veto
+  //                  to be protecting in the first place.
+  let latticeVeto = null, shadeVeto = null, blendVeto = null;
   if (latticeGate && latticeCellSize >= 2) {
+    // Strict membership on purpose -- NOT isA/isB. Those deliberately also
+    // take in the softness band and the anti-aliased blends between the two
+    // checker colours (see blendMatchStrength), and a seam blend gets filed
+    // under whichever endpoint it happens to sit nearer. Those pixels lie
+    // exactly ON cell boundaries and split near 50/50, so feeding them to the
+    // grid fit drags cell purity down far enough to fail the trust check and
+    // silently disengage the whole gate. They are also genuinely ambiguous:
+    // a blend is not evidence of a shade, so it must not be judged
+    // wrong-shade either. Leaving them unroled keeps them out of both.
     const role = new Int8Array(w * h).fill(-1);
-    let checkerCount = 0;
-    for (let p = 0; p < w * h; p++) {
-      if (isA[p]) { role[p] = 0; checkerCount++; }
-      else if (isB[p]) { role[p] = 1; checkerCount++; }
+    for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+      if (src[i + 3] === 0) continue;
+      const r = src[i], g = src[i + 1], b = src[i + 2];
+      if (minChannelDist(r, g, b, colorsA) <= tolerance) role[p] = 0;
+      else if (minChannelDist(r, g, b, colorsB) <= tolerance) role[p] = 1;
     }
-    const lattice = fitCheckerLattice(role, w, h, checkerCount, latticeCellSize, minLatticeAgreement);
-    if (lattice) {
-      const territory = latticeTerritory(role, w, h, lattice, minLatticeRegion, latticeAlternation);
+    const grid = fitCheckerGrid(role, w, h, {
+      maxCell: Math.max(4, Math.round(latticeCellSize * 2)),
+      minPurity: minLatticePurity,
+    });
+    if (grid) {
+      const cells = cellBackgroundShades(role, w, h, grid, latticeSmooth);
+      const { matches, wrongShade } = classifyByCellShade(role, w, h, cells);
+      if (shadeGate) shadeVeto = wrongShade;
+      // A checker cell's own anti-aliased seam is a linear mix of the two
+      // checker colours -- but so is the edge of WHITE ARTWORK drawn over a
+      // dark cell, or dark artwork over a light one, and blendMatchStrength
+      // cannot tell those apart, because in colour space they are the same
+      // thing (confirmed on a real sheet: a white spiderweb painted straight
+      // over the checkerboard came out shredded, its every anti-aliased edge
+      // pixel read as a seam). Position separates them exactly: a real seam
+      // lies ON a cell boundary, artwork's edge lies wherever the artwork is.
+      // So a pixel that qualifies ONLY as a blend is removable only near a
+      // cell boundary.
+      if (blendTolerance > 0 && blendSeamOnly) {
+        blendVeto = new Uint8Array(w * h);
+        const { cellW, cellH, ox, oy } = grid;
+        const nearEdge = (v, cellSize) => v <= blendSeamRadius || v >= cellSize - 1 - blendSeamRadius;
+        for (let y = 0; y < h; y++) {
+          if (nearEdge((y + oy) % cellH, cellH)) continue;   // whole row hugs a boundary
+          for (let x = 0; x < w; x++) {
+            const p = y * w + x;
+            if (role[p] >= 0) continue;                      // a real checker colour, not merely a blend
+            if (nearEdge((x + ox) % cellW, cellW)) continue;
+            blendVeto[p] = 1;
+          }
+        }
+      }
+      const territory = checkerTerritory(matches, role, w, h, minLatticeRegion, latticeAlternation, latticeBridge);
       const reach = dilateMask(territory, w, h, latticeGrow);
       const material = new Uint8Array(w * h);
       for (let p = 0, i = 0; p < w * h; p++, i += 4) {
@@ -553,6 +781,8 @@ export function checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance = 18, 
   const data = new Uint8ClampedArray(src);
   for (let p = 0, i = 0; p < w * h; p++, i += 4) {
     if (!isA[p] && !isB[p]) continue;
+    if (shadeVeto && shadeVeto[p]) continue;
+    if (blendVeto && blendVeto[p]) continue;
     if (componentLabels && componentSizes[componentLabels[p]] < minRegionSize) continue;
     if (latticeVeto && latticeVeto[p]) continue;
     const x = p % w, y = (p / w) | 0;

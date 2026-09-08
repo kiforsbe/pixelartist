@@ -76,7 +76,11 @@ test('checkerboardRemoveBitmap: minRegionSize protects a small enclosed pattern 
   assert.equal(gated.data[backgroundMid + 3], 0, 'the real, sprawling checkerboard is still fully removed');
   assert.deepEqual([gated.data[enclosedPixel], gated.data[enclosedPixel + 1], gated.data[enclosedPixel + 2], gated.data[enclosedPixel + 3]], [...colorA, 255], 'the small enclosed pattern survives -- its own connected blob (64px) is far smaller than the real background');
 
-  const ungated = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: 4, minMixFraction: 0.1, minRegionSize: 0 });
+  // latticeGate off as well, purely to isolate minRegionSize: the enclosed
+  // pattern has its own 2px period, so it also lands on the wrong shade for
+  // the surrounding 8px grid about half the time and the shade rule would
+  // protect it independently (see the dedicated test for that below).
+  const ungated = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: 4, minMixFraction: 0.1, minRegionSize: 0, latticeGate: false });
   assert.equal(ungated.data[enclosedPixel + 3], 0, 'sanity: with the gate disabled (minRegionSize: 0), the same enclosed pattern IS wrongly removed -- proving the gate, not something else, is what protects it above');
 });
 
@@ -96,15 +100,20 @@ test('checkerboardRemoveBitmap: connectivityBridge stops a thin (jagged-silhouet
   const colorA = [255, 255, 255], colorB = [192, 192, 192];
   const bmp = checkerBitmap(w, h, cell, colorA, colorB, [26, 26, 12, 12, [90, 60, 30]]);
   const { data } = bmp;
+  // What the hairline pinches off is the REAL background carrying straight on
+  // underneath, so restore the sheet's own checkerboard inside the wall --
+  // same period, same phase. (An inner region on a DIFFERENT period would be
+  // a distinct decorative texture rather than background, and is the case the
+  // wrong-shade test below covers.)
   for (let y = 28; y < 36; y++) {
     for (let x = 28; x < 36; x++) {
-      const parity = (((x - 28) / 2) | 0) + (((y - 28) / 2) | 0);
+      const parity = ((x / cell) | 0) + ((y / cell) | 0);
       const c = parity % 2 === 0 ? colorA : colorB;
       const i = (y * w + x) * 4;
       data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255;
     }
   }
-  const enclosedPixel = (31 * w + 31) * 4; // inside the 8x8 pattern, 2px from the thin wall
+  const enclosedPixel = (31 * w + 31) * 4; // inside the pinched-off pocket, 2px from the thin wall
 
   const bridged = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: 4, minMixFraction: 0.1 });
   assert.equal(bridged.data[enclosedPixel + 3], 0, 'default connectivityBridge sees past the 2px gap -- this is really just more background, so it gets removed');
@@ -383,6 +392,80 @@ test('checkerboardRemoveBitmap: the lattice gate protects a checker-coloured det
   const ungated = checkerboardRemoveBitmap(bmp, { ...opts, latticeGate: false });
   assert.equal(ungated.data[background + 3], 0, 'background still removed with the gate off');
   assert.equal(ungated.data[coal + 3], 0, 'sanity: with latticeGate disabled the same detail IS destroyed -- neither colour nor minRegionSize can save it, which is exactly why the gate exists');
+});
+
+test('checkerboardRemoveBitmap: artwork painted in an exact checker colour directly ON the checkerboard survives when it sits on a cell of the OTHER shade', () => {
+  // The case no colour test can reach, and the one that matters most on a
+  // real packed sheet: the sheet's own row/column labels are drawn straight
+  // over the pattern, black digits on the white cells and white digits on the
+  // black ones, in the exact same two colours. Being bit-identical to the
+  // background, they are indistinguishable from it pixel by pixel -- but a
+  // dark glyph sitting inside a LIGHT cell cannot be background, because the
+  // background in that cell is light everywhere. That is what saves it.
+  //
+  // Nothing else in the pipeline can: the glyph shares a border with the
+  // checkerboard, so it is part of the same connected blob (minRegionSize is
+  // no help), its neighbourhood is full of both shades (minMixFraction
+  // passes), and there is no non-checker material anywhere in this bitmap for
+  // the region veto to protect it near.
+  const w = 64, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [40, 40, 40];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB);
+  const put = (x, y, c) => {
+    const i = (y * w + x) * 4;
+    bmp.data[i] = c[0]; bmp.data[i + 1] = c[1]; bmp.data[i + 2] = c[2]; bmp.data[i + 3] = 255;
+  };
+  // cell (1,1) spans x,y 8..15 and has even parity, so it is a LIGHT cell;
+  // paint a dark 4x4 glyph in the middle of it
+  for (let y = 10; y < 14; y++) for (let x = 10; x < 14; x++) put(x, y, colorB);
+  const glyph = (11 * w + 11) * 4;
+  const background = (4 * w + 4) * 4;
+  const opts = { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1 };
+
+  const out = checkerboardRemoveBitmap(bmp, opts);
+  assert.equal(out.data[background + 3], 0, 'the real checkerboard is still removed');
+  assert.deepEqual(
+    [out.data[glyph], out.data[glyph + 1], out.data[glyph + 2], out.data[glyph + 3]],
+    [...colorB, 255],
+    'the glyph survives: it is the wrong shade for the cell it sits in, so it cannot be background',
+  );
+
+  const noShade = checkerboardRemoveBitmap(bmp, { ...opts, shadeGate: false });
+  assert.equal(noShade.data[background + 3], 0, 'background still removed with the shade rule off');
+  assert.equal(noShade.data[glyph + 3], 0, 'sanity: with shadeGate disabled the identical glyph IS destroyed -- it is bit-identical to the background, so only its position gives it away');
+});
+
+test('checkerboardRemoveBitmap: an anti-aliased edge of artwork drawn over the checkerboard is kept, while the checkerboard\'s own seam blend at a cell boundary is removed', () => {
+  // blendMatchStrength catches any pixel sitting on the line between the two
+  // checker colours, which is exactly what a cell-to-cell antialiasing seam
+  // is -- but it is ALSO exactly what the soft edge of white artwork drawn
+  // over a dark cell is, and in colour space the two are the same pixel.
+  // Position is what separates them: a real seam lies on a cell boundary.
+  const w = 64, h = 64, cell = 8;
+  const colorA = [255, 255, 255], colorB = [40, 40, 40];
+  const bmp = checkerBitmap(w, h, cell, colorA, colorB);
+  const put = (x, y, c) => {
+    const i = (y * w + x) * 4;
+    bmp.data[i] = c[0]; bmp.data[i + 1] = c[1]; bmp.data[i + 2] = c[2]; bmp.data[i + 3] = 255;
+  };
+  const mid = [148, 148, 148]; // sits exactly on the colorA..colorB line
+  // cell (1,0) spans x 8..15, y 0..7 and has odd parity, so it is a DARK cell.
+  // A white strand with a soft edge, painted well inside it:
+  for (let y = 2; y < 6; y++) { put(12, y, colorA); put(11, y, mid); put(13, y, mid); }
+  const artEdge = (3 * w + 11) * 4;      // the strand's own antialiased edge
+  const seam = (3 * w + 8) * 4;          // same colour, but on the cell boundary at x=8
+  put(8, 3, mid);
+
+  const out = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1 });
+  assert.deepEqual(
+    [out.data[artEdge], out.data[artEdge + 1], out.data[artEdge + 2], out.data[artEdge + 3]],
+    [...mid, 255],
+    "the strand's antialiased edge survives -- it is nowhere near a cell boundary, so it is artwork, not a seam",
+  );
+  assert.equal(out.data[seam + 3], 0, 'the identical colour ON a cell boundary is removed as a real checker seam');
+
+  const noSeamRule = checkerboardRemoveBitmap(bmp, { colorA, colorB, tolerance: 10, windowRadius: cell, minMixFraction: 0.1, blendSeamOnly: false });
+  assert.equal(noSeamRule.data[artEdge + 3], 0, "sanity: without the seam rule the strand's edge IS eaten -- by colour alone it is identical to a seam blend");
 });
 
 // Draws full-span guide lines into an existing checker bitmap at the given
