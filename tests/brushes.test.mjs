@@ -54,8 +54,31 @@ test('validateBrush rejects stamp ink on a non-custom mask', () => {
   assert.equal(validateBrush(good).ok, true);
 });
 
+test('validateBrush rejects a custom mask with no bitmap', () => {
+  const bad = normalizeBrush({ mask: { kind: 'custom' } });
+  assert.equal(validateBrush(bad).ok, false);
+});
+
+test('validateBrush rejects replace ink with no target color', () => {
+  const bad = normalizeBrush({ ink: { kind: 'replace' } });
+  assert.equal(validateBrush(bad).ok, false);
+});
+
 test('built-ins are all valid and include the default square 1', () => {
   for (const b of BUILTIN_BRUSHES) assert.equal(validateBrush(b).ok, true, b.name);
   assert.equal(DEFAULT_BRUSH.mask.size, 1);
   assert.equal(DEFAULT_BRUSH.ink.kind, 'solid');
+});
+
+// Built-in ids must be stable across processes: a saved project embeds them,
+// and Task 12's library dedupe matches incoming brushes against the library
+// by id. Asserting the literal ids is the cheapest proof that they are fixed
+// rather than derived from newBrushId()'s per-process counter.
+test('built-in brushes have fixed ids stable across processes', () => {
+  assert.equal(BUILTIN_BRUSHES[0].id, 'brush_builtin_square1');
+  assert.equal(BUILTIN_BRUSHES[1].id, 'brush_builtin_square2');
+  assert.equal(BUILTIN_BRUSHES[2].id, 'brush_builtin_square3');
+  assert.equal(BUILTIN_BRUSHES[3].id, 'brush_builtin_circle3');
+  assert.equal(BUILTIN_BRUSHES[4].id, 'brush_builtin_circle5');
+  assert.equal(DEFAULT_BRUSH.id, 'brush_builtin_square1');
 });

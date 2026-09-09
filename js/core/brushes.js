@@ -4,16 +4,16 @@
 // an INK (what value is written there). Keeping them separate is what lets a
 // handful of masks and inks combine into a large brush vocabulary.
 
+import { newId } from '../domain/shared/ids.js';
+
 export const MASK_KINDS = ['square', 'circle', 'custom'];
 export const INK_KINDS = ['solid', 'ramp-shade', 'dither', 'stamp', 'lock-alpha', 'replace'];
 export const PRESSURE_TARGETS = ['none', 'size', 'opacity', 'shade-step'];
 export const PRESSURE_CURVES = ['linear', 'soft', 'hard'];
 export const MAX_MASK_SIZE = 16;
 
-let idCounter = 0;
 export function newBrushId() {
-  idCounter += 1;
-  return `brush_${Date.now().toString(36)}_${idCounter.toString(36)}`;
+  return newId('brush_');
 }
 
 function clampInt(v, lo, hi, fallback) {
@@ -81,8 +81,8 @@ export function normalizeBrush(raw = {}) {
   };
 }
 
-export function createBrush({ name = 'Brush', mask, ink, pressure } = {}) {
-  return normalizeBrush({ name, mask, ink, pressure });
+export function createBrush({ id, name = 'Brush', mask, ink, pressure } = {}) {
+  return normalizeBrush({ id, name, mask, ink, pressure });
 }
 
 // `stamp` ink paints the mask's own color payload, so it is meaningless
@@ -101,12 +101,19 @@ export function validateBrush(brush) {
   return { ok: true, reason: '' };
 }
 
-export const DEFAULT_BRUSH = createBrush({ name: 'Pixel', mask: { kind: 'square', size: 1 } });
+// Built-ins get fixed literal ids instead of newBrushId()'s process-specific
+// counter. A saved project embeds brush ids, and Task 12's mergeIncoming
+// dedupe matches an incoming brush against the library by id -- a random id
+// per process would make every built-in in an opened project a "new" brush
+// that never matches the library's own copy, duplicating it on every open.
+export const DEFAULT_BRUSH = createBrush({
+  id: 'brush_builtin_square1', name: 'Pixel', mask: { kind: 'square', size: 1 },
+});
 
 export const BUILTIN_BRUSHES = [
   DEFAULT_BRUSH,
-  createBrush({ name: 'Square 2', mask: { kind: 'square', size: 2 } }),
-  createBrush({ name: 'Square 3', mask: { kind: 'square', size: 3 } }),
-  createBrush({ name: 'Circle 3', mask: { kind: 'circle', size: 3 } }),
-  createBrush({ name: 'Circle 5', mask: { kind: 'circle', size: 5 } }),
+  createBrush({ id: 'brush_builtin_square2', name: 'Square 2', mask: { kind: 'square', size: 2 } }),
+  createBrush({ id: 'brush_builtin_square3', name: 'Square 3', mask: { kind: 'square', size: 3 } }),
+  createBrush({ id: 'brush_builtin_circle3', name: 'Circle 3', mask: { kind: 'circle', size: 3 } }),
+  createBrush({ id: 'brush_builtin_circle5', name: 'Circle 5', mask: { kind: 'circle', size: 5 } }),
 ];
