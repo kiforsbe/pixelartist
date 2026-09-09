@@ -117,3 +117,103 @@ export const BUILTIN_BRUSHES = [
   createBrush({ id: 'brush_builtin_circle3', name: 'Circle 3', mask: { kind: 'circle', size: 3 } }),
   createBrush({ id: 'brush_builtin_circle5', name: 'Circle 5', mask: { kind: 'circle', size: 5 } }),
 ];
+
+// --- mask rasterization and lossless transforms -------------------------
+//
+// A mask grid is 1-bit: { width, height, bits } where bits[y*width+x] is 0
+// or 1. There is deliberately no alpha channel here -- a brush cannot
+// produce partial coverage, which is what keeps every stroke pixel-crisp.
+
+function emptyGrid(width, height) {
+  return { width, height, bits: new Uint8Array(width * height) };
+}
+
+export function rasterizeMask(mask) {
+  const size = Math.max(1, Math.min(MAX_MASK_SIZE, mask.size ?? 1));
+  if (mask.kind === 'custom') {
+    const bmp = mask.bitmap;
+    if (!bmp) return emptyGrid(1, 1);
+    // A custom mask may arrive as a 1-bit grid already, or as an RGBA bitmap
+    // whose opaque pixels define coverage. Validation only checks that
+    // `bitmap` is present, not that its shape is coherent, so guard against
+    // a malformed one (missing dimensions/data) rather than trusting it.
+    if (bmp.bits) {
+      const width = Math.max(1, Math.trunc(bmp.width) || 0);
+      const height = Math.max(1, Math.trunc(bmp.height) || 0);
+      const grid = emptyGrid(width, height);
+      const n = Math.min(grid.bits.length, bmp.bits.length ?? 0);
+      for (let i = 0; i < n; i++) grid.bits[i] = bmp.bits[i] ? 1 : 0;
+      return grid;
+    }
+    if (bmp.data) {
+      const width = Math.max(1, Math.trunc(bmp.width) || 0);
+      const height = Math.max(1, Math.trunc(bmp.height) || 0);
+      const grid = emptyGrid(width, height);
+      for (let i = 0, p = 0; i < grid.bits.length; i++, p += 4) {
+        grid.bits[i] = bmp.data[p + 3] > 0 ? 1 : 0;
+      }
+      return grid;
+    }
+    return emptyGrid(1, 1);
+  }
+  const grid = emptyGrid(size, size);
+  if (mask.kind === 'square' || size <= 2) {
+    grid.bits.fill(1);
+    return grid;
+  }
+  // Disc test against the pixel center, which keeps small odd sizes
+  // symmetric and avoids the lopsided discs a corner test produces.
+  const r = size / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x + 0.5 - r, dy = y + 0.5 - r;
+      grid.bits[y * size + x] = dx * dx + dy * dy <= r * r ? 1 : 0;
+    }
+  }
+  return grid;
+}
+
+// Clockwise quarter turns. Every source pixel lands on exactly one
+// destination pixel, so the set-pixel count is invariant.
+export function rotateMaskGrid(grid, degrees) {
+  const deg = ((Math.round(degrees / 90) * 90) % 360 + 360) % 360;
+  if (deg === 0) return { width: grid.width, height: grid.height, bits: Uint8Array.from(grid.bits) };
+  const { width: w, height: h, bits } = grid;
+  const swapped = deg === 90 || deg === 270;
+  const out = emptyGrid(swapped ? h : w, swapped ? w : h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!bits[y * w + x]) continue;
+      let nx, ny;
+      if (deg === 90) { nx = h - 1 - y; ny = x; }
+      else if (deg === 180) { nx = w - 1 - x; ny = h - 1 - y; }
+      else { nx = y; ny = w - 1 - x; }
+      out.bits[ny * out.width + nx] = 1;
+    }
+  }
+  return out;
+}
+
+export function flipMaskGrid(grid, flipH, flipV) {
+  if (!flipH && !flipV) return { width: grid.width, height: grid.height, bits: Uint8Array.from(grid.bits) };
+  const { width: w, height: h, bits } = grid;
+  const out = emptyGrid(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!bits[y * w + x]) continue;
+      const nx = flipH ? w - 1 - x : x;
+      const ny = flipV ? h - 1 - y : y;
+      out.bits[ny * w + nx] = 1;
+    }
+  }
+  return out;
+}
+
+// `options.rotate` is the per-stamp override rotateJitter supplies; it
+// composes with the brush's own static rotation.
+export function maskGridFor(mask, options = {}) {
+  let grid = rasterizeMask(mask);
+  const rotate = (mask.rotate ?? 0) + (options.rotate ?? 0);
+  grid = rotateMaskGrid(grid, rotate);
+  return flipMaskGrid(grid, !!mask.flipH, !!mask.flipV);
+}
