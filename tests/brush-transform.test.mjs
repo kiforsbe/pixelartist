@@ -36,6 +36,13 @@ test('circle size 1 and 2 stay solid -- a disc that small has no meaningful curv
   assert.equal(countSet(rasterizeMask({ kind: 'circle', size: 2 })), 4);
 });
 
+test('circle size 3 is a plus, not a solid square -- the disc formula cannot separate the two at this size', () => {
+  const circle3 = rasterizeMask({ kind: 'circle', size: 3 });
+  const square3 = rasterizeMask({ kind: 'square', size: 3 });
+  assert.equal(countSet(circle3), 5);
+  assert.notDeepEqual([...circle3.bits], [...square3.bits]);
+});
+
 test('rotating four times returns the original grid exactly', () => {
   const src = rasterizeMask({ kind: 'circle', size: 5 });
   let g = src;
@@ -78,4 +85,33 @@ test('maskGridFor honors a per-stamp rotation override for rotateJitter', () => 
   const mask = { kind: 'custom', bitmap: src, rotate: 0, flipH: false, flipV: false };
   const grid = maskGridFor(mask, { rotate: 180 });
   assert.equal(grid.bits[8], 1);
+});
+
+test('rasterizeMask tolerates a custom bitmap whose bits.length disagrees with its claimed width*height', () => {
+  const mask = { kind: 'custom', bitmap: { width: 3, height: 3, bits: Uint8Array.from([1, 1]) } };
+  const grid = rasterizeMask(mask);
+  assert.equal(grid.width, 3);
+  assert.equal(grid.height, 3);
+  for (const b of grid.bits) assert.ok(b === 0 || b === 1);
+});
+
+test('rasterizeMask tolerates a custom bitmap with neither bits nor data', () => {
+  const mask = { kind: 'custom', bitmap: { width: 5, height: 5 } };
+  const grid = rasterizeMask(mask);
+  assert.ok(grid.width >= 1);
+  assert.ok(grid.height >= 1);
+  for (const b of grid.bits) assert.ok(b === 0 || b === 1);
+});
+
+test('rasterizeMask tolerates garbage dimensions on a custom bitmap', () => {
+  const bits = Uint8Array.from([1,0,0, 0,0,0, 0,0,0]);
+  const nanGrid = rasterizeMask({ kind: 'custom', bitmap: { width: NaN, height: 3, bits } });
+  assert.ok(nanGrid.width >= 1);
+  assert.ok(nanGrid.height >= 1);
+  for (const b of nanGrid.bits) assert.ok(b === 0 || b === 1);
+
+  const negGrid = rasterizeMask({ kind: 'custom', bitmap: { width: -5, height: 3, bits } });
+  assert.ok(negGrid.width >= 1);
+  assert.ok(negGrid.height >= 1);
+  for (const b of negGrid.bits) assert.ok(b === 0 || b === 1);
 });

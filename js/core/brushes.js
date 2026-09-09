@@ -161,6 +161,18 @@ export function rasterizeMask(mask) {
     grid.bits.fill(1);
     return grid;
   }
+  if (size === 3) {
+    // At size 3, r = 1.5 so r^2 = 2.25 -- the corner distance^2 is exactly 2,
+    // so the disc formula below never excludes a corner and size 3 would
+    // render as a solid square indistinguishable from Square 3. Real
+    // pixel-art tools (Aseprite, GraphicsGale) special-case the 3px round
+    // brush as a plus/cross instead, so we do too:
+    //   .#.
+    //   ###
+    //   .#.
+    grid.bits.set([0, 1, 0, 1, 1, 1, 0, 1, 0]);
+    return grid;
+  }
   // Disc test against the pixel center, which keeps small odd sizes
   // symmetric and avoids the lopsided discs a corner test produces.
   const r = size / 2;
