@@ -51,9 +51,9 @@ test('sprites mode registers exactly the expected sprites.* command ids', () => 
     [
       'sprites.acceptAnimation', 'sprites.addAnimationFrame', 'sprites.addGroup', 'sprites.addLayer',
       'sprites.breakApartStrip', 'sprites.createFrame', 'sprites.deleteAnimation', 'sprites.deleteFrame',
-      'sprites.deleteNode', 'sprites.dragMoveNode', 'sprites.editPaletteColor', 'sprites.insertStripFrame',
+      'sprites.deleteNode', 'sprites.dragMoveNode', 'sprites.insertStripFrame',
       'sprites.mergeDown', 'sprites.mergeStripSegments', 'sprites.moveFrames', 'sprites.moveNode',
-      'sprites.moveStripTo', 'sprites.newAnimation', 'sprites.newStripFromFrame', 'sprites.remapPaletteColor',
+      'sprites.moveStripTo', 'sprites.newAnimation', 'sprites.newStripFromFrame',
       'sprites.removeAnimationFrame', 'sprites.removeStripMember', 'sprites.renameAnimation', 'sprites.renameNode',
       'sprites.reorderAnimationFrame', 'sprites.resizeFrame', 'sprites.resizeStripSegment', 'sprites.setAnimationBaseDuration',
       'sprites.setAnimationFrameDuration', 'sprites.setAnimationFrameStep', 'sprites.setFrameField', 'sprites.setLayerOpacity',

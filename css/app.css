@@ -476,3 +476,99 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .duration-control-row label { display: inline-flex; align-items: center; gap: 4px; }
 .duration-control-row input { width: 60px; }
 .duration-control-row input:disabled { opacity: .6; }
+
+/* ---- palette manager ---- */
+/* Laid out as three tiers, because the first cut of this dialog gave every
+   control identical weight and the swatch grid -- the thing the dialog is
+   actually about -- ended up as a thin strip between two button rows:
+     1. the palette bar (which palette, and the ones that create/destroy),
+     2. the swatch well and the ops that act on the SELECTED swatch,
+     3. the palette's own settings, below a rule.
+   Anything that acts on the whole palette (Add, Sort) is deliberately kept
+   out of the selection bar, so "what does this button act on" is answered
+   by position rather than by reading each label. */
+#dlg-palettes { width: 560px; max-width: 94vw; }
+
+/* The select takes the slack so long palette names stay readable while the
+   three lifecycle buttons keep their natural size. */
+.pm-bar { display: flex; gap: 6px; align-items: center; }
+.pm-bar select { flex: 1 1 auto; min-width: 0; }
+
+.pm-section-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; }
+.pm-section-title { font-weight: 600; }
+/* Sort lives here, next to Add, because both act on the WHOLE palette. In
+   the settings block it read as a property of the palette; it isn't one --
+   picking a mode reorders the grid immediately and the select snaps back. */
+.pm-sort { flex: none; width: 104px; font-size: 12px; }
+.pm-meta { font-size: 12px; color: #9a9ca8; font-variant-numeric: tabular-nums; }
+.pm-spacer { flex: 1 1 auto; }
+
+/* The lock is the palette's provenance, stated ONCE -- here, beside the fill
+   count it constrains. The Size/Reason fields below are its editor; this is
+   the readout. (It used to be repeated three times: the list label, a badge
+   by the name, and the Reason field.) */
+.pm-lock-badge { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  font-size: 11px; color: #cfd2dd; background: var(--bg3);
+  border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; }
+.pm-lock-badge::before { content: '🔒'; font-size: 9px; }
+
+/* A recessed well: the grid reads as the dialog's subject rather than one
+   more row of controls. min-height holds the dialog steady across palettes
+   of different sizes; max-height keeps a 256-entry palette from pushing the
+   settings and the footer off-screen. */
+.pm-well { background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 6px; min-height: 78px; max-height: 232px; overflow-y: auto; }
+.pm-grid { display: flex; flex-wrap: wrap; gap: 3px; }
+.pm-empty-state { color: #9a9ca8; font-size: 12px; text-align: center; padding: 16px 8px; }
+
+.pm-swatch { width: 28px; height: 28px; padding: 0; cursor: pointer;
+  border: 1px solid #0006; border-radius: 3px; }
+.pm-swatch:hover { border-color: var(--accent); }
+.pm-swatch.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* An empty slot still HAS a color -- the dashed edge and faint hatch say
+   "nobody has chosen this one yet" while leaving the color itself legible,
+   which is exactly the distinction the `empty` flag carries. */
+.pm-swatch.is-empty { border-style: dashed; border-color: #ffffff66;
+  background-image: repeating-linear-gradient(45deg, #ffffff26 0 2px, #0000 2px 5px); }
+
+/* What the ops act on, and the ops themselves, adjacent. Everything here
+   disables with no selection rather than silently no-opping, so a button can
+   never look available and do nothing. */
+.pm-selection { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-height: 26px; }
+.pm-chip { width: 18px; height: 18px; flex: none; border: 1px solid var(--border); border-radius: 3px; }
+.pm-selection-label { font-size: 12px; color: #9a9ca8; font-variant-numeric: tabular-nums; }
+.pm-ops { display: flex; align-items: center; gap: 4px; }
+/* Hairlines group the ops by what they do -- set the color, empty the slot,
+   move it. Six undifferentiated buttons in a row was the worst thing about
+   the first cut of this dialog. */
+.pm-sep { width: 1px; align-self: stretch; margin: 2px; background: var(--border); }
+.btn-step { min-width: 26px; }
+
+/* One column of labels, one of controls, so Name/Size/Options actually line
+   up instead of each row inventing its own alignment. */
+.pm-fields { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.pm-fields > label { font-size: 12px; color: #9a9ca8; }
+.pm-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pm-field > input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.pm-field > select { min-width: 0; }
+#pm-lock-size { flex: 1 1 auto; }
+#pm-lock-custom { width: 66px; flex: none; }
+#pm-lock-reason { flex: 1 1 auto; min-width: 0; }
+.pm-options { gap: 18px; flex-wrap: wrap; }
+.pm-inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.pm-inline input[type="color"] { width: 30px; height: 22px; padding: 0; }
+.pm-inline input[type="checkbox"] { margin: 0; }
+/* A disabled control should look it: the unset color has nothing to act on
+   in a palette with no unset slots, and greying the whole label says so. */
+.pm-inline:has(:disabled) { opacity: .5; }
+
+/* Import/Export sit left: they are content operations, not dialog dismissal,
+   so they don't belong in the affirmative/cancel cluster .dlg-actions
+   right-aligns. Close stays right, where every other dialog puts it. */
+.pm-footer { justify-content: flex-start; gap: 6px; }
+
+/* The Colors panel swatch strip shares the empty-slot treatment. Its cells
+   are far smaller, so the hatch alone has to carry it -- a dashed border on
+   a 16px cell is mostly border. */
+.palette-swatch.is-empty { background-image: repeating-linear-gradient(45deg, #fff6 0 3px, #0000 3px 6px); }

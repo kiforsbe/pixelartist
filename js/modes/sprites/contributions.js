@@ -27,7 +27,6 @@ import {
   toggleLayerVisible, addLayer, addGroup, deleteNode, mergeLayerDownCmd,
   moveNode, dragMoveNode, renameNode, setLayerOpacity,
 } from './application/commands/layer-commands.js';
-import { editPaletteColor, remapPaletteColor } from './application/commands/palette-commands.js';
 
 function services() { const host = getEditorHost(); return { store: host.store, projects: host.projects, history: host.history, selections: host.selections }; }
 
@@ -85,8 +84,6 @@ function registerSpriteCommands(api) {
   command('sprites.toggleLayerVisible', (_context, { sheetId, layerId }) => toggleLayerVisible(services(), sheetId, layerId));
   command('sprites.renameNode', (_context, { sheetId, nodeId, name }) => renameNode(services(), sheetId, nodeId, name));
   command('sprites.setLayerOpacity', (_context, { sheetId, layerId, opacity }) => setLayerOpacity(services(), sheetId, layerId, opacity));
-  command('sprites.editPaletteColor', (_context, { index, color }) => editPaletteColor(services(), index, color));
-  command('sprites.remapPaletteColor', (_context, { index, color }) => remapPaletteColor(services(), index, color));
 }
 
 export function registerSpriteContributions(api) {

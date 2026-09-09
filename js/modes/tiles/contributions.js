@@ -26,7 +26,6 @@ import {
   toggleLayerVisible, addLayer, addGroup, deleteNode, mergeLayerDownCmd,
   moveNode, dragMoveNode, renameNode, setLayerOpacity,
 } from './application/commands/layer-commands.js';
-import { editPaletteColor, remapPaletteColor } from './application/commands/palette-commands.js';
 
 function services() {
   const host = getEditorHost();
@@ -75,8 +74,6 @@ function registerTileCommands(api) {
   api.commands.register({ id: 'tiles.toggleLayerVisible', when: whenTiles, execute: (_c, { sheetId, layerId }) => toggleLayerVisible(services(), sheetId, layerId) });
   api.commands.register({ id: 'tiles.renameNode', when: whenTiles, execute: (_c, { sheetId, nodeId, name }) => renameNode(services(), sheetId, nodeId, name) });
   api.commands.register({ id: 'tiles.setLayerOpacity', when: whenTiles, execute: (_c, { sheetId, layerId, opacity }) => setLayerOpacity(services(), sheetId, layerId, opacity) });
-  api.commands.register({ id: 'tiles.editPaletteColor', when: whenTiles, execute: (_c, { index, color }) => editPaletteColor(services(), index, color) });
-  api.commands.register({ id: 'tiles.remapPaletteColor', when: whenTiles, execute: (_c, { index, color }) => remapPaletteColor(services(), index, color) });
 }
 
 export function registerTileContributions(api) {

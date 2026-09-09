@@ -1,5 +1,5 @@
 import { createBitmap, cloneBitmap, getPixel, setPixel, copyRegion, blitRegion } from './pixels.js';
-import { newId } from './palettes.js';
+import { newId, normalizePalette } from './palettes.js';
 import { compositeFloatOnLayer } from './floating.js';
 import { removeEntry } from './strips.js';
 import { NEIGHBOR_DIRS } from './neighbors.js';
@@ -631,7 +631,13 @@ export function serializeProject(project) {
     version: PROJECT_VERSION, name: project.name,
     settings: { ...project.settings },
     activePaletteId: project.activePaletteId,
-    palettes: project.palettes.map(p => ({ ...p, colors: p.colors.map(c => [...c]) })),
+    palettes: project.palettes.map(p => ({
+      ...p,
+      colors: p.colors.map(c => [...c]),
+      empty: [...p.empty],
+      emptyColor: [...p.emptyColor],
+      lock: p.lock ? { ...p.lock } : null,
+    })),
     maps: (project.maps ?? []).map(m => ({
       ...m, bounds: mapContentBounds(project, m), snap: { ...m.snap }, layers: m.layers.map(l => ({
         ...l, tiles: l.tiles?.map(t => ({ ...t })), terrain: l.terrain?.map(t => ({ ...t })), sprites: l.sprites?.map(s => ({ ...s })),
@@ -682,7 +688,7 @@ export function deserializeProject(json, imagesByPath) {
       ...json.settings,
     },
     activePaletteId: json.activePaletteId ?? null,
-    palettes: json.palettes ?? [],
+    palettes: (json.palettes ?? []).map(normalizePalette),
     maps: (json.maps ?? []).map(m => ({
       id: m.id, name: m.name ?? 'Map',
       bounds: m.bounds ? { ...m.bounds } : { ...DEFAULT_MAP_BOUNDS },

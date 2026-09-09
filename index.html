@@ -340,6 +340,102 @@
   </div>
   <div class="row dlg-actions"><button id="cb-ok" class="btn-sm">OK</button><button id="cb-cancel" class="btn-sm">Cancel</button></div>
 </dialog>
+<dialog id="dlg-palettes" class="dlg-movable dlg-scrolls">
+  <h3>Palettes</h3>
+  <div class="dlg-body">
+    <div class="pm-bar">
+      <select id="pm-list" title="Active palette"></select>
+      <button id="pm-new" class="btn-sm">New…</button>
+      <button id="pm-duplicate" class="btn-sm">Duplicate</button>
+      <button id="pm-delete" class="btn-sm">Delete</button>
+    </div>
+
+    <div class="pm-section-head">
+      <span class="pm-section-title">Swatches</span>
+      <span id="pm-fill" class="pm-meta"></span>
+      <span id="pm-lock-badge" class="pm-lock-badge" hidden></span>
+      <span class="pm-spacer"></span>
+      <select id="pm-sort" class="pm-sort" title="Reorder every swatch in this palette">
+        <option value="">Sort by…</option>
+        <option value="hue">Hue</option>
+        <option value="luminance">Luminance</option>
+        <option value="usage">Usage on this sheet</option>
+      </select>
+      <button id="pm-add" class="btn-sm" title="Append the current primary color">+ Add color</button>
+    </div>
+
+    <div class="pm-well">
+      <div class="pm-grid" id="pm-grid"></div>
+      <p class="pm-empty-state" id="pm-empty-state" hidden></p>
+    </div>
+
+    <div class="pm-selection">
+      <span class="pm-chip" id="pm-chip" hidden></span>
+      <span class="pm-selection-label" id="pm-selection-label"></span>
+      <span class="pm-spacer"></span>
+      <div class="pm-ops">
+        <button id="pm-set" class="btn-sm" title="Choose a color for the selected swatch">Set color…</button>
+        <button id="pm-pick" class="btn-sm" title="Sample the next canvas click into the selected swatch">Pick</button>
+        <span class="pm-sep"></span>
+        <button id="pm-clear" class="btn-sm" title="Mark the selected swatch unset">Clear</button>
+        <button id="pm-remove" class="btn-sm" title="Remove the selected swatch">Remove</button>
+        <span class="pm-sep"></span>
+        <button id="pm-left" class="btn-sm btn-step" title="Move swatch left">←</button>
+        <button id="pm-right" class="btn-sm btn-step" title="Move swatch right">→</button>
+      </div>
+    </div>
+
+    <div class="pm-fields">
+      <label for="pm-name">Name</label>
+      <div class="pm-field"><input type="text" id="pm-name"></div>
+
+      <label for="pm-lock-size">Size</label>
+      <div class="pm-field">
+        <select id="pm-lock-size"></select>
+        <input type="number" id="pm-lock-custom" min="1" max="256" value="16" title="Custom entry count" hidden>
+        <input type="text" id="pm-lock-reason" placeholder="Reason — e.g. NES" title="Why this palette is locked to that count. Travels with the export.">
+      </div>
+
+      <label>Options</label>
+      <div class="pm-field pm-options">
+        <label class="pm-inline" title="Snap the brush to these colors, and use them as the quantize/export source">
+          <input type="checkbox" id="pm-indexed"> Indexed
+        </label>
+        <label class="pm-inline" for="pm-empty-color">
+          Unset slots <input type="color" id="pm-empty-color">
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="row dlg-actions pm-footer">
+    <button id="pm-import" class="btn-sm">Import…</button>
+    <select id="pm-export-format" title="Export format">
+      <option value="gpl">GIMP (.gpl)</option>
+      <option value="hex">Hex (.hex)</option>
+      <option value="pal">JASC (.pal)</option>
+      <option value="png">Image (.png)</option>
+    </select>
+    <button id="pm-export" class="btn-sm">Export</button>
+    <span class="pm-spacer"></span>
+    <button id="pm-close" class="btn-sm">Close</button>
+  </div>
+</dialog>
+<dialog id="dlg-palette-new">
+  <h3>New Palette</h3>
+  <div class="row"><label>Source <select id="pn-source">
+    <option value="blank">Blank</option>
+    <option value="system">System palette</option>
+    <option value="artwork">From artwork on this sheet</option>
+  </select></label></div>
+  <div class="row" id="pn-name-row"><label>Name <input type="text" id="pn-name" value="Palette"></label></div>
+  <div class="row" id="pn-system-row" hidden><label>Template <select id="pn-system"></select></label></div>
+  <div class="row" id="pn-artwork-row" hidden>
+    <label>Colors <input type="number" id="pn-artwork-count" min="0" max="256" value="16"></label>
+    <span class="hint">0 = every distinct color</span>
+  </div>
+  <div class="row dlg-actions"><button id="pn-create" class="btn-sm">Create</button><button id="pn-cancel" class="btn-sm">Cancel</button></div>
+</dialog>
 <dialog id="dlg-about" class="sys-dialog">
   <h3>About PixelArtist</h3>
   <p id="about-version" class="about-meta"></p>

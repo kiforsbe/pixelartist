@@ -39,7 +39,7 @@ export const SYSTEM_PALETTES = [
 ];
 
 export function clonePalette(sys) {
-  const p = createPalette({ name: sys.name, indexed: true, size: sys.colors.length });
+  const p = createPalette({ name: sys.name, indexed: true, size: sys.colors.length, lockReason: sys.name });
   sys.colors.forEach((c, i) => setEntry(p, i, c));
   return p;
 }

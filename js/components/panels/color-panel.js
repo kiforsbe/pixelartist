@@ -1,26 +1,18 @@
 // Color/palette panel.
 
 import { getEditorHost } from '../../host/runtime.js';
-import { activeSheet } from '../../host/document-helpers.js';
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { mountStorePanel } from '../panel-mount.js';
-import { sheetLayers } from '../../core/model.js';
-import { createPalette, addSwatch, removeSwatch, INDEXED_SIZE_PRESETS } from '../../core/palettes.js';
-import { PROJECT_SCOPE } from '../../host/history-service.js';
-import { SYSTEM_PALETTES, clonePalette } from '../../core/systempalettes.js';
-import { markDefaultAction } from '../dialogs.js';
+import { addPaletteSwatch, setSwatchColor, remapSwatchColor, countSwatchPixels }
+  from '../../features/palettes/palette-commands.js';
+import { openPaletteManager } from '../../features/palettes/palette-manager.js';
 import { rgbaToHex, hexToRgb } from '../color-utils.js';
 
-// Dispatches a Command Handler by id (registered in each mode's
-// contributions.js) rather than importing it directly -- matches the
-// established pattern in frames-panel.js/tile-layers-panel.js/
-// layers-panel.js.
-function dispatch(id, args) {
-  return getEditorHost().registries.commands.execute(id, { modeId: getEditorHost().store.getState().session.activeModeId }, args);
-}
-
-function currentModeId() {
-  return getEditorHost().store.getState().session.activeModeId;
+// The palette command family takes the host's services directly -- palettes
+// are project-level, so there is no mode registry to route through.
+function services() {
+  const host = getEditorHost();
+  return { store: host.store, projects: host.projects, history: host.history };
 }
 
 function drawingSettings() { return getEditorHost().store.getState().workspace.drawing; }
@@ -98,18 +90,14 @@ export function mountColorPanel(el) {
   paletteActions.className = 'row palette-actions';
 
   const paletteSelect = document.createElement('select');
-  const btnNewPalette = document.createElement('button');
-  btnNewPalette.type = 'button';
-  btnNewPalette.textContent = '+';
-  btnNewPalette.title = 'New palette';
-  const btnSystemPalette = document.createElement('button');
-  btnSystemPalette.type = 'button';
-  btnSystemPalette.textContent = '⚙';
-  btnSystemPalette.title = 'System palettes';
+  const btnManage = document.createElement('button');
+  btnManage.type = 'button';
+  btnManage.textContent = 'Manage…';
+  btnManage.title = 'Open the palette manager';
   const btnAddSwatch = document.createElement('button');
   btnAddSwatch.textContent = '+';
   btnAddSwatch.title = 'Add current color';
-  paletteActions.append(btnNewPalette, btnSystemPalette, btnAddSwatch);
+  paletteActions.append(btnManage, btnAddSwatch);
   palettePanel.appendChild(paletteActions);
 
   const swatchStrip = document.createElement('div');
@@ -140,32 +128,14 @@ export function mountColorPanel(el) {
     paletteSelect.value = proj?.activePaletteId ?? '';
   }
 
-  function countColor(bmp, c) {
-    let n = 0;
-    const d = bmp.data;
-    for (let i = 0; i < d.length; i += 4)
-      if (d[i] === c[0] && d[i + 1] === c[1] && d[i + 2] === c[2] && d[i + 3] === c[3]) n++;
-    return n;
-  }
-
-  function allSheetLayers() {
-    const sheet = activeSheet();
-    return sheet ? sheetLayers(sheet) : [];
-  }
-
-  // The actual palette-entry (and, for a remap, per-layer bitmap) mutation
-  // plus its undo now live entirely inside the dispatched Command Handler
-  // (js/modes/{sprites,tiles}/application/commands/palette-commands.js,
-  // ported byte-for-byte from this function's old do()/undo() closures) --
-  // this function only decides WHICH command to run (a plain edit vs. a
-  // remap) and, for the remap confirm dialog, how many pixels are affected.
-  // Command ids are mode-scoped (sprites.*/tiles.*, each gated to its own
-  // mode); maps mode registers neither, since a map has no "active sheet"
-  // bitmaps of its own for the remap branch to ever touch -- editing an
-  // indexed swatch while parked in maps mode is a known no-op (see this
-  // task's report).
-  function editIndexedEntry(pal, index) {
+  // Decides WHICH command to run (a plain edit vs. a remap that also rewrites
+  // pixels) and how many pixels a remap would touch. The commands themselves
+  // are in js/features/palettes/palette-commands.js, shared by every mode --
+  // this used to dispatch mode-scoped ids, which is why editing a swatch in
+  // maps mode did nothing at all.
+  function editSwatch(pal, index) {
     const old = pal.colors[index];
+    const paletteId = pal.id;
     const input = hiddenColorInput();
     document.body.appendChild(input);
     input.value = rgbaToHex(old);
@@ -175,20 +145,13 @@ export function mountColorPanel(el) {
       document.body.removeChild(input);
       if (r === old[0] && g === old[1] && b === old[2]) return;
 
-      const sheet = activeSheet();
-      let count = 0;
-      if (sheet) for (const layer of sheetLayers(sheet)) count += countColor(layer.bitmap, old);
-
-      const mode = currentModeId();
+      const count = countSwatchPixels(services(), old);
       if (count === 0) {
-        dispatch(`${mode}.editPaletteColor`, { index, color: to });
-        refreshSwatchStrip();
+        setSwatchColor(services(), paletteId, index, to);
         return;
       }
       if (!confirmOrAuto(`Remap ${count} pixels of old color on active sheet?`)) return;
-
-      dispatch(`${mode}.remapPaletteColor`, { index, color: to });
-      refreshSwatchStrip();
+      remapSwatchColor(services(), paletteId, index, to);
     });
     input.click();
   }
@@ -196,17 +159,20 @@ export function mountColorPanel(el) {
   function refreshSwatchStrip() {
     swatchStrip.innerHTML = '';
     const pal = currentPalette();
-    btnAddSwatch.style.display = (pal && !pal.indexed) ? '' : 'none';
+    // A locked palette can still take a swatch while it has an empty slot;
+    // only a full one has nowhere to put it.
+    btnAddSwatch.style.display = (pal && (!pal.lock || pal.empty.includes(true))) ? '' : 'none';
     if (!pal) return;
     pal.colors.forEach((c, i) => {
       const sw = document.createElement('button');
       sw.type = 'button';
-      sw.className = 'palette-swatch';
+      sw.className = pal.empty[i] ? 'palette-swatch is-empty' : 'palette-swatch';
       sw.style.background = cssColor(c);
-      sw.title = pal.indexed ? `index ${i}` : '';
+      sw.title = pal.lock ? `index ${i}` : '';
       sw.addEventListener('click', () => { updateDrawingSettings({ primary: [...c] }); primaryEditor.sync(); });
       sw.addEventListener('contextmenu', (e) => { e.preventDefault(); updateDrawingSettings({ secondary: [...c] }); secondaryEditor.sync(); });
-      if (pal.indexed) sw.addEventListener('dblclick', () => editIndexedEntry(pal, i));
+      // Every palette is editable now, not just indexed ones.
+      sw.addEventListener('dblclick', () => editSwatch(pal, i));
       swatchStrip.appendChild(sw);
     });
   }
@@ -219,135 +185,17 @@ export function mountColorPanel(el) {
     refreshSwatchStrip();
   });
 
-  // ---- undoable palette edits ----
-  // Palettes are project content, not view state, so changing them belongs on
-  // the undo stack. PROJECT_SCOPE keeps them undoable from whichever sheet or
-  // map is open (see history-service.js) -- a palette is shared by all of
-  // them, so scoping one of these to the active document would strand it.
-  //
-  // Written as direct history.execute() calls rather than per-mode Command
-  // Handlers because nothing here is mode-specific: the same palette list is
-  // shared by sprites, tiles and maps, so the three identical registrations
-  // editPaletteColor needs would buy nothing. (That one stays mode-scoped for
-  // a real reason -- its remap sibling rewrites the active SHEET's bitmaps.)
-  //
-  // No markDirty()/refresh calls in here: HistoryService marks the project
-  // dirty on every do()/undo()/redo(), and this panel already redraws from
-  // that same notification (see disposeHistory below).
-  function paletteById(id) {
-    return getEditorHost().projects.project?.palettes.find(p => p.id === id) ?? null;
-  }
-  function runPaletteCommand(label, apply, revert) {
-    getEditorHost().history.execute({ label, do: apply, undo: revert }, { scope: PROJECT_SCOPE });
-  }
-  // Adding a palette (new, or adopted from the system list) also makes it
-  // active, so undo has to put the previous selection back or the user lands
-  // on a palette that no longer exists.
-  function commitAddPalette(palette, label) {
-    const previousActiveId = getEditorHost().projects.project?.activePaletteId ?? null;
-    runPaletteCommand(label,
-      () => {
-        const proj = getEditorHost().projects.project;
-        if (!proj.palettes.includes(palette)) proj.palettes.push(palette);
-        proj.activePaletteId = palette.id;
-      },
-      () => {
-        const proj = getEditorHost().projects.project;
-        proj.palettes = proj.palettes.filter(p => p !== palette);
-        proj.activePaletteId = previousActiveId;
-      });
-  }
-
+  // No markDirty()/refresh calls around the palette commands below:
+  // HistoryService marks the project dirty on every do()/undo()/redo(), and
+  // this panel already redraws from that same notification (see
+  // disposeHistory at the bottom of the file).
   btnAddSwatch.addEventListener('click', () => {
     const pal = currentPalette();
-    if (!pal || pal.indexed) return;
-    const paletteId = pal.id;
-    const color = [...drawingSettings().primary];
-    runPaletteCommand('add swatch',
-      () => { const target = paletteById(paletteId); if (target) addSwatch(target, color); },
-      () => { const target = paletteById(paletteId); if (target) removeSwatch(target, target.colors.length - 1); });
+    if (!pal) return;
+    addPaletteSwatch(services(), pal.id, [...drawingSettings().primary]);
   });
 
-  // ---- New palette dialog ----
-  const dlgNew = document.createElement('dialog');
-  dlgNew.innerHTML = `
-    <h3>New Palette</h3>
-    <div class="row"><label>Name <input type="text" id="np-name" value="Palette"></label></div>
-    <div class="row"><label><input type="checkbox" id="np-indexed"> Indexed</label></div>
-    <div class="row"><label>Size preset <select id="np-preset"></select></label></div>
-    <div class="row"><label>Custom size <input type="number" id="np-custom" min="1" max="256" value="16"></label></div>
-    <div class="row dlg-actions"><button id="np-create">Create</button><button id="np-cancel">Cancel</button></div>
-  `;
-  document.body.appendChild(dlgNew);
-  const npName = dlgNew.querySelector('#np-name');
-  const npIndexed = dlgNew.querySelector('#np-indexed');
-  const npPreset = dlgNew.querySelector('#np-preset');
-  const npCustom = dlgNew.querySelector('#np-custom');
-  for (const sz of INDEXED_SIZE_PRESETS) {
-    const o = document.createElement('option'); o.value = String(sz); o.textContent = String(sz);
-    npPreset.appendChild(o);
-  }
-  const customOpt = document.createElement('option'); customOpt.value = 'custom'; customOpt.textContent = 'Custom…';
-  npPreset.appendChild(customOpt);
-  markDefaultAction(dlgNew, dlgNew.querySelector('#np-create'));
-  dlgNew.querySelector('#np-cancel').addEventListener('click', () => dlgNew.close());
-  dlgNew.querySelector('#np-create').addEventListener('click', () => {
-    const proj = getEditorHost().projects.project;
-    if (!proj) { dlgNew.close(); return; }
-    const indexed = npIndexed.checked;
-    let size = 0;
-    if (indexed) size = npPreset.value === 'custom' ? Math.max(1, parseInt(npCustom.value, 10) || 1) : parseInt(npPreset.value, 10);
-    const p = createPalette({ name: npName.value.trim() || 'Palette', indexed, size });
-    dlgNew.close();
-    commitAddPalette(p, 'new palette');
-  });
-  btnNewPalette.addEventListener('click', () => dlgNew.showModal());
-
-  // ---- System palettes dialog ----
-  const dlgSys = document.createElement('dialog');
-  dlgSys.className = 'sys-dialog';
-  dlgSys.appendChild(Object.assign(document.createElement('h3'), { textContent: 'System Palettes' }));
-  const sysList = document.createElement('div'); sysList.className = 'sys-list';
-  for (const sys of SYSTEM_PALETTES) {
-    // The whole card is the click target (clone-on-click) -- a <button>
-    // so it's focusable/keyboard-activatable for free, no nested controls.
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'sys-palette-card';
-    card.title = `Click to add "${sys.name}" to your project`;
-
-    const header = document.createElement('div'); header.className = 'sys-palette-header';
-    header.textContent = `${sys.name} (${sys.colors.length})`;
-    card.appendChild(header);
-
-    const preview = document.createElement('div'); preview.className = 'sys-palette-preview';
-    sys.colors.forEach((c) => {
-      const sw = document.createElement('span');
-      sw.className = 'sys-palette-swatch';
-      sw.style.background = cssColor(c);
-      preview.appendChild(sw);
-    });
-    card.appendChild(preview);
-
-    card.addEventListener('click', () => {
-      const proj = getEditorHost().projects.project;
-      if (!proj) return;
-      const p = clonePalette(sys);
-      dlgSys.close();
-      commitAddPalette(p, 'add system palette');
-    });
-
-    sysList.appendChild(card);
-  }
-  dlgSys.appendChild(sysList);
-  const sysCloseRow = document.createElement('div'); sysCloseRow.className = 'row dlg-actions';
-  const sysCloseBtn = document.createElement('button'); sysCloseBtn.textContent = 'Close';
-  sysCloseBtn.addEventListener('click', () => dlgSys.close());
-  markDefaultAction(dlgSys, sysCloseBtn);
-  sysCloseRow.appendChild(sysCloseBtn);
-  dlgSys.appendChild(sysCloseRow);
-  document.body.appendChild(dlgSys);
-  btnSystemPalette.addEventListener('click', () => dlgSys.showModal());
+  btnManage.addEventListener('click', () => openPaletteManager());
 
   function refreshAll() {
     refreshPaletteSelect();
@@ -356,8 +204,8 @@ export function mountColorPanel(el) {
     secondaryEditor.sync();
   }
 
-  // History-driven redraws (the two editPaletteColor/remapPaletteColor
-  // dispatches above, undo/redo of either) reach refreshAll through
+  // History-driven redraws (the palette commands above, undo/redo of any of
+  // them) reach refreshAll through
   // HistoryService's own onChange, which fires on every do()/undo()/redo()
   // regardless of which store selector (if any) the underlying project
   // mutation happens to touch -- same reasoning as layers-panel.js's own

@@ -2,9 +2,57 @@ export { newId } from '../domain/shared/ids.js';
 import { newId } from '../domain/shared/ids.js';
 export const INDEXED_SIZE_PRESETS = [2, 4, 16, 256];
 
-export function createPalette({ name, indexed = false, size = 0 }) {
-  const colors = indexed ? Array.from({ length: size }, () => [0, 0, 0, 255]) : [];
-  return { id: newId('pal'), name, indexed, size: indexed ? size : 0, colors };
+// The color an "unset" slot carries until the user picks something. Real,
+// not null: an empty slot is an ordinary color to everything outside the
+// editor (brush snapping, quantize, export), and `empty` is only how the
+// editor knows to DRAW it as undecided. Per-palette, so a palette whose
+// artwork genuinely uses black can move its unset color out of the way.
+export const DEFAULT_EMPTY_COLOR = [0, 0, 0, 255];
+
+// `size > 0` creates that many empty slots AND locks the palette to that
+// count -- the two are the same decision at creation time. `indexed` is
+// independent of both: it only means "snap the brush to these colors, and
+// use them as the quantize/export source".
+export function createPalette({ name, indexed = false, size = 0, lockReason = '' }) {
+  const emptyColor = [...DEFAULT_EMPTY_COLOR];
+  return {
+    id: newId('pal'), name, indexed,
+    colors: Array.from({ length: size }, () => [...emptyColor]),
+    empty: Array.from({ length: size }, () => true),
+    emptyColor,
+    lock: size > 0 ? { size, reason: lockReason } : null,
+  };
+}
+
+// Brings a palette read from a project file up to the current shape. Old
+// files have {indexed, size, colors} and none of empty/emptyColor/lock.
+// An old indexed palette was fixed-size under the old rules, so locking it
+// preserves exactly the behavior the file was saved with; the empty reason
+// renders as an unlabeled lock the user can name or clear.
+//
+// A file written by the current shape is trusted as-is, INCLUDING a null
+// lock on an indexed palette -- the two are independent now, and re-deriving
+// the lock from `indexed` would silently re-lock a palette the user unlocked.
+// `emptyColor`/`lock` are what tell the two apart: serializeProject always
+// writes them, and no legacy file has them.
+//
+// colors.length always wins over a stored lock.size or size: every consumer
+// already reads the array, so the count is the array's to state.
+export function normalizePalette(raw) {
+  const { size: _legacySize, ...rest } = raw;
+  const colors = (raw.colors ?? []).map(c => [c[0], c[1], c[2], c[3] ?? 255]);
+  const empty = Array.isArray(raw.empty) && raw.empty.length === colors.length
+    ? raw.empty.map(Boolean)
+    : colors.map(() => false);
+  const emptyColor = raw.emptyColor ? [...raw.emptyColor] : [...DEFAULT_EMPTY_COLOR];
+  const isCurrentShape = 'emptyColor' in raw || 'lock' in raw;
+  const reason = isCurrentShape
+    ? (raw.lock ? raw.lock.reason ?? '' : null)
+    : (raw.indexed ? '' : null);
+  return {
+    ...rest, indexed: !!raw.indexed, colors, empty, emptyColor,
+    lock: reason !== null && colors.length > 0 ? { size: colors.length, reason } : null,
+  };
 }
 
 export function parseHexColors(str) {
@@ -14,21 +62,126 @@ export function parseHexColors(str) {
   ]);
 }
 
-export function setEntry(palette, index, rgba) { palette.colors[index] = [...rgba]; }
-
-export function addSwatch(palette, rgba) {
-  if (palette.indexed) throw new Error('indexed palette has fixed size');
-  palette.colors.push([...rgba]);
+export function setEntry(palette, index, rgba) {
+  palette.colors[index] = [...rgba];
+  palette.empty[index] = false;
 }
 
+// Every helper below maintains `colors` and `empty` together. That pairing
+// is the whole cost of keeping `colors` a plain color array (which is what
+// lets nearestColor/quantizeBitmapToPalette/serialization stay untouched),
+// so nothing outside this file may splice either array on its own.
+
+export function clearEntry(palette, index) {
+  palette.colors[index] = [...palette.emptyColor];
+  palette.empty[index] = true;
+}
+
+// Returns the index written, or -1 when a locked palette has no empty slot
+// left. A locked palette fills its first empty slot rather than growing --
+// its entry count is the point of the lock.
+export function addSwatch(palette, rgba) {
+  if (palette.lock) {
+    const slot = palette.empty.indexOf(true);
+    if (slot === -1) return -1;
+    setEntry(palette, slot, rgba);
+    return slot;
+  }
+  palette.colors.push([...rgba]);
+  palette.empty.push(false);
+  return palette.colors.length - 1;
+}
+
+// On a locked palette this CLEARS the slot instead of splicing it out, so
+// every index below it keeps its number -- an indexed palette's indices are
+// referenced by the artwork, and resequencing them silently would recolor it.
 export function removeSwatch(palette, index) {
-  if (palette.indexed) throw new Error('indexed palette has fixed size');
+  if (index < 0 || index >= palette.colors.length) return;
+  if (palette.lock) { clearEntry(palette, index); return; }
   palette.colors.splice(index, 1);
+  palette.empty.splice(index, 1);
 }
 
 export function moveSwatch(palette, from, to) {
   const [c] = palette.colors.splice(from, 1);
+  const [e] = palette.empty.splice(from, 1);
   palette.colors.splice(to, 0, c);
+  palette.empty.splice(to, 0, e);
+}
+
+// The unset color is a per-palette choice, so changing it re-assigns every
+// slot still flagged empty -- it stays this palette's unset color rather
+// than becoming a one-time fill that later edits drift away from.
+export function setEmptyColor(palette, rgba) {
+  palette.emptyColor = [...rgba];
+  for (let i = 0; i < palette.colors.length; i++) {
+    if (palette.empty[i]) palette.colors[i] = [...rgba];
+  }
+}
+
+// size === null unlocks. Unlocking discards empty slots: they have no
+// meaning in a free-growing list. Locking pads with empty slots, or drops
+// entries from the end -- the CALLER confirms a lossy truncate first (see
+// the manager's setPaletteLock flow); this helper just applies the decision.
+export function setLock(palette, size, reason = '') {
+  if (size === null) {
+    const keep = [];
+    for (let i = 0; i < palette.colors.length; i++) if (!palette.empty[i]) keep.push(i);
+    palette.colors = keep.map(i => palette.colors[i]);
+    palette.empty = keep.map(() => false);
+    palette.lock = null;
+    return;
+  }
+  while (palette.colors.length > size) { palette.colors.pop(); palette.empty.pop(); }
+  while (palette.colors.length < size) { palette.colors.push([...palette.emptyColor]); palette.empty.push(true); }
+  palette.lock = { size, reason };
+}
+
+// Greys have no hue; -1 parks them ahead of every real hue rather than
+// scattering them through the ramp at an arbitrary angle.
+function hueOf([r, g, b]) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  if (d === 0) return -1;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+
+function lumaOf([r, g, b]) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
+
+// Returns an index permutation rather than sorted colors, so the caller can
+// carry `empty` (and anything else parallel) through the same reordering --
+// see applyOrder. Ties break by original index, so a sort is deterministic
+// and re-sorting an already-sorted palette is a no-op.
+// mode: 'hue' | 'luminance' | 'usage'. `usage` is a per-slot count array
+// (see countPaletteUsage); most-used sorts first.
+export function sortOrder(colors, mode, usage = null) {
+  const key = mode === 'hue' ? i => hueOf(colors[i])
+    : mode === 'luminance' ? i => lumaOf(colors[i])
+    : i => -(usage?.[i] ?? 0);
+  return colors.map((_, i) => i).sort((a, b) => key(a) - key(b) || a - b);
+}
+
+export function applyOrder(palette, order) {
+  palette.colors = order.map(i => palette.colors[i]);
+  palette.empty = order.map(i => palette.empty[i]);
+}
+
+// Per-slot exact-RGBA hit counts across `bitmaps`. Duplicate colors in the
+// palette all report against their first slot; fully transparent pixels are
+// never counted (they need no palette entry).
+export function countPaletteUsage(palette, bitmaps) {
+  const counts = palette.colors.map(() => 0);
+  const index = new Map();
+  palette.colors.forEach((c, i) => { const k = c.join(','); if (!index.has(k)) index.set(k, i); });
+  for (const bmp of bitmaps) {
+    const d = bmp.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      const at = index.get(`${d[i]},${d[i + 1]},${d[i + 2]},${d[i + 3]}`);
+      if (at !== undefined) counts[at]++;
+    }
+  }
+  return counts;
 }
 
 export function nearestColor(palette, rgba) {

@@ -78,7 +78,7 @@ export function mountApplicationMenu() {
     { label: 'Edit', items: [
       { action: 'edit.undo' }, { action: 'edit.redo' }, { separator: true },
       { action: 'edit.cut' }, { action: 'edit.copy' }, { action: 'edit.paste' }, { separator: true },
-      { action: 'edit.filters' }, { separator: true },
+      { action: 'edit.filters' }, { action: 'edit.palettes' }, { separator: true },
       { action: 'edit.projectSettings' },
     ] },
     { label: 'View', items: [

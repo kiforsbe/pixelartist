@@ -8,7 +8,7 @@ import {
   scrubTileReferences, layerAnimationContext, removeSheet, activePaletteColors, resolvePixelSnapperPalette,
   effectiveDuration, fpsStepToMs, msToFps,
 } from '../js/core/model.js';
-import { createPalette, setEntry } from '../js/core/palettes.js';
+import { createPalette, setEntry, addSwatch, setEmptyColor } from '../js/core/palettes.js';
 import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
 
 function proj() {
@@ -782,3 +782,67 @@ test('serializeProject/deserializeProject round-trip anim base-duration fields a
   assert.equal(p2.settings.baseFps, 12);
 });
 
+
+test('a locked palette with empty slots and a custom unset color survives save and reload', () => {
+  const p = createProject('pal-roundtrip');
+  const pal = createPalette({ name: 'Console', indexed: true, size: 3, lockReason: 'NES' });
+  setEntry(pal, 0, [1, 2, 3, 255]);
+  setEmptyColor(pal, [200, 0, 200, 255]);
+  p.palettes.push(pal);
+  p.activePaletteId = pal.id;
+
+  const { json } = serializeProject(p);
+  const back = deserializeProject(json, new Map()).palettes[0];
+
+  assert.deepEqual(back.lock, { size: 3, reason: 'NES' });
+  assert.deepEqual(back.empty, [false, true, true]);
+  assert.deepEqual(back.emptyColor, [200, 0, 200, 255]);
+  assert.deepEqual(back.colors[0], [1, 2, 3, 255]);
+  assert.deepEqual(back.colors[1], [200, 0, 200, 255]);
+  assert.equal('size' in back, false);
+  // deep-copied, not aliased into the serialized json
+  back.colors[0][0] = 99;
+  assert.equal(pal.colors[0][0], 1);
+});
+
+test('a palette unlocked by the user stays unlocked across save and reload, even while indexed', () => {
+  const p = createProject('pal-unlocked');
+  const pal = createPalette({ name: 'Free', indexed: true });
+  addSwatch(pal, [4, 5, 6, 255]);
+  p.palettes.push(pal);
+
+  const back = deserializeProject(serializeProject(p).json, new Map()).palettes[0];
+  assert.equal(back.lock, null, 'indexed must not silently re-lock an unlocked palette');
+  assert.equal(back.indexed, true);
+});
+
+test('a project saved before the lock/empty model loads with its old palettes migrated', () => {
+  // Exactly the shape older files carry: {indexed, size, colors} and nothing else.
+  const { json } = serializeProject(createProject('legacy'));
+  json.palettes = [
+    { id: 'old1', name: 'Indexed', indexed: true, size: 4, colors: [[1, 1, 1, 255], [2, 2, 2, 255]] },
+    { id: 'old2', name: 'Swatches', indexed: false, size: 0, colors: [[3, 3, 3, 255]] },
+  ];
+  const [indexedPal, freePal] = deserializeProject(json, new Map()).palettes;
+
+  // colors.length wins over the stored size, and the old fixed-size rule
+  // becomes an unlabeled lock the user can name or clear.
+  assert.deepEqual(indexedPal.lock, { size: 2, reason: '' });
+  assert.deepEqual(indexedPal.empty, [false, false]);
+  assert.deepEqual(indexedPal.emptyColor, [0, 0, 0, 255]);
+  assert.equal('size' in indexedPal, false);
+
+  assert.equal(freePal.lock, null);
+  assert.deepEqual(freePal.empty, [false]);
+});
+
+test('an empty palette slot is an ordinary color to brush snapping -- empty is editor-only', () => {
+  const p = createProject('snap');
+  const pal = createPalette({ name: 'Locked', indexed: true, size: 3, lockReason: 'x' });
+  setEntry(pal, 0, [10, 20, 30, 255]);
+  p.palettes.push(pal);
+  p.activePaletteId = pal.id;
+  // Two slots are still unset, and they are still offered as snap targets.
+  assert.deepEqual(resolvePixelSnapperPalette(p), [[10, 20, 30], [0, 0, 0], [0, 0, 0]]);
+  assert.equal(activePaletteColors(p).length, 3);
+});
