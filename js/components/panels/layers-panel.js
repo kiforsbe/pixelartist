@@ -614,15 +614,16 @@ export function mountLayersPanel(el) {
     });
     row.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-      const map = activeMap(), i = map?.layers.indexOf(layer); if (i == null) return;
-      const target = e.key === 'ArrowUp' ? i + 1 : i - 1;
-      if (target < 0 || target >= map.layers.length) return;
-      // No Command Handler exists for map-layer reordering (out of Task 2's
-      // scope; never undoable even before this refactor) -- keep the direct
-      // mutation, but this panel no longer listens on the legacy 'view' bus
-      // for its own repaint, so ask mountStorePanel's debounced render for
-      // one explicitly or this row's new position would never show up.
-      e.preventDefault(); map.layers.splice(i, 1); map.layers.splice(target, 0, layer); host.projects.markDirty(); host.store.notifyPixelsChanged();
+      const map = activeMap(); if (!map) return;
+      e.preventDefault();
+      // Goes through the maps.moveLayer Command Handler (same shape as the
+      // sprite/tile tree's moveNode) so the reorder is undoable; the command
+      // clamps the target index itself. The command marks the project dirty,
+      // but this panel no longer listens on the legacy 'view' bus for its own
+      // repaint, so it still asks mountStorePanel's debounced render for one
+      // or this row's new position would never show up.
+      dispatch('maps.moveLayer', { mapId: map.id, layerId: layer.id, delta: e.key === 'ArrowUp' ? 1 : -1 });
+      host.store.notifyPixelsChanged();
       storePanel.scheduleRender();
     });
     const spacer = document.createElement('span'); spacer.className = 'tree-spacer leaf-spacer';

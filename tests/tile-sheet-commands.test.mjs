@@ -4,7 +4,6 @@ import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { SelectionService } from '../js/host/selection-service.js';
-import { CommandStack } from '../js/core/commands.js';
 import { createBitmap } from '../js/core/pixels.js';
 import {
   swapTiles, moveTile, moveStandaloneTile, resizeTile, createTile, deleteTile,
@@ -16,11 +15,10 @@ function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
   if (project.sheets[0]) store.updateSession({ activeDocument: { kind: 'tile-sheet', id: project.sheets[0].id } });
-  const stack = new CommandStack();
   return {
     store,
     projects: new ProjectService(store, null),
-    history: new HistoryService({ store, stack }),
+    history: new HistoryService({ store }),
     selections: new SelectionService(store),
   };
 }

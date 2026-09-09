@@ -141,11 +141,18 @@ test('undoing a float after a sheet switch does not restore the old marquee into
   f.select();
   createFloat();
   f.switchSheet(1);
+  // Undo is scoped to the active document, so sheet A's float is not on
+  // sheet B's history at all: this must leave BOTH sheets alone, and in
+  // particular cannot drop A's restored marquee into B.
   f.host.history.undo();
+  assert.equal(hasSelection(), false);
   f.key('Delete');
+  assert.deepEqual(getPixel(f.bitmap(f.sheets[1]), 1, 1), blue);
+  // Back on its own sheet the same undo does apply, restoring the cut pixels.
+  f.switchSheet(0);
+  f.host.history.undo();
   assert.deepEqual(getPixel(f.bitmap(f.sheets[0]), 1, 1), red);
   assert.deepEqual(getPixel(f.bitmap(f.sheets[1]), 1, 1), blue);
-  assert.equal(hasSelection(), false);
 });
 
 for (const operation of ['commit', 'cancel']) {

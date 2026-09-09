@@ -14,6 +14,7 @@
 // diverge here -- a third copy exists only so contributions.js can register
 // its own command id gated to Maps mode.
 import { runEntityCommand } from '../../../../host/command-helpers.js';
+import { PROJECT_SCOPE } from '../../../../host/history-service.js';
 import { cloneBitmap, blitRegion, colorsEqual } from '../../../../core/pixels.js';
 import { sheetLayers } from '../../../../core/model.js';
 import { setEntry, remapColor } from '../../../../core/palettes.js';
@@ -35,7 +36,12 @@ export function editPaletteColor(services, index, color) {
   if (colorsEqual(before, color)) return;
   runEntityCommand(services, 'edit palette color', project => project,
     project => { const target = paletteById(project, paletteId); if (target) setEntry(target, index, color); },
-    project => { const target = paletteById(project, paletteId); if (target) setEntry(target, index, before); });
+    project => { const target = paletteById(project, paletteId); if (target) setEntry(target, index, before); },
+    // Palette-only: no document's pixels change, so it stays undoable from
+    // whichever sheet/map the user happens to be looking at. (remapPaletteColor
+    // below is deliberately NOT project-scoped -- it rewrites the active
+    // sheet's bitmaps, so it belongs to that sheet's history.)
+    { scope: PROJECT_SCOPE });
 }
 
 // The palette-entry mutation lives INSIDE the command so undo restores both

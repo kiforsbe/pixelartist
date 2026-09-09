@@ -3,14 +3,12 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
-import { CommandStack } from '../js/core/commands.js';
-import { addMapLayer, deleteMapLayer, renameMapLayer, setMapLayerOpacity } from '../js/modes/maps/application/commands/map-layer-commands.js';
+import { addMapLayer, deleteMapLayer, renameMapLayer, setMapLayerOpacity, moveMapLayer } from '../js/modes/maps/application/commands/map-layer-commands.js';
 
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
-  const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }) };
 }
 
 function makeProject() {
@@ -95,4 +93,41 @@ test('renameMapLayer changes the requested map layer and supports undo and redo'
   assert.equal(project.maps[0].layers[0].name, 'Ground');
   services.history.redo();
   assert.equal(project.maps[0].layers[0].name, 'Roads');
+});
+
+// ---- moveMapLayer ----
+// Map-layer reordering used to splice the array straight from the panel, so
+// it silently skipped the undo stack: Ctrl+Z afterwards reverted whatever the
+// user did BEFORE the reorder instead.
+function makeOrderedProject() {
+  return { sheets: [], maps: [{ id: 'map1', bounds: null, layers: ['l0', 'l1', 'l2'].map(id => ({ id, type: 'tile', tiles: [], terrain: [] })) }] };
+}
+const order = project => project.maps[0].layers.map(l => l.id);
+
+test('moveMapLayer reorders the layer and is undoable in both directions', () => {
+  const project = makeOrderedProject();
+  const services = makeServices(project);
+
+  moveMapLayer(services, 'map1', 'l0', 1);
+  assert.deepEqual(order(project), ['l1', 'l0', 'l2']);
+  assert.equal(services.store.getState().project.dirty, true);
+
+  services.history.undo();
+  assert.deepEqual(order(project), ['l0', 'l1', 'l2']);
+  services.history.redo();
+  assert.deepEqual(order(project), ['l1', 'l0', 'l2']);
+
+  moveMapLayer(services, 'map1', 'l0', -1);
+  assert.deepEqual(order(project), ['l0', 'l1', 'l2']);
+});
+
+test('moveMapLayer ignores moves off either end and unknown layers', () => {
+  const project = makeOrderedProject();
+  const services = makeServices(project);
+
+  moveMapLayer(services, 'map1', 'l0', -1);
+  moveMapLayer(services, 'map1', 'l2', 1);
+  moveMapLayer(services, 'map1', 'nope', 1);
+  assert.deepEqual(order(project), ['l0', 'l1', 'l2']);
+  assert.equal(services.history.canUndo(), false, 'a rejected move leaves no history entry');
 });

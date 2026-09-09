@@ -5,6 +5,7 @@ import { buildBaseDurationControl } from '../../components/panels/base-duration-
 import { defineAction } from '../shell/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
 import { getEditorHost } from '../../host/runtime.js';
+import { PROJECT_SCOPE } from '../../host/history-service.js';
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { resetFileSession } from './file-session.js';
 
@@ -430,7 +431,7 @@ export function mountProjectController() {
       label: 'edit project settings',
       do() { project.name = afterName; project.settings = { ...afterSettings }; },
       undo() { project.name = beforeName; project.settings = { ...beforeSettings }; },
-    });
+    }, { scope: PROJECT_SCOPE });
     // Onion step colors are live-mutated project settings (never go through the undo
     // stack, same as every other onion field
     // comment), applied here alongside the undoable dims/name command so one

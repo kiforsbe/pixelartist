@@ -241,10 +241,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     // Routes directly through HistoryService.execute() rather than a
     // registered-by-id Command Handler: this command closes over the live
     // `bmp` reference already resolved above, so there is no id to
-    // re-resolve later, and HistoryService.execute() is the same
-    // CommandStack.push() a Command Handler dispatch would end up calling
-    // anyway. HistoryService's own onChange wrapper marks the project dirty
-    // on every push, so no separate markDirty() call is needed here.
+    // re-resolve later, and HistoryService.execute() is what a Command
+    // Handler dispatch would end up calling anyway. It marks the project
+    // dirty on every push, so no separate markDirty() call is needed here,
+    // and it files the command under the active document's own history.
     getEditorHost().history.execute(makePixelPatch(bmp, rect, beforeRegion, afterRegion, label));
   }
 

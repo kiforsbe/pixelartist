@@ -5,7 +5,8 @@ import { activeSheet } from '../../host/document-helpers.js';
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 import { mountStorePanel } from '../panel-mount.js';
 import { sheetLayers } from '../../core/model.js';
-import { createPalette, addSwatch, INDEXED_SIZE_PRESETS } from '../../core/palettes.js';
+import { createPalette, addSwatch, removeSwatch, INDEXED_SIZE_PRESETS } from '../../core/palettes.js';
+import { PROJECT_SCOPE } from '../../host/history-service.js';
 import { SYSTEM_PALETTES, clonePalette } from '../../core/systempalettes.js';
 import { markDefaultAction } from '../dialogs.js';
 import { rgbaToHex, hexToRgb } from '../color-utils.js';
@@ -218,12 +219,53 @@ export function mountColorPanel(el) {
     refreshSwatchStrip();
   });
 
+  // ---- undoable palette edits ----
+  // Palettes are project content, not view state, so changing them belongs on
+  // the undo stack. PROJECT_SCOPE keeps them undoable from whichever sheet or
+  // map is open (see history-service.js) -- a palette is shared by all of
+  // them, so scoping one of these to the active document would strand it.
+  //
+  // Written as direct history.execute() calls rather than per-mode Command
+  // Handlers because nothing here is mode-specific: the same palette list is
+  // shared by sprites, tiles and maps, so the three identical registrations
+  // editPaletteColor needs would buy nothing. (That one stays mode-scoped for
+  // a real reason -- its remap sibling rewrites the active SHEET's bitmaps.)
+  //
+  // No markDirty()/refresh calls in here: HistoryService marks the project
+  // dirty on every do()/undo()/redo(), and this panel already redraws from
+  // that same notification (see disposeHistory below).
+  function paletteById(id) {
+    return getEditorHost().projects.project?.palettes.find(p => p.id === id) ?? null;
+  }
+  function runPaletteCommand(label, apply, revert) {
+    getEditorHost().history.execute({ label, do: apply, undo: revert }, { scope: PROJECT_SCOPE });
+  }
+  // Adding a palette (new, or adopted from the system list) also makes it
+  // active, so undo has to put the previous selection back or the user lands
+  // on a palette that no longer exists.
+  function commitAddPalette(palette, label) {
+    const previousActiveId = getEditorHost().projects.project?.activePaletteId ?? null;
+    runPaletteCommand(label,
+      () => {
+        const proj = getEditorHost().projects.project;
+        if (!proj.palettes.includes(palette)) proj.palettes.push(palette);
+        proj.activePaletteId = palette.id;
+      },
+      () => {
+        const proj = getEditorHost().projects.project;
+        proj.palettes = proj.palettes.filter(p => p !== palette);
+        proj.activePaletteId = previousActiveId;
+      });
+  }
+
   btnAddSwatch.addEventListener('click', () => {
     const pal = currentPalette();
     if (!pal || pal.indexed) return;
-    addSwatch(pal, drawingSettings().primary);
-    getEditorHost().projects.markDirty();
-    refreshSwatchStrip();
+    const paletteId = pal.id;
+    const color = [...drawingSettings().primary];
+    runPaletteCommand('add swatch',
+      () => { const target = paletteById(paletteId); if (target) addSwatch(target, color); },
+      () => { const target = paletteById(paletteId); if (target) removeSwatch(target, target.colors.length - 1); });
   });
 
   // ---- New palette dialog ----
@@ -256,12 +298,8 @@ export function mountColorPanel(el) {
     let size = 0;
     if (indexed) size = npPreset.value === 'custom' ? Math.max(1, parseInt(npCustom.value, 10) || 1) : parseInt(npPreset.value, 10);
     const p = createPalette({ name: npName.value.trim() || 'Palette', indexed, size });
-    proj.palettes.push(p);
-    proj.activePaletteId = p.id;
     dlgNew.close();
-    getEditorHost().projects.markDirty();
-    refreshPaletteSelect();
-    refreshSwatchStrip();
+    commitAddPalette(p, 'new palette');
   });
   btnNewPalette.addEventListener('click', () => dlgNew.showModal());
 
@@ -295,12 +333,8 @@ export function mountColorPanel(el) {
       const proj = getEditorHost().projects.project;
       if (!proj) return;
       const p = clonePalette(sys);
-      proj.palettes.push(p);
-      proj.activePaletteId = p.id;
       dlgSys.close();
-      getEditorHost().projects.markDirty();
-      refreshPaletteSelect();
-      refreshSwatchStrip();
+      commitAddPalette(p, 'add system palette');
     });
 
     sysList.appendChild(card);

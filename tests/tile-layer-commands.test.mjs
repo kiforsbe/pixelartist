@@ -3,14 +3,12 @@ import assert from 'node:assert/strict';
 import { EditorStore } from '../js/host/editor-store.js';
 import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
-import { CommandStack } from '../js/core/commands.js';
 import { addTileLayer, removeTileLayer } from '../js/modes/tiles/application/commands/tile-layer-commands.js';
 
 function makeServices(project) {
   const store = new EditorStore();
   store.setProject(project, { dirty: false });
-  const stack = new CommandStack();
-  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store, stack }) };
+  return { store, projects: new ProjectService(store, null), history: new HistoryService({ store }) };
 }
 
 function makeProject() {

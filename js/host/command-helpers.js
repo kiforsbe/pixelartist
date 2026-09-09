@@ -8,7 +8,11 @@
 // `after(project, entity)` runs once per do/undo, after apply/revert -- for
 // bookkeeping that must stay in sync regardless of direction (e.g. maps'
 // refreshMapBounds).
-export function runEntityCommand(services, label, resolve, apply, revert, { after } = {}) {
+// `scope` is forwarded to HistoryService.execute() -- omit it (the normal
+// case) and the command lands on the active document's undo history; pass
+// PROJECT_SCOPE for a command that mutates nothing but project-level state,
+// so it stays undoable from whichever document is open.
+export function runEntityCommand(services, label, resolve, apply, revert, { after, scope } = {}) {
   const command = {
     label,
     do: () => services.projects.mutate(label, project => {
@@ -22,5 +26,5 @@ export function runEntityCommand(services, label, resolve, apply, revert, { afte
       after?.(project, entity);
     }),
   };
-  services.history.execute(command);
+  services.history.execute(command, { scope });
 }

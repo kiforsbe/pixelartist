@@ -8,7 +8,10 @@ import { runAction } from '../../js/features/shell/actions.js';
 
 export class Element {
   constructor(tagName = 'DIV') {
-    Object.assign(this, { tagName, children: [], handlers: {}, value: '', dataset: {}, open: false });
+    // `type` mirrors the real DOM: an <input> with no type attribute reports
+    // 'text', which is what tells a text field apart from a slider/checkbox.
+    Object.assign(this, { tagName, children: [], handlers: {}, value: '', dataset: {}, open: false, modal: false });
+    if (tagName === 'INPUT') this.type = 'text';
     this.classList = { add() {}, toggle() {} };
   }
   addEventListener(type, callback) { (this.handlers[type] ??= []).push(callback); }
@@ -17,8 +20,11 @@ export class Element {
   set innerHTML(value) { this.children = []; }
   querySelector() { return new Element(); }
   closest() { return this.dialog ?? null; }
-  showModal() { this.open = true; }
-  close() { this.open = false; this.emit('close'); }
+  // show() vs showModal() is a real behavioral difference here, not a detail:
+  // the filter dialogs are non-modal on purpose and must not freeze shortcuts.
+  show() { this.open = true; this.modal = false; }
+  showModal() { this.open = true; this.modal = true; }
+  close() { this.open = false; this.modal = false; this.emit('close'); }
 }
 
 export async function mountDocumentFixture() {
@@ -26,7 +32,8 @@ export async function mountDocumentFixture() {
   globalThis.document = {
     getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); },
     createElement: tag => new Element(tag.toUpperCase()),
-    querySelector: () => [...elements.values()].find(element => element.open) ?? null,
+    querySelector: (selector = '') => [...elements.values()]
+      .find(element => element.open && (!selector.includes(':modal') || element.modal)) ?? null,
     activeElement: null,
   };
   globalThis.window = { addEventListener(type, callback) { (events.get(type) ?? events.set(type, []).get(type)).push(callback); } };

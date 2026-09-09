@@ -26,14 +26,13 @@ function selectContent(document) {
   return { ...host.selections.get() };
 }
 
-for (const input of ['input', 'textarea', 'contenteditable', 'dialog', 'activeElement', 'openDialog', 'prevented']) {
+for (const input of ['input', 'textarea', 'contenteditable', 'activeElement', 'openDialog', 'prevented']) {
   test(`history shortcuts leave ${input} editing alone`, () => {
     reset();
     let value = 0;
     host.history.execute({ do() { value = 1; }, undo() { value = 0; } });
     const target = new Element(input === 'input' ? 'INPUT' : input === 'textarea' ? 'TEXTAREA' : 'DIV');
     if (input === 'contenteditable') target.isContentEditable = true;
-    if (input === 'dialog') target.dialog = new Element('DIALOG');
     if (input === 'activeElement') document.activeElement = new Element('INPUT');
     if (input === 'openDialog') elements.get('dlg-newsheet').showModal();
     const prevented = input === 'prevented';
@@ -46,6 +45,33 @@ for (const input of ['input', 'textarea', 'contenteditable', 'dialog', 'activeEl
       assert.equal(value, 0, 'project history must not consume text redo');
       assert.equal(redo.defaultPrevented, prevented);
     }
+  });
+}
+
+// The other half of the same guard: it used to treat EVERY <input> and EVERY
+// open <dialog> as "the user is typing", which silently killed Undo/Redo
+// whenever focus had landed on a slider/checkbox (a layer-opacity drag leaves
+// focus there) or while a non-modal filter dialog was up -- and those dialogs
+// are non-modal precisely so the user can keep working underneath them.
+for (const [name, prepare] of [
+  ['a focused slider', target => { target.type = 'range'; }],
+  ['a focused checkbox', target => { target.type = 'checkbox'; }],
+  ['a focused color swatch', target => { target.type = 'color'; }],
+  ['a non-modal dialog target', target => { target.dialog = new Element('DIALOG'); }],
+  ['an open non-modal dialog', () => { document.getElementById('dlg-quantize').show(); }],
+]) {
+  test(`history shortcuts still fire with ${name}`, () => {
+    reset();
+    let value = 0;
+    host.history.execute({ do() { value = 1; }, undo() { value = 0; } });
+    const target = new Element(name.includes('dialog') ? 'DIV' : 'INPUT');
+    prepare(target);
+    document.activeElement = target;
+    const undo = keydown({ target });
+    assert.equal(value, 0, 'undo must reach project history');
+    assert.equal(undo.defaultPrevented, true, 'the shortcut is consumed by the app');
+    keydown({ key: 'y', target });
+    assert.equal(value, 1, 'redo must reach project history');
   });
 }
 

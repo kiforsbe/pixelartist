@@ -1011,4 +1011,17 @@ export function mountFilterController(workbench) {
     dlgCheckerboard.close();
     commitCheckerboard(params, cbAllLayers.checked);
   });
+
+  // These dialogs are non-modal on purpose (sample colors, mark objects, keep
+  // painting while they're up), so an undo/redo can land while one is open --
+  // and every preview above is computed from the LIVE layer bitmaps. Without
+  // this the canvas would keep showing the pre-undo preview override and the
+  // undo would look like it did nothing. Recompute whichever dialog is open;
+  // the commit itself is a history change too, but by then the dialog is
+  // already closed, so this never fights an in-flight commit.
+  getEditorHost().history.subscribe(() => {
+    if (dlgQuantize.open) previewQuantize();
+    else if (dlgChromaKey.open) { previewChromaKey(); refreshChromaKeyHistograms(); }
+    else if (dlgCheckerboard.open) previewCheckerboard();
+  });
 }

@@ -5,7 +5,8 @@ import { snapProjectPixels } from '../../core/project-pixel-snapper.js';
 import { commitFloatIfAny, cutSelection, copySelection, paste, hasSelection, discardFloatingForSheet } from '../../components/canvas/float-session.js';
 import { defineAction, runAction, bindAction } from '../shell/actions.js';
 import { markDefaultAction } from '../../components/dialogs.js';
-import { isTypingTarget } from '../../components/dom-utils.js';
+import { isTextEntryTarget } from '../../components/dom-utils.js';
+import { PROJECT_SCOPE } from '../../host/history-service.js';
 import { activeSheet, activeMap } from '../../host/document-helpers.js';
 import { confirmOrAuto } from '../../platform/browser/autotest.js';
 
@@ -168,7 +169,11 @@ export function mountDocumentController({ editorHost, workbench }) {
         if (prevDoc) editorHost.selections.set(prevSelection, prevDoc);
       },
     };
-    editorHost.history.execute(cmd);
+    // Creating/renaming/deleting a document is project-level: it changes
+    // WHICH documents exist, so it must stay undoable from whichever one is
+    // active afterwards (creating a sheet activates it, deleting one moves
+    // you to a sibling).
+    editorHost.history.execute(cmd, { scope: PROJECT_SCOPE });
     editorHost.projects.markDirty();
   }
 
@@ -189,7 +194,7 @@ export function mountDocumentController({ editorHost, workbench }) {
         selectCreationDocument(previousDocument, 'maps');
         if (previousDocument) editorHost.selections.set(previousSelection, previousDocument);
       },
-    });
+    }, { scope: PROJECT_SCOPE });
   }
   
   // ---- new sheet dialog ----
@@ -312,7 +317,7 @@ export function mountDocumentController({ editorHost, workbench }) {
       label: `rename ${kind}`,
       do() { target.name = v; editorHost.projects.markDirty(); refreshSheetSelect(); },
       undo() { target.name = old; editorHost.projects.markDirty(); refreshSheetSelect(); },
-    });
+    }, { scope: PROJECT_SCOPE });
     renameTarget = null;
     dlgRenameSheet.close();
   });
@@ -345,7 +350,7 @@ export function mountDocumentController({ editorHost, workbench }) {
         if (wasActive) editorHost.documents.setActive({ kind: 'map', id: map.id }, { modeId: mode });
         editorHost.projects.markDirty();
       },
-    });
+    }, { scope: PROJECT_SCOPE });
   }
   function commitDeleteSheet(sheet) {
     const project = editorHost.projects.project;
@@ -373,7 +378,7 @@ export function mountDocumentController({ editorHost, workbench }) {
         editorHost.projects.markDirty();
       },
     };
-    editorHost.history.execute(cmd);
+    editorHost.history.execute(cmd, { scope: PROJECT_SCOPE });
   }
   defineAction('document.deleteSheet', {
     label: 'Delete',
@@ -420,7 +425,19 @@ export function mountDocumentController({ editorHost, workbench }) {
   defineAction('edit.paste', { label: 'Paste', shortcut: 'Ctrl+V', run: paste });
   window.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || !(e.ctrlKey || e.metaKey)) return;
-    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement) || document.querySelector('dialog[open]')) return;
+    // Deliberately narrower than the isTypingTarget/dialog[open] guard the
+    // single-key shortcuts use. Undo/Redo/Save must survive two states that
+    // guard was silently killing them in:
+    //  - focus parked on a non-text control (the layer-opacity slider, a
+    //    checkbox, a color swatch) -- those have no native undo to defer to;
+    //  - a NON-modal dialog being open. The filter dialogs (Quantize, Chroma
+    //    Key, Remove Checkerboard) are shown with .show(), movable, and meant
+    //    to stay up while the user keeps painting/sampling on the canvas, so
+    //    "a dialog is open" cannot mean "the app is frozen". Only a real
+    //    modal (:modal, i.e. .showModal()) still blocks -- it owns the
+    //    keyboard.
+    if (isTextEntryTarget(e.target) || isTextEntryTarget(document.activeElement)) return;
+    if (document.querySelector('dialog:modal')) return;
     const key = e.key.toLowerCase();
     if (key === 'z' && !e.shiftKey) { e.preventDefault(); runAction('edit.undo'); }
     else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); runAction('edit.redo'); }

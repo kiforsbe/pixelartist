@@ -22,7 +22,7 @@ export function stripLayersOf(sheet, anim) {
 // frames' x/y in one step.
 //
 // NOTE: this eagerly applies the move (pixels and frame x/y). Callers push a
-// command whose do() re-applies `after` idempotently -- CommandStack.push
+// command whose do() re-applies `after` idempotently -- HistoryService.execute
 // invokes do() immediately, so the net effect is a single applied move.
 export function buildMovePatches(frames, dx, dy, layers) {
   const ux0 = Math.min(...frames.map(f => Math.min(f.x, f.x + dx)));
