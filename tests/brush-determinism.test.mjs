@@ -20,15 +20,33 @@ test('stampRandom depends only on (seed, index, salt), not call order', () => {
   assert.deepEqual(forward, backward);
 });
 
-test('spacing 1 stamps every point', () => {
+test('spacing 1 stamps every pixel of travel, even across sparse waypoints', () => {
   const mask = normalizeBrush({ mask: { spacing: 1 } }).mask;
-  assert.equal(strokeStamps(line(10), mask, 1).length, 10);
+  const sparse = [{ x: 0, y: 0 }, { x: 30, y: 0 }];
+  const stamps = strokeStamps(sparse, mask, 1);
+  assert.deepEqual(stamps.map(s => s.x), Array.from({ length: 31 }, (_, i) => i));
 });
 
-test('spacing N stamps every Nth point and always includes the first', () => {
+test('spacing N stamps every N pixels of travel and always includes the first', () => {
   const mask = normalizeBrush({ mask: { spacing: 3 } }).mask;
-  const stamps = strokeStamps(line(10), mask, 1);
+  const sparse = [{ x: 0, y: 0 }, { x: 9, y: 0 }];
+  const stamps = strokeStamps(sparse, mask, 1);
   assert.deepEqual(stamps.map(s => s.x), [0, 3, 6, 9]);
+});
+
+test('a sparse path and a dense path covering the same distance stamp identically', () => {
+  // Regression case: a fast drag samples few, far-apart points; a slow drag
+  // over the same distance samples many, close-together points. Spacing is
+  // defined in pixels of travel, so both must produce the same stamps.
+  const mask = normalizeBrush({ mask: { spacing: 5 } }).mask;
+  const sparse = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }, { x: 30, y: 0 }];
+  const dense = line(31);
+  assert.deepEqual(strokeStamps(sparse, mask, 42), strokeStamps(dense, mask, 42));
+});
+
+test('a single-point path yields exactly one stamp', () => {
+  const mask = normalizeBrush({ mask: { spacing: 5 } }).mask;
+  assert.deepEqual(strokeStamps([{ x: 7, y: 9 }], mask, 1), [{ x: 7, y: 9, rotate: 0 }]);
 });
 
 test('scatter 0 leaves positions exactly on the path', () => {
@@ -60,6 +78,15 @@ test('re-rasterizing a prefix reproduces that prefix exactly -- shape previews d
   const full = strokeStamps(line(20), mask, 42);
   const prefix = strokeStamps(line(8), mask, 42);
   assert.deepEqual(prefix, full.slice(0, prefix.length));
+});
+
+test('the prefix invariant holds across sparse, multi-segment waypoints too', () => {
+  const mask = normalizeBrush({ mask: { scatter: 4, rotateJitter: true, spacing: 2 } }).mask;
+  const full = [{ x: 0, y: 0 }, { x: 15, y: 0 }, { x: 15, y: 20 }, { x: 40, y: 20 }];
+  const prefixPoints = full.slice(0, 2);
+  const fullStamps = strokeStamps(full, mask, 42);
+  const prefixStamps = strokeStamps(prefixPoints, mask, 42);
+  assert.deepEqual(prefixStamps, fullStamps.slice(0, prefixStamps.length));
 });
 
 test('rotateJitter yields only quarter turns', () => {
