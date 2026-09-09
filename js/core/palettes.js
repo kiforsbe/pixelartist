@@ -21,6 +21,7 @@ export function createPalette({ name, indexed = false, size = 0, lockReason = ''
     empty: Array.from({ length: size }, () => true),
     emptyColor,
     lock: size > 0 ? { size, reason: lockReason } : null,
+    ramps: [],
   };
 }
 
@@ -52,6 +53,11 @@ export function normalizePalette(raw) {
   return {
     ...rest, indexed: !!raw.indexed, colors, empty, emptyColor,
     lock: reason !== null && colors.length > 0 ? { size: colors.length, reason } : null,
+    ramps: Array.isArray(raw.ramps)
+      ? raw.ramps
+          .filter(r => r && typeof r.name === 'string' && Array.isArray(r.indices))
+          .map(r => ({ name: r.name, indices: r.indices.filter(Number.isInteger) }))
+      : [],
   };
 }
 
