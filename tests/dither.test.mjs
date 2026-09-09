@@ -57,3 +57,52 @@ test('every named pattern exists and has non-zero dimensions', () => {
     assert.equal(p.cells.length, p.width * p.height, name);
   }
 });
+
+// Fraction of a pattern's own tile where the cell is 0 (primary). checker
+// and lines are exact 50/50 splits, so this reads the same as secondary
+// coverage for them; dots25's whole point is that it is NOT 50/50 -- its
+// sparse "dots" are the 0 cells, at a genuine quarter density, not the 12.5%
+// or 87.5% an earlier, wrongly-sized cells array once produced.
+function primaryCoverage(name) {
+  const p = PATTERNS[name];
+  const zeros = p.cells.filter(c => c === 0).length;
+  return zeros / p.cells.length;
+}
+
+test('dots25 marks a quarter of its tile; checker and lines split theirs evenly', () => {
+  assert.equal(primaryCoverage('dots25'), 0.25);
+  assert.equal(primaryCoverage('checker'), 0.5);
+  assert.equal(primaryCoverage('lines'), 0.5);
+});
+
+function lcm(a, b) {
+  const gcd = (x, y) => (y === 0 ? x : gcd(y, x % y));
+  return (a / gcd(a, b)) * b;
+}
+
+// The defect this catches: two named patterns that look different on paper
+// (different dimensions, different cells arrays) but produce the exact same
+// picksSecondary output everywhere -- which is exactly what happened when
+// `bayer4` (a median split of BAYER4) turned out to be pixel-identical to
+// `checker`. Comparing over the LCM of every pattern's width/height, rather
+// than one pattern's own tile, means a future pattern with a different
+// period still gets checked honestly against the others.
+test('no two named patterns produce identical output across their combined tile period', () => {
+  const names = Object.keys(PATTERNS);
+  const periodW = names.reduce((acc, n) => lcm(acc, PATTERNS[n].width), 1);
+  const periodH = names.reduce((acc, n) => lcm(acc, PATTERNS[n].height), 1);
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      let identical = true;
+      for (let y = 0; y < periodH && identical; y++) {
+        for (let x = 0; x < periodW; x++) {
+          if (patternPicksSecondary(names[i], x, y) !== patternPicksSecondary(names[j], x, y)) {
+            identical = false;
+            break;
+          }
+        }
+      }
+      assert.equal(identical, false, `${names[i]} and ${names[j]} are identical across their combined tile period`);
+    }
+  }
+});

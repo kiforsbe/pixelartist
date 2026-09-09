@@ -36,14 +36,20 @@ export function passesOpacity(x, y, opacity) {
   return BAYER4[wrap(y, 4)][wrap(x, 4)] < level;
 }
 
+// There is no `bayer4` entry here on purpose: patternPicksSecondary takes no
+// density argument, so a named pattern is always a fixed 50/50-or-whatever
+// split of two colors -- and splitting the standard 4x4 Bayer matrix at its
+// median (v < 8) is mathematically always a checkerboard. The Bayer matrix
+// already earns its keep in passesOpacity, where all 17 density levels get
+// used; do not re-add it here, it would just be `checker` under another
+// name.
 export const PATTERNS = {
-  bayer4: { width: 4, height: 4, cells: BAYER4.flat().map(v => (v < 8 ? 0 : 1)) },
   checker: { width: 2, height: 2, cells: [0, 1, 1, 0] },
-  dots25: { width: 4, height: 4, cells: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1] },
+  dots25: { width: 2, height: 2, cells: [0, 1, 1, 1] },
   lines: { width: 2, height: 2, cells: [0, 0, 1, 1] },
 };
 
 export function patternPicksSecondary(patternName, x, y) {
-  const p = PATTERNS[patternName] ?? PATTERNS.bayer4;
+  const p = PATTERNS[patternName] ?? PATTERNS.checker;
   return p.cells[wrap(y, p.height) * p.width + wrap(x, p.width)] === 1;
 }

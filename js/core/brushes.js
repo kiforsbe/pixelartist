@@ -56,7 +56,7 @@ function normalizeInk(raw = {}) {
     opacity: clampInt(raw.opacity, 0, 100, 100),
     trueAlpha: !!raw.trueAlpha,
     jitter: clampInt(raw.jitter, 0, 8, 0),
-    pattern: raw.pattern ?? 'bayer4',
+    pattern: raw.pattern ?? 'checker',
     rampName: raw.rampName ?? null,
     replaceColor: raw.replaceColor ?? null,
   };

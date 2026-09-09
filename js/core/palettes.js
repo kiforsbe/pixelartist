@@ -1,5 +1,6 @@
 export { newId } from '../domain/shared/ids.js';
 import { newId } from '../domain/shared/ids.js';
+import { BAYER4 } from './dither.js';
 export const INDEXED_SIZE_PRESETS = [2, 4, 16, 256];
 
 // The color an "unset" slot carries until the user picks something. Real,
@@ -233,20 +234,14 @@ function nearestTwoColors(colors, rgba) {
   return { a, b, t };
 }
 
-// Values 0-15 arranged so adjacent cells differ maximally -- the standard
-// 4x4 Bayer threshold matrix.
-const BAYER_4X4 = [
-  [0, 8, 2, 10],
-  [12, 4, 14, 6],
-  [3, 11, 1, 9],
-  [15, 7, 13, 5],
-];
-
 // Ordered/Bayer dithering: no error propagation (unlike the diffusion
 // methods below), so it can't smear across large flat regions -- trades
 // that safety for a fixed, visible grid pattern. See nearestTwoColors for
 // why this compares a PROJECTION against the threshold rather than
-// thresholding raw channel values.
+// thresholding raw channel values. BAYER4 (from dither.js) is the same
+// matrix the brush engine's passesOpacity uses for its density test -- one
+// shared source so the quantizer's ordered dither and brush dithering never
+// drift into misaligned grids on the same canvas.
 function ditherOrdered(bitmap, palette) {
   const { width, data } = bitmap;
   const count = data.length / 4;
@@ -254,7 +249,7 @@ function ditherOrdered(bitmap, palette) {
     const i = p * 4;
     if (data[i + 3] === 0) continue;
     const x = p % width, y = (p / width) | 0;
-    const threshold = (BAYER_4X4[y % 4][x % 4] + 0.5) / 16;
+    const threshold = (BAYER4[y % 4][x % 4] + 0.5) / 16;
     const { a, b, t } = nearestTwoColors(palette.colors, [data[i], data[i + 1], data[i + 2], data[i + 3]]);
     const c = t > threshold ? b : a;
     data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2];
