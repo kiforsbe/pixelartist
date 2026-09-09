@@ -53,10 +53,16 @@ export function normalizePalette(raw) {
   return {
     ...rest, indexed: !!raw.indexed, colors, empty, emptyColor,
     lock: reason !== null && colors.length > 0 ? { size: colors.length, reason } : null,
+    // Indices are bounds-checked against this palette's own color count --
+    // a saved file can outlive swatches a named ramp once referenced (an
+    // edit that removed colors, a hand-edited or corrupted project file).
     ramps: Array.isArray(raw.ramps)
       ? raw.ramps
           .filter(r => r && typeof r.name === 'string' && Array.isArray(r.indices))
-          .map(r => ({ name: r.name, indices: r.indices.filter(Number.isInteger) }))
+          .map(r => ({
+            name: r.name,
+            indices: r.indices.filter(i => Number.isInteger(i) && i >= 0 && i < colors.length),
+          }))
       : [],
   };
 }
@@ -152,7 +158,7 @@ function hueOf([r, g, b]) {
   return (h * 60 + 360) % 360;
 }
 
-function lumaOf([r, g, b]) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
+export function lumaOf([r, g, b]) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
 
 // Returns an index permutation rather than sorted colors, so the caller can
 // carry `empty` (and anything else parallel) through the same reordering --

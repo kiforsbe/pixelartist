@@ -34,9 +34,36 @@ test('detectRamps finds maximal monotonic runs', () => {
 });
 
 test('a hue jump breaks a run even when luminance keeps rising', () => {
-  // grey -> grey -> saturated blue: luminance rises throughout, hue does not.
-  const ramps = detectRamps(paletteOf([[20, 20, 20], [80, 80, 80], [40, 40, 240]]));
+  // Two close-hued oranges (hue ~24 deg, ~26 deg) followed by a saturated
+  // cyan-green (hue ~173 deg). Luminance rises at every step (69.9 -> 112.7
+  // -> 180.3) and neither achromatic entry is involved, so only the hue
+  // check -- not luminance direction -- can be what breaks the run.
+  const ramps = detectRamps(paletteOf([[120, 60, 20], [180, 100, 40], [40, 220, 200]]));
   assert.deepEqual(ramps, [[0, 1]]);
+});
+
+test('a hue-drift anchor stops small adjacent steps from compounding into a full hue rotation', () => {
+  // The real NES palette, indices 30-36: seven entries with rising luminance
+  // and consecutive hue deltas of ~26/40/32/29/21/21 degrees -- every
+  // adjacent pair is within the 45 degree tolerance, but the run drifts
+  // ~168 degrees end to end, magenta through pink/salmon/orange/olive to
+  // green. Measuring each entry only against its predecessor would fold
+  // this into one 7-entry ramp and shade magenta into green.
+  const NES_MAGENTA_TO_GREEN = [
+    [228, 84, 236], [236, 88, 180], [236, 106, 100], [212, 136, 32],
+    [160, 170, 0], [116, 196, 0], [76, 208, 32],
+  ];
+  const ramps = detectRamps(paletteOf(NES_MAGENTA_TO_GREEN));
+  assert.deepEqual(ramps, [[0, 1], [2, 3], [4, 5, 6]]);
+});
+
+test('a grey-hue pair is not a ramp -- shading it would erase the hue', () => {
+  // The real CGA palette's brown and neutral grey: [170,85,0] -> [170,170,170].
+  // Adjacent-hue-only detection accepts this (grey matches any hue), but a
+  // ramp with exactly one chromatic entry has nowhere to shade the hue TO --
+  // the next step is colorless. Requires >=2 chromatic entries, or all-grey.
+  const ramps = detectRamps(paletteOf([[170, 85, 0], [170, 170, 170]]));
+  assert.deepEqual(ramps, []);
 });
 
 test('a luminance reversal breaks a run', () => {
@@ -67,6 +94,30 @@ test('rampContaining returns null for a color in no ramp', () => {
 test('a named ramp overrides detection', () => {
   const p = paletteOf(GREYS_THEN_REDS, { ramps: [{ name: 'custom', indices: [0, 4, 6] }] });
   assert.deepEqual(rampContaining(p, [20, 20, 20, 255], 'custom'), [0, 4, 6]);
+});
+
+test('rampContaining returns null when the color is not actually in the named ramp', () => {
+  // Index 1's color ([70,70,70]) is a real palette entry but not a member of
+  // the named ramp [0, 4, 6] -- a caller must not get an unrelated ramp back.
+  const p = paletteOf(GREYS_THEN_REDS, { ramps: [{ name: 'custom', indices: [0, 4, 6] }] });
+  assert.equal(rampContaining(p, [70, 70, 70, 255], 'custom'), null);
+});
+
+test('normalizePalette drops named-ramp indices that are out of range for this palette', () => {
+  const p = normalizePalette({
+    id: 'p', name: 'P', colors: [[10, 10, 10, 255], [200, 200, 200, 255]],
+    ramps: [{ name: 'corrupt', indices: [0, 999, 1] }],
+  });
+  assert.deepEqual(p.ramps, [{ name: 'corrupt', indices: [0, 1] }]);
+});
+
+test('stepAlongRamp returns null rather than throwing when a named ramp outlives a deleted swatch', () => {
+  // Simulate a Task-13-style bug: the ramp was valid when created, but a
+  // swatch it references was later removed from `colors` without the ramp
+  // being re-normalized. The stale index must degrade to null, not throw.
+  const p = paletteOf([[10, 10, 10], [200, 200, 200]], { ramps: [{ name: 'corrupt', indices: [0, 1] }] });
+  p.colors.pop();
+  assert.equal(stepAlongRamp(p, [10, 10, 10, 255], 1, 'corrupt'), null);
 });
 
 test('stepAlongRamp moves one entry toward light and never interpolates', () => {
