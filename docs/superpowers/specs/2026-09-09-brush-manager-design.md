@@ -59,6 +59,14 @@ Brush {
     colors,         // for custom: optional RGBA payload, used by 'stamp' ink
     spacing,        // integer px between stamps along a stroke; 1 = every px
     scatter,        // integer px max random offset per stamp; 0 = none
+    rotate,         // 0 | 90 | 180 | 270 -- lossless quarter turns only
+    flipH, flipV,   // booleans, lossless mirrors
+    rotateJitter,   // boolean: random quarter turn per stamp (seeded)
+  },
+  pressure: {
+    target: 'none' | 'size' | 'opacity' | 'shade-step',
+    min, max,       // output range; integers for 'size' and 'shade-step'
+    curve,          // 'linear' | 'soft' | 'hard'
   },
   ink: {
     kind: 'solid' | 'ramp-shade' | 'dither' | 'stamp' | 'lock-alpha' | 'replace',
@@ -82,6 +90,26 @@ size. Fractional spacing would put stamps at non-integer positions.
 payload. Pairing `stamp` ink with a `square` or `circle` mask has no payload
 to draw, so it falls back to `solid`. The manager disables the combination
 rather than letting it be saved.
+
+### Rotation and flipping — quarter turns only
+
+`rotate` is restricted to 0/90/180/270 and the flips are plain mirrors. These
+are **lossless permutations** of the mask bitmap: every source pixel lands on
+exactly one destination pixel.
+
+Arbitrary-angle rotation is deliberately excluded. Rotating a 1-bit mask by,
+say, 37° requires resampling, which either drops pixels or invents partial
+coverage — the mask stops being a crisp pixel shape and starts being a blurry
+approximation of one. That is the precise failure mode this tool exists to
+avoid, and it cannot be fixed by a better resampler.
+
+`flipBitmap(bmp, flipH, flipV)` already exists at `js/core/pixels.js:217` and
+is reused directly. Quarter turns are a transpose plus a flip.
+
+**`rotateJitter` picks a random quarter turn per stamp**, drawn from the
+stroke's seeded PRNG. Combined with `scatter` and a custom mask this is the
+foliage/gravel/rubble brush: organic-looking variation that is still composed
+entirely of lossless permutations of one authored stamp.
 
 ### Ink semantics
 
@@ -164,13 +192,77 @@ unchanged.
 
 ### Determinism
 
-`scatter` and `jitter` are random, and randomness breaks undo — a redo must
-paint exactly what the original stroke painted.
+`scatter`, `jitter` and `rotateJitter` are random, and that randomness has to
+be pinned — but **not for the reason it first appears.**
 
-Every stroke therefore carries a **seed**, stored in its command. All
-randomness draws from a seeded PRNG (mulberry32) initialized from that seed.
-The mask phase generates all stamp positions up front from the seed, so a
-stroke is reproducible by construction rather than by bookkeeping.
+Undo is already safe. Strokes commit through
+`makePixelPatch(bitmap, rect, before, after, label)` at
+`js/components/canvas/drawing-engine.js:248`, which records before/after pixel
+regions. Undo and redo replay **bytes**, not the stroke, so a redo reproduces
+a random stroke exactly no matter what the PRNG does.
+
+The real reason is **preview stability while dragging.** Shape tools restore
+and fully re-rasterize on every pointer move:
+
+```js
+// drawing-engine.js:360 -- runs on EVERY move event
+blitRegion(layer.bitmap, before, 0, 0);
+drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, brushSize);
+```
+
+Without a fixed seed, a scattered or rotation-jittered line would reshuffle
+its entire appearance on every mouse move — the shape would shimmer and boil
+under the cursor, and the result you finally released on would be unrelated to
+what you were aiming at.
+
+So every stroke carries a **seed**, fixed at pointer-down and held for the
+stroke's life. All randomness draws from a seeded PRNG (mulberry32)
+initialized from it, and the mask phase derives each stamp's offset and
+rotation from `(seed, stampIndex)` rather than from call order — so
+re-rasterizing a prefix of the stroke reproduces it identically.
+
+Freehand tools do not re-rasterize, but they use the same mechanism for
+consistency and testability.
+
+### Pressure sensitivity
+
+The browser already delivers pressure; the app currently throws it away.
+`js/components/canvas/canvas-view.js:187` receives a real `PointerEvent` and
+normalizes it down to:
+
+```js
+this.onPointer({ type, x, y, sx, sy, buttons, shiftKey, altKey });
+```
+
+`e.pressure` and `e.pointerType` are dropped at that boundary. Adding them to
+the payload in the three handlers (`_onPointerDown`, `_onPointerMove`,
+`_onPointerUp`) is the entire input-path change. No new device layer, no
+library.
+
+**Pressure is honored only when `pointerType === 'pen'`.** This guard is not
+optional. A mouse reports a constant `pressure` of 0.5 (or 1.0 while a button
+is down), and touch input reports wildly inconsistent values across devices.
+Without the guard, every mouse user silently gets a brush behaving as though
+it were held at half pressure forever.
+
+`pressure.target` selects what pressure drives:
+
+| Target | Effect |
+|---|---|
+| `none` | **default** — pressure ignored entirely |
+| `size` | mask size interpolates `min`..`max`, **rounded to an integer** |
+| `opacity` | dither density interpolates, snapped to the pattern's levels |
+| `shade-step` | how many ramp entries a `ramp-shade` stamp advances |
+
+Every target quantizes to integers. There is no fractional brush size and no
+continuous opacity, so pressure cannot smuggle sub-pixel or off-palette
+output past the retro guarantees.
+
+`curve` shapes the response: `linear`, `soft` (ease-in, more control at low
+pressure), `hard` (ease-out, reaches max sooner).
+
+The default is `target: 'none'`, so behavior is unchanged for existing users
+and for anyone on a mouse.
 
 ## Architecture
 
@@ -263,18 +355,42 @@ brushes in the file that are not in the library trigger a non-blocking offer:
 This keeps a shared project self-contained without creating a second editable
 copy that could drift from the library.
 
-**Consequence: there is no brush command family and no brush undo.** Brush
-definitions are editor configuration, like preferences, not project content.
-Deleting a library brush asks for confirmation via `confirmOrAuto` instead.
-This is a deliberate simplification over the palette design, where palettes
-*are* project content and therefore *are* undoable at `PROJECT_SCOPE`.
+**Brush edits are undoable, but only inside the manager window.** Brush
+definitions are editor configuration, not project content, so they must never
+enter project history — undoing a sprite edit should not silently resize a
+brush, and undoing a brush rename should not resurrect deleted pixels. The two
+histories stay completely separate.
 
-**The one exception is named ramps.** Ramps live on the palette, which is
-project content, so naming or deleting a ramp *is* an undoable palette command
-at `PROJECT_SCOPE`, added to the existing family in
-`js/features/palettes/palette-commands.js`. The rule is consistent once stated
-as: *brushes are configuration and are not undoable; palettes and their ramps
-are project content and are.*
+The manager owns a private `CommandStack` from `js/core/commands.js:3` — the
+same plain do/undo stack the project used before `HistoryService`, and exactly
+the right primitive here because it has no scope machinery to get entangled
+with. Every brush edit (rename, resize, mask paint, ink change, reorder,
+delete) is a small command pushed onto that stack.
+
+**Routing.** The global undo binding lives at
+`js/features/project/document-controller.js:442` on `window`, and its guards
+deliberately allow non-modal dialogs through so filter dialogs can stay open
+while painting. The brush manager is non-modal, so `Ctrl+Z` inside it would
+otherwise hit *project* history. The manager therefore listens for
+`Ctrl+Z`/`Ctrl+Y` on its own dialog element and calls `stopPropagation()`.
+Because the dialog is deeper in the tree than `window`, its listener runs
+first and the global handler never sees the event.
+
+The dialog also renders its own **Undo/Redo buttons**, so the scoping is
+visible rather than a hidden keybinding whose behavior depends on focus.
+
+**Lifetime: the stack is cleared when the dialog closes.** Its scope is the
+window, matching the requirement. Edits are already persisted to the library
+by then, so this is not data loss — but it does mean reopening the manager
+starts with an empty history, which the buttons make obvious.
+
+**Named ramps are the exception that stays in project history.** Ramps live on
+the palette, which *is* project content, so naming or deleting a ramp is an
+undoable palette command at `PROJECT_SCOPE`, added to the existing family in
+`js/features/palettes/palette-commands.js`.
+
+The rule, stated once: *brush edits undo on the manager's local stack;
+palettes and their ramps undo in project history; the two never mix.*
 
 ### Import / export
 
@@ -332,7 +448,18 @@ Pure-core tests under `node --test`, matching the palette manager's approach:
   its target color.
 - **`tests/brush-io.test.mjs`** — PNG and JSON round-trips.
 - **`tests/brush-determinism.test.mjs`** — the same seed produces byte-identical
-  output across two runs, for scatter and jitter.
+  output across two runs, for scatter, jitter and `rotateJitter`; and
+  re-rasterizing a prefix of a stroke reproduces that prefix exactly, which is
+  the property shape-tool previews depend on.
+- **`tests/brush-transform.test.mjs`** — quarter turns and flips are lossless:
+  rotating a mask four times returns the original bitmap, and every rotation
+  preserves the set-pixel count exactly.
+- **`tests/brush-pressure.test.mjs`** — pressure maps to integer outputs across
+  the range and all three curves, and is **ignored entirely** when
+  `pointerType` is not `'pen'`.
+- **`tests/brush-manager-history.test.mjs`** — the manager's local
+  `CommandStack` undoes and redoes each brush edit kind, and never touches
+  project history.
 
 Two **invariant tests** carry most of the safety value:
 
@@ -344,7 +471,10 @@ Two **invariant tests** carry most of the safety value:
 
 ## Out of scope
 
-- Brush rotation and flipping. Worth adding later; not needed for a first cut.
-- Pressure sensitivity. No tablet input path exists in the app today.
+- **Arbitrary-angle brush rotation.** Quarter turns and flips are in; free
+  rotation is excluded on purpose, because resampling a 1-bit mask destroys
+  the crisp pixel shape that is the point of the tool.
 - Per-brush blend modes beyond the inks listed here.
 - Animated or multi-frame brushes.
+- Pressure targets beyond size, opacity and shade-step (e.g. pressure-driven
+  scatter or spacing).
