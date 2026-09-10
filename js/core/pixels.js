@@ -26,8 +26,17 @@ export function setPixel(bmp, x, y, rgba) {
 // A write goes through the ink when one is supplied, and straight to the
 // bitmap otherwise. Keeping the fallback here means every existing caller --
 // layer compositing in model.js, snapping in pixelSnapper.js -- is unchanged.
+//
+// `rgba` is handed to the ink as its SOURCE COLOUR rather than dropped. A
+// primitive can vary the colour across its own geometry -- drawRect and
+// drawEllipse paint an outline in `rgba` and an interior in `filled` -- and
+// an ink that has no colour of its own to insist on (solid, dither, replace,
+// lock-alpha, stamp) must honour that, or a two-colour filled shape collapses
+// to a single flat colour. An ink is still free to ignore it: ramp-shade
+// derives its output from the destination pixel, so a source colour is
+// meaningless there.
 function put(bmp, x, y, rgba, ink) {
-  if (ink) ink.write(bmp, x, y);
+  if (ink) ink.write(bmp, x, y, rgba);
   else setPixel(bmp, x, y, rgba);
 }
 
@@ -171,6 +180,12 @@ export function softFloodFill(bmp, x, y, rgba, {
       // would invent colours outside the palette, which is the one thing this
       // editor exists to prevent.
       if (strength < 0.5) return;
+      // Deliberately no source colour (unlike `put`, which forwards `rgba`).
+      // This primitive has two candidate colours -- `rgba` and, in erase mode,
+      // the transparent `target` -- and picking between them is a behaviour
+      // question about what soft-flood ERASE should do under an ink, not part
+      // of threading the caller's colour through. The ink paints its own
+      // primary here, exactly as it did before.
       ink.write(bmp, px, py);
       // Bounds grow for every pixel OFFERED to the ink, not only those it
       // chose to paint -- same reasoning as floodFill's: the caller uses this

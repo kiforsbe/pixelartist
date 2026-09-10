@@ -19,7 +19,7 @@
 import { getEditorHost } from '../../host/runtime.js';
 import { activeSheet, activeLayer } from '../../host/document-helpers.js';
 import {
-  cloneBitmap, stamp, drawLine, drawRect, drawEllipse, floodFill, softFloodFill,
+  cloneBitmap, stamp, drawRect, drawEllipse, floodFill, softFloodFill,
   copyRegion, blitRegion, fillRegion, getPixel,
 } from '../../core/pixels.js';
 import { makePixelPatch } from '../../core/commands.js';
@@ -109,11 +109,19 @@ function activeBrush() {
 
 // Fill tools ink a single click, so they build their own ink with a fresh
 // seed rather than borrowing a stroke's.
-function strokeInk(ev, color, seed = newStrokeSeed()) {
+//
+// `origin` is the sheet-space position of the bitmap this ink will paint
+// into. It is (0,0) for anything painting straight onto a layer, but the fill
+// tools flood a detached copy of the target region whose own origin is (0,0),
+// and the ink's dither/jitter patterns must stay anchored to the SHEET or a
+// bucket fill at an odd offset comes out in the opposite dither phase from a
+// pencil stroke over the same pixels.
+function strokeInk(ev, color, origin = null, seed = newStrokeSeed()) {
   return makeInk(activeBrush(), {
     primary: color, secondary: drawingSettings().secondary,
     palette: activePalette(), seed, alt: ev?.altKey,
     pressure: ev?.pressure, pointerType: ev?.pointerType,
+    originX: origin?.x ?? 0, originY: origin?.y ?? 0,
   });
 }
 
@@ -303,7 +311,8 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const t = getTargetRect(ev.x, ev.y);
       if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
       const sub = copyRegion(layer.bitmap, t.x, t.y, t.w, t.h);
-      const r = floodFill(sub, ev.x - t.x, ev.y - t.y, color, toolOptions.contiguous, strokeInk(ev, color));
+      // `sub` is origin-(0,0), so the ink is told where it really sits.
+      const r = floodFill(sub, ev.x - t.x, ev.y - t.y, color, toolOptions.contiguous, strokeInk(ev, color, t));
       let dirty = null;
       if (r) {
         blitRegion(layer.bitmap, sub, t.x, t.y);
@@ -321,10 +330,11 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
       const sub = copyRegion(layer.bitmap, t.x, t.y, t.w, t.h);
       const sfColor = currentColor(ev, false, true);
+      // `sub` is origin-(0,0), so the ink is told where it really sits.
       const r = softFloodFill(sub, ev.x - t.x, ev.y - t.y, sfColor, {
         ...toolOptions.softFlood,
         mode: ev.buttons & 2 ? 'erase' : 'fill',
-      }, strokeInk(ev, sfColor));
+      }, strokeInk(ev, sfColor, t));
       let dirty = null;
       if (r) {
         blitRegion(layer.bitmap, sub, t.x, t.y);
@@ -351,7 +361,11 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       for (const s of strokeStamps([p], brush.mask, seed)) {
         const g = maskGridFor({ ...brush.mask, size }, { rotate: s.rotate });
         stamp(layer.bitmap, s.x, s.y, color, size, ink, g);
-        const b = strokeBounds(s.x, s.y, g.width, g.height, brush.mask.scatter);
+        // Scatter is NOT re-applied here: `s.x, s.y` is the SCATTERED position
+        // -- strokeStamps already moved it -- so widening again would double
+        // the box and make maskOutsideTarget rescan ~(2*scatter)^2 extra
+        // pixels per stamp for nothing.
+        const b = strokeBounds(s.x, s.y, g.width, g.height, 0);
         maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, target);
         dirty = extend(dirty, b.x0, b.y0, b.x1, b.y1);
       }
@@ -404,7 +418,11 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       for (const s of strokeStamps([last, p], brush.mask, seed, stroke.travelled)) {
         const g = maskGridFor({ ...brush.mask, size }, { rotate: s.rotate });
         stamp(layer.bitmap, s.x, s.y, color, size, ink, g);
-        const b = strokeBounds(s.x, s.y, g.width, g.height, brush.mask.scatter);
+        // Scatter is NOT re-applied here: `s.x, s.y` is the SCATTERED position
+        // -- strokeStamps already moved it -- so widening again would double
+        // the box and make maskOutsideTarget rescan ~(2*scatter)^2 extra
+        // pixels per stamp for nothing.
+        const b = strokeBounds(s.x, s.y, g.width, g.height, 0);
         maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, stroke.target);
         stroke.dirty = extend(stroke.dirty, b.x0, b.y0, b.x1, b.y1);
       }
@@ -431,15 +449,31 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       });
       const a = stroke.anchor;
       if (tool === 'line') {
+        // The line is STAMPED, exactly the way the freehand branch stamps a
+        // pointer segment -- drawLine's own walk puts one stamp on every pixel
+        // of the Bresenham path, which silently discards the brush's spacing,
+        // scatter and rotate jitter and drew a solid straight line from a
+        // brush that dots and scatters under the pencil.
+        //
+        // startDistance stays 0 because a shape tool re-rasterizes the WHOLE
+        // line from its anchor on every pointer move. strokeStamps indexes a
+        // stamp's randomness by its ordinal along the path and nothing else,
+        // so recomputing from 0 makes a shorter preview byte-identical to the
+        // same prefix of the final line -- the line does not reshuffle under
+        // the cursor as it is dragged out (brush-stroke.js:3-12).
         const size = effectiveMaskSize(stroke.brush, ev.pressure, ev.pointerType);
-        const g = maskGridFor({ ...stroke.brush.mask, size }, {});
-        drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, size, stroke.ink, g);
-        const bA = strokeBounds(a.x, a.y, g.width, g.height, stroke.brush.mask.scatter);
-        const bP = strokeBounds(p.x, p.y, g.width, g.height, stroke.brush.mask.scatter);
-        const x0 = Math.min(bA.x0, bP.x0), y0 = Math.min(bA.y0, bP.y0);
-        const x1 = Math.max(bA.x1, bP.x1), y1 = Math.max(bA.y1, bP.y1);
-        maskOutsideTarget(layer.bitmap, before, x0, y0, x1, y1, stroke.target);
-        stroke.dirty = extend(stroke.dirty, x0, y0, x1, y1);
+        for (const s of strokeStamps([a, p], stroke.brush.mask, stroke.seed)) {
+          const g = maskGridFor({ ...stroke.brush.mask, size }, { rotate: s.rotate });
+          stamp(layer.bitmap, s.x, s.y, color, size, stroke.ink, g);
+          // Per-stamp bounds, and no scatter widening: `s.x, s.y` is already
+          // the scattered position. The endpoint-union box this replaced DID
+          // need the widening -- it was centred on the unscattered anchor and
+          // pointer, so scatter reach was the only thing accounting for where
+          // stamps could actually land.
+          const b = strokeBounds(s.x, s.y, g.width, g.height, 0);
+          maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, stroke.target);
+          stroke.dirty = extend(stroke.dirty, b.x0, b.y0, b.x1, b.y1);
+        }
       } else if (tool === 'rect') {
         drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill, stroke.ink);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));

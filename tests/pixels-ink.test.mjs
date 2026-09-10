@@ -5,9 +5,20 @@ import { createBitmap, getPixel, setPixel, drawLine, drawRect, drawEllipse, floo
 const RED = [255, 0, 0, 255], GREEN = [0, 255, 0, 255];
 
 // A recording ink that writes green and logs every coordinate it is given.
+// `sources` records the SOURCE COLOUR each write was offered, which is how a
+// primitive that varies colour across its own geometry (drawRect's outline vs
+// interior, and later the stamp ink's per-pixel payload) reaches an ink.
 function spyInk() {
-  const seen = [];
-  return { seen, write(bmp, x, y) { seen.push(`${x},${y}`); setPixel(bmp, x, y, GREEN); } };
+  const seen = [], sources = [];
+  return {
+    seen,
+    sources,
+    write(bmp, x, y, srcColor) {
+      seen.push(`${x},${y}`);
+      sources.push(srcColor ? srcColor.join() : null);
+      setPixel(bmp, x, y, GREEN);
+    },
+  };
 }
 
 test('drawLine without an ink behaves exactly as before', () => {
@@ -176,17 +187,39 @@ test('drawRect routes its INTERIOR through the ink, not just its border', () => 
   assert.deepEqual([...getPixel(bmp, 1, 1)], GREEN, 'the interior must be written by the ink');
 });
 
-test('a two-colour rect collapses to one ink -- the ink is the colour source', () => {
-  // drawRect takes `filled` as an rgba array for two-colour shapes. Under an
-  // ink both border and interior go through ink.write, which carries its own
-  // colour. That is inherent to the abstraction, not a defect -- pinned here so
-  // it reads as deliberate.
+test('a two-colour rect offers each pixel its own source colour', () => {
+  // drawRect takes `filled` as an rgba array for two-colour shapes, and the
+  // distinction has to survive the ink. `put` used to drop `rgba` whenever an
+  // ink was present, so both branches painted the ink's primary and a filled
+  // rect with a red outline and a blue interior came back solid red. The ink
+  // is still the authority on what actually lands (this spy writes GREEN
+  // regardless) -- but it must be TOLD which colour the caller meant.
   const bmp = createBitmap(8, 8);
   const BLUE = [0, 0, 255, 255];
   const ink = spyInk();
   drawRect(bmp, 0, 0, 3, 3, RED, BLUE, ink);
-  assert.deepEqual([...getPixel(bmp, 0, 0)], GREEN, 'border');
-  assert.deepEqual([...getPixel(bmp, 1, 1)], GREEN, 'interior -- not BLUE');
+  const offered = new Map(ink.seen.map((key, i) => [key, ink.sources[i]]));
+  assert.equal(offered.get('0,0'), RED.join(), 'the border must be offered the outline colour');
+  assert.equal(offered.get('1,1'), BLUE.join(), 'the interior must be offered the fill colour');
+  assert.deepEqual([...getPixel(bmp, 0, 0)], GREEN, 'the ink still decides what lands');
+  assert.deepEqual([...getPixel(bmp, 1, 1)], GREEN);
+});
+
+test('drawLine offers the ink the colour it was called with', () => {
+  // Not just drawRect: threading the caller's colour is a general mechanism.
+  const bmp = createBitmap(8, 8);
+  const ink = spyInk();
+  drawLine(bmp, 0, 0, 2, 0, RED, 1, ink);
+  assert.deepEqual(ink.sources, [RED.join(), RED.join(), RED.join()]);
+});
+
+test('a primitive called without an ink is untouched by the source-colour path', () => {
+  // The no-ink fallback still writes rgba straight to the bitmap.
+  const bmp = createBitmap(8, 8);
+  const BLUE = [0, 0, 255, 255];
+  drawRect(bmp, 0, 0, 3, 3, RED, BLUE);
+  assert.deepEqual([...getPixel(bmp, 0, 0)], RED, 'border');
+  assert.deepEqual([...getPixel(bmp, 1, 1)], BLUE, 'interior');
 });
 
 test('an even-width mask grid anchors top-left-biased, since it has no exact centre', () => {

@@ -21,6 +21,21 @@ export function applyPaletteClosure(palette, rgba) {
   return nearestColor(palette, rgba);
 }
 
+// The single choke point every ink's write passes through, which is exactly
+// why the transparency guard lives here rather than in each ink arm.
+//
+// A fully transparent pixel has no colour. The eraser writes [0,0,0,0], but
+// applyPaletteClosure's nearestColor replaces RGB while PRESERVING alpha, so
+// on an indexed palette an erased pixel came back as a palette entry under
+// alpha 0 -- a transparent *red*. Two things break on that: floodFill's
+// region test is `colorsEqual`, so [255,0,0,0] and a never-drawn [0,0,0,0]
+// read as different colours and a bucket fill stops dead at an erase
+// boundary; and transparent pixels carrying stale RGB fringe when the sheet
+// is exported or scaled.
+function writePixel(bitmap, x, y, rgba) {
+  setPixel(bitmap, x, y, rgba[3] === 0 ? [0, 0, 0, 0] : rgba);
+}
+
 // Integer hash of a pixel's absolute bitmap coordinates into a single
 // stampRandom index. Coordinates are coerced to int32 first (`| 0`) so
 // negative values wrap into a distinct, stable unsigned bit pattern rather
@@ -57,6 +72,19 @@ function blendOver(src, dst, aSrc) {
 export function makeInk(brush, context) {
   const { kind, opacity, jitter, pattern, rampName, replaceColor, trueAlpha } = brush.ink;
   const { primary, secondary, palette, seed, alt } = context;
+  // Screen anchoring for callers that paint into a DETACHED sub-bitmap. The
+  // fill tools copy the target region out to a `sub` whose origin is (0,0),
+  // flood that, and blit it back; without an offset the ink would index the
+  // Bayer cell and the ramp-shade jitter hash from sub-local coordinates, so
+  // the same content filled at an odd x came out with the dither phase
+  // inverted relative to a pencil stroke over the same pixels -- the two
+  // complementary checkerboards then add up to a solid region.
+  //
+  // These are added ONLY where a pattern is indexed. Every actual read and
+  // write (`touched`, getPixel, commit, setPixel) stays in the bitmap's own
+  // coordinates, because that is the bitmap the caller handed us.
+  const originX = context.originX ?? 0;
+  const originY = context.originY ?? 0;
   // Pixels this stroke has already inked, keyed "x,y". This is what makes a
   // stroke idempotent per pixel.
   const touched = new Set();
@@ -86,19 +114,33 @@ export function makeInk(brush, context) {
       out = blendOver(out, dest, aSrc);
     }
     if (keepAlpha) out = [out[0], out[1], out[2], dest[3]];
-    setPixel(bitmap, x, y, applyPaletteClosure(palette, out));
+    writePixel(bitmap, x, y, applyPaletteClosure(palette, out));
   }
 
   return {
     // Pressure changes within a stroke, but the ink must NOT be rebuilt per
     // pointer move -- its `touched` set is stroke-lifetime state (see the
     // header comment).
-    setPressure(p, type) { pressure = p; pointerType = type; },
+    // `p ?? pressure` rather than a bare assignment: a mouse/touch pointer
+    // event carries no `pressure`, and letting that undefined land here would
+    // wipe out makeInk's `?? 1` default and hand pressureValue NaN for the
+    // rest of the stroke.
+    setPressure(p, type) { pressure = p ?? pressure; pointerType = type; },
 
-    write(bitmap, x, y) {
+    // `srcColor` is the colour the CALLER wants painted at this pixel (see
+    // pixels.js `put`). Inks that paint a source colour take it in place of
+    // `primary`; ramp-shade, whose output comes from the destination pixel
+    // and a palette ramp, ignores it.
+    write(bitmap, x, y, srcColor) {
       const key = `${x},${y}`;
       if (touched.has(key)) return;
       touched.add(key);
+
+      // Pattern-space coordinates: bitmap coordinates shifted by the caller's
+      // origin, so a dither stays anchored to the sheet even when the ink is
+      // painting into a detached sub-bitmap. Used for pattern/jitter indexing
+      // ONLY -- never to address a pixel.
+      const px = x + originX, py = y + originY;
 
       // Pressure target 'opacity' overrides the static opacity for this
       // write only; `opacity` itself is a destructured const and is never
@@ -116,18 +158,24 @@ export function makeInk(brush, context) {
       // Opacity is density: the pattern is indexed by bitmap coordinates so
       // separate strokes over one region stay aligned. When `blends` is on,
       // opacity is honored by the alpha blend in `commit` instead.
-      if (!blends && !passesOpacity(x, y, effOpacity)) return;
+      if (!blends && !passesOpacity(px, py, effOpacity)) return;
 
       const dest = getPixel(bitmap, x, y);
       if (!dest) return;
 
+      // The source colour, for the inks that paint one. `??` and not `||`:
+      // a caller may legitimately pass [0,0,0,0] (the eraser does), which is
+      // falsy-adjacent only if you test the array wrong.
+      const src = srcColor ?? primary;
+
       switch (kind) {
         case 'lock-alpha':
           if (dest[3] === 0) return;
-          // primary's own alpha feeds the blend; keepAlpha restores the pixel's
-          // alpha afterwards, so the plain path still writes dest[3] exactly as
-          // it did before.
-          commit(bitmap, x, y, primary, true, effOpacity);
+          // lock-alpha paints a source colour like solid does -- it is the
+          // ALPHA it refuses to touch, not the colour. src's own alpha feeds
+          // the blend; keepAlpha restores the pixel's alpha afterwards, so the
+          // plain path still writes dest[3] exactly as it did before.
+          commit(bitmap, x, y, src, true, effOpacity);
           return;
 
         case 'replace':
@@ -140,16 +188,26 @@ export function makeInk(brush, context) {
           // stray alpha it carries.
           if (dest[3] === 0) return;
           if (dest[0] !== replaceColor[0] || dest[1] !== replaceColor[1] || dest[2] !== replaceColor[2]) return;
-          commit(bitmap, x, y, primary, false, effOpacity);
+          // What replace decides is WHICH pixels get painted, not what colour
+          // goes down, so it honours the source colour like solid does.
+          commit(bitmap, x, y, src, false, effOpacity);
           return;
 
         case 'dither':
-          // Falls back to primary without a secondary, the way stamp falls
-          // back to solid, rather than throwing on an unset swatch.
-          commit(bitmap, x, y, patternPicksSecondary(pattern, x, y) ? (secondary ?? primary) : primary, false, effOpacity);
+          // A two-colour ink: the source colour takes the PRIMARY slot and the
+          // secondary swatch stays the secondary. Substituting src for both
+          // would make every dithered fill solid, which is the opposite of
+          // what this ink is for.
+          // Falls back to the source colour without a secondary, the way stamp
+          // falls back to solid, rather than throwing on an unset swatch.
+          commit(bitmap, x, y, patternPicksSecondary(pattern, px, py) ? (secondary ?? src) : src, false, effOpacity);
           return;
 
         case 'ramp-shade': {
+          // `src` is deliberately unused: this ink writes a NEIGHBOUR of the
+          // destination pixel along a palette ramp. There is no sense in which
+          // a caller-supplied colour could be that neighbour, so honouring one
+          // here would mean abandoning the ramp.
           if (!palette) return;
           // Pressure target 'shade-step' scales the step magnitude: a harder
           // press moves further along the ramp in one write. Floored at 1
@@ -169,26 +227,28 @@ export function makeInk(brush, context) {
             // per-write counter would hand the same pixel a different value
             // each frame and the preview would crawl. This matches how
             // opacity and dither are anchored above.
-            const r = stampRandom(seed, mixCoords(x, y), 'jit');
+            const r = stampRandom(seed, mixCoords(px, py), 'jit');
             delta += Math.round((r * 2 - 1) * jitter);
           }
           if (delta === 0) return;
           const stepped = stepAlongRamp(palette, dest, delta, rampName);
           // A color in no ramp is left alone rather than guessed at.
           if (!stepped) return;
-          setPixel(bitmap, x, y, stepped);
+          writePixel(bitmap, x, y, stepped);
           return;
         }
 
         case 'stamp':
-          // Handled by the stroke layer, which knows the mask's color
-          // payload; falls back to solid if it reaches here.
-          commit(bitmap, x, y, primary, false, effOpacity);
+          // The stamp ink paints the mask's own per-pixel colour payload, and
+          // `srcColor` is precisely how that payload reaches an ink -- so this
+          // arm honours it and falls back to primary (solid) when the caller
+          // supplies nothing.
+          commit(bitmap, x, y, src, false, effOpacity);
           return;
 
         case 'solid':
         default:
-          commit(bitmap, x, y, primary, false, effOpacity);
+          commit(bitmap, x, y, src, false, effOpacity);
       }
     },
   };
