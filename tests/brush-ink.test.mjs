@@ -632,6 +632,21 @@ test('usesSecondary is true for dither and false for every other ink', () => {
   }
 });
 
+test('usesMaskColors is true only for stamp', () => {
+  // Enumerated from INK_KINDS, same as usesSecondary above: a new ink kind
+  // must show up here as a failure rather than being silently assumed not to
+  // want a custom mask's colour payload. Fail-closed either way -- an ink
+  // absent from this expectation table is asserted false, matching
+  // MASK_COLOR_CONSUMING_KINDS's own default for anything it doesn't list.
+  const expected = { stamp: true, solid: false, dither: false, replace: false, 'lock-alpha': false, 'ramp-shade': false };
+  assert.deepEqual([...INK_KINDS].sort(), Object.keys(expected).sort(),
+    'a new ink kind was added -- decide whether it consumes a custom mask\'s colour payload');
+  for (const kind of INK_KINDS) {
+    const brush = normalizeBrush({ ink: { kind, replaceColor: RED } });
+    assert.equal(makeInk(brush, ctx()).usesMaskColors, expected[kind], `usesMaskColors wrong for ${kind}`);
+  }
+});
+
 test('only the ink that actually reads `secondary` reports usesSecondary', () => {
   // Behavioural cross-check on the flag, so it cannot drift away from the
   // code: paint a pixel with the secondary set, then again with a DIFFERENT

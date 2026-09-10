@@ -50,11 +50,16 @@ export function stamp(bmp, x, y, rgba, size, ink = null, grid = null) {
       for (let gx = 0; gx < grid.width; gx++) {
         const i = gy * grid.width + gx;
         if (!grid.bits[i]) continue;
-        // A custom mask's own per-cell colour payload (the `stamp` ink's
-        // stock in trade) travels ON THE GRID, not as a second argument --
-        // see brushes.js's maskGridFor, which is what decides whether a
-        // grid built for a non-stamp ink carries `colors` at all.
-        const color = grid.colors ? (grid.colors[i] ?? rgba) : rgba;
+        // A custom mask's own per-cell colour payload travels ON THE GRID
+        // (see brushes.js's rasterizeMask), which carries it unconditionally
+        // -- a mask does not know or care what ink will paint it. Whether
+        // THIS ink actually wants it is `ink.usesMaskColors`'s call, not
+        // this function's: only the `stamp` ink claims it (brush-ink.js's
+        // MASK_COLOR_CONSUMING_KINDS), so `solid` and every other ink still
+        // gets the caller's own `rgba` even when the grid has a payload to
+        // offer -- the same mask, reused under a different ink, must paint
+        // that ink's own colour instead of leaking its stored palette.
+        const color = (grid.colors && ink?.usesMaskColors) ? (grid.colors[i] ?? rgba) : rgba;
         put(bmp, x + gx - halfX, y + gy - halfY, color, ink);
       }
     return;

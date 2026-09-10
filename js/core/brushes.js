@@ -286,31 +286,21 @@ export function flipMaskGrid(grid, flipH, flipV) {
 // `options.rotate` is the per-stamp override rotateJitter supplies; it
 // composes with the brush's own static rotation.
 //
-// `options.inkKind` is an OPTIONAL, additive declaration of which ink this
-// grid is being built to paint with. A mask's colour payload (`mask.colors`,
-// carried through rasterizeMask/rotate/flip above) belongs to the `stamp`
-// ink alone -- design doc line 121: "stamp ... writes the custom mask's own
-// colors payload, ignoring primary." Mask and ink are independent axes (see
-// this module's header), so nothing stops the SAME custom mask -- payload
-// and all -- from being reused under `solid` or any other ink, and that
-// combination must paint the ink's own colour, not silently repaint the
-// embedded palette. rasterizeMask/rotateMaskGrid/flipMaskGrid stay
-// unconditional (a mask's colours are its own business, independent of what
-// paints it); this is the one point where "which ink is this for" is known,
-// so it is where the payload is withheld for every ink but stamp.
-// Omitting `inkKind` (every call site that existed before this option was
-// added) leaves colours exactly as the transforms produced them -- this is
-// opt-in, not a behaviour change for an existing caller.
+// A mask's colour payload (`mask.colors`, carried through
+// rasterizeMask/rotate/flip above) is returned unconditionally here --
+// whether the active ink actually wants it is NOT this function's decision.
+// An earlier version of this function withheld `colors` itself based on a
+// caller-supplied ink hint; that failed open (a caller that passed nothing
+// -- every real call site -- kept the payload) and put ink taxonomy in a
+// mask function, which is the same anti-pattern `usesSecondary` exists to
+// avoid one layer over (Ruling 38). The payload is instead withheld at the
+// one place that already knows, per-ink, whether it wants one:
+// brush-ink.js's `ink.usesMaskColors`, consulted by pixels.js's `stamp()`.
 export function maskGridFor(mask, options = {}) {
   let grid = rasterizeMask(mask);
   const rotate = (mask.rotate ?? 0) + (options.rotate ?? 0);
   grid = rotateMaskGrid(grid, rotate);
-  grid = flipMaskGrid(grid, !!mask.flipH, !!mask.flipV);
-  if (grid.colors && options.inkKind !== undefined && options.inkKind !== 'stamp') {
-    const { colors, ...rest } = grid;
-    grid = rest;
-  }
-  return grid;
+  return flipMaskGrid(grid, !!mask.flipH, !!mask.flipV);
 }
 
 // --- pressure -----------------------------------------------------------

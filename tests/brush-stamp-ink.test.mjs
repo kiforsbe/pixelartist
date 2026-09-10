@@ -4,14 +4,21 @@
 // produces `mask.colors` -- the stamp ink's own per-pixel colour payload --
 // but nothing read it. This file exercises the machinery that gives it a
 // consumer: rasterizeMask/rotateMaskGrid/flipMaskGrid carry `colors` on the
-// grid, and pixels.js's `stamp()` forwards the right cell's colour instead of
-// the caller's flat `rgba`.
+// grid unconditionally, and pixels.js's `stamp()` forwards the right cell's
+// colour instead of the caller's flat `rgba` -- but ONLY when the active ink
+// actually claims the payload (`ink.usesMaskColors`, brush-ink.js).
 //
-// A custom mask's colour payload belongs to `stamp` alone (mask and ink are
-// independent axes -- brushes.js's header comment); the SAME mask reused
-// under any other ink must paint that ink's own colour, not the embedded
-// palette. `maskGridFor`'s optional `options.inkKind` is what withholds the
-// payload for every ink but stamp -- see its comment in brushes.js.
+// Fix round 1: an earlier version of this file gated the payload in
+// `maskGridFor` via an `options.inkKind` hint. That failed open -- every real
+// call site in drawing-engine.js passes no hint, so the payload leaked into
+// every ink there by default -- and put ink taxonomy in a mask function
+// (the same anti-pattern `usesSecondary` exists to avoid, per Ruling 38).
+// `maskGridFor` now always returns a mask's colours unconditionally (mask and
+// ink are independent axes; a mask does not know or care what will paint it),
+// and the decision moved to the one place that already knows, per ink,
+// whether it wants the payload: `ink.usesMaskColors`. This is fail-closed --
+// an ink absent from brush-ink.js's MASK_COLOR_CONSUMING_KINDS, including one
+// added later, cannot receive the payload no matter how the grid was built.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,12 +52,21 @@ function rgbBrush(inkOverride) {
   return normalizeBrush({ ...base, ...(inkOverride ? { ink: inkOverride } : {}) });
 }
 
+// `{ rotate: 0 }` mirrors drawing-engine.js's actual call shape
+// (`maskGridFor({ ...brush.mask, size }, { rotate: s.rotate })` at lines 360,
+// 449, 496) -- there is no ink hint to pass any more, so every test in this
+// file already exercises the live call shape, not a hypothetical one.
+function liveGrid(mask) {
+  return maskGridFor(mask, { rotate: 0 });
+}
+
 test('a stamp-ink custom brush paints its own red/green/blue payload, not primary', () => {
   const brush = rgbBrush({ kind: 'stamp' });
-  const grid = maskGridFor(brush.mask, { inkKind: brush.ink.kind });
-  assert.ok(grid.colors, 'grid must carry the payload for a stamp-ink brush');
-  const bmp = createBitmap(10, 10);
+  const grid = liveGrid(brush.mask);
+  assert.ok(grid.colors, 'grid must carry the payload -- rasterizeMask attaches it unconditionally');
   const ink = makeInk(brush, ctx());
+  assert.equal(ink.usesMaskColors, true, 'stamp ink must claim the mask colour payload');
+  const bmp = createBitmap(10, 10);
   stamp(bmp, 5, 5, PRIMARY, 1, ink, grid);
   assert.deepEqual([...getPixel(bmp, 4, 5)], RED, 'first cell must be the payload red, not primary');
   assert.deepEqual([...getPixel(bmp, 5, 5)], GREEN, 'second cell must be the payload green, not primary');
@@ -60,12 +76,12 @@ test('a stamp-ink custom brush paints its own red/green/blue payload, not primar
 test('mask.rotate: 90 rotates the payload WITH the shape, not independently of it', () => {
   const brush = rgbBrush({ kind: 'stamp' });
   const rotated = normalizeBrush({ ...brush, mask: { ...brush.mask, rotate: 90 } });
-  const grid = maskGridFor(rotated.mask, { inkKind: rotated.ink.kind });
+  const grid = liveGrid(rotated.mask);
   // A 3x1 grid rotated 90 degrees clockwise becomes 1x3.
   assert.equal(grid.width, 1);
   assert.equal(grid.height, 3);
-  const bmp = createBitmap(10, 10);
   const ink = makeInk(rotated, ctx());
+  const bmp = createBitmap(10, 10);
   stamp(bmp, 5, 5, PRIMARY, 1, ink, grid);
   const halfY = (grid.height - 1) >> 1;
   assert.deepEqual([...getPixel(bmp, 5, 5 - halfY)], RED, 'top cell after rotation must still be red');
@@ -84,9 +100,9 @@ test('a stamp brush on a palette lacking its colours writes the nearest palette 
   setPixel(src, 2, 0, OFF_C);
   const base = bitmapToBrush(src, 'Off');
   const brush = normalizeBrush({ ...base, ink: { kind: 'stamp' } });
-  const grid = maskGridFor(brush.mask, { inkKind: brush.ink.kind });
-  const bmp = createBitmap(10, 10);
+  const grid = liveGrid(brush.mask);
   const ink = makeInk(brush, ctx({ palette, primary: [222, 111, 5, 255] }));
+  const bmp = createBitmap(10, 10);
   stamp(bmp, 5, 5, [222, 111, 5, 255], 1, ink, grid);
 
   const entries = palette.colors.map(c => `${c[0]},${c[1]},${c[2]}`);
@@ -103,28 +119,30 @@ test('a stamp brush on a palette lacking its colours writes the nearest palette 
   assert.ok(new Set([a, b, c].map(p => p.join())).size === 3, 'all three cells closed to the same entry');
 });
 
-test('solid ink on the SAME custom mask with a colors payload still paints primary -- the payload must not leak', () => {
-  const brush = rgbBrush({ kind: 'solid' });
-  const grid = maskGridFor(brush.mask, { inkKind: brush.ink.kind });
-  assert.equal(grid.colors, undefined, 'a grid built for solid ink must not carry the stamp payload');
-  const bmp = createBitmap(10, 10);
+// --- Fix round 1: the leak closes at the ink, not the grid -----------------
+//
+// This inverts the old "leaky" test from before the fix. A solid-ink custom
+// brush is the DEFAULT shape `bitmapToBrush` produces (it sets no `ink`
+// field, and normalizeInk defaults to `solid`), and `liveGrid` above is
+// EXACTLY the call shape drawing-engine.js uses -- no ink hint, because there
+// is nowhere left to pass one. Before this fix, painting this exact
+// combination through `stamp()` produced [255,0,0,255] [0,255,0,255]
+// [0,0,255,255] -- the payload -- where solid ink should give primary three
+// times. That was the live app's behaviour, not a hypothetical.
+
+test('a solid-ink custom brush, built by bitmapToBrush and painted through the drawing engine\'s exact call shape, paints primary -- the payload must not leak', () => {
+  const brush = rgbBrush(); // no ink override: exercises normalizeInk's actual default
+  assert.equal(brush.ink.kind, 'solid', 'bitmapToBrush must still default to solid ink, or this test is not the real scenario');
+  const grid = liveGrid(brush.mask);
+  // Baseline: the grid genuinely carries the payload (rasterizeMask attaches
+  // it unconditionally), so the "no leak" assertions below are pinned against
+  // an ink that had real ammunition to leak, not an empty one.
+  assert.ok(grid.colors, 'baseline: the grid must actually carry the payload, or "no leak" below proves nothing');
   const ink = makeInk(brush, ctx());
+  assert.equal(ink.usesMaskColors, false, 'solid ink must not claim the mask colour payload');
+  const bmp = createBitmap(10, 10);
   stamp(bmp, 5, 5, PRIMARY, 1, ink, grid);
   assert.deepEqual([...getPixel(bmp, 4, 5)], PRIMARY, 'solid must paint primary, not the payload red');
   assert.deepEqual([...getPixel(bmp, 5, 5)], PRIMARY, 'solid must paint primary, not the payload green');
   assert.deepEqual([...getPixel(bmp, 6, 5)], PRIMARY, 'solid must paint primary, not the payload blue');
-
-  // Anti-vacuity, required by the task's verification discipline: prove what
-  // "the mechanism is absent" looks like. A grid built WITHOUT declaring
-  // inkKind (every call site that predates this option) keeps the payload
-  // attached regardless of ink -- the exact leak this test guards against --
-  // so painting through IT must reproduce red/green/blue, not primary. If it
-  // didn't, the assertions above would not be discriminating anything.
-  const leaky = maskGridFor(brush.mask, {});
-  assert.ok(leaky.colors, 'a grid built without inkKind must still carry the payload (baseline)');
-  const leakyBmp = createBitmap(10, 10);
-  stamp(leakyBmp, 5, 5, PRIMARY, 1, makeInk(brush, ctx()), leaky);
-  assert.deepEqual([...getPixel(leakyBmp, 4, 5)], RED, 'baseline: an ink-unaware grid leaks the payload');
-  assert.deepEqual([...getPixel(leakyBmp, 5, 5)], GREEN, 'baseline: an ink-unaware grid leaks the payload');
-  assert.deepEqual([...getPixel(leakyBmp, 6, 5)], BLUE, 'baseline: an ink-unaware grid leaks the payload');
 });

@@ -89,6 +89,39 @@ function blendOver(src, dst, aSrc) {
 //                      confuse with "reads the secondary swatch".
 const SECONDARY_CONSUMING_KINDS = new Set(['dither']);
 
+// Ink kinds that consume a CUSTOM MASK's own per-cell colour payload (the
+// `colors` a custom mask's grid may carry -- see brushes.js's rasterizeMask
+// and pixels.js's stamp()) instead of the caller's flat source colour.
+//
+// This lives here, and is exposed on the ink as `usesMaskColors`, for exactly
+// the reason SECONDARY_CONSUMING_KINDS does: a caller (pixels.js's stamp())
+// must not switch on `kind` to decide whether to honour the payload, because
+// that taxonomy rots the moment a seventh ink is added. A brush's mask and
+// ink are independent axes (brushes.js's header comment), so the SAME custom
+// mask -- payload and all -- can be reused under any ink: `bitmapToBrush`
+// itself hands a fresh custom-mask brush `solid` ink by default. Without this
+// flag, and with grid.colors carried unconditionally (rasterizeMask does not
+// know or care what ink will paint it), stamp() had no way to tell "the
+// active ink wants this payload" from "the active ink has never heard of it"
+// -- so every ink, `solid` included, painted the embedded palette instead of
+// its own colour. Fail-closed by construction: an ink absent from this set
+// (including any added later by someone who never reads this comment) simply
+// cannot receive the payload.
+//
+// Verified against every arm of `write`, not assumed:
+//   stamp       YES -- this is the whole point of the ink (design doc line
+//                      121: "stamp ... writes the custom mask's own colors
+//                      payload, ignoring primary").
+//   solid       no  -- paints the source colour it is handed by its caller,
+//                      never a mask's own stored palette.
+//   dither      no  -- alternates the source colour with the secondary swatch;
+//                      a mask's per-cell colour is not either of those.
+//   replace     no  -- `replaceColor` gates WHICH pixels; the colour is `src`.
+//   lock-alpha  no  -- paints `src`, pinning only the destination's alpha.
+//   ramp-shade  no  -- its output is a RAMP NEIGHBOUR of the destination
+//                      pixel, not a stored colour of any kind.
+const MASK_COLOR_CONSUMING_KINDS = new Set(['stamp']);
+
 // THE ERASE RULE, half one: WHICH inks can carry out an erase.
 //
 // The eraser tool's colour is the fully transparent [0,0,0,0]
@@ -208,6 +241,12 @@ export function makeInk(brush, context) {
     // give way, because there are only two swatches and no third colour to
     // break the tie with. See drawing-engine.js's `fill`.
     usesSecondary: SECONDARY_CONSUMING_KINDS.has(kind),
+
+    // True when this ink claims a custom mask's own per-cell colour payload
+    // as one of its own colours -- see MASK_COLOR_CONSUMING_KINDS above.
+    // pixels.js's stamp() consults this before ever reading `grid.colors`, so
+    // the payload cannot reach an ink that has not claimed it.
+    usesMaskColors: MASK_COLOR_CONSUMING_KINDS.has(kind),
 
     // Pressure changes within a stroke, but the ink must NOT be rebuilt per
     // pointer move -- its `touched` set is stroke-lifetime state (see the
