@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBitmap, getPixel, setPixel, drawLine, drawRect, drawEllipse, floodFill } from '../js/core/pixels.js';
+import { createBitmap, getPixel, setPixel, drawLine, drawRect, drawEllipse, floodFill, softFloodFill } from '../js/core/pixels.js';
 
 const RED = [255, 0, 0, 255], GREEN = [0, 255, 0, 255];
 
@@ -109,4 +109,49 @@ test('floodFill with a skipping ink offers every pixel of the region exactly onc
   floodFill(bmp, 0, 0, RED, true, ink);
   assert.equal(seen.length, 64, 'every pixel of the empty 8x8 region should be offered to the ink');
   assert.equal(new Set(seen).size, 64, 'no coordinate should be offered to the ink twice');
+});
+
+// --- softFloodFill ink hook (Ruling 25) ------------------------------------
+
+test('softFloodFill without an ink blends exactly as it always has', () => {
+  const bmp = createBitmap(4, 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(bmp, x, y, [0, 0, 0, 255]);
+  softFloodFill(bmp, 0, 0, [255, 255, 255, 255], { tolerance: 255 });
+  assert.deepEqual([...getPixel(bmp, 2, 2)], [255, 255, 255, 255]);
+});
+
+test('softFloodFill routes through an ink when given one', () => {
+  const bmp = createBitmap(4, 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(bmp, x, y, [0, 0, 0, 255]);
+  const ink = spyInk();
+  softFloodFill(bmp, 0, 0, [255, 255, 255, 255], { tolerance: 255 }, ink);
+  assert.equal(ink.seen.length, 16, 'every pixel in tolerance should be offered to the ink');
+  assert.deepEqual([...getPixel(bmp, 2, 2)], GREEN, 'the ink decides the colour, not rgba');
+});
+
+test('an ink turns feather into a hard threshold instead of a blend', () => {
+  // Two pixels: one well inside tolerance (strength 1), one out past the
+  // feather band (strength 0). With an ink neither may come back part-blended.
+  const bmp = createBitmap(4, 1);
+  setPixel(bmp, 0, 0, [0, 0, 0, 255]);
+  setPixel(bmp, 1, 0, [10, 10, 10, 255]);
+  setPixel(bmp, 2, 0, [200, 200, 200, 255]);
+  setPixel(bmp, 3, 0, [255, 255, 255, 255]);
+  const ink = spyInk();
+  softFloodFill(bmp, 0, 0, [255, 0, 0, 255], { tolerance: 20, feather: 100 }, ink);
+  for (const x of [0, 1, 2, 3]) {
+    const p = [...getPixel(bmp, x, 0)];
+    const untouched = p[0] === p[1] && p[1] === p[2];
+    assert.ok(p.join() === GREEN.join() || untouched,
+      `pixel ${x} came back part-blended (${p}) -- an ink must never produce an in-between colour`);
+  }
+});
+
+test('softFloodFill with a skipping ink still terminates', () => {
+  const bmp = createBitmap(16, 16);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) setPixel(bmp, x, y, [0, 0, 0, 255]);
+  let offered = 0;
+  const ink = { write(b, x, y) { offered++; if (offered > 4096) throw new Error('runaway traversal'); if (x % 2 === 0 && y % 2 === 0) setPixel(b, x, y, GREEN); } };
+  softFloodFill(bmp, 0, 0, [255, 255, 255, 255], { tolerance: 255 }, ink);
+  assert.equal(offered, 256, 'each pixel offered exactly once');
 });

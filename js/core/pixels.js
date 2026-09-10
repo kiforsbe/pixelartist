@@ -140,7 +140,7 @@ export function floodFill(bmp, x, y, rgba, contiguous = true, ink = null) {
 // Fill blends toward `rgba`; erase blends toward transparent black.
 export function softFloodFill(bmp, x, y, rgba, {
   mode = 'fill', tolerance = 0, feather = 0, contiguous = true,
-} = {}) {
+} = {}, ink = null) {
   const seed = getPixel(bmp, x, y);
   if (!seed) return null;
   const source = new Uint8ClampedArray(bmp.data);
@@ -164,6 +164,18 @@ export function softFloodFill(bmp, x, y, rgba, {
     return (edge - dist) / f;
   };
   const apply = (px, py, strength) => {
+    if (ink) {
+      // An ink writes hard, palette-safe pixels and has no notion of partial
+      // coverage, so under one the feather stops blending and becomes a
+      // threshold -- the usual way to binarize a coverage mask. Blending here
+      // would invent colours outside the palette, which is the one thing this
+      // editor exists to prevent.
+      if (strength < 0.5) return;
+      ink.write(bmp, px, py);
+      minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+      minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+      return;
+    }
     const p = sourcePixel(px, py);
     const out = p.map((v, i) => Math.round(v + (target[i] - v) * strength));
     if (colorsEqual(p, out)) return;
