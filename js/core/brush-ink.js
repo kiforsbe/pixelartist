@@ -26,8 +26,14 @@ export function applyPaletteClosure(palette, rgba) {
 // than behaving oddly under Math.imul; the xor/imul mix keeps neighbouring
 // pixels from colliding in any structured way. Integer math only -- this
 // runs per pixel in the paint loop.
+// The two terms are combined with + rather than ^. Math.imul(-x, A) is
+// -Math.imul(x, A) mod 2^32, and (-p) ^ (-q) equals p ^ q whenever p and q
+// share their lowest set bit -- so an xor here collided mix(x, y) with
+// mix(-x, -y) for a third of all coordinate pairs. Addition drops that to
+// noise. In-bounds coordinates never reach the negative half today, so this
+// is a latent trap rather than a live bug, but it costs nothing to close.
 function mixCoords(x, y) {
-  let h = Math.imul(x | 0, 0x27d4eb2f) ^ Math.imul(y | 0, 0x85ebca6b);
+  let h = (Math.imul(x | 0, 0x27d4eb2f) + Math.imul(y | 0, 0x85ebca6b)) | 0;
   h = Math.imul(h ^ (h >>> 15), 0xc2b2ae35);
   return (h ^ (h >>> 13)) >>> 0;
 }
