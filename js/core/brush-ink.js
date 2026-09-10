@@ -89,6 +89,58 @@ function blendOver(src, dst, aSrc) {
 //                      confuse with "reads the secondary swatch".
 const SECONDARY_CONSUMING_KINDS = new Set(['dither']);
 
+// THE ERASE RULE, half one: WHICH inks can carry out an erase.
+//
+// The eraser tool's colour is the fully transparent [0,0,0,0]
+// (drawing-engine.js `currentColor`), and every tool now paints through an
+// ink, so every ink can be handed it. A fully transparent source colour is
+// not a colour: it is an instruction to REMOVE one. So an ink handed an erase
+// may erase a pixel or leave it alone, and may never write a coloured or an
+// opaque value. Half two -- what an erase actually writes -- is settled once
+// in `commit`, which is the only place a value reaches the bitmap.
+//
+// A set, for the same reason SECONDARY_CONSUMING_KINDS is one: this is ink
+// taxonomy, and a seventh ink should have to answer the question here rather
+// than inherit whatever answer its branch happens to fall into.
+//
+// Decided against the code of every arm, not assumed:
+//   solid       YES -- writes the source colour, so a transparent one clears.
+//   stamp       YES -- same; a mask's colour payload may legitimately be
+//                      "nothing", and this is how a stamped erase works.
+//   replace     YES -- it gates WHICH pixels are written, never what value
+//                      goes down, so an erase removes exactly the pixels
+//                      matching replaceColor. (This arm reads as a no-op under
+//                      the default replaceColor of null; that is the guard at
+//                      the top of the arm, not a property of erasing.)
+//   dither      YES -- but on the source-colour phase only. See its arm: with
+//                      no second colour to alternate with, the pattern
+//                      degrades to a density mask. Without that, a "feathered
+//                      erase" removed half the region and PAINTED THE
+//                      SECONDARY SWATCH over the other half.
+//   lock-alpha  no  -- pinning the destination's alpha and clearing it are
+//                      contradictory intents; refusing is more honest than
+//                      guessing which one the user meant. Concretely, without
+//                      this the erase sentinel's RGB [0,0,0] closed to the
+//                      palette's darkest entry under the destination's own
+//                      alpha, so the ERASER FILLED THE REGION SOLID BLACK.
+//   ramp-shade  no  -- it ignores the source colour entirely and writes a ramp
+//                      NEIGHBOUR of the destination, so an erase would come
+//                      out as an opaque shade. Worth stating because this arm
+//                      LOOKS like a no-op when probed with a colour that lies
+//                      in no ramp -- stepAlongRamp returns null and the arm
+//                      bails. Over a real ramp it is not a no-op at all: an
+//                      eraser would have shaded the region one step lighter.
+const ERASE_CAPABLE_KINDS = new Set(['solid', 'stamp', 'replace', 'dither']);
+
+// A source colour of "nothing". The eraser's sentinel; see ERASE_CAPABLE_KINDS.
+// Alpha alone decides, rather than an exact match against [0,0,0,0]: a
+// transparent pixel has no colour, so its RGB carries no information, and a
+// source colour that was SAMPLED from a bitmap rather than handed down from a
+// swatch can arrive as stale RGB under alpha 0.
+function isErase(rgba) {
+  return rgba[3] === 0;
+}
+
 export function makeInk(brush, context) {
   const { kind, opacity, jitter, pattern, rampName, replaceColor, trueAlpha } = brush.ink;
   const { primary, secondary, palette, seed, alt } = context;
@@ -127,6 +179,18 @@ export function makeInk(brush, context) {
   // `effOpacity` is the per-write opacity computed in `write` below -- the
   // brush's static opacity unless pressure target 'opacity' overrides it.
   function commit(bitmap, x, y, rgba, keepAlpha = false, effOpacity = opacity) {
+    // THE ERASE RULE, half two: what an erase WRITES. Settled here, at the one
+    // choke point every value passes through, and ahead of both steps below --
+    // each of which destroys the intent in its own way:
+    //   - the trueAlpha blend composites TOWARD alpha 0, so aSrc is 0 and
+    //     blendOver returns the destination untouched. An erase expressed as a
+    //     blend is a no-op by construction; it has to be recognised before it.
+    //   - keepAlpha restores the destination's alpha over the result, which is
+    //     precisely how lock-alpha turned an erase into an opaque black fill.
+    // Palette closure is skipped for the same reason writePixel normalises an
+    // alpha-0 result: there is no colour here for nearestColor to snap, only
+    // stale RGB for it to invent.
+    if (isErase(rgba)) { writePixel(bitmap, x, y, [0, 0, 0, 0]); return; }
     const dest = getPixel(bitmap, x, y);
     let out = rgba;
     if (blends) {
@@ -195,8 +259,20 @@ export function makeInk(brush, context) {
       // falsy-adjacent only if you test the array wrong.
       const src = srcColor ?? primary;
 
+      // THE ERASE RULE, half one (see ERASE_CAPABLE_KINDS): a transparent
+      // source colour is an erase, and an ink that cannot express one declines
+      // the pixel here rather than inventing a colour for it further down.
+      // Leaving the pixel alone is a permitted answer; writing an opaque or
+      // coloured value is not.
+      const erasing = isErase(src);
+      if (erasing && !ERASE_CAPABLE_KINDS.has(kind)) return;
+
       switch (kind) {
         case 'lock-alpha':
+          // Note the two are different rules and both are needed. This one is
+          // about a transparent DESTINATION: there is no alpha worth
+          // preserving, so there is nothing to paint into. The rule above is
+          // about a transparent SOURCE, and this arm declines that outright.
           if (dest[3] === 0) return;
           // lock-alpha paints a source colour like solid does -- it is the
           // ALPHA it refuses to touch, not the colour. src's own alpha feeds
@@ -220,21 +296,35 @@ export function makeInk(brush, context) {
           commit(bitmap, x, y, src, false, effOpacity);
           return;
 
-        case 'dither':
+        case 'dither': {
           // A two-colour ink: the source colour takes the PRIMARY slot and the
           // secondary swatch stays the secondary. Substituting src for both
           // would make every dithered fill solid, which is the opposite of
           // what this ink is for.
           // Falls back to the source colour without a secondary, the way stamp
           // falls back to solid, rather than throwing on an unset swatch.
-          commit(bitmap, x, y, patternPicksSecondary(pattern, px, py) ? (secondary ?? src) : src, false, effOpacity);
+          const picksSecondary = patternPicksSecondary(pattern, px, py);
+          // The erase rule's one per-kind consequence, and the only thing an
+          // arm gets to decide: WHICH pixels an erase touches. There is no
+          // second colour to alternate an erase with -- "remove this pixel" has
+          // no opposite the secondary swatch could stand in for -- so the
+          // pattern stops being a two-colour split and becomes a density mask,
+          // exactly as opacity already is. The secondary phase declines.
+          // Without this the off-phase went on painting the secondary, so a
+          // feathered erase removed half the region and PAINTED the other half.
+          if (erasing && picksSecondary) return;
+          commit(bitmap, x, y, picksSecondary ? (secondary ?? src) : src, false, effOpacity);
           return;
+        }
 
         case 'ramp-shade': {
           // `src` is deliberately unused: this ink writes a NEIGHBOUR of the
           // destination pixel along a palette ramp. There is no sense in which
           // a caller-supplied colour could be that neighbour, so honouring one
-          // here would mean abandoning the ramp.
+          // here would mean abandoning the ramp. That is also why an erase
+          // never reaches this arm (see ERASE_CAPABLE_KINDS): ignoring the
+          // source colour is fine when it names a colour and wrong when it
+          // means "no colour at all".
           if (!palette) return;
           // Pressure target 'shade-step' scales the step magnitude: a harder
           // press moves further along the ramp in one write. Floored at 1

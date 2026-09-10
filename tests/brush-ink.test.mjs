@@ -659,3 +659,192 @@ test('only the ink that actually reads `secondary` reports usesSecondary', () =>
       `${kind}: usesSecondary says ${makeInk(brush, ctx()).usesSecondary} but it ${reads ? 'does' : 'does not'} read the secondary`);
   }
 });
+
+// --- fix round 4: erase semantics -------------------------------------------
+//
+// Every drawing tool now paints through an ink, the eraser included, and the
+// eraser's colour is the fully transparent [0,0,0,0] (drawing-engine's
+// currentColor). The inks were designed for painting, so two of them answered
+// "paint this transparent colour" by ADDING colour: dither painted its
+// secondary swatch on the pattern's off-phase, and lock-alpha closed the
+// sentinel's [0,0,0] to the palette's darkest entry under the destination's
+// own alpha -- an eraser that filled the region SOLID BLACK. The rule now in
+// brush-ink.js: a transparent source colour means ERASE; an ink may erase a
+// pixel or leave it alone, and may never write a coloured or opaque value.
+
+function erasePalette() {
+  // Indexed, with a real four-step grey RAMP so ramp-shade is genuinely armed,
+  // plus saturated entries that survive closure as distinct colours. Both
+  // properties are ASSERTED below, never assumed: a palette whose colours lie
+  // in no ramp makes ramp-shade look like a no-op when it is not one, and
+  // probe colours that close together make every ink look like it ignores the
+  // secondary. Three earlier probes on this branch were neutralised that way.
+  const colors = [[20, 20, 20], [70, 70, 70], [130, 130, 130], [200, 200, 200],
+    [0, 255, 0], [0, 0, 255], [255, 0, 0]].map(c => [...c, 255]);
+  return normalizePalette({ id: 'e', name: 'E', indexed: true, colors, empty: colors.map(() => false) });
+}
+
+// One 8x1 row of `dest`, written end to end through a fresh ink. `source` is
+// the colour handed to write() -- CLEAR is what the eraser passes.
+function eraseRow(kind, dest, { palette, primary = CLEAR, secondary = BLUE, source = CLEAR, ink = {} } = {}) {
+  const bmp = createBitmap(8, 1);
+  for (let x = 0; x < 8; x++) setPixel(bmp, x, 0, dest);
+  const made = makeInk(normalizeBrush({ ink: { kind, ...ink } }), ctx({ palette, primary, secondary }));
+  for (let x = 0; x < 8; x++) made.write(bmp, x, 0, source);
+  return Array.from({ length: 8 }, (_, x) => [...getPixel(bmp, x, 0)]);
+}
+
+test('ERASE TABLE: every ink either erases a pixel or leaves it exactly as it was', () => {
+  const palette = erasePalette();
+  const GREY1 = palette.colors[1], GREY2 = palette.colors[2];
+
+  // Anti-vacuity for all four mechanisms this table leans on. If a mechanism
+  // were ABSENT the table would read all-'D' for that ink and still pass, so
+  // each of these has to be checked before the table means anything.
+  assert.notDeepEqual([...applyPaletteClosure(palette, CLEAR)], CLEAR,
+    'the palette must snap transparent black to a coloured entry, or lock-alpha could not have gone black');
+  assert.notEqual(applyPaletteClosure(palette, GREEN).join(), applyPaletteClosure(palette, BLUE).join(),
+    'GREEN and BLUE must survive closure as distinct entries, or dither would look like it ignored the secondary');
+  assert.deepEqual(eraseRow('ramp-shade', GREY1, { palette, primary: RED, source: RED })[0], [...GREY2],
+    'ramp-shade must actually step this palette when painting, or its erase row below proves nothing');
+  const dithered = eraseRow('dither', GREEN, { palette, primary: RED, source: RED }).map(p => p.join());
+  assert.ok(dithered.includes(BLUE.join()) && dithered.includes(RED.join()),
+    'the dither secondary phase must be live when painting, or its erase row below proves nothing');
+
+  // '.' erased, 'D' left exactly as it was, '!' anything else -- and '!' is
+  // precisely the violation: a value that is neither the erase nor the pixel
+  // that was already there.
+  const expected = {
+    solid: '........',
+    stamp: '........',
+    replace: '........',      // armed below: replaceColor IS the destination
+    dither: '.D.D.D.D',       // no second colour to alternate with, so the
+                              // pattern degrades to a density mask
+    'lock-alpha': 'DDDDDDDD', // declines: pinning alpha and clearing it are
+                              // contradictory intents
+    'ramp-shade': 'DDDDDDDD', // declines: it ignores the source colour, so an
+                              // erase would come out as an opaque shade
+  };
+  assert.deepEqual([...INK_KINDS].sort(), Object.keys(expected).sort(),
+    'a new ink kind was added -- decide what it does when handed an erase');
+
+  // Twice over: GREEN lies in no ramp (ramp-shade bails at stepAlongRamp),
+  // GREY1 sits mid-ramp (ramp-shade would really step it). Only the second
+  // pass can catch ramp-shade, which is why a probe run on a rampless palette
+  // reported that arm as already a no-op when it was not one.
+  for (const dest of [GREEN, GREY1]) {
+    for (const kind of INK_KINDS) {
+      const row = eraseRow(kind, dest, { palette, ink: { replaceColor: dest } });
+      const got = row.map(p => (p.join() === CLEAR.join() ? '.' : p.join() === dest.join() ? 'D' : '!')).join('');
+      assert.equal(got, expected[kind],
+        `${kind} erasing over ${dest.join()}: ${row.map(p => p.join()).join(' | ')}`);
+    }
+  }
+});
+
+test('a dither brush erases at its density and leaves the untouched pixels UNTOUCHED', () => {
+  // The headline case: with the off-phase still painting, a "feathered erase"
+  // removed half the region and painted the SECONDARY SWATCH over the other
+  // half -- an eraser that adds colour.
+  const palette = erasePalette();
+  const bmp = createBitmap(8, 8);
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) setPixel(bmp, x, y, GREEN);
+  const ink = makeInk(normalizeBrush({ ink: { kind: 'dither', pattern: 'checker' } }),
+    ctx({ palette, primary: CLEAR, secondary: BLUE }));
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) ink.write(bmp, x, y, CLEAR);
+  let erased = 0, kept = 0;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+    const p = [...getPixel(bmp, x, y)];
+    if (p.join() === CLEAR.join()) erased++;
+    else if (p.join() === GREEN.join()) kept++;
+    else assert.fail(`pixel ${x},${y} is neither erased nor intact: ${p} (the secondary is ${BLUE})`);
+  }
+  assert.equal(erased, 32, 'a checker dither must erase exactly its own half of the region');
+  assert.equal(kept, 32, 'the other half must be left exactly as it was, not repainted');
+});
+
+test('lock-alpha refuses an erase outright rather than filling the region black', () => {
+  // nearestColor replaces RGB and preserves alpha, so the sentinel's [0,0,0]
+  // closed to the palette's darkest entry under the destination's own alpha:
+  // the eraser turned an opaque region opaque BLACK, the precise opposite of
+  // erasing. lock-alpha now declines, and declining must change NOTHING.
+  const palette = erasePalette();
+  const bmp = createBitmap(4, 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(bmp, x, y, GREEN);
+  setPixel(bmp, 3, 3, CLEAR);                // a hole, which must stay a hole
+  setPixel(bmp, 0, 3, [0, 255, 0, 128]);     // a partial-alpha pixel, kept verbatim
+  const before = [...bmp.data];
+  const ink = makeInk(normalizeBrush({ ink: { kind: 'lock-alpha' } }), ctx({ palette, primary: CLEAR }));
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) ink.write(bmp, x, y, CLEAR);
+  assert.deepEqual([...bmp.data], before, 'a lock-alpha erase must change nothing at all');
+
+  // Anti-vacuity: the same ink, handed a real colour, must still paint -- or
+  // the assertion above would hold just as well for an ink that had stopped
+  // working altogether.
+  const live = createBitmap(2, 1);
+  setPixel(live, 0, 0, GREEN);
+  makeInk(normalizeBrush({ ink: { kind: 'lock-alpha' } }), ctx({ palette, primary: RED }))
+    .write(live, 0, 0, RED);
+  assert.deepEqual([...getPixel(live, 0, 0)], RED, 'lock-alpha must still paint a real colour');
+});
+
+test('ramp-shade refuses an erase instead of shading the region a step lighter', () => {
+  // This arm reads as a no-op under a palette whose colours lie in no ramp:
+  // stepAlongRamp returns null and it bails for an unrelated reason. Mid-ramp
+  // it really would have written an opaque neighbour -- an eraser that SHADES.
+  const palette = erasePalette();
+  const GREY1 = palette.colors[1], GREY2 = palette.colors[2];
+  assert.deepEqual(eraseRow('ramp-shade', GREY1, { palette, primary: RED, source: RED })[0], [...GREY2],
+    'this palette must really step, or the assertion below is vacuous');
+  for (const p of eraseRow('ramp-shade', GREY1, { palette })) {
+    assert.deepEqual(p, [...GREY1], 'a ramp-shade erase must leave the pixel exactly as it was');
+  }
+});
+
+test('replace erasing removes exactly the pixels matching replaceColor', () => {
+  // replace also reads as a no-op under the DEFAULT replaceColor of null --
+  // the guard at the top of its arm, not a property of erasing. Armed, it
+  // gates WHICH pixels are written and never what value goes down, so it
+  // erases its target and only its target. That is right, and is pinned here.
+  const palette = erasePalette();
+  const bmp = createBitmap(4, 1);
+  setPixel(bmp, 0, 0, GREEN); setPixel(bmp, 1, 0, BLUE);
+  setPixel(bmp, 2, 0, GREEN); setPixel(bmp, 3, 0, RED);
+  const ink = makeInk(normalizeBrush({ ink: { kind: 'replace', replaceColor: GREEN } }),
+    ctx({ palette, primary: CLEAR }));
+  for (let x = 0; x < 4; x++) ink.write(bmp, x, 0, CLEAR);
+  assert.deepEqual([...getPixel(bmp, 0, 0)], CLEAR);
+  assert.deepEqual([...getPixel(bmp, 1, 0)], BLUE, 'a non-matching pixel must be left alone');
+  assert.deepEqual([...getPixel(bmp, 2, 0)], CLEAR);
+  assert.deepEqual([...getPixel(bmp, 3, 0)], RED, 'a non-matching pixel must be left alone');
+});
+
+test('an erase erases under trueAlpha, where a blend toward alpha 0 is a no-op', () => {
+  // commit folds opacity into aSrc = (rgba[3] / 255) * (effOpacity / 100),
+  // which is 0 for an erase source, so blendOver returned the destination
+  // unchanged and the erase did nothing at all. Nothing in js/ sets trueAlpha
+  // today; the next task exposes it in the brush-manager UI.
+  const palette = erasePalette();
+
+  // Anti-vacuity FIRST: prove the trueAlpha branch is really taken here. At
+  // opacity 50 the blending path writes EVERY pixel (a half-alpha value),
+  // where the density path would leave exactly half of them blank. If this
+  // ever reads 32 then `blends` is off and the assertions below prove nothing
+  // about trueAlpha at all.
+  const probe = createBitmap(8, 8);
+  const blending = makeInk(normalizeBrush({ ink: { opacity: 50, trueAlpha: true } }), ctx({ palette, primary: RED }));
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) blending.write(probe, x, y, RED);
+  let written = 0;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if (getPixel(probe, x, y)[3] > 0) written++;
+  assert.equal(written, 64, 'trueAlpha must be blending, not dithering by density, or this test is vacuous');
+
+  // Every ink that can erase must erase with trueAlpha on exactly as it does
+  // with it off -- compared against the plain path rather than hand-written,
+  // so the two cannot drift apart.
+  for (const kind of ['solid', 'stamp', 'dither', 'replace']) {
+    const plain = eraseRow(kind, GREEN, { palette, ink: { replaceColor: GREEN } });
+    const alpha = eraseRow(kind, GREEN, { palette, ink: { replaceColor: GREEN, trueAlpha: true } });
+    assert.deepEqual(alpha, plain, `${kind}: a trueAlpha erase must match the plain erase`);
+    assert.ok(alpha.some(p => p.join() === CLEAR.join()), `${kind}: the trueAlpha erase erased nothing`);
+  }
+});
