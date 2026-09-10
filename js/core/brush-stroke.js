@@ -92,14 +92,33 @@ export function strokeBounds(x, y, gridW, gridH, scatter = 0) {
   };
 }
 
-export function strokeStamps(points, mask, seed) {
+// Pixels of travel between two points along a Bresenham path -- the Chebyshev
+// distance, which is exactly `densifyPath([a, b]).length - 1`. Callers that
+// stamp a stroke one pointer segment at a time use this to advance
+// `startDistance` without densifying the segment twice.
+export function pathSteps(a, b) {
+  return Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+}
+
+// `startDistance` is how many pixels of travel this stroke has already
+// consumed. A caller that stamps the whole path at once leaves it at 0; one
+// that stamps segment by segment (as freehand painting does, a segment per
+// pointer move) passes the running total, without which every segment would
+// restart the spacing phase and the stamp ordinal -- making stroke density
+// track the pointer event rate and giving scatter a visible repeating rhythm
+// at the sampling period.
+export function strokeStamps(points, mask, seed, startDistance = 0) {
   const spacing = Math.max(1, mask.spacing ?? 1);
   const scatter = Math.max(0, mask.scatter ?? 0);
   const jitterRotate = !!mask.rotateJitter;
   const dense = densifyPath(points);
   const stamps = [];
-  let stampIndex = 0;
-  for (let i = 0; i < dense.length; i += spacing) {
+  for (let i = 0; i < dense.length; i++) {
+    // Both the "is there a stamp here" test and the stamp's ordinal come from
+    // the same stroke-global position, so they cannot drift apart.
+    const travelled = startDistance + i;
+    if (travelled % spacing !== 0) continue;
+    const stampIndex = travelled / spacing;
     const p = dense[i];
     let x = p.x, y = p.y;
     if (scatter > 0) {
@@ -115,7 +134,6 @@ export function strokeStamps(points, mask, seed) {
       ? QUARTER_TURNS[Math.floor(stampRandom(seed, stampIndex, 'rot') * 4)]
       : 0;
     stamps.push({ x, y, rotate });
-    stampIndex++;
   }
   return stamps;
 }

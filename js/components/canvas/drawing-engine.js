@@ -26,7 +26,7 @@ import { makePixelPatch } from '../../core/commands.js';
 import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '../../core/floating.js';
 import { nearestColor } from '../../core/palettes.js';
 import { normalizeBrush, maskGridFor, effectiveMaskSize } from '../../core/brushes.js';
-import { strokeStamps, newStrokeSeed, strokeBounds } from '../../core/brush-stroke.js';
+import { strokeStamps, newStrokeSeed, strokeBounds, pathSteps } from '../../core/brush-stroke.js';
 import { makeInk } from '../../core/brush-ink.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../../core/model.js';
 import { segmentAt } from '../../core/strips.js';
@@ -355,7 +355,12 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, target);
         dirty = extend(dirty, b.x0, b.y0, b.x1, b.y1);
       }
-      stroke = { tool, layer, before, color, dirty, last: p, target, brush, seed, ink };
+      // `travelled` is how many pixels of stroke this brush has already
+      // covered. strokeStamps needs it because freehand stamps one pointer
+      // segment at a time: without it each segment restarts the spacing phase
+      // and the stamp ordinal, so density would follow the pointer event rate
+      // and scatter would repeat at the sampling period.
+      stroke = { tool, layer, before, color, dirty, last: p, target, brush, seed, ink, travelled: 0 };
       notifyPixelsChanged();
       return;
     }
@@ -396,13 +401,18 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       // current point: strokeStamps densifies and indexes internally, so a
       // one-point call would freeze spacing/scatter/rotation jitter at
       // stampIndex 0 for every move (task-9-brief-amendment.md:C).
-      for (const s of strokeStamps([last, p], brush.mask, seed)) {
+      for (const s of strokeStamps([last, p], brush.mask, seed, stroke.travelled)) {
         const g = maskGridFor({ ...brush.mask, size }, { rotate: s.rotate });
         stamp(layer.bitmap, s.x, s.y, color, size, ink, g);
         const b = strokeBounds(s.x, s.y, g.width, g.height, brush.mask.scatter);
         maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, stroke.target);
         stroke.dirty = extend(stroke.dirty, b.x0, b.y0, b.x1, b.y1);
       }
+      // Advance by the segment's own length. `last` is shared with the previous
+      // segment's end, so it is re-stamped at the same stroke position and
+      // therefore lands identically -- the ink's `touched` set makes that a
+      // no-op rather than a double ink.
+      stroke.travelled += pathSteps(last, p);
       stroke.last = p;
       notifyPixelsChanged();
       return;
