@@ -269,6 +269,25 @@ test('replace never touches a transparent pixel, even when replaceColor is black
   assert.equal(replaced, 4);
 });
 
+test('lock-alpha preserves a pixel\'s alpha exactly, blending or not', () => {
+  // The whole point of lock-alpha is painting colour without touching alpha.
+  // Blending recomputes the alpha channel, so it must be pinned back or soft
+  // edges erode: a 128-alpha pixel came back as 192 before this was guarded.
+  for (const trueAlpha of [false, true]) {
+    for (const opacity of [100, 50]) {
+      for (const destAlpha of [255, 128, 64]) {
+        const brush = normalizeBrush({ mask: { kind: 'square', size: 1 }, ink: { kind: 'lock-alpha', opacity, trueAlpha } });
+        const bmp = createBitmap(2, 2);
+        setPixel(bmp, 0, 0, [255, 255, 255, destAlpha]);
+        const ink = makeInk(brush, ctx({ primary: BLACK }));
+        ink.write(bmp, 0, 0);
+        assert.equal(getPixel(bmp, 0, 0)[3], destAlpha,
+          `trueAlpha=${trueAlpha} opacity=${opacity} changed alpha ${destAlpha}`);
+      }
+    }
+  }
+});
+
 test('dither falls back to primary when no secondary is set', () => {
   const brush = normalizeBrush({ mask: { kind: 'square', size: 1 }, ink: { kind: 'dither', opacity: 100, pattern: 'checker' } });
   const bmp = createBitmap(4, 4);

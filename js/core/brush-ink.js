@@ -59,13 +59,18 @@ export function makeInk(brush, context) {
   // there and trueAlpha is inert.
   const blends = trueAlpha && kind !== 'ramp-shade';
 
-  function commit(bitmap, x, y, rgba) {
+  // `keepAlpha` pins the destination's own alpha through the write. lock-alpha
+  // paints colour only, so without it a blend would recompute the alpha channel
+  // and erode precisely the soft edges that ink exists to protect.
+  function commit(bitmap, x, y, rgba, keepAlpha = false) {
+    const dest = getPixel(bitmap, x, y);
+    let out = rgba;
     if (blends) {
-      const dest = getPixel(bitmap, x, y);
       const aSrc = (rgba[3] / 255) * (opacity / 100);
-      rgba = blendOver(rgba, dest, aSrc);
+      out = blendOver(out, dest, aSrc);
     }
-    setPixel(bitmap, x, y, applyPaletteClosure(palette, rgba));
+    if (keepAlpha) out = [out[0], out[1], out[2], dest[3]];
+    setPixel(bitmap, x, y, applyPaletteClosure(palette, out));
   }
 
   return {
@@ -85,7 +90,10 @@ export function makeInk(brush, context) {
       switch (kind) {
         case 'lock-alpha':
           if (dest[3] === 0) return;
-          commit(bitmap, x, y, [primary[0], primary[1], primary[2], dest[3]]);
+          // primary's own alpha feeds the blend; keepAlpha restores the pixel's
+          // alpha afterwards, so the plain path still writes dest[3] exactly as
+          // it did before.
+          commit(bitmap, x, y, primary, true);
           return;
 
         case 'replace':
