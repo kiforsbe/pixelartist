@@ -1,7 +1,7 @@
 // tests/brush-ink.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBitmap, setPixel, getPixel, drawRect, drawEllipse, floodFill } from '../js/core/pixels.js';
+import { createBitmap, setPixel, getPixel, drawRect, drawEllipse, floodFill, softFloodFill } from '../js/core/pixels.js';
 import { normalizePalette } from '../js/core/palettes.js';
 import { normalizeBrush } from '../js/core/brushes.js';
 import { makeInk, applyPaletteClosure } from '../js/core/brush-ink.js';
@@ -552,4 +552,63 @@ test('setPressure still applies a real pressure value', () => {
   ink.setPressure(0, 'pen');
   ink.write(bmp, 0, 0);
   assert.deepEqual([...getPixel(bmp, 0, 0)], CLEAR, 'pressure 0 at target opacity must paint nothing');
+});
+
+// --- fix round 2: soft-flood erase must erase -------------------------------
+//
+// softFloodFill already computes `target` -- `rgba` for a fill, [0,0,0,0] for
+// an erase -- and then threw it away when an ink was present, so a right-click
+// soft flood painted the ink's primary over the region instead of erasing it.
+// The erase deliberately still goes through the ink: a brush that paints at
+// 50% density erases at 50% density.
+
+test('soft-flood erase under an ink erases instead of painting the ink primary', () => {
+  // On an INDEXED palette, so this also pins that the erase composes with the
+  // alpha-0 normalisation: without it nearestColor would snap the erased pixel
+  // back to a coloured-but-invisible palette entry.
+  const palette = brightPalette();
+  const bmp = createBitmap(4, 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(bmp, x, y, BLUE);
+  const ink = makeInk(normalizeBrush({}), ctx({ palette, primary: RED }));
+  // `rgba` is RED -- the colour a FILL would have used. Erase must ignore it.
+  softFloodFill(bmp, 0, 0, RED, { mode: 'erase', tolerance: 0 }, ink);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+    assert.deepEqual([...getPixel(bmp, x, y)], CLEAR, `pixel ${x},${y} was painted, not erased`);
+  }
+});
+
+test('soft-flood erase at 50% density erases half the region and leaves the rest intact', () => {
+  // The one that proves erase still respects the BRUSH rather than being
+  // special-cased into a bypass. Opacity is dither density here, so an
+  // opacity-50 ink must erase exactly the Bayer half of an 8x8 region and
+  // leave the other half untouched -- a feathered erase.
+  const bmp = createBitmap(8, 8);
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) setPixel(bmp, x, y, BLUE);
+  const ink = makeInk(normalizeBrush({ ink: { opacity: 50 } }), ctx({ primary: RED }));
+  softFloodFill(bmp, 0, 0, RED, { mode: 'erase', tolerance: 0 }, ink);
+  let erased = 0, kept = 0;
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+    const p = [...getPixel(bmp, x, y)];
+    if (p.join() === CLEAR.join()) erased++;
+    else if (p.join() === BLUE.join()) kept++;
+    else assert.fail(`pixel ${x},${y} is neither erased nor intact: ${p}`);
+  }
+  assert.equal(erased, 32, 'an opacity-50 ink must erase exactly half the region');
+  assert.equal(kept, 32, 'the other half must be left exactly as it was');
+});
+
+test('soft-flood FILL mode is unchanged by the erase fix', () => {
+  // In fill mode `target` IS `rgba`, and drawing-engine builds this ink with
+  // primary === the colour it passes as rgba (strokeInk(ev, sfColor, t) beside
+  // softFloodFill(..., sfColor, ...)), so nothing on this path moved. This is
+  // a no-regression assertion: it is EXPECTED to stay green under the mutation
+  // that reverts the erase fix -- a failure there would mean fill mode had
+  // changed, which is exactly what must not happen.
+  const bmp = createBitmap(4, 4);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(bmp, x, y, BLUE);
+  const ink = makeInk(normalizeBrush({}), ctx({ primary: GREEN }));
+  softFloodFill(bmp, 0, 0, GREEN, { tolerance: 0 }, ink);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+    assert.deepEqual([...getPixel(bmp, x, y)], GREEN, `pixel ${x},${y}`);
+  }
 });

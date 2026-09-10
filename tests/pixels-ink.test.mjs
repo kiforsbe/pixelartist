@@ -168,6 +168,25 @@ test('an ink turns feather into a hard threshold instead of a blend', () => {
   }
 });
 
+test('softFloodFill offers the ink the colour the operation actually writes', () => {
+  // `target` is the answer softFloodFill already computes: `rgba` for a fill,
+  // transparent black for an erase. It used to be discarded whenever an ink
+  // was present, which is why a right-click soft flood painted the ink's
+  // primary instead of erasing.
+  const fillBmp = createBitmap(2, 2);
+  for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) setPixel(fillBmp, x, y, [0, 0, 0, 255]);
+  const fillInk = spyInk();
+  softFloodFill(fillBmp, 0, 0, RED, { tolerance: 255 }, fillInk);
+  assert.deepEqual([...new Set(fillInk.sources)], [RED.join()], 'fill mode offers the fill colour');
+
+  const eraseBmp = createBitmap(2, 2);
+  for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) setPixel(eraseBmp, x, y, [0, 0, 0, 255]);
+  const eraseInk = spyInk();
+  softFloodFill(eraseBmp, 0, 0, RED, { mode: 'erase', tolerance: 255 }, eraseInk);
+  assert.deepEqual([...new Set(eraseInk.sources)], ['0,0,0,0'],
+    'erase mode must offer transparent black, not the colour a fill would have used');
+});
+
 test('softFloodFill with a skipping ink still terminates', () => {
   const bmp = createBitmap(16, 16);
   for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) setPixel(bmp, x, y, [0, 0, 0, 255]);

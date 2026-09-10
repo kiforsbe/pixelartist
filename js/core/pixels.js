@@ -180,13 +180,22 @@ export function softFloodFill(bmp, x, y, rgba, {
       // would invent colours outside the palette, which is the one thing this
       // editor exists to prevent.
       if (strength < 0.5) return;
-      // Deliberately no source colour (unlike `put`, which forwards `rgba`).
-      // This primitive has two candidate colours -- `rgba` and, in erase mode,
-      // the transparent `target` -- and picking between them is a behaviour
-      // question about what soft-flood ERASE should do under an ink, not part
-      // of threading the caller's colour through. The ink paints its own
-      // primary here, exactly as it did before.
-      ink.write(bmp, px, py);
+      // `target` -- not `rgba` -- is this primitive's source colour, because
+      // `target` is already the answer to "what does this operation write":
+      // `rgba` for a fill, transparent black for an erase. In fill mode the
+      // two are the same value, so that path is untouched; in erase mode
+      // passing `rgba` would have meant a right-click erase painting the ink's
+      // primary instead of erasing, which is what it used to do.
+      //
+      // Erase still goes THROUGH the ink rather than round it. A brush that
+      // paints at 50% density therefore erases at 50% density -- a feathered
+      // erase, which is the point. Bypassing the ink here would silently
+      // discard the brush the user chose.
+      //
+      // A transparent source colour lands as a clean [0,0,0,0]: brush-ink's
+      // writePixel normalises an alpha-0 result, so an indexed palette cannot
+      // snap the erased pixel back to a coloured-but-invisible entry.
+      ink.write(bmp, px, py, target);
       // Bounds grow for every pixel OFFERED to the ink, not only those it
       // chose to paint -- same reasoning as floodFill's: the caller uses this
       // as a dirty rect, and a pixel the ink declined still needs repainting.
