@@ -24,7 +24,7 @@ export function applyPaletteClosure(palette, rgba) {
 // Integer hash of a pixel's absolute bitmap coordinates into a single
 // stampRandom index. Coordinates are coerced to int32 first (`| 0`) so
 // negative values wrap into a distinct, stable unsigned bit pattern rather
-// than behaving oddly under Math.imul; the xor/imul mix keeps neighbouring
+// than behaving oddly under Math.imul; the add/imul mix keeps neighbouring
 // pixels from colliding in any structured way. Integer math only -- this
 // runs per pixel in the paint loop.
 // The two terms are combined with + rather than ^. Math.imul(-x, A) is
