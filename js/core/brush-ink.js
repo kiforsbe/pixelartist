@@ -158,7 +158,9 @@ export function makeInk(brush, context) {
           let step = 1;
           if (brush.pressure.target === 'shade-step') {
             const pv = pressureValue(brush, pressure, pointerType);
-            step = pv === null ? 1 : Math.max(1, Math.floor(pv));
+            // pressureValue already rounds to an integer, so only the floor
+            // at 1 is needed here -- never 0, which would freeze the brush.
+            step = pv === null ? 1 : Math.max(1, pv);
           }
           let delta = (alt ? -1 : 1) * step;
           if (jitter > 0) {

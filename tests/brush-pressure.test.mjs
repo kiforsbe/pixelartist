@@ -169,3 +169,43 @@ test('target none (default) produces byte-identical output whatever the pressure
   };
   assert.deepEqual(runWith(0), runWith(1));
 });
+
+// --- target-aware default ranges (Ruling 22) -------------------------------
+
+test('the default pressure range suits the chosen target', () => {
+  // One 1..8 default across every target left `opacity` swinging over 1%..8%
+  // of full density -- an invisible brush at maximum pen pressure.
+  assert.deepEqual(
+    [normalizeBrush({ pressure: { target: 'size' } }).pressure.min,
+     normalizeBrush({ pressure: { target: 'size' } }).pressure.max], [1, 8]);
+  assert.deepEqual(
+    [normalizeBrush({ pressure: { target: 'opacity' } }).pressure.min,
+     normalizeBrush({ pressure: { target: 'opacity' } }).pressure.max], [0, 100]);
+  assert.deepEqual(
+    [normalizeBrush({ pressure: { target: 'shade-step' } }).pressure.min,
+     normalizeBrush({ pressure: { target: 'shade-step' } }).pressure.max], [1, 3]);
+});
+
+test('an explicitly given pressure range still wins over the default', () => {
+  const b = normalizeBrush({ pressure: { target: 'opacity', min: 10, max: 20 } });
+  assert.equal(b.pressure.min, 10);
+  assert.equal(b.pressure.max, 20);
+});
+
+test('an opacity-target brush with default range actually paints across the range', () => {
+  const brush = normalizeBrush({
+    mask: { kind: 'square', size: 1 },
+    ink: { kind: 'solid', opacity: 100 },
+    pressure: { target: 'opacity' },
+  });
+  const coverage = (pressure) => {
+    const bmp = createBitmap(8, 8);
+    const ink = makeInk(brush, ctx({ pressure, pointerType: 'pen' }));
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) ink.write(bmp, x, y);
+    return countPainted(bmp, 8, 8);
+  };
+  // Before the per-target defaults this was 0, 4 and 4 of 64.
+  assert.equal(coverage(0), 0, 'no pressure should paint nothing');
+  assert.ok(coverage(0.5) > 16 && coverage(0.5) < 48, `half pressure painted ${coverage(0.5)}/64`);
+  assert.equal(coverage(1), 64, 'full pressure should paint everything');
+});

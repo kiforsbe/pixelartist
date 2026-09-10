@@ -62,11 +62,28 @@ function normalizeInk(raw = {}) {
   };
 }
 
+// Default pressure ranges are per target, because the targets are measured in
+// different units. A single 1..8 default suits `size` (pixels) and is close to
+// useless for `opacity`, where it would swing a stroke over 1%..8% of full
+// density -- invisible paint at maximum pen pressure. `shade-step` counts ramp
+// entries, and a typical ramp is 4-6 long, so a range wider than a few steps
+// saturates before the pen does.
+const PRESSURE_RANGES = {
+  none: [1, 8],
+  size: [1, 8],
+  opacity: [0, 100],
+  'shade-step': [1, 3],
+};
+
 function normalizePressure(raw = {}) {
+  const target = oneOf(raw.target, PRESSURE_TARGETS, 'none');
+  const [defMin, defMax] = PRESSURE_RANGES[target];
   return {
-    target: oneOf(raw.target, PRESSURE_TARGETS, 'none'),
-    min: clampInt(raw.min, 0, 100, 1),
-    max: clampInt(raw.max, 0, 100, 8),
+    target,
+    // An explicit range always wins; these defaults only fill in for a brush
+    // that never named one.
+    min: clampInt(raw.min, 0, 100, defMin),
+    max: clampInt(raw.max, 0, 100, defMax),
     curve: oneOf(raw.curve, PRESSURE_CURVES, 'linear'),
   };
 }
@@ -254,7 +271,9 @@ export function pressureValue(brush, pressure, pointerType) {
 }
 
 export function effectiveMaskSize(brush, pressure, pointerType) {
-  if (brush.pressure.target !== 'size') return brush.mask.size;
+  // Guarded the same way pressureValue guards `p`, so the two siblings behave
+  // alike on a brush that somehow arrived without a pressure block.
+  if (!brush.pressure || brush.pressure.target !== 'size') return brush.mask.size;
   const v = pressureValue(brush, pressure, pointerType);
   if (v === null) return brush.mask.size;
   return Math.max(1, Math.min(MAX_MASK_SIZE, v));
