@@ -25,7 +25,7 @@ import {
 import { makePixelPatch } from '../../core/commands.js';
 import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '../../core/floating.js';
 import { nearestColor } from '../../core/palettes.js';
-import { normalizeBrush, maskGridFor, effectiveMaskSize } from '../../core/brushes.js';
+import { maskGridFor, effectiveMaskSize } from '../../core/brushes.js';
 import { strokeStamps, newStrokeSeed, strokeBounds, pathSteps } from '../../core/brush-stroke.js';
 import { makeInk } from '../../core/brush-ink.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../../core/model.js';
@@ -98,13 +98,11 @@ function activePalette() {
   return p.palettes.find(pl => pl.id === p.activePaletteId) ?? null;
 }
 
-// The active brush. Falls back to synthesising one from the legacy `brushSize`
-// setting so this task lands before the store migration without breaking the
-// paint path; Task 10 adds `drawing.brush`, retires `brushSize`, and deletes
-// the fallback.
+// The active brush. `drawing.brush` always exists now (editor-store.js's
+// migrateDrawingSettings guarantees it), so there is no fallback to
+// synthesise one from the retired `brushSize` scalar.
 function activeBrush() {
-  const d = drawingSettings();
-  return d.brush ?? normalizeBrush({ mask: { kind: 'square', size: d.brushSize ?? 1 } });
+  return drawingSettings().brush;
 }
 
 // Fill tools ink a single click, so they build their own ink with a fresh
@@ -374,7 +372,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       // segment at a time: without it each segment restarts the spacing phase
       // and the stamp ordinal, so density would follow the pointer event rate
       // and scatter would repeat at the sampling period.
-      stroke = { tool, layer, before, color, dirty, last: p, target, brush, seed, ink, travelled: 0 };
+      stroke = {
+        tool, layer, before, color, dirty, last: p, target, brush, seed, ink, travelled: 0,
+        pressure: ev.pressure, pointerType: ev.pointerType,
+      };
       notifyPixelsChanged();
       return;
     }
@@ -413,7 +414,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const fill = (tool !== 'line' && toolOptions.filled)
         ? (ink.usesSecondary ? color : currentColor(ev, true))
         : null;
-      stroke = { tool, layer, before, color, fill, dirty: null, anchor: p, target, brush, seed, ink };
+      stroke = {
+        tool, layer, before, color, fill, dirty: null, anchor: p, target, brush, seed, ink,
+        pressure: ev.pressure, pointerType: ev.pointerType,
+      };
       notifyPixelsChanged();
       return;
     }
@@ -421,6 +425,11 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
 
   function handleMove(ev) {
     if (!stroke) return;
+    // Remember the last REAL pressure/pointerType reading (from pointerdown
+    // or a genuine pointermove) so handleUp can finalize the stroke with it
+    // instead of a pointerup event's own -- see the comment there.
+    stroke.pressure = ev.pressure;
+    stroke.pointerType = ev.pointerType;
     const { tool, layer, before, color } = stroke;
     if (BRUSH_TOOLS.has(tool)) {
       const p = clampPoint(ev.x, ev.y, stroke.target);
@@ -509,7 +518,16 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
 
   function handleUp(ev) {
     if (!stroke) return;
-    handleMove(ev); // commit final pointer position (handles click-without-move too)
+    // A pointerup event reports pressure 0 -- the pen has already left the
+    // surface -- but handleMove is about to run once more to commit the
+    // final pointer position. Trusting that 0 verbatim would stamp the
+    // stroke's last segment at the bottom of the brush's pressure range
+    // (minimum size, zero opacity, or the lowest shade step) even though the
+    // pen was at real pressure a moment earlier. Reuse the last genuine
+    // pressure/pointerType reading (tracked on `stroke` by handleDown/
+    // handleMove) instead, so the final segment matches the one before it.
+    const finalEv = { ...ev, pressure: stroke.pressure, pointerType: stroke.pointerType };
+    handleMove(finalEv); // commit final pointer position (handles click-without-move too)
     const { tool, layer, before, dirty, target } = stroke;
     finalize(layer, before, dirty, tool, target);
     stroke = null;

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorStore, documentKey } from '../js/host/editor-store.js';
+import { DEFAULT_BRUSH, normalizeBrush } from '../js/core/brushes.js';
 
 test('EditorStore batches selector notifications at transaction boundaries', () => {
   const store = new EditorStore();
@@ -41,18 +42,23 @@ test('EditorStore owns reactive drawing settings outside project identity', () =
   const seen = [];
   store.subscribe(state => state.workspace.drawing, drawing => { seen.push(drawing); });
 
+  const defaultBrush = normalizeBrush({ ...DEFAULT_BRUSH, mask: { kind: 'square', size: 1 } });
   assert.deepEqual(store.getState().workspace.drawing, {
     primary: [0, 0, 0, 255],
     secondary: [255, 255, 255, 255],
-    brushSize: 1,
+    brush: defaultBrush,
   });
 
-  store.updateDrawingSettings({ primary: [1, 2, 3, 255], brushSize: 4 });
+  // Patch the brush rather than the retired `brushSize` field. updateDrawingSettings
+  // is a raw patch merge (not re-migrated), so this also proves a patch built from
+  // the current brush round-trips exactly -- see editor-store.js's migrateDrawingSettings.
+  const cur = store.getState().workspace.drawing.brush;
+  store.updateDrawingSettings({ primary: [1, 2, 3, 255], brush: { ...cur, mask: { ...cur.mask, size: 4 } } });
 
   assert.deepEqual(store.getState().workspace.drawing, {
     primary: [1, 2, 3, 255],
     secondary: [255, 255, 255, 255],
-    brushSize: 4,
+    brush: { ...defaultBrush, mask: { ...defaultBrush.mask, size: 4 } },
   });
   assert.equal(seen.length, 1);
 
@@ -60,7 +66,7 @@ test('EditorStore owns reactive drawing settings outside project identity', () =
   assert.deepEqual(customized.getState().workspace.drawing, {
     primary: [0, 0, 0, 255],
     secondary: [255, 255, 255, 255],
-    brushSize: 3,
+    brush: normalizeBrush({ ...DEFAULT_BRUSH, mask: { kind: 'square', size: 3 } }),
   });
 });
 

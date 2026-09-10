@@ -445,9 +445,10 @@ They use a disposable project and no native pickers or pointer drags.
     project that already has a save target — packed or unpacked — would
     instead call the native save path directly; that path is [M], see
     section 13.)
-67. [A] `[` / `]` decrement/increment `state.brushSize`, clamped to
-    1..8, and the Size number input in the tool options row reflects the
-    new value.
+67. [A] `[` / `]` decrement/increment the active brush's mask size
+    (`state.workspace.drawing.brush.mask.size`), clamped to 1..16, and
+    the Size number input in the tool options row reflects the new
+    value.
 68. [A] `X` swaps `state.primary` and `state.secondary`; both color
     swatches in the Colors panel visibly swap.
 69. [A] `Escape` clears an active marquee selection, or backs out of the

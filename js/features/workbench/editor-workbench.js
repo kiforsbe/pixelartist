@@ -38,10 +38,12 @@ export function mountEditorWorkbench() {
     const drawing = editorHost.store.getState().workspace.drawing;
     if (e.key === '[') {
       e.preventDefault();
-      editorHost.store.updateDrawingSettings({ brushSize: Math.max(1, drawing.brushSize - 1) });
+      const cur = drawing.brush;
+      editorHost.store.updateDrawingSettings({ brush: { ...cur, mask: { ...cur.mask, size: Math.max(1, cur.mask.size - 1) } } });
     } else if (e.key === ']') {
       e.preventDefault();
-      editorHost.store.updateDrawingSettings({ brushSize: Math.min(8, drawing.brushSize + 1) });
+      const cur = drawing.brush;
+      editorHost.store.updateDrawingSettings({ brush: { ...cur, mask: { ...cur.mask, size: Math.min(16, cur.mask.size + 1) } } });
     } else if (e.key.toLowerCase() === 'x') {
       e.preventDefault();
       editorHost.store.updateDrawingSettings({ primary: drawing.secondary, secondary: drawing.primary });

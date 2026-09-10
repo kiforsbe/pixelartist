@@ -4,6 +4,7 @@ import { normalizeBrush, applyCurve, pressureValue, effectiveMaskSize } from '..
 import { createBitmap, setPixel, getPixel } from '../js/core/pixels.js';
 import { normalizePalette } from '../js/core/palettes.js';
 import { makeInk } from '../js/core/brush-ink.js';
+import { drawingFixture } from './helpers/drawing-selection-fixtures.mjs';
 
 const sizeBrush = (extra = {}) => normalizeBrush({
   mask: { kind: 'square', size: 4 },
@@ -208,4 +209,39 @@ test('an opacity-target brush with default range actually paints across the rang
   assert.equal(coverage(0), 0, 'no pressure should paint nothing');
   assert.ok(coverage(0.5) > 16 && coverage(0.5) < 48, `half pressure painted ${coverage(0.5)}/64`);
   assert.equal(coverage(1), 64, 'full pressure should paint everything');
+});
+
+// --- pointerup must not drive pressure (task-10 amendment section 5, Ruling 35) ---
+//
+// drawing-engine.js's handleUp finishes a stroke by replaying the pointer's
+// final position through handleMove. A real pointerup event reports pressure
+// 0 -- the pen has already left the surface -- so without a guard the last
+// segment of every pen stroke would be stamped at the bottom of the brush's
+// pressure range (here: opacity 0, i.e. invisible) even though the pen was
+// at full pressure a moment before.
+//
+// Opacity is used as the discriminator rather than size because it gives a
+// clean binary signal (painted vs. not painted) with no mask-clipping edge
+// cases to account for: opacity 0 NEVER paints a pixel (dither.js's
+// passesOpacity) and opacity 100 ALWAYS does, so there is no ambiguity about
+// which pressure reading actually drove the final write.
+test('a pointerup event does not drive the stroke\'s final pressure (Ruling 35)', (t) => {
+  const f = drawingFixture(t, 'sheet');
+  const brush = normalizeBrush({
+    mask: { kind: 'square', size: 1 },
+    ink: { kind: 'solid', opacity: 100 },
+    pressure: { target: 'opacity', min: 0, max: 100, curve: 'linear' },
+  });
+  f.host.store.updateDrawingSettings({ primary: RED, brush });
+  f.host.store.updateSession({ activeToolId: 'pencil' });
+
+  f.pointer('down', 2, 4, { pressure: 1, pointerType: 'pen' });
+  f.pointer('move', 3, 4, { pressure: 1, pointerType: 'pen' });
+  // The final pointer position is new to this event, and the event's own
+  // pressure is 0 -- exactly what a real pen's pointerup reports.
+  f.pointer('up', 4, 4, { pressure: 0, pointerType: 'pen' });
+
+  assert.ok(getPixel(f.bitmap(), 3, 4)[3] > 0, 'the segment before the last should be painted (sanity check)');
+  assert.ok(getPixel(f.bitmap(), 4, 4)[3] > 0,
+    'the stroke\'s final pixel was dropped -- the pointerup\'s own zero pressure drove the write');
 });

@@ -453,7 +453,7 @@ export function mountFrameEditor(hostEl) {
   // only point that calls markDirty(), so the project's dirty flag doesn't
   // thrash on every drag tick but the final value still persists. Onion
   // prefs are a display setting, not editing history, so none of this is
-  // pushed through state.commands (no undo entry), matching state.brushSize.
+  // pushed through state.commands (no undo entry), matching state.brush.
   function bindOnionField(input, apply, { eager = false } = {}) {
     const commit = () => { apply(); view.requestRender(); };
     input.addEventListener(eager ? 'input' : 'change', commit);

@@ -125,14 +125,15 @@ export function mountToolPalette(el) {
   brushRow.dataset.commonOption = 'size';
   brushRow.appendChild(document.createTextNode('Size'));
   const brushInput = document.createElement('input');
-  brushInput.type = 'number'; brushInput.min = '1'; brushInput.max = '8';
-  brushInput.value = String(drawingSettings().brushSize);
+  brushInput.type = 'number'; brushInput.min = '1'; brushInput.max = '16';
+  brushInput.value = String(drawingSettings().brush.mask.size);
   brushInput.addEventListener('change', () => {
     let v = parseInt(brushInput.value, 10);
     if (!Number.isFinite(v)) v = 1;
-    v = Math.max(1, Math.min(8, v));
+    v = Math.max(1, Math.min(16, v));
     brushInput.value = String(v);
-    store.updateDrawingSettings({ brushSize: v });
+    const cur = drawingSettings().brush;
+    store.updateDrawingSettings({ brush: { ...cur, mask: { ...cur.mask, size: v } } });
   });
   brushRow.appendChild(brushInput);
   optionsRow.appendChild(brushRow);
@@ -228,7 +229,10 @@ export function mountToolPalette(el) {
     softFloodRow.style.display = vis.softFlood ? '' : 'none';
     for (const { id, els } of extraRows)
       for (const rEl of els) rEl.style.display = toolId === id ? '' : 'none';
-    brushInput.value = String(drawingSettings().brushSize);
+    const cur = drawingSettings().brush;
+    brushInput.value = String(cur.mask.size);
+    // A custom mask has no scalar size to edit.
+    brushInput.disabled = cur.mask.kind === 'custom';
   }
 
   function selectTool(id) {
@@ -253,7 +257,7 @@ export function mountToolPalette(el) {
   const disposables = [
     store.subscribe(s => s.session.activeModeId, refresh),
     store.subscribe(s => s.session.activeToolId, refresh),
-    store.subscribe(s => s.workspace.drawing.brushSize, refresh),
+    store.subscribe(s => s.workspace.drawing.brush.mask.size, refresh),
   ];
 
   const onKeyDown = (e) => {

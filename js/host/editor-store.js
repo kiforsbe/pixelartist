@@ -1,5 +1,23 @@
+import { DEFAULT_BRUSH, normalizeBrush } from '../core/brushes.js';
+
 export function documentKey(document) {
   return document ? `${document.kind}:${document.id}` : null;
+}
+
+// The legacy `brushSize` scalar is replaced by the full brush object. Raw
+// input may carry `brushSize` (an old save, or a fresh default), an already-
+// migrated `brush`, or neither -- this is the one place that reconciles all
+// three into `drawing.brush` and drops `brushSize` for good.
+export function migrateDrawingSettings(raw = {}) {
+  const { brushSize, brush, ...rest } = raw;
+  return {
+    primary: [0, 0, 0, 255],
+    secondary: [255, 255, 255, 255],
+    ...rest,
+    brush: brush
+      ? normalizeBrush(brush)
+      : normalizeBrush({ ...DEFAULT_BRUSH, mask: { kind: 'square', size: brushSize ?? 1 } }),
+  };
 }
 
 export function createEditorState(initial = {}) {
@@ -20,12 +38,7 @@ export function createEditorState(initial = {}) {
       focusedSurfaceId: null,
       ...initialWorkspace,
       overlays: { labels: true, sequences: true, ...(initialWorkspace.overlays ?? {}) },
-      drawing: {
-        primary: [0, 0, 0, 255],
-        secondary: [255, 255, 255, 255],
-        brushSize: 1,
-        ...(initialWorkspace.drawing ?? {}),
-      },
+      drawing: migrateDrawingSettings(initialWorkspace.drawing),
       pixelRevision: initialWorkspace.pixelRevision ?? 0,
     },
   };

@@ -29,7 +29,7 @@ test('the browser composition root (bootstrap.js) stays small', async () => {
 test('nothing in the shell controllers imports the retired legacy setProject/markDirty writers', async () => {
   // Deliberately does NOT ban `on`/`emit`: pixels/selection/tool/view events
   // stay on the legacy bus in several of these files throughout this whole
-  // plan (editor-workbench.js's brushSize/colors/pixels/selection wiring,
+  // plan (editor-workbench.js's brush/colors/pixels/selection wiring,
   // file-controller.js's/filter-controller.js's/float-session.js's own
   // 'pixels' emits) -- banning those names would make this test fail against
   // its own already-correct target state, not just the pre-migration one.
