@@ -23,17 +23,35 @@ export function setPixel(bmp, x, y, rgba) {
   bmp.data[i + 2] = rgba[2]; bmp.data[i + 3] = rgba[3];
 }
 
-function stamp(bmp, x, y, rgba, size) {
-  for (let dy = 0; dy < size; dy++)
-    for (let dx = 0; dx < size; dx++) setPixel(bmp, x + dx, y + dy, rgba);
+// A write goes through the ink when one is supplied, and straight to the
+// bitmap otherwise. Keeping the fallback here means every existing caller --
+// layer compositing in model.js, snapping in pixelSnapper.js -- is unchanged.
+function put(bmp, x, y, rgba, ink) {
+  if (ink) ink.write(bmp, x, y);
+  else setPixel(bmp, x, y, rgba);
 }
 
-export function drawLine(bmp, x0, y0, x1, y1, rgba, size = 1) {
+// `grid` is an optional 1-bit mask ({width,height,bits}); without one the
+// stamp is a filled `size` x `size` square, which is the historical shape.
+// Masks anchor on their CENTER so the cursor sits in the middle of the brush.
+export function stamp(bmp, x, y, rgba, size, ink = null, grid = null) {
+  if (grid) {
+    const halfX = (grid.width - 1) >> 1, halfY = (grid.height - 1) >> 1;
+    for (let gy = 0; gy < grid.height; gy++)
+      for (let gx = 0; gx < grid.width; gx++)
+        if (grid.bits[gy * grid.width + gx]) put(bmp, x + gx - halfX, y + gy - halfY, rgba, ink);
+    return;
+  }
+  for (let dy = 0; dy < size; dy++)
+    for (let dx = 0; dx < size; dx++) put(bmp, x + dx, y + dy, rgba, ink);
+}
+
+export function drawLine(bmp, x0, y0, x1, y1, rgba, size = 1, ink = null, grid = null) {
   let dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
   const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
   let err = dx + dy;
   for (;;) {
-    stamp(bmp, x0, y0, rgba, size);
+    stamp(bmp, x0, y0, rgba, size, ink, grid);
     if (x0 === x1 && y0 === y1) break;
     const e2 = 2 * err;
     if (e2 >= dy) { err += dy; x0 += sx; }
@@ -43,24 +61,24 @@ export function drawLine(bmp, x0, y0, x1, y1, rgba, size = 1) {
 
 // `filled` may be `true` (interior = rgba) or an rgba array (two-color shape:
 // rgba outline, `filled` interior); falsy draws the outline only.
-export function drawRect(bmp, x0, y0, x1, y1, rgba, filled) {
+export function drawRect(bmp, x0, y0, x1, y1, rgba, filled, ink = null) {
   const fill = filled === true ? rgba : filled;
   const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
   const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
   for (let y = ya; y <= yb; y++)
     for (let x = xa; x <= xb; x++) {
-      if (x === xa || x === xb || y === ya || y === yb) setPixel(bmp, x, y, rgba);
-      else if (fill) setPixel(bmp, x, y, fill);
+      if (x === xa || x === xb || y === ya || y === yb) put(bmp, x, y, rgba, ink);
+      else if (fill) put(bmp, x, y, fill, ink);
     }
 }
 
-export function drawEllipse(bmp, x0, y0, x1, y1, rgba, filled) {
+export function drawEllipse(bmp, x0, y0, x1, y1, rgba, filled, ink = null) {
   const fill = filled === true ? rgba : filled;
   const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
   const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
   const rx = (xb - xa) / 2, ry = (yb - ya) / 2;
   const cx = xa + rx, cy = ya + ry;
-  if (rx < 0.5 || ry < 0.5) { drawRect(bmp, xa, ya, xb, yb, rgba, true); return; }
+  if (rx < 0.5 || ry < 0.5) { drawRect(bmp, xa, ya, xb, yb, rgba, true, ink); return; }
   // scanline test against ellipse equation; outline = inside but a 1px-shrunk ellipse misses
   for (let y = ya; y <= yb; y++) {
     for (let x = xa; x <= xb; x++) {
@@ -70,18 +88,29 @@ export function drawEllipse(bmp, x0, y0, x1, y1, rgba, filled) {
       if (!inside) continue;
       const ix = (x + 0.5 - (cx + 0.5)) / Math.max(rx - 0.5, 0.5);
       const iy = (y + 0.5 - (cy + 0.5)) / Math.max(ry - 0.5, 0.5);
-      if (ix * ix + iy * iy > 1) setPixel(bmp, x, y, rgba);
-      else if (fill) setPixel(bmp, x, y, fill);
+      if (ix * ix + iy * iy > 1) put(bmp, x, y, rgba, ink);
+      else if (fill) put(bmp, x, y, fill, ink);
     }
   }
 }
 
-export function floodFill(bmp, x, y, rgba, contiguous = true) {
+// The contiguous branch tracks visited pixels with an explicit `seen` array
+// (the same pattern softFloodFill already uses below), NOT by checking
+// whether a pixel still equals `target`. An ink is free to decline to write
+// -- opacity < 100, ramp-shade off-ramp, replace on a non-match, lock-alpha
+// on a transparent pixel all do this routinely -- and a skipped pixel still
+// equals `target`, so colour-as-visited-marker pushes it back onto the stack
+// forever whenever two skipped pixels are orthogonally adjacent (e.g. a
+// dots25 dither pattern). See task-8-brief-amendment.md (Ruling 24).
+export function floodFill(bmp, x, y, rgba, contiguous = true, ink = null) {
   const target = getPixel(bmp, x, y);
   if (!target || colorsEqual(target, rgba)) return null;
   let minX = Infinity, minY = Infinity, maxX = -1, maxY = -1;
+  // Bounds cover the region test, not what the ink actually wrote: the
+  // caller uses this as a dirty rect, and a pixel the ink skipped inside the
+  // region still needs repainting (its neighbours' writes may show through).
   const mark = (px, py) => {
-    setPixel(bmp, px, py, rgba);
+    put(bmp, px, py, rgba, ink);
     if (px < minX) minX = px; if (px > maxX) maxX = px;
     if (py < minY) minY = py; if (py > maxY) maxY = py;
   };
@@ -90,9 +119,14 @@ export function floodFill(bmp, x, y, rgba, contiguous = true) {
       for (let px = 0; px < bmp.width; px++)
         if (colorsEqual(getPixel(bmp, px, py), target)) mark(px, py);
   } else {
+    const seen = new Uint8Array(bmp.width * bmp.height);
     const stack = [[x, y]];
     while (stack.length) {
       const [px, py] = stack.pop();
+      if (px < 0 || py < 0 || px >= bmp.width || py >= bmp.height) continue;
+      const index = py * bmp.width + px;
+      if (seen[index]) continue;
+      seen[index] = 1;
       if (!colorsEqual(getPixel(bmp, px, py), target)) continue;
       mark(px, py);
       stack.push([px + 1, py], [px - 1, py], [px, py + 1], [px, py - 1]);
