@@ -130,15 +130,25 @@ test('softFloodFill routes through an ink when given one', () => {
 });
 
 test('an ink turns feather into a hard threshold instead of a blend', () => {
-  // Two pixels: one well inside tolerance (strength 1), one out past the
-  // feather band (strength 0). With an ink neither may come back part-blended.
+  // Strengths are pinned to known values so this test actually constrains the
+  // 0.5 cutoff. tolerance 20 + feather 100 => edge 120, and strength in the
+  // band is (edge - dist) / feather:
+  //   x=0  dist   0 -> strength 1.0   written
+  //   x=1  dist  60 -> strength 0.6   written
+  //   x=2  dist  90 -> strength 0.3   SKIPPED
+  //   x=3  dist 200 -> strength 0     skipped, and traversal stops here
+  // A cutoff of 0.05 would also write x=2; a cutoff of 0.99 would write only
+  // x=0. Either mutation must fail this test.
   const bmp = createBitmap(4, 1);
   setPixel(bmp, 0, 0, [0, 0, 0, 255]);
-  setPixel(bmp, 1, 0, [10, 10, 10, 255]);
-  setPixel(bmp, 2, 0, [200, 200, 200, 255]);
-  setPixel(bmp, 3, 0, [255, 255, 255, 255]);
+  setPixel(bmp, 1, 0, [60, 60, 60, 255]);
+  setPixel(bmp, 2, 0, [90, 90, 90, 255]);
+  setPixel(bmp, 3, 0, [200, 200, 200, 255]);
   const ink = spyInk();
   softFloodFill(bmp, 0, 0, [255, 0, 0, 255], { tolerance: 20, feather: 100 }, ink);
+  assert.deepEqual(ink.seen, ['0,0', '1,0'], 'only pixels at or above half strength may be inked');
+  assert.deepEqual([...getPixel(bmp, 2, 0)], [90, 90, 90, 255], 'a sub-threshold pixel must be left exactly as it was');
+  // The original point of this test: nothing may come back part-blended.
   for (const x of [0, 1, 2, 3]) {
     const p = [...getPixel(bmp, x, 0)];
     const untouched = p[0] === p[1] && p[1] === p[2];
@@ -154,4 +164,44 @@ test('softFloodFill with a skipping ink still terminates', () => {
   const ink = { write(b, x, y) { offered++; if (offered > 4096) throw new Error('runaway traversal'); if (x % 2 === 0 && y % 2 === 0) setPixel(b, x, y, GREEN); } };
   softFloodFill(bmp, 0, 0, [255, 255, 255, 255], { tolerance: 255 }, ink);
   assert.equal(offered, 256, 'each pixel offered exactly once');
+});
+
+// --- gaps found in review ---------------------------------------------------
+
+test('drawRect routes its INTERIOR through the ink, not just its border', () => {
+  const bmp = createBitmap(8, 8);
+  const ink = spyInk();
+  drawRect(bmp, 0, 0, 3, 3, RED, true, ink);
+  assert.ok(ink.seen.includes('1,1'), 'an interior pixel must be offered to the ink');
+  assert.deepEqual([...getPixel(bmp, 1, 1)], GREEN, 'the interior must be written by the ink');
+});
+
+test('a two-colour rect collapses to one ink -- the ink is the colour source', () => {
+  // drawRect takes `filled` as an rgba array for two-colour shapes. Under an
+  // ink both border and interior go through ink.write, which carries its own
+  // colour. That is inherent to the abstraction, not a defect -- pinned here so
+  // it reads as deliberate.
+  const bmp = createBitmap(8, 8);
+  const BLUE = [0, 0, 255, 255];
+  const ink = spyInk();
+  drawRect(bmp, 0, 0, 3, 3, RED, BLUE, ink);
+  assert.deepEqual([...getPixel(bmp, 0, 0)], GREEN, 'border');
+  assert.deepEqual([...getPixel(bmp, 1, 1)], GREEN, 'interior -- not BLUE');
+});
+
+test('an even-width mask grid anchors top-left-biased, since it has no exact centre', () => {
+  // halfX = (2 - 1) >> 1 = 0, so a 2x2 grid at (4,4) covers (4,4)..(5,5).
+  const bmp = createBitmap(8, 8);
+  const ink = spyInk();
+  const grid = { width: 2, height: 2, bits: Uint8Array.from([1, 1, 1, 1]) };
+  drawLine(bmp, 4, 4, 4, 4, RED, 2, ink, grid);
+  assert.deepEqual(ink.seen.sort(), ['4,4', '4,5', '5,4', '5,5']);
+});
+
+test('a mask grid whose cells fall outside the bitmap does not throw', () => {
+  const bmp = createBitmap(4, 4);
+  const ink = spyInk();
+  const grid = { width: 3, height: 3, bits: Uint8Array.from([1, 1, 1, 1, 1, 1, 1, 1, 1]) };
+  drawLine(bmp, 0, 0, 0, 0, RED, 3, ink, grid);
+  assert.deepEqual([...getPixel(bmp, 0, 0)], GREEN, 'in-bounds cells still land');
 });

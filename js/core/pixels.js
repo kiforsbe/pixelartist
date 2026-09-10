@@ -172,6 +172,9 @@ export function softFloodFill(bmp, x, y, rgba, {
       // editor exists to prevent.
       if (strength < 0.5) return;
       ink.write(bmp, px, py);
+      // Bounds grow for every pixel OFFERED to the ink, not only those it
+      // chose to paint -- same reasoning as floodFill's: the caller uses this
+      // as a dirty rect, and a pixel the ink declined still needs repainting.
       minX = Math.min(minX, px); maxX = Math.max(maxX, px);
       minY = Math.min(minY, py); maxY = Math.max(maxY, py);
       return;
