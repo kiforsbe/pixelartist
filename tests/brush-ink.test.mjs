@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBitmap, setPixel, getPixel, drawRect, drawEllipse, floodFill, softFloodFill } from '../js/core/pixels.js';
 import { normalizePalette } from '../js/core/palettes.js';
-import { normalizeBrush } from '../js/core/brushes.js';
+import { normalizeBrush, INK_KINDS } from '../js/core/brushes.js';
 import { makeInk, applyPaletteClosure } from '../js/core/brush-ink.js';
 
 const RED = [255, 0, 0, 255], BLUE = [0, 0, 255, 255], CLEAR = [0, 0, 0, 0];
@@ -610,5 +610,52 @@ test('soft-flood FILL mode is unchanged by the erase fix', () => {
   softFloodFill(bmp, 0, 0, GREEN, { tolerance: 0 }, ink);
   for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
     assert.deepEqual([...getPixel(bmp, x, y)], GREEN, `pixel ${x},${y}`);
+  }
+});
+
+// --- fix round 3: an ink declares whether it claims the secondary swatch ----
+//
+// The shape tools paint a filled shape's interior in the secondary. An ink
+// that already uses the secondary as one of its own colours therefore
+// collides with that convention, and drawing-engine needs to know -- WITHOUT
+// switching on `kind`, which would put ink taxonomy in the wrong module.
+
+test('usesSecondary is true for dither and false for every other ink', () => {
+  // Enumerated from INK_KINDS rather than hand-listed, so a seventh ink shows
+  // up here as a failure instead of being silently assumed not to use it.
+  const expected = { dither: true, solid: false, stamp: false, replace: false, 'lock-alpha': false, 'ramp-shade': false };
+  assert.deepEqual([...INK_KINDS].sort(), Object.keys(expected).sort(),
+    'a new ink kind was added -- decide whether it consumes the secondary swatch');
+  for (const kind of INK_KINDS) {
+    const brush = normalizeBrush({ ink: { kind, replaceColor: RED } });
+    assert.equal(makeInk(brush, ctx()).usesSecondary, expected[kind], `usesSecondary wrong for ${kind}`);
+  }
+});
+
+test('only the ink that actually reads `secondary` reports usesSecondary', () => {
+  // Behavioural cross-check on the flag, so it cannot drift away from the
+  // code: paint a pixel with the secondary set, then again with a DIFFERENT
+  // secondary. Only an ink that reads it can produce a different result.
+  const palette = greyPalette();
+  // Both probe secondaries are real palette entries, and so are the primary
+  // and the destination. Off-palette probes would be snapped together by
+  // applyPaletteClosure and every ink would look like it ignored the
+  // secondary -- the probe has to survive the closure to prove anything. The
+  // palette is kept (rather than dropped) so ramp-shade is genuinely
+  // exercised instead of bailing out at its `if (!palette) return`.
+  const DEST = palette.colors[1], INK_PRIMARY = palette.colors[2];
+  const paint = (kind, secondary) => {
+    const bmp = createBitmap(4, 4);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) setPixel(bmp, x, y, DEST);
+    const brush = normalizeBrush({ ink: { kind, replaceColor: DEST } });
+    const ink = makeInk(brush, ctx({ palette, primary: INK_PRIMARY, secondary }));
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) ink.write(bmp, x, y);
+    return Array.from({ length: 16 }, (_, i) => getPixel(bmp, i % 4, (i / 4) | 0).join()).join(' ');
+  };
+  for (const kind of INK_KINDS) {
+    const brush = normalizeBrush({ ink: { kind } });
+    const reads = paint(kind, palette.colors[0]) !== paint(kind, palette.colors[3]);
+    assert.equal(makeInk(brush, ctx()).usesSecondary, reads,
+      `${kind}: usesSecondary says ${makeInk(brush, ctx()).usesSecondary} but it ${reads ? 'does' : 'does not'} read the secondary`);
   }
 });

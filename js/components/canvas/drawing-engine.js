@@ -382,9 +382,6 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const target = getTargetRect(ev.x, ev.y);
       const p = clampPoint(ev.x, ev.y, target);
       if (!p) return;
-      // filled shapes: outline in the pressed button's color, interior in the
-      // opposite swatch (left = primary outline / secondary fill, right = swapped)
-      const fill = (tool !== 'line' && toolOptions.filled) ? currentColor(ev, true) : null;
       const brush = activeBrush();
       const seed = newStrokeSeed();
       const ink = makeInk(brush, {
@@ -392,6 +389,30 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
         palette: activePalette(), seed, alt: ev.altKey,
         pressure: ev.pressure, pointerType: ev.pointerType,
       });
+      // filled shapes: outline in the pressed button's color, interior in the
+      // opposite swatch (left = primary outline / secondary fill, right = swapped)
+      //
+      // UNLESS the ink already claims the secondary as one of its own colours,
+      // which it tells us via `usesSecondary` -- never by us inspecting its
+      // kind, since ink taxonomy belongs to brush-ink.js. There are only two
+      // swatches, so a dither brush and the two-colour shape convention are
+      // asking to spend the same one, and something has to give: the interior
+      // takes the OUTLINE colour, and the shape becomes one evenly dithered
+      // region instead of a dithered border round a solid middle.
+      //
+      // The richer mechanism wins because picking a dither brush is a more
+      // specific statement about how colour goes down than the shape tool's
+      // fill convention, which is a cruder version of the same idea. And the
+      // distinction being given up was not working anyway: handing a dither
+      // ink the secondary as its source colour put the same colour in both of
+      // its slots and painted a SOLID interior.
+      //
+      // Resolved once, at pointer-down: `usesSecondary` is a property of the
+      // brush, and the brush cannot change mid-stroke even though handleMove
+      // rebuilds the ink on every pointer move.
+      const fill = (tool !== 'line' && toolOptions.filled)
+        ? (ink.usesSecondary ? color : currentColor(ev, true))
+        : null;
       stroke = { tool, layer, before, color, fill, dirty: null, anchor: p, target, brush, seed, ink };
       notifyPixelsChanged();
       return;

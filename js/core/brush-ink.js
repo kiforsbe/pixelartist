@@ -69,6 +69,26 @@ function blendOver(src, dst, aSrc) {
   return [mix(src[0], dst[0]), mix(src[1], dst[1]), mix(src[2], dst[2]), Math.round(aOut * 255)];
 }
 
+// Ink kinds that consume the SECONDARY swatch as a colour of their own.
+//
+// This lives here, and is exposed on the ink as `usesSecondary`, so that no
+// caller ever has to switch on `kind`. Ink taxonomy belongs to this module:
+// a caller that sniffed the kind would be silently wrong the moment a seventh
+// ink is added, whereas a missing entry here is one obvious place to look.
+//
+// Verified against every arm of `write`, not assumed:
+//   dither      YES -- `patternPicksSecondary(...) ? (secondary ?? src) : src`.
+//   solid       no  -- paints the source colour only.
+//   stamp       no  -- paints the source colour (a mask's colour payload).
+//   replace     no  -- `replaceColor` gates WHICH pixels; the colour is `src`.
+//   lock-alpha  no  -- paints `src`, pinning only the destination's alpha.
+//   ramp-shade  no  -- its second colour is a RAMP NEIGHBOUR of the
+//                      destination pixel (`stepAlongRamp`), which comes from
+//                      the palette, not from the swatch. Worth stating
+//                      explicitly because "derives a second colour" is easy to
+//                      confuse with "reads the secondary swatch".
+const SECONDARY_CONSUMING_KINDS = new Set(['dither']);
+
 export function makeInk(brush, context) {
   const { kind, opacity, jitter, pattern, rampName, replaceColor, trueAlpha } = brush.ink;
   const { primary, secondary, palette, seed, alt } = context;
@@ -118,6 +138,13 @@ export function makeInk(brush, context) {
   }
 
   return {
+    // True when this ink already claims the secondary swatch as one of its own
+    // colours. A caller that ALSO wants to spend the secondary on something
+    // else -- the shape tools paint a filled shape's interior in it -- has to
+    // give way, because there are only two swatches and no third colour to
+    // break the tie with. See drawing-engine.js's `fill`.
+    usesSecondary: SECONDARY_CONSUMING_KINDS.has(kind),
+
     // Pressure changes within a stroke, but the ink must NOT be rebuilt per
     // pointer move -- its `touched` set is stroke-lifetime state (see the
     // header comment).
