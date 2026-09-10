@@ -11,6 +11,13 @@ export const INK_KINDS = ['solid', 'ramp-shade', 'dither', 'stamp', 'lock-alpha'
 export const PRESSURE_TARGETS = ['none', 'size', 'opacity', 'shade-step'];
 export const PRESSURE_CURVES = ['linear', 'soft', 'hard'];
 export const MAX_MASK_SIZE = 16;
+// A custom mask's bitmap dimensions are attacker-controlled the moment file
+// import exists (Task 12): a brush file claiming {width:1e9,height:1e9}
+// would otherwise reach `new Uint8Array(width*height)` in rasterizeMask and
+// throw RangeError on the first paint, after import appeared to succeed.
+// 256 is far beyond any real brush -- MAX_MASK_SIZE (16) already bounds the
+// scalar square/circle masks -- so this only ever clips hostile input.
+export const MAX_CUSTOM_BITMAP_DIM = 256;
 
 export function newBrushId() {
   return newId('brush_');
@@ -145,6 +152,30 @@ function emptyGrid(width, height) {
   return { width, height, bits: new Uint8Array(width * height) };
 }
 
+// Shared by both custom-bitmap branches below. Clamps to MAX_CUSTOM_BITMAP_DIM
+// so no declared dimension can make `emptyGrid`'s `new Uint8Array(w*h)` throw
+// -- this is the last line of defence and must not depend on a parser having
+// already validated the file (see brush-io.js's parseBrushJson for the other
+// half: rejecting a hostile file outright instead of silently clamping it).
+// Negative/NaN inputs fall back to 1 exactly as before this cap existed.
+function clampCustomDim(v) {
+  const n = Math.trunc(v) || 0;
+  return Math.max(1, Math.min(MAX_CUSTOM_BITMAP_DIM, n));
+}
+
+// `mask.colors` is the stamp ink's per-cell payload (see brush-io.js's
+// bitmapToBrush): one entry per source cell, aligned to the SOURCE bitmap's
+// bits -- not to `grid`, whose dimensions may already be clamped/truncated.
+// Attached onto `grid` only where the bit is actually set, so a caller never
+// has to null-check bit-vs-colour agreement itself.
+function attachColors(grid, colors) {
+  if (!Array.isArray(colors) || !colors.length) return;
+  const out = new Array(grid.bits.length).fill(null);
+  const n = Math.min(out.length, colors.length);
+  for (let i = 0; i < n; i++) if (grid.bits[i]) out[i] = colors[i] ?? null;
+  grid.colors = out;
+}
+
 export function rasterizeMask(mask) {
   const size = Math.max(1, Math.min(MAX_MASK_SIZE, mask.size ?? 1));
   if (mask.kind === 'custom') {
@@ -155,20 +186,22 @@ export function rasterizeMask(mask) {
     // `bitmap` is present, not that its shape is coherent, so guard against
     // a malformed one (missing dimensions/data) rather than trusting it.
     if (bmp.bits) {
-      const width = Math.max(1, Math.trunc(bmp.width) || 0);
-      const height = Math.max(1, Math.trunc(bmp.height) || 0);
+      const width = clampCustomDim(bmp.width);
+      const height = clampCustomDim(bmp.height);
       const grid = emptyGrid(width, height);
       const n = Math.min(grid.bits.length, bmp.bits.length ?? 0);
       for (let i = 0; i < n; i++) grid.bits[i] = bmp.bits[i] ? 1 : 0;
+      attachColors(grid, mask.colors);
       return grid;
     }
     if (bmp.data) {
-      const width = Math.max(1, Math.trunc(bmp.width) || 0);
-      const height = Math.max(1, Math.trunc(bmp.height) || 0);
+      const width = clampCustomDim(bmp.width);
+      const height = clampCustomDim(bmp.height);
       const grid = emptyGrid(width, height);
       for (let i = 0, p = 0; i < grid.bits.length; i++, p += 4) {
         grid.bits[i] = bmp.data[p + 3] > 0 ? 1 : 0;
       }
+      attachColors(grid, mask.colors);
       return grid;
     }
     return emptyGrid(1, 1);
@@ -206,10 +239,15 @@ export function rasterizeMask(mask) {
 // destination pixel, so the set-pixel count is invariant.
 export function rotateMaskGrid(grid, degrees) {
   const deg = ((Math.round(degrees / 90) * 90) % 360 + 360) % 360;
-  if (deg === 0) return { width: grid.width, height: grid.height, bits: Uint8Array.from(grid.bits) };
+  if (deg === 0) {
+    const out = { width: grid.width, height: grid.height, bits: Uint8Array.from(grid.bits) };
+    if (grid.colors) out.colors = grid.colors.slice();
+    return out;
+  }
   const { width: w, height: h, bits } = grid;
   const swapped = deg === 90 || deg === 270;
   const out = emptyGrid(swapped ? h : w, swapped ? w : h);
+  if (grid.colors) out.colors = new Array(out.bits.length).fill(null);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (!bits[y * w + x]) continue;
@@ -218,21 +256,28 @@ export function rotateMaskGrid(grid, degrees) {
       else if (deg === 180) { nx = w - 1 - x; ny = h - 1 - y; }
       else { nx = y; ny = w - 1 - x; }
       out.bits[ny * out.width + nx] = 1;
+      if (grid.colors) out.colors[ny * out.width + nx] = grid.colors[y * w + x];
     }
   }
   return out;
 }
 
 export function flipMaskGrid(grid, flipH, flipV) {
-  if (!flipH && !flipV) return { width: grid.width, height: grid.height, bits: Uint8Array.from(grid.bits) };
+  if (!flipH && !flipV) {
+    const out = { width: grid.width, height: grid.height, bits: Uint8Array.from(grid.bits) };
+    if (grid.colors) out.colors = grid.colors.slice();
+    return out;
+  }
   const { width: w, height: h, bits } = grid;
   const out = emptyGrid(w, h);
+  if (grid.colors) out.colors = new Array(out.bits.length).fill(null);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (!bits[y * w + x]) continue;
       const nx = flipH ? w - 1 - x : x;
       const ny = flipV ? h - 1 - y : y;
       out.bits[ny * w + nx] = 1;
+      if (grid.colors) out.colors[ny * w + nx] = grid.colors[y * w + x];
     }
   }
   return out;
@@ -240,11 +285,32 @@ export function flipMaskGrid(grid, flipH, flipV) {
 
 // `options.rotate` is the per-stamp override rotateJitter supplies; it
 // composes with the brush's own static rotation.
+//
+// `options.inkKind` is an OPTIONAL, additive declaration of which ink this
+// grid is being built to paint with. A mask's colour payload (`mask.colors`,
+// carried through rasterizeMask/rotate/flip above) belongs to the `stamp`
+// ink alone -- design doc line 121: "stamp ... writes the custom mask's own
+// colors payload, ignoring primary." Mask and ink are independent axes (see
+// this module's header), so nothing stops the SAME custom mask -- payload
+// and all -- from being reused under `solid` or any other ink, and that
+// combination must paint the ink's own colour, not silently repaint the
+// embedded palette. rasterizeMask/rotateMaskGrid/flipMaskGrid stay
+// unconditional (a mask's colours are its own business, independent of what
+// paints it); this is the one point where "which ink is this for" is known,
+// so it is where the payload is withheld for every ink but stamp.
+// Omitting `inkKind` (every call site that existed before this option was
+// added) leaves colours exactly as the transforms produced them -- this is
+// opt-in, not a behaviour change for an existing caller.
 export function maskGridFor(mask, options = {}) {
   let grid = rasterizeMask(mask);
   const rotate = (mask.rotate ?? 0) + (options.rotate ?? 0);
   grid = rotateMaskGrid(grid, rotate);
-  return flipMaskGrid(grid, !!mask.flipH, !!mask.flipV);
+  grid = flipMaskGrid(grid, !!mask.flipH, !!mask.flipV);
+  if (grid.colors && options.inkKind !== undefined && options.inkKind !== 'stamp') {
+    const { colors, ...rest } = grid;
+    grid = rest;
+  }
+  return grid;
 }
 
 // --- pressure -----------------------------------------------------------

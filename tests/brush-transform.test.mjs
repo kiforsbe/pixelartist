@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeBrush } from '../js/core/brushes.js';
-import { rasterizeMask, rotateMaskGrid, flipMaskGrid, maskGridFor } from '../js/core/brushes.js';
+import { rasterizeMask, rotateMaskGrid, flipMaskGrid, maskGridFor, MAX_CUSTOM_BITMAP_DIM } from '../js/core/brushes.js';
 
 function countSet(grid) {
   let n = 0;
@@ -114,4 +114,22 @@ test('rasterizeMask tolerates garbage dimensions on a custom bitmap', () => {
   assert.ok(negGrid.width >= 1);
   assert.ok(negGrid.height >= 1);
   for (const b of negGrid.bits) assert.ok(b === 0 || b === 1);
+});
+
+// --- amendment section B: rasterizeMask clamps a hostile bitmap instead of
+// throwing (Ruling 30). This is the LAST line of defence and must hold even
+// for a caller that bypasses brush-io.js's parser entirely (e.g. a mask
+// object built by hand, or by some future caller). A brush file claiming
+// {width:1e9, height:1e9} used to reach `new Uint8Array(width*height)` here
+// and throw RangeError: Invalid typed array length on the very first paint.
+
+test('rasterizeMask clamps a custom bitmap whose declared dimensions are hostile, instead of throwing', () => {
+  const hostile = { kind: 'custom', bitmap: { width: 1e9, height: 1e9, bits: new Uint8Array(4) } };
+  // Anti-vacuity: without the clamp this call throws RangeError before the
+  // assertions below ever run -- node --test would report the throw itself
+  // as the failure, not a silent false pass.
+  const grid = rasterizeMask(hostile);
+  assert.ok(grid.width <= MAX_CUSTOM_BITMAP_DIM, `width ${grid.width} was not clamped`);
+  assert.ok(grid.height <= MAX_CUSTOM_BITMAP_DIM, `height ${grid.height} was not clamped`);
+  assert.equal(grid.bits.length, grid.width * grid.height);
 });

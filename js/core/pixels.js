@@ -47,8 +47,16 @@ export function stamp(bmp, x, y, rgba, size, ink = null, grid = null) {
   if (grid) {
     const halfX = (grid.width - 1) >> 1, halfY = (grid.height - 1) >> 1;
     for (let gy = 0; gy < grid.height; gy++)
-      for (let gx = 0; gx < grid.width; gx++)
-        if (grid.bits[gy * grid.width + gx]) put(bmp, x + gx - halfX, y + gy - halfY, rgba, ink);
+      for (let gx = 0; gx < grid.width; gx++) {
+        const i = gy * grid.width + gx;
+        if (!grid.bits[i]) continue;
+        // A custom mask's own per-cell colour payload (the `stamp` ink's
+        // stock in trade) travels ON THE GRID, not as a second argument --
+        // see brushes.js's maskGridFor, which is what decides whether a
+        // grid built for a non-stamp ink carries `colors` at all.
+        const color = grid.colors ? (grid.colors[i] ?? rgba) : rgba;
+        put(bmp, x + gx - halfX, y + gy - halfY, color, ink);
+      }
     return;
   }
   for (let dy = 0; dy < size; dy++)
