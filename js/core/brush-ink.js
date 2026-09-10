@@ -12,6 +12,7 @@ import { nearestColor } from './palettes.js';
 import { stepAlongRamp } from './ramps.js';
 import { passesOpacity, patternPicksSecondary } from './dither.js';
 import { stampRandom } from './brush-stroke.js';
+import { pressureValue } from './brushes.js';
 
 // The retro guarantee, in one place: when the palette is indexed, every value
 // an ink writes is snapped to a real palette entry.
@@ -59,6 +60,13 @@ export function makeInk(brush, context) {
   // Pixels this stroke has already inked, keyed "x,y". This is what makes a
   // stroke idempotent per pixel.
   const touched = new Set();
+
+  // Pressure changes within a stroke, but the ink must NOT be rebuilt per
+  // pointer move -- its `touched` set above is stroke-lifetime state (see the
+  // header comment). So pressure lives in mutable closure state instead,
+  // seeded from the context and updated in place by setPressure.
+  let pressure = context.pressure ?? 1;
+  let pointerType = context.pointerType;
   // trueAlpha promises real alpha blending for non-indexed work (spec:147).
   // ramp-shade writes a ramp *neighbour* rather than a colour of its own, so
   // there is nothing to blend toward -- opacity keeps its density meaning
@@ -68,11 +76,13 @@ export function makeInk(brush, context) {
   // `keepAlpha` pins the destination's own alpha through the write. lock-alpha
   // paints colour only, so without it a blend would recompute the alpha channel
   // and erode precisely the soft edges that ink exists to protect.
-  function commit(bitmap, x, y, rgba, keepAlpha = false) {
+  // `effOpacity` is the per-write opacity computed in `write` below -- the
+  // brush's static opacity unless pressure target 'opacity' overrides it.
+  function commit(bitmap, x, y, rgba, keepAlpha = false, effOpacity = opacity) {
     const dest = getPixel(bitmap, x, y);
     let out = rgba;
     if (blends) {
-      const aSrc = (rgba[3] / 255) * (opacity / 100);
+      const aSrc = (rgba[3] / 255) * (effOpacity / 100);
       out = blendOver(out, dest, aSrc);
     }
     if (keepAlpha) out = [out[0], out[1], out[2], dest[3]];
@@ -80,15 +90,33 @@ export function makeInk(brush, context) {
   }
 
   return {
+    // Pressure changes within a stroke, but the ink must NOT be rebuilt per
+    // pointer move -- its `touched` set is stroke-lifetime state (see the
+    // header comment).
+    setPressure(p, type) { pressure = p; pointerType = type; },
+
     write(bitmap, x, y) {
       const key = `${x},${y}`;
       if (touched.has(key)) return;
       touched.add(key);
 
+      // Pressure target 'opacity' overrides the static opacity for this
+      // write only; `opacity` itself is a destructured const and is never
+      // reassigned. Resolved per write, because pressure may have changed
+      // since the last one (via setPressure). Any other target -- including
+      // the default 'none' -- leaves effOpacity exactly as it was, so mouse
+      // and touch input (pressureValue always null for them) behave
+      // precisely as they do today.
+      let effOpacity = opacity;
+      if (brush.pressure.target === 'opacity') {
+        const pv = pressureValue(brush, pressure, pointerType);
+        if (pv !== null) effOpacity = Math.max(0, Math.min(100, pv));
+      }
+
       // Opacity is density: the pattern is indexed by bitmap coordinates so
       // separate strokes over one region stay aligned. When `blends` is on,
       // opacity is honored by the alpha blend in `commit` instead.
-      if (!blends && !passesOpacity(x, y, opacity)) return;
+      if (!blends && !passesOpacity(x, y, effOpacity)) return;
 
       const dest = getPixel(bitmap, x, y);
       if (!dest) return;
@@ -99,7 +127,7 @@ export function makeInk(brush, context) {
           // primary's own alpha feeds the blend; keepAlpha restores the pixel's
           // alpha afterwards, so the plain path still writes dest[3] exactly as
           // it did before.
-          commit(bitmap, x, y, primary, true);
+          commit(bitmap, x, y, primary, true, effOpacity);
           return;
 
         case 'replace':
@@ -112,18 +140,27 @@ export function makeInk(brush, context) {
           // stray alpha it carries.
           if (dest[3] === 0) return;
           if (dest[0] !== replaceColor[0] || dest[1] !== replaceColor[1] || dest[2] !== replaceColor[2]) return;
-          commit(bitmap, x, y, primary);
+          commit(bitmap, x, y, primary, false, effOpacity);
           return;
 
         case 'dither':
           // Falls back to primary without a secondary, the way stamp falls
           // back to solid, rather than throwing on an unset swatch.
-          commit(bitmap, x, y, patternPicksSecondary(pattern, x, y) ? (secondary ?? primary) : primary);
+          commit(bitmap, x, y, patternPicksSecondary(pattern, x, y) ? (secondary ?? primary) : primary, false, effOpacity);
           return;
 
         case 'ramp-shade': {
           if (!palette) return;
-          let delta = alt ? -1 : 1;
+          // Pressure target 'shade-step' scales the step magnitude: a harder
+          // press moves further along the ramp in one write. Floored at 1
+          // (never 0, which would freeze the brush) and falls back to 1 when
+          // pressureValue is null (not a pen, or a different target).
+          let step = 1;
+          if (brush.pressure.target === 'shade-step') {
+            const pv = pressureValue(brush, pressure, pointerType);
+            step = pv === null ? 1 : Math.max(1, Math.floor(pv));
+          }
+          let delta = (alt ? -1 : 1) * step;
           if (jitter > 0) {
             // Indexed by absolute position, not by call order: shape tools
             // restore and fully re-rasterize on every pointer move, so a
@@ -144,12 +181,12 @@ export function makeInk(brush, context) {
         case 'stamp':
           // Handled by the stroke layer, which knows the mask's color
           // payload; falls back to solid if it reaches here.
-          commit(bitmap, x, y, primary);
+          commit(bitmap, x, y, primary, false, effOpacity);
           return;
 
         case 'solid':
         default:
-          commit(bitmap, x, y, primary);
+          commit(bitmap, x, y, primary, false, effOpacity);
       }
     },
   };

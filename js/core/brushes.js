@@ -229,3 +229,33 @@ export function maskGridFor(mask, options = {}) {
   grid = rotateMaskGrid(grid, rotate);
   return flipMaskGrid(grid, !!mask.flipH, !!mask.flipV);
 }
+
+// --- pressure -----------------------------------------------------------
+//
+// Pressure is honored ONLY for a pen. A mouse reports a constant pressure of
+// 0.5 (or 1.0 while a button is held) and touch reports wildly inconsistent
+// values across devices, so without this guard every mouse user would get a
+// brush behaving as though it were held at half pressure forever.
+
+export function applyCurve(t, curve) {
+  const x = Math.max(0, Math.min(1, t));
+  if (curve === 'soft') return x * x;
+  if (curve === 'hard') return 1 - (1 - x) * (1 - x);
+  return x;
+}
+
+export function pressureValue(brush, pressure, pointerType) {
+  const p = brush.pressure;
+  if (!p || p.target === 'none') return null;
+  if (pointerType !== 'pen') return null;
+  const t = applyCurve(Number(pressure) || 0, p.curve);
+  // Every target quantizes: no fractional sizes, no continuous opacity.
+  return Math.round(p.min + (p.max - p.min) * t);
+}
+
+export function effectiveMaskSize(brush, pressure, pointerType) {
+  if (brush.pressure.target !== 'size') return brush.mask.size;
+  const v = pressureValue(brush, pressure, pointerType);
+  if (v === null) return brush.mask.size;
+  return Math.max(1, Math.min(MAX_MASK_SIZE, v));
+}
