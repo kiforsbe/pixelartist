@@ -19,12 +19,15 @@
 import { getEditorHost } from '../../host/runtime.js';
 import { activeSheet, activeLayer } from '../../host/document-helpers.js';
 import {
-  cloneBitmap, drawLine, drawRect, drawEllipse, floodFill, softFloodFill,
+  cloneBitmap, stamp, drawLine, drawRect, drawEllipse, floodFill, softFloodFill,
   copyRegion, blitRegion, fillRegion, getPixel,
 } from '../../core/pixels.js';
 import { makePixelPatch } from '../../core/commands.js';
 import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '../../core/floating.js';
 import { nearestColor } from '../../core/palettes.js';
+import { normalizeBrush, maskGridFor, effectiveMaskSize } from '../../core/brushes.js';
+import { strokeStamps, newStrokeSeed, strokeBounds } from '../../core/brush-stroke.js';
+import { makeInk } from '../../core/brush-ink.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../../core/model.js';
 import { segmentAt } from '../../core/strips.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat, activeFloating, currentEditRegion } from './float-session.js';
@@ -93,6 +96,25 @@ function activePalette() {
   const p = getEditorHost().projects.project;
   if (!p) return null;
   return p.palettes.find(pl => pl.id === p.activePaletteId) ?? null;
+}
+
+// The active brush. Falls back to synthesising one from the legacy `brushSize`
+// setting so this task lands before the store migration without breaking the
+// paint path; Task 10 adds `drawing.brush`, retires `brushSize`, and deletes
+// the fallback.
+function activeBrush() {
+  const d = drawingSettings();
+  return d.brush ?? normalizeBrush({ mask: { kind: 'square', size: d.brushSize ?? 1 } });
+}
+
+// Fill tools ink a single click, so they build their own ink with a fresh
+// seed rather than borrowing a stroke's.
+function strokeInk(ev, color, seed = newStrokeSeed()) {
+  return makeInk(activeBrush(), {
+    primary: color, secondary: drawingSettings().secondary,
+    palette: activePalette(), seed, alt: ev?.altKey,
+    pressure: ev?.pressure, pointerType: ev?.pointerType,
+  });
 }
 
 // -------------------------------------------------------------- stroke logic
@@ -178,8 +200,9 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
 
   // Restore `before` pixels outside `target` within the given step bounds.
   // Catches writes that coordinate clamping alone cannot prevent (brush
-  // stamps overflow up to brushSize-1 px past a clamped coordinate;
-  // select-move can drag content past the target edge).
+  // stamps overflow up to (maskSize - 1)/2 + scatter px in EVERY direction
+  // past a clamped coordinate -- scatter reaches left and up as well as
+  // right and down; select-move can drag content past the target edge).
   function maskOutsideTarget(bitmap, before, x0, y0, x1, y1, target) {
     const t = target;
     const bx0 = Math.max(0, x0), by0 = Math.max(0, y0);
@@ -280,7 +303,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const t = getTargetRect(ev.x, ev.y);
       if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
       const sub = copyRegion(layer.bitmap, t.x, t.y, t.w, t.h);
-      const r = floodFill(sub, ev.x - t.x, ev.y - t.y, color, toolOptions.contiguous);
+      const r = floodFill(sub, ev.x - t.x, ev.y - t.y, color, toolOptions.contiguous, strokeInk(ev, color));
       let dirty = null;
       if (r) {
         blitRegion(layer.bitmap, sub, t.x, t.y);
@@ -297,10 +320,11 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const t = getTargetRect(ev.x, ev.y);
       if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
       const sub = copyRegion(layer.bitmap, t.x, t.y, t.w, t.h);
-      const r = softFloodFill(sub, ev.x - t.x, ev.y - t.y, currentColor(ev, false, true), {
+      const sfColor = currentColor(ev, false, true);
+      const r = softFloodFill(sub, ev.x - t.x, ev.y - t.y, sfColor, {
         ...toolOptions.softFlood,
         mode: ev.buttons & 2 ? 'erase' : 'fill',
-      });
+      }, strokeInk(ev, sfColor));
       let dirty = null;
       if (r) {
         blitRegion(layer.bitmap, sub, t.x, t.y);
@@ -315,11 +339,23 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const target = getTargetRect(ev.x, ev.y);
       const p = clampPoint(ev.x, ev.y, target);
       if (!p) return;
-      const brushSize = drawingSettings().brushSize;
-      drawLine(layer.bitmap, p.x, p.y, p.x, p.y, color, brushSize);
-      maskOutsideTarget(layer.bitmap, before, p.x, p.y, p.x + brushSize - 1, p.y + brushSize - 1, target);
-      const dirty = extend(null, p.x, p.y, p.x + brushSize - 1, p.y + brushSize - 1);
-      stroke = { tool, layer, before, color, dirty, last: p, target };
+      const brush = activeBrush();
+      const seed = newStrokeSeed();
+      const ink = makeInk(brush, {
+        primary: color, secondary: drawingSettings().secondary,
+        palette: activePalette(), seed, alt: ev.altKey,
+        pressure: ev.pressure, pointerType: ev.pointerType,
+      });
+      const size = effectiveMaskSize(brush, ev.pressure, ev.pointerType);
+      let dirty = null;
+      for (const s of strokeStamps([p], brush.mask, seed)) {
+        const g = maskGridFor({ ...brush.mask, size }, { rotate: s.rotate });
+        stamp(layer.bitmap, s.x, s.y, color, size, ink, g);
+        const b = strokeBounds(s.x, s.y, g.width, g.height, brush.mask.scatter);
+        maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, target);
+        dirty = extend(dirty, b.x0, b.y0, b.x1, b.y1);
+      }
+      stroke = { tool, layer, before, color, dirty, last: p, target, brush, seed, ink };
       notifyPixelsChanged();
       return;
     }
@@ -330,7 +366,14 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       // filled shapes: outline in the pressed button's color, interior in the
       // opposite swatch (left = primary outline / secondary fill, right = swapped)
       const fill = (tool !== 'line' && toolOptions.filled) ? currentColor(ev, true) : null;
-      stroke = { tool, layer, before, color, fill, dirty: null, anchor: p, target };
+      const brush = activeBrush();
+      const seed = newStrokeSeed();
+      const ink = makeInk(brush, {
+        primary: color, secondary: drawingSettings().secondary,
+        palette: activePalette(), seed, alt: ev.altKey,
+        pressure: ev.pressure, pointerType: ev.pointerType,
+      });
+      stroke = { tool, layer, before, color, fill, dirty: null, anchor: p, target, brush, seed, ink };
       notifyPixelsChanged();
       return;
     }
@@ -343,13 +386,23 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const p = clampPoint(ev.x, ev.y, stroke.target);
       if (!p) return;
       const last = stroke.last;
-      const brushSize = drawingSettings().brushSize;
-      drawLine(layer.bitmap, last.x, last.y, p.x, p.y, color, brushSize);
-      const sx0 = Math.min(last.x, p.x), sy0 = Math.min(last.y, p.y);
-      const sx1 = Math.max(last.x, p.x) + brushSize - 1;
-      const sy1 = Math.max(last.y, p.y) + brushSize - 1;
-      maskOutsideTarget(layer.bitmap, before, sx0, sy0, sx1, sy1, stroke.target);
-      stroke.dirty = extend(stroke.dirty, sx0, sy0, sx1, sy1);
+      const { brush, seed, ink } = stroke;
+      // Pressure changes within a stroke, but the ink is NOT rebuilt per
+      // pointer move -- its `touched` set is stroke-lifetime state (see
+      // brush-ink.js:4-8). Live pressure reaches it through this setter.
+      ink.setPressure(ev.pressure, ev.pointerType);
+      const size = effectiveMaskSize(brush, ev.pressure, ev.pointerType);
+      // The accumulated path (previous point through current), not just the
+      // current point: strokeStamps densifies and indexes internally, so a
+      // one-point call would freeze spacing/scatter/rotation jitter at
+      // stampIndex 0 for every move (task-9-brief-amendment.md:C).
+      for (const s of strokeStamps([last, p], brush.mask, seed)) {
+        const g = maskGridFor({ ...brush.mask, size }, { rotate: s.rotate });
+        stamp(layer.bitmap, s.x, s.y, color, size, ink, g);
+        const b = strokeBounds(s.x, s.y, g.width, g.height, brush.mask.scatter);
+        maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, stroke.target);
+        stroke.dirty = extend(stroke.dirty, b.x0, b.y0, b.x1, b.y1);
+      }
       stroke.last = p;
       notifyPixelsChanged();
       return;
@@ -358,19 +411,30 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       const p = clampPoint(ev.x, ev.y, stroke.target);
       if (!p) return;
       blitRegion(layer.bitmap, before, 0, 0);
+      // Shape previews restore-then-fully-re-rasterize on every move, so a
+      // fresh `touched` set is correct here -- but the SEED is not rebuilt,
+      // which is what keeps the preview stable frame to frame.
+      stroke.ink = makeInk(stroke.brush, {
+        primary: color, secondary: drawingSettings().secondary,
+        palette: activePalette(), seed: stroke.seed, alt: ev.altKey,
+        pressure: ev.pressure, pointerType: ev.pointerType,
+      });
       const a = stroke.anchor;
       if (tool === 'line') {
-        const brushSize = drawingSettings().brushSize;
-        drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, brushSize);
-        const sx1 = Math.max(a.x, p.x) + brushSize - 1;
-        const sy1 = Math.max(a.y, p.y) + brushSize - 1;
-        maskOutsideTarget(layer.bitmap, before, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1, stroke.target);
-        stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), sx1, sy1);
+        const size = effectiveMaskSize(stroke.brush, ev.pressure, ev.pointerType);
+        const g = maskGridFor({ ...stroke.brush.mask, size }, {});
+        drawLine(layer.bitmap, a.x, a.y, p.x, p.y, color, size, stroke.ink, g);
+        const bA = strokeBounds(a.x, a.y, g.width, g.height, stroke.brush.mask.scatter);
+        const bP = strokeBounds(p.x, p.y, g.width, g.height, stroke.brush.mask.scatter);
+        const x0 = Math.min(bA.x0, bP.x0), y0 = Math.min(bA.y0, bP.y0);
+        const x1 = Math.max(bA.x1, bP.x1), y1 = Math.max(bA.y1, bP.y1);
+        maskOutsideTarget(layer.bitmap, before, x0, y0, x1, y1, stroke.target);
+        stroke.dirty = extend(stroke.dirty, x0, y0, x1, y1);
       } else if (tool === 'rect') {
-        drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill);
+        drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill, stroke.ink);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
       } else if (tool === 'ellipse') {
-        drawEllipse(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill);
+        drawEllipse(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill, stroke.ink);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
       }
       notifyPixelsChanged();

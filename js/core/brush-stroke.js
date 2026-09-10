@@ -75,6 +75,23 @@ function densifyPath(points) {
   return dense;
 }
 
+// Bounds for one stamp, used for both the dirty rect and the
+// maskOutsideTarget safety net.
+//
+// Scatter widens the box in BOTH directions: a scattered stamp can land to
+// the left of and above its path point as easily as right and below. The old
+// `brushSize - 1` bound only ever extended right and down, which is exactly
+// why it cannot simply be reused here.
+export function strokeBounds(x, y, gridW, gridH, scatter = 0) {
+  const halfX = (gridW - 1) >> 1, halfY = (gridH - 1) >> 1;
+  return {
+    x0: x - halfX - scatter,
+    y0: y - halfY - scatter,
+    x1: x + (gridW - 1 - halfX) + scatter,
+    y1: y + (gridH - 1 - halfY) + scatter,
+  };
+}
+
 export function strokeStamps(points, mask, seed) {
   const spacing = Math.max(1, mask.spacing ?? 1);
   const scatter = Math.max(0, mask.scatter ?? 0);
