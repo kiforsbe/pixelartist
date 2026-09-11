@@ -5,6 +5,7 @@ import { removeEntry } from './strips.js';
 import { NEIGHBOR_DIRS } from './neighbors.js';
 import { MAX_PALETTE_COLORS, DEFAULT_PIXEL_SNAPPER_CONFIG } from './pixelSnapper.js';
 import { DEFAULT_MAP_BOUNDS, mapContentBounds } from '../domain/maps/maps.js';
+import { toPlain as brushToPlain, fromPlain as brushFromPlain } from './brush-io.js';
 
 export { DEFAULT_MAP_BOUNDS, createMap, createMapLayer, mapContentBounds, refreshMapBounds } from '../domain/maps/maps.js';
 export { fpsStepToMs, msToFps, effectiveDuration } from '../domain/sprites/animation-timing.js';
@@ -116,7 +117,7 @@ export function createGroupNode(name, { animationId = null, open = true } = {}) 
 
 export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
   return { version: PROJECT_VERSION, name, settings: { onion: defaultOnionSettings(), ...settings },
-    sheets: [], maps: [], palettes: [], activePaletteId: null };
+    sheets: [], maps: [], palettes: [], activePaletteId: null, brushes: [] };
 }
 
 export function newDefaultProject(settings = DEFAULT_SETTINGS) {
@@ -631,6 +632,12 @@ export function serializeProject(project) {
     version: PROJECT_VERSION, name: project.name,
     settings: { ...project.settings },
     activePaletteId: project.activePaletteId,
+    // Embedded brushes go through the same toPlain a standalone .brush.json
+    // uses. bundle.js JSON.stringifies this whole body (bundle.js:7), and a
+    // custom mask's `bits` is a Uint8Array -- which JSONs to an OBJECT, not an
+    // array, and rehydrates to an EMPTY one. Without this the brush would
+    // survive the round trip listed, selectable, and painting nothing.
+    brushes: (project.brushes ?? []).map(brushToPlain),
     palettes: project.palettes.map(p => ({
       ...p,
       colors: p.colors.map(c => [...c]),
@@ -688,6 +695,7 @@ export function deserializeProject(json, imagesByPath) {
       ...json.settings,
     },
     activePaletteId: json.activePaletteId ?? null,
+    brushes: (json.brushes ?? []).map(brushFromPlain),
     palettes: (json.palettes ?? []).map(normalizePalette),
     maps: (json.maps ?? []).map(m => ({
       id: m.id, name: m.name ?? 'Map',

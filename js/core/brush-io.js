@@ -41,7 +41,15 @@ export function brushToBitmap(brush) {
 
 // Uint8Array does not survive JSON, so the mask bits travel as a plain array
 // and are rehydrated on the way back in.
-function toPlain(brush) {
+//
+// Exported (Task 12) so js/core/model.js can apply the identical transform to
+// brushes embedded in a project file. bundle.js JSON.stringifies the whole
+// project body -- unlike sheet bitmaps, which ride separately as PNG images
+// -- so an embedded custom-mask brush hits exactly the same Uint8Array-through-
+// JSON hazard a standalone .brush.json file does; reusing this function keeps
+// the two paths from drifting into two different (and possibly differently
+// buggy) answers to the same problem.
+export function toPlain(brush) {
   const b = { ...brush, mask: { ...brush.mask } };
   if (b.mask.bitmap) {
     b.mask.bitmap = { ...b.mask.bitmap, bits: Array.from(b.mask.bitmap.bits) };
@@ -70,7 +78,11 @@ function assertSaneCustomBitmap(bmp) {
   }
 }
 
-function fromPlain(raw) {
+// Exported (Task 12) alongside toPlain, for the same reason: model.js must
+// rehydrate embedded brushes with the identical logic a standalone file uses,
+// including the hostile-dimension check -- a corrupt project file is no more
+// trustworthy than a corrupt .brush.json.
+export function fromPlain(raw) {
   assertSaneCustomBitmap(raw?.mask?.bitmap);
   const b = normalizeBrush(raw);
   if (b.mask.bitmap?.bits) {

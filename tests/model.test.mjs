@@ -10,6 +10,7 @@ import {
 } from '../js/core/model.js';
 import { createPalette, setEntry, addSwatch, setEmptyColor } from '../js/core/palettes.js';
 import { setPixel, getPixel, createBitmap } from '../js/core/pixels.js';
+import { normalizeBrush } from '../js/core/brushes.js';
 
 function proj() {
   const p = createProject('demo');
@@ -845,4 +846,48 @@ test('an empty palette slot is an ordinary color to brush snapping -- empty is e
   // Two slots are still unset, and they are still offered as snap targets.
   assert.deepEqual(resolvePixelSnapperPalette(p), [[10, 20, 30], [0, 0, 0], [0, 0, 0]]);
   assert.equal(activePaletteColors(p).length, 3);
+});
+
+
+// --- embedded brushes -------------------------------------------------------
+
+test('a project round-trips its embedded brushes', () => {
+  const p = createProject('brushes');
+  p.brushes = [normalizeBrush({ name: 'Embedded', mask: { kind: 'circle', size: 5 } })];
+  const { json, images } = serializeProject(p);
+  const back = deserializeProject(json, new Map(images.map(i => [i.path, i.bitmap])));
+  assert.equal(back.brushes.length, 1);
+  assert.equal(back.brushes[0].name, 'Embedded');
+  assert.equal(back.brushes[0].mask.size, 5);
+});
+
+test('an old project file with no brushes key loads with an empty list', () => {
+  const p = createProject('old');
+  const { json, images } = serializeProject(p);
+  delete json.brushes;
+  const back = deserializeProject(json, new Map(images.map(i => [i.path, i.bitmap])));
+  assert.deepEqual(back.brushes, []);
+});
+
+test('a custom-mask brush survives the REAL JSON boundary a bundle writes', () => {
+  // The two tests above cannot catch the hazard this one exists for, and it is
+  // worth saying why. A `circle` mask has no bitmap, so there is no Uint8Array
+  // to lose; and handing `json` straight to deserializeProject never crosses a
+  // JSON boundary at all, so even a raw Uint8Array would survive. bundle.js
+  // really does `JSON.stringify(json)` (bundle.js:7), and a Uint8Array JSONs to
+  // an OBJECT -- `{"0":1,...}` -- which `Uint8Array.from` turns into an EMPTY
+  // array. Without toPlain/fromPlain the brush comes back listed, selectable,
+  // and painting nothing. So: custom mask, and a real stringify/parse.
+  const p = createProject('custom');
+  p.brushes = [normalizeBrush({
+    name: 'Stamp',
+    mask: { kind: 'custom', bitmap: { width: 2, height: 2, bits: Uint8Array.from([1, 0, 0, 1]) } },
+  })];
+  const { json, images } = serializeProject(p);
+  const wire = JSON.parse(JSON.stringify(json));
+  const back = deserializeProject(wire, new Map(images.map(i => [i.path, i.bitmap])));
+  const bits = back.brushes[0].mask.bitmap.bits;
+  assert.ok(bits instanceof Uint8Array, 'bits must rehydrate as a typed array');
+  assert.equal(bits.length, 4, 'an empty array here is the exact failure this guards');
+  assert.equal([...bits].join(''), '1001');
 });
