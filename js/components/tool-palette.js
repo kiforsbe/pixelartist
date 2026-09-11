@@ -6,6 +6,8 @@
 
 import { isTypingTarget } from './canvas/float-session.js';
 import { getEditorHost } from '../host/runtime.js';
+import { getBrushLibrary } from '../features/brushes/brush-library.js';
+import { drawBrushIcon, openBrushManager } from '../features/brushes/brush-manager.js';
 
 function currentModeId() { return getEditorHost()?.store.getState().session.activeModeId ?? null; }
 function currentToolId() { return getEditorHost()?.store.getState().session.activeToolId ?? 'pencil'; }
@@ -137,6 +139,83 @@ export function mountToolPalette(el) {
   });
   brushRow.appendChild(brushInput);
   optionsRow.appendChild(brushRow);
+
+  // ---- brush picker strip (Task 15b) ----
+  // A row of swatches below Size, one per library brush, plus a button that
+  // opens the full manager. getBrushLibrary(...) is the shared, WeakMap-
+  // memoized accessor -- brush-manager.js's dialog is the first consumer
+  // and this is the second, and both MUST see the same instance (an add/
+  // edit/remove from either place has to show up in the other without a
+  // reload). Never createBrushLibrary() here: calling it a second time is
+  // exactly the cache-divergence bug brush-library.test.mjs's
+  // characterization test exists to document.
+  const lib = getBrushLibrary(host.preferences);
+  // A <div>, not the <label> the other rows use -- a <label> wrapping
+  // several <button>s (a labelable element) would forward an empty-padding
+  // click to whichever button happens to be first, which is not what any
+  // of contiguousRow/filledRow rely on (they each wrap exactly one input).
+  const brushPickerRow = document.createElement('div');
+  brushPickerRow.className = 'tool-option-row brush-picker-row';
+  brushPickerRow.dataset.commonOption = 'size';
+  const brushPickerStrip = document.createElement('div');
+  brushPickerStrip.className = 'brush-picker-strip';
+  brushPickerRow.appendChild(brushPickerStrip);
+  const brushManagerBtn = document.createElement('button');
+  brushManagerBtn.type = 'button';
+  brushManagerBtn.className = 'btn-icon-sm brush-picker-manage';
+  brushManagerBtn.title = 'Brushes…';
+  brushManagerBtn.textContent = '⚙️';
+  brushManagerBtn.addEventListener('click', () => openBrushManager());
+  brushPickerRow.appendChild(brushManagerBtn);
+  optionsRow.appendChild(brushPickerRow);
+
+  // Rebuilds the swatches themselves (icons + count) -- called whenever the
+  // LIBRARY changes (a brush added/edited/removed), via lib.subscribe
+  // below. Kept separate from updateBrushSwatchSelection (called from the
+  // shared refresh() below, which runs far more often) so picking a
+  // different active brush -- which does not change the library -- never
+  // redraws every icon just to move one highlight.
+  function renderBrushSwatches() {
+    brushPickerStrip.innerHTML = '';
+    const activeId = drawingSettings().brush.id;
+    for (const brush of lib.list()) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'brush-swatch';
+      btn.dataset.brushId = brush.id;
+      if (brush.id === activeId) btn.classList.add('is-active');
+      btn.title = brush.name;
+      const icon = document.createElement('canvas');
+      icon.className = 'brush-swatch-icon';
+      // Reuses brush-manager.js's own thumbnail renderer rather than a
+      // second implementation -- same rasterizeMask grid, centered and
+      // unsmoothed on a checkerboard, that the manager's own grid draws.
+      drawBrushIcon(icon, brush);
+      btn.appendChild(icon);
+      // The full brush object, not a merge -- picking a swatch REPLACES the
+      // active brush wholesale (mask kind, ink, pressure, everything),
+      // unlike the Size input above, which patches one field of the brush
+      // already active. store.updateDrawingSettings, never a direct
+      // `workspace.drawing.brush =` assignment, matches the Size input's
+      // own mutation path just above.
+      btn.addEventListener('click', () => store.updateDrawingSettings({ brush }));
+      brushPickerStrip.appendChild(btn);
+    }
+  }
+
+  // Cheap highlight-only pass for the shared refresh() below (which runs on
+  // every tool/mode switch and mask-size change): swaps the .is-active
+  // class without redrawing every icon.
+  function updateBrushSwatchSelection() {
+    const activeId = drawingSettings().brush.id;
+    for (const btn of brushPickerStrip.children) {
+      btn.classList.toggle('is-active', btn.dataset.brushId === activeId);
+    }
+  }
+
+  renderBrushSwatches();
+  const disposeBrushLibrary = lib.subscribe(renderBrushSwatches);
+
   const optionChecks = document.createElement('div');
   optionChecks.className = 'tool-option-checks';
   optionChecks.dataset.commonOption = 'checks';
@@ -223,6 +302,9 @@ export function mountToolPalette(el) {
     toolNameEl.textContent = toolTitle(toolId);
     const vis = optionVisibleFor(toolId);
     brushRow.style.display = vis.size ? '' : 'none';
+    // Same gate as Size -- the active-brush concept only matters while a
+    // brush tool (pencil/eraser) is selected.
+    brushPickerRow.style.display = vis.size ? '' : 'none';
     contiguousRow.style.display = vis.contiguous ? '' : 'none';
     filledRow.style.display = vis.filled ? '' : 'none';
     optionChecks.style.display = (vis.contiguous || vis.filled) ? '' : 'none';
@@ -233,6 +315,7 @@ export function mountToolPalette(el) {
     brushInput.value = String(cur.mask.size);
     // A custom mask has no scalar size to edit.
     brushInput.disabled = cur.mask.kind === 'custom';
+    updateBrushSwatchSelection();
   }
 
   function selectTool(id) {
@@ -258,6 +341,10 @@ export function mountToolPalette(el) {
     store.subscribe(s => s.session.activeModeId, refresh),
     store.subscribe(s => s.session.activeToolId, refresh),
     store.subscribe(s => s.workspace.drawing.brush.mask.size, refresh),
+    // Two brushes can share a mask size (e.g. two square-size-1 brushes with
+    // different ink), so the subscription above alone would miss a swatch
+    // switch between them -- this one exists specifically for that case.
+    store.subscribe(s => s.workspace.drawing.brush.id, refresh),
   ];
 
   const onKeyDown = (e) => {
@@ -272,6 +359,7 @@ export function mountToolPalette(el) {
   return {
     dispose() {
       disposables.forEach(dispose => dispose());
+      disposeBrushLibrary();
       window.removeEventListener('keydown', onKeyDown);
       if (paletteApi?.refresh === refresh) paletteApi = null;
     },

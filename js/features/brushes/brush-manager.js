@@ -3,10 +3,11 @@
 // Non-modal (.show(), not .showModal()) on purpose -- same reasoning as the
 // palette manager: trying a brush out on the canvas while the manager is
 // open has to keep the canvas reachable. Task 14 built the shell (the
-// read-only grid and the window-scoped undo stack). This task (15a) adds
+// read-only grid and the window-scoped undo stack). Task 15a added
 // selection, the editing controls, and the live stroke preview. Task 15b
-// adds Make Brush From Selection, the tool-palette picker strip, and
-// import/export -- none of that lives in this file's diff.
+// (this diff) adds Make Brush From Selection and the footer's import/export
+// buttons -- the tool-palette picker strip itself lives in tool-palette.js,
+// which reuses this file's drawBrushIcon rather than duplicating it.
 import { getEditorHost } from '../../host/runtime.js';
 import { defineAction } from '../shell/actions.js';
 import { makeDialogMovable, centerDialog, closeOnEscape } from '../../components/dialogs.js';
@@ -19,8 +20,13 @@ import {
 import { opacityLevel, PATTERNS } from '../../core/dither.js';
 import { strokeStamps } from '../../core/brush-stroke.js';
 import { makeInk } from '../../core/brush-ink.js';
-import { createBitmap, stamp } from '../../core/pixels.js';
-import { getBrushLibrary } from './brush-library.js';
+import { createBitmap, stamp, copyRegion } from '../../core/pixels.js';
+import { bitmapToBrush } from '../../core/brush-io.js';
+import { flattenSheet } from '../../core/model.js';
+import { getBrushLibrary, mergeIncoming } from './brush-library.js';
+import { exportBrush, importBrush } from './brush-files.js';
+import { commitFloatIfAny, currentEditRegion, hasSelection } from '../../components/canvas/float-session.js';
+import { activeSheet } from '../../host/document-helpers.js';
 
 function host() { return getEditorHost(); }
 
@@ -213,14 +219,38 @@ export function renderBrushPreview(brush, context, { width = 64, height = 64 } =
   return bmp;
 }
 
+// --- Make Brush From Selection (Task 15b) --------------------------------
+//
+// Pure: takes whatever bitmap the caller hands it and crops `rect` out of it
+// before turning the crop into a custom-mask brush. It has no opinion on
+// WHICH bitmap that should be -- that choice is made once, at the single
+// call site below (the `brush.fromSelection` action), which is why this
+// function stays trivially testable without a DOM or a host.
+//
+// The call site passes flattenSheet(sheet) -- the COMPOSITE of every visible
+// layer -- not activeLayer().bitmap. A user who marquees a region of a
+// multi-layer sprite and asks for a brush is asking for what they can see;
+// handing them a brush built from one layer, with pixels from other layers
+// silently missing, would not match their selection and nothing on screen
+// would explain why. captureLayers (the clipboard's path, float-session.js)
+// defaults to the active layer for a different reason -- cut/copy is meant
+// to move that layer's content -- which does not apply here.
+export function brushFromSelection(bitmap, rect, name) {
+  return bitmapToBrush(copyRegion(bitmap, rect.x, rect.y, rect.w, rect.h), name);
+}
+
 // A small read-only preview of the mask, the same "canvas thumbnail inside a
 // swatch button" idiom the maps mode brush picker uses (map-assets-panel.js)
 // -- drawn from rasterizeMask's 1-bit grid rather than sampled from a sheet.
 // Downscaling (a 256x256 custom mask) and upscaling (a 1x1 square) both go
 // through the same drawImage call, centered and unsmoothed, so neither
 // extreme has a special case.
+//
+// Exported (Task 15b) so the tool-palette brush picker strip can draw the
+// identical thumbnail instead of a second implementation -- see that file's
+// own comment on why reusing this, not rewriting it, is the right call.
 const ICON_SIZE = 40;
-function drawBrushIcon(canvas, brush) {
+export function drawBrushIcon(canvas, brush) {
   canvas.width = ICON_SIZE;
   canvas.height = ICON_SIZE;
   const ctx = canvas.getContext('2d');
@@ -272,6 +302,9 @@ export function mountBrushManager() {
   const grid = el('bm-grid');
   const btnUndo = el('bm-undo');
   const btnRedo = el('bm-redo');
+  const btnImport = el('bm-import');
+  const exportFormat = el('bm-export-format');
+  const btnExport = el('bm-export');
   const btnClose = el('bm-close');
   const errorEl = el('bm-error');
   const controls = el('bm-controls');
@@ -425,6 +458,10 @@ export function mountBrushManager() {
   function refreshControls() {
     const brush = selectedId ? lib.get(selectedId) : null;
     controls.disabled = !brush;
+    // Export acts on the SELECTED brush, same gating as the fieldset -- there
+    // is nothing to export with no current brush. Import is never gated: it
+    // always creates brushes rather than editing the current one.
+    btnExport.disabled = !brush;
     errorEl.hidden = true;
     errorEl.textContent = '';
     if (!brush) {
@@ -585,6 +622,30 @@ export function mountBrushManager() {
     showEditResult(editBrush('brush pressure curve', b => { b.pressure.curve = pressureCurve.value; return b; }));
   });
 
+  // ---- import / export (Task 15b) ----
+  // Mirrors palette-manager.js's own import/export wiring: Import always
+  // creates new library entries rather than touching the current selection;
+  // Export acts on whichever brush is currently selected.
+  btnImport.addEventListener('click', async () => {
+    const result = await importBrush();
+    if (!result) return; // cancelled picker
+    // importBrush() returns a single Brush for a .png or a single-brush
+    // .json, or an ARRAY for a whole-library .json (serializeLibraryJson's
+    // own shape) -- mergeIncoming wants a list either way.
+    const incoming = Array.isArray(result) ? result : [result];
+    // mergeIncoming only REPORTS which ids are new (brush-library.js) -- it
+    // never mutates, so a re-imported brush that already exists (matched by
+    // id) is left alone here rather than silently overwritten.
+    const { added } = mergeIncoming(lib, incoming);
+    for (const brush of added) lib.add(brush);
+  });
+
+  btnExport.addEventListener('click', async () => {
+    const brush = selectedId ? lib.get(selectedId) : null;
+    if (!brush) return;
+    await exportBrush(brush, exportFormat.value);
+  });
+
   // One listener on `close` (not the Close button's click handler) covers
   // Escape, the button, and any programmatic close alike -- a native
   // <dialog> fires `close` on all three. Clearing only from the button
@@ -611,5 +672,27 @@ export function mountBrushManager() {
   defineAction('edit.brushes', {
     label: 'Brushes…',
     run: openBrushManager,
+  });
+
+  // Make Brush From Selection (Task 15b, plan Step 3). Registered here
+  // (the brushes feature module), not menu-controller.js -- palette-
+  // manager.js's own edit.palettes registration, right above, is the
+  // precedent. commitFloatIfAny() mirrors clipboardCapture's own first line
+  // (float-session.js): any not-yet-committed floating selection must land
+  // on its layer before flattenSheet reads that layer's bitmap, or the
+  // capture would miss whatever the user is still mid-drag on.
+  defineAction('brush.fromSelection', {
+    label: 'Make Brush From Selection',
+    run: () => {
+      commitFloatIfAny();
+      const sheet = activeSheet();
+      const rr = sheet ? currentEditRegion() : null;
+      if (!sheet || !rr) return;
+      // The composite of every visible layer, not activeLayer().bitmap --
+      // see brushFromSelection's own comment for why.
+      const composite = flattenSheet(sheet);
+      lib.add(brushFromSelection(composite, rr.region, 'Selection brush'));
+    },
+    isEnabled: () => hasSelection(),
   });
 }

@@ -49,6 +49,23 @@ body {
 .soft-flood-control { display: grid; grid-template-columns: 1fr auto; gap: 3px 6px; }
 .soft-flood-control input[type="range"] { grid-column: 1 / -1; width: 100%; min-width: 0; }
 .tool-option-checks { display: flex; flex-direction: column; gap: 4px; }
+
+/* ---- brush picker strip (Task 15b) --------------------------------------
+   Below the Size control: a swatch per library brush plus a button that
+   opens the full manager. Swatches reuse brush-manager.js's own
+   drawBrushIcon (a 40x40 canvas) rather than a second thumbnail renderer --
+   .brush-swatch-icon just constrains the DISPLAY size down for this
+   compact, wrapping strip; .bm-icon in the manager's own grid shows the
+   same canvas at its native size, where there is room for it. */
+.brush-picker-row { align-items: flex-start; }
+.brush-picker-strip { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.brush-swatch { display: block; padding: 2px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg3); cursor: pointer; line-height: 0; }
+.brush-swatch:hover { border-color: var(--accent); }
+.brush-swatch.is-active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.brush-swatch-icon { display: block; width: 22px; height: 22px; image-rendering: pixelated;
+  background: conic-gradient(#777 25%, #aaa 25% 50%, #777 50% 75%, #aaa 75%) 0 0 / 6px 6px; }
+.brush-picker-manage { flex: none; }
 #canvas-host { grid-column: 2; grid-row: 1; position: relative; overflow: hidden; background: var(--bg); min-height: 0; }
 #canvas-host canvas { position: absolute; inset: 0; }
 .map-editor-host { position: absolute; inset: 0; overflow: hidden; background: #15161a; }
