@@ -87,6 +87,32 @@ export function createBrushLibrary(preferences) {
   };
 }
 
+// App-wide accessor: memoizes one library per `preferences` store instead of
+// each caller constructing its own via createBrushLibrary(). Two independent
+// instances over the SAME store diverge -- one's add()/update() writes
+// through to preferences, but the other's already-loaded `brushes` cache is
+// never reloaded and its own subscribe() listeners never fire, so it keeps
+// showing pre-edit brushes until something forces a reload (see
+// brush-library.test.mjs's characterization test for the concrete failure
+// this produces). The brush manager dialog is the only production caller
+// today; a Task 15 brush-picker strip is the second one this exists for.
+//
+// Keyed by the `preferences` object itself (a WeakMap, not a bare singleton
+// that ignores its argument after the first call) so tests can still get
+// isolated libraries by passing separate fakePrefs() objects, while two
+// calls with the SAME store -- the only case that happens in production,
+// since EditorHost hands out one `preferences` instance for its whole
+// lifetime -- return the identical instance.
+const sharedLibraries = new WeakMap();
+export function getBrushLibrary(preferences) {
+  let lib = sharedLibraries.get(preferences);
+  if (!lib) {
+    lib = createBrushLibrary(preferences);
+    sharedLibraries.set(preferences, lib);
+  }
+  return lib;
+}
+
 // Compares by id, so a brush that travelled inside a project file and one
 // already in the library are recognised as the same brush.
 export function mergeIncoming(library, incoming) {

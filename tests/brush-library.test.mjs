@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeBrush } from '../js/core/brushes.js';
-import { createBrushLibrary, mergeIncoming } from '../js/features/brushes/brush-library.js';
+import { createBrushLibrary, getBrushLibrary, mergeIncoming } from '../js/features/brushes/brush-library.js';
 
 // Mirrors BrowserPreferences: values cross a JSON boundary on the way in and
 // out. Storing them by reference would hide precisely the bug toStored and
@@ -28,6 +28,54 @@ test('added brushes persist through the preferences store', () => {
   a.add(normalizeBrush({ name: 'Grass' }));
   const b = createBrushLibrary(prefs);
   assert.ok(b.list().some(x => x.name === 'Grass'));
+});
+
+// getBrushLibrary is the app-wide accessor brush-manager.js (and, from Task
+// 15, the tool-palette brush picker) use instead of calling
+// createBrushLibrary() directly. This is deliberately NOT the same scenario
+// as the persistence test just above: that test creates its second instance
+// AFTER the first one's write, which persistence-through-preferences alone
+// already makes look correct -- the one ordering in which two independent
+// instances cannot diverge. This test needs the two retrievals to be the
+// SAME instance while both are alive, so a mutation through either one is
+// visible -- and notified -- through the other.
+test('getBrushLibrary returns one shared instance per preferences store', () => {
+  const prefs = fakePrefs();
+  const a = getBrushLibrary(prefs);
+  const b = getBrushLibrary(prefs);
+  assert.equal(a, b, 'two retrievals for the same preferences store must be the identical object');
+
+  let fired = false;
+  b.subscribe(() => { fired = true; });
+  a.add(normalizeBrush({ name: 'Shared' }));
+  assert.ok(fired, 'a mutation made through one retrieval must fire a listener registered through another');
+  assert.ok(b.list().some(x => x.name === 'Shared'));
+});
+
+// CHARACTERIZATION TEST -- this documents the bug getBrushLibrary exists to
+// prevent, using createBrushLibrary directly (never getBrushLibrary). Do not
+// delete this as "redundant" with the test above: the test above proves the
+// accessor is correct; this one proves the failure mode is real when the
+// accessor is bypassed, which is exactly the mistake Task 15 could make by
+// calling createBrushLibrary() a second time instead of getBrushLibrary().
+//
+// b.list() is called BEFORE a's write so b's cache is actually loaded --
+// otherwise b would lazily load fresh from `prefs` on its first list() call
+// after a's write and this test would pass for the wrong reason (looking
+// fixed while nothing was fixed), the same trap the persistence test above
+// falls into.
+test('CHARACTERIZATION: two concurrent createBrushLibrary(prefs) instances diverge -- this is why getBrushLibrary exists', () => {
+  const prefs = fakePrefs();
+  const a = createBrushLibrary(prefs);
+  const b = createBrushLibrary(prefs);
+  b.list(); // force b's cache to load BEFORE a's mutation lands
+
+  let fired = false;
+  b.subscribe(() => { fired = true; });
+  a.add(normalizeBrush({ name: 'Ghost' }));
+
+  assert.equal(fired, false, 'an independent second instance must NOT be notified of a mutation made through the first');
+  assert.ok(!b.list().some(x => x.name === 'Ghost'), 'an independent second instance must NOT see the mutation until it reloads');
 });
 
 test('update replaces a brush by id and leaves the rest alone', () => {

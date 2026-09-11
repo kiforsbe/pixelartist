@@ -12,7 +12,7 @@ import { makeDialogMovable, centerDialog, closeOnEscape } from '../../components
 import { isTextEntryTarget } from '../../components/dom-utils.js';
 import { CommandStack } from '../../core/commands.js';
 import { rasterizeMask } from '../../core/brushes.js';
-import { createBrushLibrary } from './brush-library.js';
+import { getBrushLibrary } from './brush-library.js';
 
 function host() { return getEditorHost(); }
 
@@ -67,7 +67,7 @@ function drawBrushIcon(canvas, brush) {
   const img = octx.createImageData(grid.width, grid.height);
   for (let i = 0; i < grid.bits.length; i++) {
     const p = i * 4;
-    img.data[p] = img.data[p + 1] = img.data[p + 2] = 214; // matches --fg
+    img.data[p] = img.data[p + 1] = img.data[p + 2] = 214; // approximates --fg (#d6d7dc), close enough at 40px
     img.data[p + 3] = grid.bits[i] ? 255 : 0;
   }
   octx.putImageData(img, 0, 0);
@@ -93,7 +93,10 @@ export function mountBrushManager() {
   const btnRedo = dlg.querySelector('#bm-redo');
   const btnClose = dlg.querySelector('#bm-close');
 
-  const lib = createBrushLibrary(host().preferences);
+  // The shared instance, not a private createBrushLibrary() closure -- Task
+  // 15's tool-palette brush picker will call getBrushLibrary() too, and must
+  // see this dialog's edits (and vice versa) without a page reload.
+  const lib = getBrushLibrary(host().preferences);
 
   function refreshGrid() {
     grid.innerHTML = '';
@@ -168,6 +171,4 @@ export function mountBrushManager() {
     label: 'Brushes…',
     run: openBrushManager,
   });
-
-  return { refreshGrid };
 }

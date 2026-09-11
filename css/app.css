@@ -578,8 +578,14 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
    window-scoped Undo/Redo this dialog's own edits (Task 15) will run
    through. Same swatch-well idiom as .pm-well/.map-brush-grid above, sized
    for an icon-plus-name card instead of a bare color chip. */
+/* .bm-grid's auto-fill needs the dialog itself to have a DEFINITE inline
+   size to expand past one track -- a position: fixed dialog with no width
+   shrink-to-fits (indefinite), which collapsed the grid to a single column
+   stacking every card at the same `left`. #dlg-palettes' own width rule
+   above is the precedent. */
+#dlg-brushes { width: 560px; max-width: 94vw; }
 .bm-well { background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
-  padding: 8px; min-height: 60px; }
+  padding: 8px; min-height: 60px; max-height: 232px; overflow-y: auto; }
 .bm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
 .bm-card { display: flex; flex-direction: column; align-items: center; gap: 3px;
   padding: 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg3); }
