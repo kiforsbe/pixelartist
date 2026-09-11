@@ -15,6 +15,7 @@ import { mountDocumentController } from './features/project/document-controller.
 import { mountApplicationMenu } from './features/shell/menu-controller.js';
 import { mountFileController } from './features/project/file-controller.js';
 import { mountPaletteManager } from './features/palettes/palette-manager.js';
+import { mountBrushManager } from './features/brushes/brush-manager.js';
 
 export const editorHost = new EditorHost({
   preferences: new BrowserPreferences(),
@@ -39,3 +40,4 @@ mountDocumentController({ editorHost, workbench });
 mountApplicationMenu();
 mountFileController();
 mountPaletteManager();
+mountBrushManager();

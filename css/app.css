@@ -572,3 +572,22 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
    are far smaller, so the hatch alone has to carry it -- a dashed border on
    a 16px cell is mostly border. */
 .palette-swatch.is-empty { background-image: repeating-linear-gradient(45deg, #fff6 0 3px, #0000 3px 6px); }
+
+/* ---- brush manager -------------------------------------------------
+   Task 14 is display-only: a read-only grid of brush previews plus the
+   window-scoped Undo/Redo this dialog's own edits (Task 15) will run
+   through. Same swatch-well idiom as .pm-well/.map-brush-grid above, sized
+   for an icon-plus-name card instead of a bare color chip. */
+.bm-well { background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 8px; min-height: 60px; }
+.bm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.bm-card { display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg3); }
+.bm-icon { display: block; image-rendering: pixelated;
+  background: conic-gradient(#777 25%, #aaa 25% 50%, #777 50% 75%, #aaa 75%) 0 0 / 8px 8px; }
+.bm-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; text-align: center; color: var(--fg); }
+/* Undo/Redo are this dialog's own history controls, not dismissal actions --
+   same left-alignment reasoning as .pm-footer's Import/Export. */
+.bm-footer { justify-content: flex-start; gap: 6px; }
+.bm-spacer { flex: 1 1 auto; }
