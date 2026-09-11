@@ -127,6 +127,50 @@ export function createBrushEditor(library, history, getCurrentId, refresh) {
   };
 }
 
+// --- coercing a free-typed field, consistently with a rejected one -------
+//
+// HTML min/max attributes are advisory (a user can type 9999 straight past
+// them), and normalizeBrush's own clampInt (via library.update, inside
+// editBrush above) is the real safety net -- but it clamps SILENTLY.
+// Picking `stamp` on a square mask gets an explicit reason and a reverted
+// control (validateBrush); typing 9999 into spacing used to just reappear
+// as 64 with nothing said. That inconsistency, not the clamping itself
+// (which normalizeBrush already does correctly), is the defect.
+//
+// Both exported, taking the already-committing `editBrush` as an argument
+// rather than an <input> element, for the same DOM-independence reason
+// createBrushEditor itself is a factory: a node:test file can commit a
+// value and inspect both the RESULT (does the library actually hold the
+// clamped number?) and the MESSAGE (would the user have been told?)
+// without a document. mountBrushManager's commitNumberField/commitName
+// below are the only DOM-touching callers, reading `min`/`max` off the
+// input's own attributes rather than a second, divergent copy of any bound
+// (MAX_MASK_SIZE, the HTML literals, or -- for the pressure pair --
+// PRESSURE_RANGES, already wired onto those two inputs by refreshControls).
+//
+// A rejected edit (validateBrush) already explains itself via editBrush's
+// own return value; `message` here is null whenever that path fired (no
+// separate value was actually committed to compare against), so a caller
+// showing both never shows two contradictory explanations at once.
+export function commitCoercedNumber(editBrush, label, typed, min, max, apply) {
+  const n = Number(typed);
+  const clamped = Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : min;
+  const result = editBrush(label, b => { apply(b, clamped); return b; });
+  const changed = result && result.ok && clamped !== n;
+  const shown = String(typed).trim() === '' ? '(blank)' : `"${typed}"`;
+  return { result, value: clamped, message: changed ? `${shown} is out of range -- used ${clamped} instead.` : null };
+}
+
+// The same inconsistency, one field over: an emptied name silently becomes
+// "Brush" via normalizeBrush's own fallback. Same shape, same treatment.
+export function commitCoercedName(editBrush, label, typed) {
+  const trimmed = typed.trim();
+  const value = trimmed || 'Brush';
+  const result = editBrush(label, b => { b.name = value; return b; });
+  const changed = result && result.ok && !trimmed;
+  return { result, value, message: changed ? `Name can't be empty -- used "Brush" instead.` : null };
+}
+
 // --- the live preview, also factored out of the DOM --------------------
 //
 // A short, deterministic S-curve: flat-ish at both ends and steep through
@@ -340,6 +384,25 @@ export function mountBrushManager() {
     errorEl.textContent = '';
   }
 
+  // Bounds come off the input's OWN min/max attributes -- already sourced
+  // from MAX_MASK_SIZE, the HTML literals, or PRESSURE_RANGES (for the
+  // pressure pair, kept current by refreshControls) -- so this is not a
+  // second, divergent copy of any of those numbers. showEditResult still
+  // handles a validateBrush rejection (and reverts the control); this only
+  // adds a message on the path that does not reject anything, so the two
+  // never talk over each other.
+  function commitNumberField(input, label, apply) {
+    const { result, message } = commitCoercedNumber(editBrush, label, input.value, Number(input.min), Number(input.max), apply);
+    showEditResult(result);
+    if (message) { errorEl.hidden = false; errorEl.textContent = message; }
+  }
+
+  function commitNameField(input, label) {
+    const { result, message } = commitCoercedName(editBrush, label, input.value);
+    showEditResult(result);
+    if (message) { errorEl.hidden = false; errorEl.textContent = message; }
+  }
+
   function drawPreview(brush) {
     const ctx = previewCanvas.getContext('2d');
     previewCanvas.width = PREVIEW_SIZE;
@@ -365,7 +428,17 @@ export function mountBrushManager() {
     errorEl.hidden = true;
     errorEl.textContent = '';
     if (!brush) {
+      // Blank every field, not just the name -- with nothing selected, a
+      // mask/ink/pressure field still showing the PREVIOUSLY selected
+      // brush's values (merely dimmed by the fieldset's own disabled
+      // opacity) reads as "these are the current settings" when they are
+      // not settings for anything.
       nameInput.value = '';
+      maskKind.value = ''; maskSize.value = ''; maskSpacing.value = ''; maskScatter.value = '';
+      maskRotate.value = ''; maskFlipH.checked = false; maskFlipV.checked = false; maskRotateJitter.checked = false;
+      inkKind.value = ''; inkOpacity.value = ''; inkOpacityLevel.textContent = '';
+      inkTrueAlpha.checked = false; inkJitter.value = ''; inkPattern.value = '';
+      pressureTarget.value = ''; pressureMin.value = ''; pressureMax.value = ''; pressureCurve.value = '';
       drawPreview(null);
       return;
     }
@@ -444,20 +517,20 @@ export function mountBrushManager() {
   // push a stack entry per keystroke or per drag tick of a range control.
 
   nameInput.addEventListener('change', () => {
-    showEditResult(editBrush('rename brush', b => { b.name = nameInput.value.trim(); return b; }));
+    commitNameField(nameInput, 'rename brush');
   });
 
   maskKind.addEventListener('change', () => {
     showEditResult(editBrush('brush mask kind', b => { b.mask.kind = maskKind.value; return b; }));
   });
   maskSize.addEventListener('change', () => {
-    showEditResult(editBrush('brush mask size', b => { b.mask.size = Number(maskSize.value); return b; }));
+    commitNumberField(maskSize, 'brush mask size', (b, v) => { b.mask.size = v; });
   });
   maskSpacing.addEventListener('change', () => {
-    showEditResult(editBrush('brush mask spacing', b => { b.mask.spacing = Number(maskSpacing.value); return b; }));
+    commitNumberField(maskSpacing, 'brush mask spacing', (b, v) => { b.mask.spacing = v; });
   });
   maskScatter.addEventListener('change', () => {
-    showEditResult(editBrush('brush mask scatter', b => { b.mask.scatter = Number(maskScatter.value); return b; }));
+    commitNumberField(maskScatter, 'brush mask scatter', (b, v) => { b.mask.scatter = v; });
   });
   maskRotate.addEventListener('change', () => {
     showEditResult(editBrush('brush mask rotate', b => { b.mask.rotate = Number(maskRotate.value); return b; }));
@@ -476,13 +549,13 @@ export function mountBrushManager() {
     showEditResult(editBrush('brush ink kind', b => { b.ink.kind = inkKind.value; return b; }));
   });
   inkOpacity.addEventListener('change', () => {
-    showEditResult(editBrush('brush ink opacity', b => { b.ink.opacity = Number(inkOpacity.value); return b; }));
+    commitNumberField(inkOpacity, 'brush ink opacity', (b, v) => { b.ink.opacity = v; });
   });
   inkTrueAlpha.addEventListener('change', () => {
     showEditResult(editBrush('brush ink true alpha', b => { b.ink.trueAlpha = inkTrueAlpha.checked; return b; }));
   });
   inkJitter.addEventListener('change', () => {
-    showEditResult(editBrush('brush ink jitter', b => { b.ink.jitter = Number(inkJitter.value); return b; }));
+    commitNumberField(inkJitter, 'brush ink jitter', (b, v) => { b.ink.jitter = v; });
   });
   inkPattern.addEventListener('change', () => {
     showEditResult(editBrush('brush ink pattern', b => { b.ink.pattern = inkPattern.value; return b; }));
@@ -503,10 +576,10 @@ export function mountBrushManager() {
     }));
   });
   pressureMin.addEventListener('change', () => {
-    showEditResult(editBrush('brush pressure min', b => { b.pressure.min = Number(pressureMin.value); return b; }));
+    commitNumberField(pressureMin, 'brush pressure min', (b, v) => { b.pressure.min = v; });
   });
   pressureMax.addEventListener('change', () => {
-    showEditResult(editBrush('brush pressure max', b => { b.pressure.max = Number(pressureMax.value); return b; }));
+    commitNumberField(pressureMax, 'brush pressure max', (b, v) => { b.pressure.max = v; });
   });
   pressureCurve.addEventListener('change', () => {
     showEditResult(editBrush('brush pressure curve', b => { b.pressure.curve = pressureCurve.value; return b; }));

@@ -7,7 +7,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeBrush, validateBrush, PRESSURE_RANGES } from '../js/core/brushes.js';
 import { createBrushLibrary } from '../js/features/brushes/brush-library.js';
-import { createBrushHistory, createBrushEditor, renderBrushPreview } from '../js/features/brushes/brush-manager.js';
+import {
+  createBrushHistory, createBrushEditor, renderBrushPreview,
+  commitCoercedNumber, commitCoercedName,
+} from '../js/features/brushes/brush-manager.js';
 
 function fakePrefs() {
   const store = new Map();
@@ -203,4 +206,79 @@ test('renderBrushPreview is deterministic for a fixed seed -- identical settings
   const a = renderBrushPreview(brush, ctx, { width: 24, height: 24 });
   const b = renderBrushPreview(brush, ctx, { width: 24, height: 24 });
   assert.deepEqual([...a.data], [...b.data]);
+});
+
+// --- fix round 1, item 1: coerce loudly, not silently ---------------------
+//
+// The trap the review specifically warned about: normalizeBrush's own
+// clampInt (inside library.update, which editBrush already calls) clamps
+// an out-of-range number regardless of whether commitCoercedNumber does
+// anything at all. So asserting ONLY `lib.get(id).mask.spacing === 64`
+// would still pass with commitCoercedNumber's clamping deleted (proved
+// below, as its own test) -- it would be measuring normalizeBrush, the
+// storage layer, not the handler this fix is actually about. Every test
+// here also asserts the returned `message`, which normalizeBrush has no
+// way to produce, to actually discriminate.
+
+test('an out-of-range number is clamped, committed, AND reported with a message', () => {
+  const { lib, brush, editBrush } = setup();
+  const { result, value, message } = commitCoercedNumber(
+    editBrush, 'brush mask spacing', '9999', 1, 64, (b, v) => { b.mask.spacing = v; });
+  assert.equal(result.ok, true);
+  assert.equal(value, 64);
+  assert.equal(lib.get(brush.id).mask.spacing, 64, 'the clamped value must actually be committed');
+  assert.ok(message && message.includes('64'), 'an out-of-range input must produce a user-visible message');
+});
+
+test('a fractional number is rounded, committed, and reported', () => {
+  const { lib, brush, editBrush } = setup();
+  const { value, message } = commitCoercedNumber(
+    editBrush, 'brush ink jitter', '2.6', 0, 8, (b, v) => { b.ink.jitter = v; });
+  assert.equal(value, 3);
+  assert.equal(lib.get(brush.id).ink.jitter, 3);
+  assert.ok(message, 'a rounded input must produce a message too -- 2.6 is not what the user will see stored');
+});
+
+test('a non-numeric value falls back to the minimum and is reported', () => {
+  const { editBrush } = setup();
+  const { value, message } = commitCoercedNumber(
+    editBrush, 'brush mask scatter', 'abc', 0, 64, (b, v) => { b.mask.scatter = v; });
+  assert.equal(value, 0);
+  assert.ok(message);
+});
+
+test('an in-range number is committed with NO message', () => {
+  const { lib, brush, editBrush } = setup();
+  const { message } = commitCoercedNumber(
+    editBrush, 'brush mask spacing', '10', 1, 64, (b, v) => { b.mask.spacing = v; });
+  assert.equal(message, null, 'a value already within bounds must not be reported as coerced');
+  assert.equal(lib.get(brush.id).mask.spacing, 10);
+});
+
+test('an empty name commits the "Brush" fallback AND is reported', () => {
+  const { lib, brush, editBrush } = setup();
+  const { result, value, message } = commitCoercedName(editBrush, 'rename brush', '   ');
+  assert.equal(result.ok, true);
+  assert.equal(value, 'Brush');
+  assert.equal(lib.get(brush.id).name, 'Brush', 'the fallback must actually be committed');
+  assert.ok(message, 'an emptied name must produce a user-visible message');
+});
+
+test('a non-empty name is committed with NO message', () => {
+  const { lib, brush, editBrush } = setup();
+  const { message } = commitCoercedName(editBrush, 'rename brush', 'Custom Name');
+  assert.equal(message, null);
+  assert.equal(lib.get(brush.id).name, 'Custom Name');
+});
+
+// Demonstrates the trap explicitly, rather than just asserting around it:
+// this reimplements the OLD (pre-fix) handler shape -- hand the raw typed
+// value straight to editBrush with no clamping in front of it at all -- and
+// shows that normalizeBrush's own clamp still makes the "only assert the
+// stored value" version of the test above pass anyway.
+test('TRAP: asserting only the stored value cannot tell the old silent handler from the new one', () => {
+  const { lib, brush, editBrush } = setup();
+  // The pre-fix shape: `b.mask.spacing = Number(input.value)`, unclamped.
+  editBrush('brush mask spacing', b => { b.mask.spacing = Number('9999'); return b; });
+  assert.equal(lib.get(brush.id).mask.spacing, 64, 'normalizeBrush clamps regardless -- this line proves the trap, not the fix');
 });
