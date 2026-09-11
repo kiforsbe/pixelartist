@@ -10,6 +10,10 @@ import { normalizeBrush, BUILTIN_BRUSHES } from '../../core/brushes.js';
 import { toPlain as toStored, fromPlain } from '../../core/brush-io.js';
 
 const KEY = 'brushes.library';
+// Where unreadable stored brushes are set aside. Nothing reads this yet; its
+// job is to exist, so a user whose library will not parse has something to
+// recover from rather than a key that got quietly overwritten.
+const UNREADABLE_KEY = 'brushes.library.unreadable';
 
 // Storage and files face the identical problem -- a Uint8Array mask JSONs to an
 // object and rehydrates to an EMPTY array -- so they share one answer rather
@@ -27,7 +31,12 @@ function loadStored(raw) {
   const out = [];
   for (const entry of raw) {
     try { out.push(fromPlain(entry)); }
-    catch { /* corrupt entry: drop it and keep the rest of the library */ }
+    catch (e) {
+      // Dropping keeps one bad entry from costing the whole library, but a
+      // blank catch would swallow a genuine regression in normalizeBrush just
+      // as silently as it swallows corrupt data. Say something.
+      console.warn(`Dropped an unreadable stored brush: ${e.message}`);
+    }
   }
   return out;
 }
@@ -39,7 +48,19 @@ export function createBrushLibrary(preferences) {
   function load() {
     if (brushes) return brushes;
     const raw = preferences.get(KEY, null);
-    const stored = Array.isArray(raw) && raw.length ? loadStored(raw) : [];
+    const hadStored = Array.isArray(raw) && raw.length > 0;
+    const stored = hadStored ? loadStored(raw) : [];
+    // Anything dropped means the stored copy holds data this build cannot read.
+    // The very next save() overwrites that key, so set the original aside FIRST
+    // -- otherwise a user whose brushes fail to parse loses them permanently
+    // the moment they add their next brush, with no warning and nothing to
+    // recover from. Seeding the built-ins over an empty result is right for a
+    // first run and catastrophic for a corrupt one; the two are only
+    // distinguishable here, before that write happens.
+    if (hadStored && stored.length !== raw.length) {
+      preferences.set(UNREADABLE_KEY, raw);
+      console.warn(`Set aside ${raw.length - stored.length} unreadable brush(es) under "${UNREADABLE_KEY}".`);
+    }
     brushes = stored.length ? stored : BUILTIN_BRUSHES.map(b => normalizeBrush(b));
     return brushes;
   }

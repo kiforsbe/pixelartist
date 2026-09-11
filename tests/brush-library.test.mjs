@@ -102,3 +102,22 @@ test('a corrupt stored brush is dropped without costing the whole library', () =
   assert.ok(names.includes('Keeper'), 'the sound brush must survive its corrupt neighbour');
   assert.ok(!names.some(n => n === undefined), 'no half-built brush may be admitted');
 });
+
+test('a library where EVERY stored brush is unreadable is set aside, not destroyed', () => {
+  // The partial-corruption test above passes even with this bug present, so it
+  // cannot stand in for this one. When nothing survives, `load()` falls back to
+  // the built-ins -- correct for a first run, catastrophic here -- and the next
+  // save() overwrites the stored key. Without setting the original aside first,
+  // the user's brushes are gone permanently the moment they add their next one.
+  const prefs = fakePrefs();
+  const bad = (name) => {
+    const b = normalizeBrush({ name });
+    return { ...b, mask: { ...b.mask, kind: 'custom', bitmap: { width: 1e9, height: 1e9, bits: [1] } } };
+  };
+  prefs.set('brushes.library', [bad('Mine1'), bad('Mine2')]);
+  const lib = createBrushLibrary(prefs);
+  lib.add(normalizeBrush({ name: 'New' }));   // the write that would destroy them
+  const kept = prefs.get('brushes.library.unreadable', null);
+  assert.ok(Array.isArray(kept), 'the unreadable originals must be set aside');
+  assert.deepEqual(kept.map(b => b.name), ['Mine1', 'Mine2']);
+});
