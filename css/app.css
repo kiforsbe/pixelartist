@@ -587,8 +587,13 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .bm-well { background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
   padding: 8px; min-height: 60px; max-height: 232px; overflow-y: auto; }
 .bm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+/* A <button>, not a <div>, as of Task 15a (card click selects a brush) --
+   reset the browser's own button chrome so it still reads as the same card. */
 .bm-card { display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg3); }
+  padding: 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg3);
+  font: inherit; text-align: inherit; cursor: pointer; }
+.bm-card:hover { border-color: var(--accent); }
+.bm-card.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
 .bm-icon { display: block; image-rendering: pixelated;
   background: conic-gradient(#777 25%, #aaa 25% 50%, #777 50% 75%, #aaa 75%) 0 0 / 8px 8px; }
 .bm-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -597,3 +602,36 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
    same left-alignment reasoning as .pm-footer's Import/Export. */
 .bm-footer { justify-content: flex-start; gap: 6px; }
 .bm-spacer { flex: 1 1 auto; }
+
+/* ---- brush manager: editing controls + preview (Task 15a) --------------
+   Mirrors palette manager's .pm-fields/.pm-field/.pm-inline idiom (a label
+   column plus a wrapped-controls column) under a bm- prefix rather than
+   reusing those classes directly -- the same relationship .bm-well already
+   has to .pm-well above. */
+.bm-error { color: #ff8f8f; font-size: 12px; margin: 8px 0 0; }
+#bm-controls { border: none; margin: 0; padding: 0; }
+.bm-fields { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: start;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.bm-fields > label { font-size: 12px; color: #9a9ca8; padding-top: 4px; }
+.bm-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.bm-field > input[type="text"] { flex: 1 1 auto; min-width: 0; }
+/* One row per group (Mask/Ink/Pressure), its sub-fields wrapping rather than
+   each getting its own row -- eight mask fields in individually labeled rows
+   would triple this dialog's height for no benefit over one wrapped line. */
+.bm-group { flex-wrap: wrap; row-gap: 6px; column-gap: 14px; }
+.bm-inline { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; }
+.bm-inline input[type="checkbox"] { margin: 0; }
+.bm-inline input[type="number"] { width: 52px; }
+/* A fieldset's own [disabled] cascades to every descendant control, which is
+   what actually gates the whole panel with nothing selected -- the mask-size
+   and stamp-ink rules set their OWN .disabled on top of that independently
+   (see brush-manager.js's refreshControls), so a control can be read as
+   disabled for its specific reason regardless of the fieldset's state. */
+#bm-controls:disabled { opacity: .55; }
+
+.bm-preview-well { background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 6px; display: inline-flex; }
+/* Same checkerboard-behind-transparency idiom as .bm-icon, at a size where a
+   dither pattern or a scattered stroke is actually legible. */
+.bm-preview-canvas { display: block; width: 144px; height: 144px; image-rendering: pixelated;
+  background: conic-gradient(#777 25%, #aaa 25% 50%, #777 50% 75%, #aaa 75%) 0 0 / 8px 8px; }

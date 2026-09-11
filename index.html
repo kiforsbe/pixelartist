@@ -442,6 +442,49 @@
     <div class="bm-well">
       <div class="bm-grid" id="bm-grid"></div>
     </div>
+
+    <p id="bm-error" class="bm-error" hidden></p>
+
+    <fieldset id="bm-controls" class="bm-controls" disabled>
+      <div class="bm-fields">
+        <label for="bm-name">Name</label>
+        <div class="bm-field"><input type="text" id="bm-name"></div>
+
+        <label>Preview</label>
+        <div class="bm-field">
+          <div class="bm-preview-well"><canvas id="bm-preview" class="bm-preview-canvas"></canvas></div>
+        </div>
+
+        <label>Mask</label>
+        <div class="bm-field bm-group">
+          <select id="bm-mask-kind" title="Mask shape"></select>
+          <label class="bm-inline">Size <input type="number" id="bm-mask-size" min="1"></label>
+          <label class="bm-inline">Spacing <input type="number" id="bm-mask-spacing" min="1" max="64"></label>
+          <label class="bm-inline">Scatter <input type="number" id="bm-mask-scatter" min="0" max="64"></label>
+          <label class="bm-inline">Rotate <select id="bm-mask-rotate"></select></label>
+          <label class="bm-inline"><input type="checkbox" id="bm-mask-fliph"> Flip H</label>
+          <label class="bm-inline"><input type="checkbox" id="bm-mask-flipv"> Flip V</label>
+          <label class="bm-inline"><input type="checkbox" id="bm-mask-rotate-jitter"> Rotate jitter</label>
+        </div>
+
+        <label>Ink</label>
+        <div class="bm-field bm-group">
+          <select id="bm-ink-kind" title="Ink kind"></select>
+          <label class="bm-inline">Opacity <input type="number" id="bm-ink-opacity" min="0" max="100"> <span id="bm-ink-opacity-level" class="hint"></span></label>
+          <label class="bm-inline"><input type="checkbox" id="bm-ink-truealpha"> True alpha</label>
+          <label class="bm-inline">Jitter <input type="number" id="bm-ink-jitter" min="0" max="8"></label>
+          <label class="bm-inline">Pattern <select id="bm-ink-pattern"></select></label>
+        </div>
+
+        <label>Pressure</label>
+        <div class="bm-field bm-group">
+          <label class="bm-inline">Target <select id="bm-pressure-target"></select></label>
+          <label class="bm-inline">Min <input type="number" id="bm-pressure-min" min="0" max="100"></label>
+          <label class="bm-inline">Max <input type="number" id="bm-pressure-max" min="0" max="100"></label>
+          <label class="bm-inline">Curve <select id="bm-pressure-curve"></select></label>
+        </div>
+      </div>
+    </fieldset>
   </div>
   <div class="row dlg-actions bm-footer">
     <button id="bm-undo" class="btn-sm" disabled>Undo</button>

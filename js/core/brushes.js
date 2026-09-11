@@ -75,7 +75,13 @@ function normalizeInk(raw = {}) {
 // density -- invisible paint at maximum pen pressure. `shade-step` counts ramp
 // entries, and a typical ramp is 4-6 long, so a range wider than a few steps
 // saturates before the pen does.
-const PRESSURE_RANGES = {
+// Exported (Task 15a) so the brush manager's min/max inputs can drive their
+// own `min`/`max` HTML attributes from the same table rather than a second,
+// hand-copied one -- otherwise a `shade-step` brush's max input would go on
+// offering 100 after the target switched away from `opacity`. Exporting
+// changes nothing here: the values and normalizePressure's own clamping
+// (always 0..100, regardless of target) are unchanged.
+export const PRESSURE_RANGES = {
   none: [1, 8],
   size: [1, 8],
   opacity: [0, 100],
