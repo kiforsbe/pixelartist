@@ -270,3 +270,59 @@ export function setPaletteIndexed(services, paletteId, indexed) {
     p => { p.indexed = !!indexed; },
     p => { p.indexed = !indexed; });
 }
+
+// ---- named ramps ----
+//
+// Ramps are palette state (js/core/ramps.js's rampContaining/stepAlongRamp
+// read them by name, and brush-ink.js threads a brush's rampName through to
+// stepAlongRamp), so unlike brush edits these commands ARE undoable at
+// PROJECT_SCOPE. Brushes are configuration; palettes are content.
+
+function cloneRamps(ramps) {
+  return (ramps ?? []).map(r => ({ name: r.name, indices: [...r.indices] }));
+}
+
+function sameIndices(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+// A single out-of-range index does not just leave a gap in the ramp: it
+// derails stepAlongRamp for every step near it, because clamping there is
+// against the stored array's length, not the count of indices that actually
+// resolve. Filtering at write time is what keeps a ramp usable for every
+// entry it claims to have.
+function usableIndices(palette, indices) {
+  return indices.filter(i => Number.isInteger(i) && i >= 0 && i < palette.colors.length);
+}
+
+export function nameRamp(services, paletteId, name, indices) {
+  const target = paletteById(services, paletteId);
+  if (!target) return;
+  const usable = usableIndices(target, indices);
+  // Fewer than two entries is not a ramp -- refuse rather than store
+  // something that would silently do nothing (see usableIndices above).
+  if (usable.length < 2) return;
+  const before = cloneRamps(target.ramps);
+  const existing = before.find(r => r.name === name);
+  // Re-naming a ramp to the same name and (post-filter) the same indices is
+  // not a change. The manager's UI fires on every selection, including one
+  // that merely re-confirms the current ramp, so this mirrors the guard
+  // setPaletteLock already keeps for the same reason: a dead undo step is
+  // worse than none.
+  if (existing && sameIndices(existing.indices, usable)) return;
+  const after = before.filter(r => r.name !== name).concat([{ name, indices: [...usable] }]);
+  runOnPalette(services, paletteId, 'name ramp',
+    p => { p.ramps = cloneRamps(after); },
+    p => { p.ramps = cloneRamps(before); });
+}
+
+export function deleteRamp(services, paletteId, name) {
+  const target = paletteById(services, paletteId);
+  if (!target) return;
+  const before = cloneRamps(target.ramps);
+  if (!before.some(r => r.name === name)) return;
+  const after = before.filter(r => r.name !== name);
+  runOnPalette(services, paletteId, 'delete ramp',
+    p => { p.ramps = cloneRamps(after); },
+    p => { p.ramps = cloneRamps(before); });
+}

@@ -5,11 +5,13 @@ import { ProjectService } from '../js/host/project-service.js';
 import { HistoryService } from '../js/host/history-service.js';
 import { createBitmap } from '../js/core/pixels.js';
 import { createPalette, setEntry } from '../js/core/palettes.js';
+import { stepAlongRamp } from '../js/core/ramps.js';
 import {
   createNewPalette, duplicatePalette, renamePalette, deletePalette,
   addPaletteSwatch, setSwatchColor, remapSwatchColor, clearSwatch,
   removePaletteSwatch, movePaletteSwatch, sortPalette, setPaletteLock,
   setPaletteEmptyColor, setPaletteIndexed, countSwatchPixels,
+  nameRamp, deleteRamp,
 } from '../js/features/palettes/palette-commands.js';
 
 function makeServices(project, activeSheetId = null) {
@@ -309,4 +311,114 @@ test('setPaletteLock(null) on an already-unlocked palette records nothing', () =
   const services = makeServices({ sheets: [], maps: [], palettes: [p], activePaletteId: p.id });
   setPaletteLock(services, p.id, null);
   assert.equal(services.history.canUndo(), false);
+});
+
+// ---- named ramps ----
+
+// Local to these tests: the two-line setup the existing tests in this file
+// already repeat inline.
+function rampFixture() {
+  const palette = makePalette('Ramps');
+  const project = { sheets: [], maps: [], palettes: [palette], activePaletteId: palette.id };
+  return { palette, services: makeServices(project) };
+}
+
+test('nameRamp adds a named ramp and undo removes it', () => {
+  const { services, palette } = rampFixture();
+  nameRamp(services, palette.id, 'skin', [0, 1, 2]);
+  assert.deepEqual(palette.ramps, [{ name: 'skin', indices: [0, 1, 2] }]);
+  services.history.undo();
+  assert.deepEqual(palette.ramps, []);
+});
+
+test('nameRamp replaces a ramp of the same name rather than duplicating it', () => {
+  const { services, palette } = rampFixture();
+  nameRamp(services, palette.id, 'skin', [0, 1]);
+  nameRamp(services, palette.id, 'skin', [2, 3]);
+  assert.equal(palette.ramps.length, 1);
+  assert.deepEqual(palette.ramps[0].indices, [2, 3]);
+});
+
+test('deleteRamp removes one ramp and undo restores it', () => {
+  const { services, palette } = rampFixture();
+  nameRamp(services, palette.id, 'skin', [0, 1]);
+  deleteRamp(services, palette.id, 'skin');
+  assert.deepEqual(palette.ramps, []);
+  services.history.undo();
+  assert.equal(palette.ramps.length, 1);
+});
+
+test('deleteRamp on an unknown name records no history entry', () => {
+  const { services, palette } = rampFixture();
+  const before = services.history.canUndo();
+  deleteRamp(services, palette.id, 'missing');
+  assert.equal(services.history.canUndo(), before);
+});
+
+test('nameRamp is a no-op for an unknown palette', () => {
+  const { services } = rampFixture();
+  assert.doesNotThrow(() => nameRamp(services, 'missing', 'x', [0]));
+});
+
+test('nameRamp is a no-op when re-naming a ramp with identical indices (no dead undo step)', () => {
+  const { services, palette } = rampFixture();
+  nameRamp(services, palette.id, 'skin', [0, 1, 2]);
+  assert.equal(services.history.canUndo(), true);
+
+  // Byte-identical re-name: same name, same indices (a fresh array, per the
+  // amendment -- the caller never hands back the same reference). The
+  // manager's UI fires this on every re-selection, including one that just
+  // re-confirms the ramp already stored, so this must not add a step.
+  nameRamp(services, palette.id, 'skin', [0, 1, 2]);
+
+  // Discriminating check: palette.ramps looks identical either way right
+  // after the second call, because an unguarded re-name overwrites with the
+  // same content rather than appending a visible change. Only counting undo
+  // STEPS tells "one" from "two" apart: a single undo() must fully unwind
+  // back to no ramp at all. If the guard were absent, this same undo() would
+  // only unwind the second (no-op) command, leaving
+  // palette.ramps === [{ name: 'skin', indices: [0, 1, 2] }] and
+  // canUndo() === true -- exactly what asserting ramps.length alone would
+  // miss.
+  services.history.undo();
+  assert.equal(services.history.canUndo(), false, 'the identical re-name must not have recorded a second undo step');
+  assert.deepEqual(palette.ramps, []);
+});
+
+test('nameRamp drops out-of-range indices so the surviving ramp still resolves via stepAlongRamp', () => {
+  const { services, palette } = rampFixture();
+
+  // Control: a clean two-entry ramp (indices 0 and 1 are both real colors on
+  // this 4-color palette). Stepping past its last entry must clamp to that
+  // entry and return a real color -- never null.
+  nameRamp(services, palette.id, 'clean', [0, 1]);
+  const cleanStep = stepAlongRamp(palette, palette.colors[1], 1, 'clean');
+  assert.deepEqual(cleanStep, palette.colors[1], 'control: a clean ramp must resolve a step, not go null');
+
+  // Dirty: the SAME two real indices, plus 99 (past the palette's 4 colors)
+  // and -3 (negative) -- an out-of-range index a caller could hand in from
+  // stale UI state. If nameRamp stored these verbatim instead of filtering,
+  // palette.ramps would carry a 4-entry indices array whose last two entries
+  // never resolve to a color. js/core/ramps.js's stepAlongRamp clamps the
+  // next step against that raw array LENGTH, not against how many entries
+  // actually resolve, so stepping from index 1 by +1 would land on the bad
+  // index 99 and return null -- exactly the "ramp silently does nothing"
+  // failure the amendment's probe found, even though the ramp still "has"
+  // its two good indices.
+  nameRamp(services, palette.id, 'dirty', [0, 1, 99, -3]);
+  assert.deepEqual(palette.ramps.find(r => r.name === 'dirty').indices, [0, 1],
+    'out-of-range indices must be dropped at write time');
+  const dirtyStep = stepAlongRamp(palette, palette.colors[1], 1, 'dirty');
+  assert.deepEqual(dirtyStep, cleanStep,
+    'the surviving ramp must actually resolve a step like the control -- an unfiltered ramp returns null here instead');
+});
+
+test('nameRamp refuses a ramp left with fewer than two usable indices after filtering', () => {
+  const { services, palette } = rampFixture();
+  const before = services.history.canUndo();
+  // Only index 1 survives filtering (99 and -3 are out of range on this
+  // 4-color palette); one index is not a ramp.
+  nameRamp(services, palette.id, 'useless', [99, -3, 1]);
+  assert.equal(services.history.canUndo(), before, 'an unusable ramp must record no history entry');
+  assert.equal(palette.ramps.length, 0);
 });
