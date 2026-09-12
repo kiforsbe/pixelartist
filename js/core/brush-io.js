@@ -6,7 +6,7 @@
 // itself. JSON carries the settings a PNG cannot -- ink kind, opacity,
 // spacing, scatter, pressure.
 
-import { createBitmap, setPixel, getPixel } from './pixels.js';
+import { createBitmap, setPixel, getPixel, copyRegion } from './pixels.js';
 import { normalizeBrush, MAX_CUSTOM_BITMAP_DIM } from './brushes.js';
 
 export function bitmapToBrush(bitmap, name = 'Brush') {
@@ -23,6 +23,28 @@ export function bitmapToBrush(bitmap, name = 'Brush') {
     name,
     mask: { kind: 'custom', bitmap: { width: bitmap.width, height: bitmap.height, bits }, colors },
   });
+}
+
+// --- Make Brush From Selection (Task 15b, moved here in fix round 1) -----
+//
+// Pure: takes whatever bitmap the caller hands it and crops `rect` out of it
+// before turning the crop into a custom-mask brush. It has no opinion on
+// WHICH bitmap that should be -- that choice belongs to the caller, not to
+// this function, which is why it stays a 3-line wrapper over copyRegion +
+// bitmapToBrush with no DOM/host dependency.
+//
+// The one production call site (js/features/brushes/brush-manager.js's
+// `brush.fromSelection` action) passes flattenSheet(sheet) -- the COMPOSITE
+// of every visible layer -- not activeLayer().bitmap. A user who marquees a
+// region of a multi-layer sprite and asks for a brush is asking for what
+// they can see; handing them a brush built from one layer, with pixels from
+// other layers silently missing, would not match their selection and
+// nothing on screen would explain why. captureLayers (the clipboard's path,
+// float-session.js) defaults to the active layer for a different reason --
+// cut/copy is meant to move that layer's content -- which does not apply
+// here.
+export function brushFromSelection(bitmap, rect, name) {
+  return bitmapToBrush(copyRegion(bitmap, rect.x, rect.y, rect.w, rect.h), name);
 }
 
 export function brushToBitmap(brush) {

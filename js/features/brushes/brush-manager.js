@@ -20,8 +20,8 @@ import {
 import { opacityLevel, PATTERNS } from '../../core/dither.js';
 import { strokeStamps } from '../../core/brush-stroke.js';
 import { makeInk } from '../../core/brush-ink.js';
-import { createBitmap, stamp, copyRegion } from '../../core/pixels.js';
-import { bitmapToBrush } from '../../core/brush-io.js';
+import { createBitmap, stamp } from '../../core/pixels.js';
+import { brushFromSelection } from '../../core/brush-io.js';
 import { flattenSheet } from '../../core/model.js';
 import { getBrushLibrary, mergeIncoming } from './brush-library.js';
 import { exportBrush, importBrush } from './brush-files.js';
@@ -219,24 +219,48 @@ export function renderBrushPreview(brush, context, { width = 64, height = 64 } =
   return bmp;
 }
 
-// --- Make Brush From Selection (Task 15b) --------------------------------
+// --- import: the whole flow minus the file picker (fix round 1) ---------
 //
-// Pure: takes whatever bitmap the caller hands it and crops `rect` out of it
-// before turning the crop into a custom-mask brush. It has no opinion on
-// WHICH bitmap that should be -- that choice is made once, at the single
-// call site below (the `brush.fromSelection` action), which is why this
-// function stays trivially testable without a DOM or a host.
+// Exported, taking `pickImport` (importBrush from brush-files.js, in
+// production) as an argument rather than calling it directly -- the same
+// DOM-independence reason createBrushEditor/commitCoercedNumber above are
+// factories: `node --test` has no `window`/`document`/File System Access,
+// so importBrush() itself cannot run in a test, but the try/catch, the
+// mergeIncoming accounting, and the resulting user-facing message all can.
+// mountBrushManager's click handler below is the thin DOM adapter.
 //
-// The call site passes flattenSheet(sheet) -- the COMPOSITE of every visible
-// layer -- not activeLayer().bitmap. A user who marquees a region of a
-// multi-layer sprite and asks for a brush is asking for what they can see;
-// handing them a brush built from one layer, with pixels from other layers
-// silently missing, would not match their selection and nothing on screen
-// would explain why. captureLayers (the clipboard's path, float-session.js)
-// defaults to the active layer for a different reason -- cut/copy is meant
-// to move that layer's content -- which does not apply here.
-export function brushFromSelection(bitmap, rect, name) {
-  return bitmapToBrush(copyRegion(bitmap, rect.x, rect.y, rect.w, rect.h), name);
+// importBrush() throws from decodePng (a corrupt PNG), from
+// parseBrushJson/parseLibraryJson via parseImportedBrushJson ('Not a brush
+// file' / 'Not a brush library file'), and from assertSaneCustomBitmap
+// (Task 11's hostile-custom-bitmap guard) -- all three deliberately, rather
+// than degrading to a garbage brush. Catching but swallowing that here would
+// hand back exactly the silence Task 11 exists to prevent, so every failure
+// comes back as `{ ok: false, message }` instead of escaping this function.
+export async function performBrushImport(lib, pickImport) {
+  let result;
+  try {
+    result = await pickImport();
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+  if (!result) return { ok: true, message: null }; // cancelled picker
+  // importBrush() returns a single Brush for a .png or a single-brush
+  // .json, or an ARRAY for a whole-library .json (serializeLibraryJson's
+  // own shape) -- mergeIncoming wants a list either way.
+  const incoming = Array.isArray(result) ? result : [result];
+  // mergeIncoming only REPORTS which ids are new (brush-library.js) -- it
+  // never mutates, so a re-imported brush that already exists (matched by
+  // id) is left alone here rather than silently overwritten. Both counts
+  // are reported: an import that adds nothing because everything already
+  // existed must not look, from the user's side, identical to one that
+  // silently failed.
+  const { added, existing } = mergeIncoming(lib, incoming);
+  for (const brush of added) lib.add(brush);
+  const addedLabel = `${added.length} brush${added.length === 1 ? '' : 'es'}`;
+  const message = existing.length
+    ? `Imported ${addedLabel} (${existing.length} already in your library).`
+    : `Imported ${addedLabel}.`;
+  return { ok: true, message, added, existing };
 }
 
 // A small read-only preview of the mask, the same "canvas thumbnail inside a
@@ -622,22 +646,19 @@ export function mountBrushManager() {
     showEditResult(editBrush('brush pressure curve', b => { b.pressure.curve = pressureCurve.value; return b; }));
   });
 
-  // ---- import / export (Task 15b) ----
+  // ---- import / export (Task 15b; fix round 1 made failures and
+  // collisions visible through the same #bm-error banner every other
+  // failure in this dialog already uses) ----
   // Mirrors palette-manager.js's own import/export wiring: Import always
   // creates new library entries rather than touching the current selection;
-  // Export acts on whichever brush is currently selected.
+  // Export acts on whichever brush is currently selected. The whole import
+  // flow lives in performBrushImport (above) so it's testable without a
+  // DOM; this handler is the thin adapter that reports its result.
   btnImport.addEventListener('click', async () => {
-    const result = await importBrush();
-    if (!result) return; // cancelled picker
-    // importBrush() returns a single Brush for a .png or a single-brush
-    // .json, or an ARRAY for a whole-library .json (serializeLibraryJson's
-    // own shape) -- mergeIncoming wants a list either way.
-    const incoming = Array.isArray(result) ? result : [result];
-    // mergeIncoming only REPORTS which ids are new (brush-library.js) -- it
-    // never mutates, so a re-imported brush that already exists (matched by
-    // id) is left alone here rather than silently overwritten.
-    const { added } = mergeIncoming(lib, incoming);
-    for (const brush of added) lib.add(brush);
+    const { message } = await performBrushImport(lib, importBrush);
+    if (message == null) return; // cancelled picker -- leave the banner as-is
+    errorEl.hidden = false;
+    errorEl.textContent = message;
   });
 
   btnExport.addEventListener('click', async () => {
@@ -689,9 +710,17 @@ export function mountBrushManager() {
       const rr = sheet ? currentEditRegion() : null;
       if (!sheet || !rr) return;
       // The composite of every visible layer, not activeLayer().bitmap --
-      // see brushFromSelection's own comment for why.
+      // see brushFromSelection's own comment (js/core/brush-io.js) for why.
       const composite = flattenSheet(sheet);
-      lib.add(brushFromSelection(composite, rr.region, 'Selection brush'));
+      const brush = brushFromSelection(composite, rr.region, 'Selection brush');
+      lib.add(brush);
+      // Fix round 1, ruling 4: the action exists so the user can draw with
+      // what they just captured -- leaving it merely added-but-inactive
+      // means opening the picker and hunting for it, exactly the extra step
+      // this action was supposed to save. store.updateDrawingSettings, the
+      // same path tool-palette.js's own swatch click uses -- never a direct
+      // `workspace.drawing.brush =` assignment.
+      host().store.updateDrawingSettings({ brush });
     },
     isEnabled: () => hasSelection(),
   });

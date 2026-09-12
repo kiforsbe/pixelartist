@@ -1,20 +1,22 @@
 // Task 15b: Make Brush From Selection.
 //
-// brushFromSelection(bitmap, rect, name) itself (brush-manager.js) is
-// deliberately opinion-free about WHICH bitmap it is handed -- it just crops
-// `rect` out of whatever it's given. The decision that matters lives at the
-// call site (the `brush.fromSelection` action, also in brush-manager.js):
-// it passes flattenSheet(sheet), the COMPOSITE of every visible layer, not
-// activeLayer().bitmap. That call site needs a live host/DOM (activeSheet,
-// commitFloatIfAny, lib.add) and is exercised by manual verification instead
-// (see task-15b-report.md); what's unit-tested here is the crop itself, and
-// -- the part this branch has gotten wrong eleven times -- proof that
-// capturing the COMPOSITE actually differs from capturing one layer.
+// brushFromSelection(bitmap, rect, name) itself (js/core/brush-io.js, moved
+// there from brush-manager.js in fix round 1 -- it has no DOM dependency and
+// belongs beside bitmapToBrush) is deliberately opinion-free about WHICH
+// bitmap it is handed -- it just crops `rect` out of whatever it's given.
+// The decision that matters lives at the call site (the `brush.fromSelection`
+// action, in brush-manager.js): it passes flattenSheet(sheet), the COMPOSITE
+// of every visible layer, not activeLayer().bitmap. That call site needs a
+// live host/DOM (activeSheet, commitFloatIfAny, lib.add) and is exercised by
+// manual verification instead (see task-15b-report.md); what's unit-tested
+// here is the crop itself, and -- the part this branch has gotten wrong
+// eleven times -- proof that capturing the COMPOSITE actually differs from
+// capturing one layer.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { flattenSheet, createGroupNode } from '../js/core/model.js';
 import { createBitmap, setPixel } from '../js/core/pixels.js';
-import { brushFromSelection } from '../js/features/brushes/brush-manager.js';
+import { brushFromSelection } from '../js/core/brush-io.js';
 
 function bit(brush, x, y) {
   const { width } = brush.mask.bitmap;
