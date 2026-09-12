@@ -504,6 +504,15 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
           maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, stroke.target);
           stroke.dirty = extend(stroke.dirty, b.x0, b.y0, b.x1, b.y1);
         }
+      // KNOWN LIMITATION, deliberate: rect and ellipse OUTLINES are not
+      // stamp-aware, so a brush's spacing, scatter and rotateJitter do not
+      // apply to them -- unlike the line tool just above, which was converted
+      // to strokeStamps. The ink still applies (opacity, dither, ramp-shade
+      // all work), only the mask phase is skipped. drawRect/drawEllipse walk
+      // their own perimeter and take no stamp list; threading one through is a
+      // redesign of both primitives, not a fix, and it was ruled out of scope
+      // rather than overlooked. Do not "fix" this by widening the call
+      // signature without reworking the primitives themselves.
       } else if (tool === 'rect') {
         drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill, stroke.ink);
         stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
