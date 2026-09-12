@@ -5,7 +5,7 @@
 // (see task-15a-report.md).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeBrush, validateBrush, PRESSURE_RANGES } from '../js/core/brushes.js';
+import { normalizeBrush, validateBrush, PRESSURE_RANGES, MAX_MASK_SIZE } from '../js/core/brushes.js';
 import { createBrushLibrary } from '../js/features/brushes/brush-library.js';
 import {
   createBrushHistory, createBrushEditor, renderBrushPreview,
@@ -36,9 +36,29 @@ function setup(brushOverrides = {}) {
 
 test('PRESSURE_RANGES is exported with the per-target defaults normalizePressure uses', () => {
   assert.deepEqual(PRESSURE_RANGES.none, [1, 8]);
-  assert.deepEqual(PRESSURE_RANGES.size, [1, 8]);
   assert.deepEqual(PRESSURE_RANGES.opacity, [0, 100]);
   assert.deepEqual(PRESSURE_RANGES['shade-step'], [1, 3]);
+});
+
+// The `size` target's ceiling gets its own test, written against
+// MAX_MASK_SIZE rather than a literal. The 8 that used to sit in the table
+// was the RETIRED brush-size cap, and it was a literal here too -- so this
+// assertion agreed with the bug and kept it alive. The manager wires these
+// numbers onto the pressure min/max inputs' HTML bounds, so a stale ceiling
+// meant typing 16 into pressure max came back "out of range -- used 8
+// instead" while the Size input beside it accepted 16.
+test('the size pressure target offers the whole mask range, not the retired brush-size cap', () => {
+  assert.deepEqual(PRESSURE_RANGES.size, [1, MAX_MASK_SIZE]);
+  // The ceiling is what a typed value is clamped against in the dialog
+  // (commitCoercedNumber reads the input's own max, wired from this table),
+  // so the bound has to admit MAX_MASK_SIZE itself.
+  const { lib, brush, editBrush } = setup({ pressure: { target: 'size' } });
+  const [, max] = PRESSURE_RANGES.size;
+  const { value, message } = commitCoercedNumber(
+    editBrush, 'brush pressure max', String(MAX_MASK_SIZE), 1, max, (b, v) => { b.pressure.max = v; });
+  assert.equal(value, MAX_MASK_SIZE, `typing ${MAX_MASK_SIZE} was clamped to ${value}`);
+  assert.equal(message, null, 'a legal maximum must not be reported as out of range');
+  assert.equal(lib.get(brush.id).pressure.max, MAX_MASK_SIZE);
 });
 
 // --- createBrushEditor: the basic edit-command shape --------------------

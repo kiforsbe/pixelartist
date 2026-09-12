@@ -6,7 +6,7 @@
 
 import { isTypingTarget } from './canvas/float-session.js';
 import { getEditorHost } from '../host/runtime.js';
-import { getBrushLibrary } from '../features/brushes/brush-library.js';
+import { getBrushLibrary, bindActiveBrushSync } from '../features/brushes/brush-library.js';
 import { drawBrushIcon, openBrushManager } from '../features/brushes/brush-manager.js';
 
 function currentModeId() { return getEditorHost()?.store.getState().session.activeModeId ?? null; }
@@ -215,6 +215,14 @@ export function mountToolPalette(el) {
 
   renderBrushSwatches();
   const disposeBrushLibrary = lib.subscribe(renderBrushSwatches);
+  // The swatch click above hands the store a DETACHED SNAPSHOT of the brush,
+  // so a later library edit (the manager's controls, or its Undo/Redo) never
+  // reached the canvas -- the picker went on highlighting a brush the canvas
+  // was no longer using. This pushes a changed definition back through
+  // updateDrawingSettings; `mask.size` is deliberately left alone, because
+  // the Size input two rows up and the `[`/`]` keys own it as a live
+  // override. See bindActiveBrushSync's own comment for the full reasoning.
+  const disposeBrushSync = bindActiveBrushSync(lib, store);
 
   const optionChecks = document.createElement('div');
   optionChecks.className = 'tool-option-checks';
@@ -360,6 +368,7 @@ export function mountToolPalette(el) {
     dispose() {
       disposables.forEach(dispose => dispose());
       disposeBrushLibrary();
+      disposeBrushSync();
       window.removeEventListener('keydown', onKeyDown);
       if (paletteApi?.refresh === refresh) paletteApi = null;
     },

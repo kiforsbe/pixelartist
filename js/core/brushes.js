@@ -81,9 +81,18 @@ function normalizeInk(raw = {}) {
 // offering 100 after the target switched away from `opacity`. Exporting
 // changes nothing here: the values and normalizePressure's own clamping
 // (always 0..100, regardless of target) are unchanged.
+// `size` is bounded by MAX_MASK_SIZE, not by a literal: the 8 that used to
+// sit here was the RETIRED brush-size cap, carried forward untouched while
+// size caps were being unified on MAX_MASK_SIZE. Since the manager wires its
+// pressure min/max inputs' HTML bounds straight off this table, the stale 8
+// meant typing 16 into pressure max came back as "16 is out of range -- used
+// 8 instead" while the Size input directly beside it accepted 16. The model
+// was always fine (normalizePressure clamps 0..100 regardless of target); it
+// was only the offered ceiling that lied, and this retires the last copy of
+// the old cap.
 export const PRESSURE_RANGES = {
   none: [1, 8],
-  size: [1, 8],
+  size: [1, MAX_MASK_SIZE],
   opacity: [0, 100],
   'shade-step': [1, 3],
 };
@@ -113,6 +122,36 @@ export function normalizeBrush(raw = {}) {
 
 export function createBrush({ id, name = 'Brush', mask, ink, pressure } = {}) {
   return normalizeBrush({ id, name, mask, ink, pressure });
+}
+
+// Structural equality for two brushes. Lives here, with the model, because
+// there are two callers that must agree on what "the same brush" means: the
+// manager's no-op guard (an edit that changes nothing must not become an undo
+// step) and the library-to-canvas re-sync (a push that changes nothing must
+// not become a store notification). Two private copies of this would be two
+// places to get it subtly differently wrong.
+//
+// A generic deep-equal, not JSON.stringify: a custom mask's
+// mask.bitmap.bits is a Uint8Array, and while comparing two live Uint8Arrays
+// via JSON.stringify would happen to work today, that is an accident of key
+// order this function should not depend on. Handled explicitly instead.
+export function brushesEqual(a, b) {
+  if (a === b) return true;
+  if (a instanceof Uint8Array || b instanceof Uint8Array) {
+    if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => brushesEqual(v, b[i]));
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const ak = Object.keys(a), bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    return ak.every(k => Object.prototype.hasOwnProperty.call(b, k) && brushesEqual(a[k], b[k]));
+  }
+  return false;
 }
 
 // `stamp` ink paints the mask's own color payload, so it is meaningless

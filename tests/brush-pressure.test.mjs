@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeBrush, applyCurve, pressureValue, effectiveMaskSize } from '../js/core/brushes.js';
+import { normalizeBrush, applyCurve, pressureValue, effectiveMaskSize, MAX_MASK_SIZE } from '../js/core/brushes.js';
 import { createBitmap, setPixel, getPixel } from '../js/core/pixels.js';
 import { normalizePalette } from '../js/core/palettes.js';
 import { makeInk } from '../js/core/brush-ink.js';
@@ -176,9 +176,12 @@ test('target none (default) produces byte-identical output whatever the pressure
 test('the default pressure range suits the chosen target', () => {
   // One 1..8 default across every target left `opacity` swinging over 1%..8%
   // of full density -- an invisible brush at maximum pen pressure.
+  // MAX_MASK_SIZE, not a literal: `size` is measured in mask pixels, so its
+  // ceiling is the mask cap by definition. A literal here is what let the
+  // retired brush-size cap of 8 survive in PRESSURE_RANGES.
   assert.deepEqual(
     [normalizeBrush({ pressure: { target: 'size' } }).pressure.min,
-     normalizeBrush({ pressure: { target: 'size' } }).pressure.max], [1, 8]);
+     normalizeBrush({ pressure: { target: 'size' } }).pressure.max], [1, MAX_MASK_SIZE]);
   assert.deepEqual(
     [normalizeBrush({ pressure: { target: 'opacity' } }).pressure.min,
      normalizeBrush({ pressure: { target: 'opacity' } }).pressure.max], [0, 100]);

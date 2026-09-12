@@ -10,7 +10,7 @@
 import { getPixel, setPixel } from './pixels.js';
 import { nearestColor } from './palettes.js';
 import { stepAlongRamp } from './ramps.js';
-import { passesOpacity, patternPicksSecondary } from './dither.js';
+import { passesOpacity, passesPatternOpacity, patternPicksSecondary } from './dither.js';
 import { stampRandom } from './brush-stroke.js';
 import { pressureValue } from './brushes.js';
 
@@ -165,6 +165,38 @@ const MASK_COLOR_CONSUMING_KINDS = new Set(['stamp']);
 //                      eraser would have shaded the region one step lighter.
 const ERASE_CAPABLE_KINDS = new Set(['solid', 'stamp', 'replace', 'dither']);
 
+// Ink kinds whose opacity is screened one PATTERN PERIOD at a time
+// (dither.js's passesPatternOpacity) rather than one pixel at a time
+// (passesOpacity) -- because they ALSO split their admitted pixels between
+// two colours using a pattern on the same lattice the density screen uses.
+// See passesPatternOpacity's own comment for why those two cannot be allowed
+// to partition that lattice independently.
+//
+// A set, in the same style and for the same reason as the three above: this
+// is ink taxonomy, it belongs to this module, and a seventh ink should have
+// to answer the question here rather than inherit whichever branch it happens
+// to fall into. Unlike `usesSecondary`/`usesMaskColors` this one is NOT
+// exposed on the ink object -- no caller needs it, exactly like
+// ERASE_CAPABLE_KINDS. Fail-closed: an ink absent from this set keeps the
+// finer per-pixel screen, which is the correct default for every ink that
+// paints ONE colour.
+//
+// Decided against the code of every arm, not assumed:
+//   dither      YES -- `patternPicksSecondary(pattern, px, py)` splits its
+//                      admitted pixels between two colours on a 2x2 lattice
+//                      that the Bayer density screen is itself aligned to.
+//   solid       no  -- one colour, no pattern; nothing to decorrelate from,
+//                      so it keeps the finer screen.
+//   stamp       no  -- paints a mask's own per-cell payload, which is indexed
+//                      by the MASK's cells, not by a screen-space pattern.
+//   replace     no  -- one colour; `replaceColor` gates which pixels, and
+//                      that gate is destination content, not a lattice.
+//   lock-alpha  no  -- one colour, plus the destination's own alpha.
+//   ramp-shade  no  -- one colour per pixel, derived from the destination. It
+//                      never reaches this gate on the patterned path anyway,
+//                      but the finer screen is still the right answer for it.
+const PATTERN_SCREENED_KINDS = new Set(['dither']);
+
 // A source colour of "nothing". The eraser's sentinel; see ERASE_CAPABLE_KINDS.
 // Alpha alone decides, rather than an exact match against [0,0,0,0]: a
 // transparent pixel has no colour, so its RGB carries no information, and a
@@ -205,6 +237,9 @@ export function makeInk(brush, context) {
   // there is nothing to blend toward -- opacity keeps its density meaning
   // there and trueAlpha is inert.
   const blends = trueAlpha && kind !== 'ramp-shade';
+  // Resolved once per stroke, not per pixel: the ink's kind cannot change
+  // mid-stroke. See PATTERN_SCREENED_KINDS.
+  const patternScreened = PATTERN_SCREENED_KINDS.has(kind);
 
   // `keepAlpha` pins the destination's own alpha through the write. lock-alpha
   // paints colour only, so without it a blend would recompute the alpha channel
@@ -285,10 +320,23 @@ export function makeInk(brush, context) {
         if (pv !== null) effOpacity = Math.max(0, Math.min(100, pv));
       }
 
-      // Opacity is density: the pattern is indexed by bitmap coordinates so
+      // Opacity is density: the screen is indexed by bitmap coordinates so
       // separate strokes over one region stay aligned. When `blends` is on,
       // opacity is honored by the alpha blend in `commit` instead.
-      if (!blends && !passesOpacity(px, py, effOpacity)) return;
+      //
+      // A two-colour ink screens a whole pattern period at a time so that its
+      // density screen and its colour pattern do not partition the same
+      // lattice -- see PATTERN_SCREENED_KINDS and dither.js's
+      // passesPatternOpacity. Both screens are pure functions of the absolute
+      // pattern-space coordinate, so either way the result is deterministic
+      // and screen-anchored, and re-rasterizing a path prefix reproduces it
+      // byte for byte.
+      if (!blends) {
+        const admitted = patternScreened
+          ? passesPatternOpacity(pattern, px, py, effOpacity)
+          : passesOpacity(px, py, effOpacity);
+        if (!admitted) return;
+      }
 
       const dest = getPixel(bitmap, x, y);
       if (!dest) return;

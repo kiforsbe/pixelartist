@@ -43,8 +43,38 @@ export function bitmapToBrush(bitmap, name = 'Brush') {
 // float-session.js) defaults to the active layer for a different reason --
 // cut/copy is meant to move that layer's content -- which does not apply
 // here.
+// The bound an in-app capture is held to, exported so a caller can compare it
+// against the rect it asked for and TELL the user its selection was cropped.
+//
+// Capture is a PRODUCER of custom masks, and every consumer of one
+// (fromPlain, and so library.add / project load / file import) refuses a
+// bitmap over MAX_CUSTOM_BITMAP_DIM outright -- correctly, for an untrusted
+// file. A marquee is not an untrusted file, but it is just as easily over the
+// cap: any selection wider or taller than 256px produced a brush that
+// library.add then threw on, from inside a CommandRegistry.execute that does
+// not catch, so the capture failed with no brush and no message at all.
+//
+// Bounding the REGION is not the same thing as clamping the finished mask,
+// and the difference matters: copyRegion produces a bitmap whose stride
+// matches its own width, whereas rasterizeMask re-reads an oversized source's
+// bits at the DECLARED width and shears the result (a vertical line comes out
+// diagonal). The size has to be settled before the pixels are read, which is
+// here.
+export function boundedBrushRegion(rect) {
+  return {
+    x: rect.x,
+    y: rect.y,
+    w: Math.max(0, Math.min(MAX_CUSTOM_BITMAP_DIM, rect.w)),
+    h: Math.max(0, Math.min(MAX_CUSTOM_BITMAP_DIM, rect.h)),
+  };
+}
+
 export function brushFromSelection(bitmap, rect, name) {
-  return bitmapToBrush(copyRegion(bitmap, rect.x, rect.y, rect.w, rect.h), name);
+  // Bounded here as well as at the call site: this is the in-app producer, and
+  // it must not be able to hand back a brush that the library will refuse,
+  // whichever caller reaches it.
+  const r = boundedBrushRegion(rect);
+  return bitmapToBrush(copyRegion(bitmap, r.x, r.y, r.w, r.h), name);
 }
 
 export function brushToBitmap(brush) {

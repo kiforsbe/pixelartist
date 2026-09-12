@@ -53,3 +53,41 @@ export function patternPicksSecondary(patternName, x, y) {
   const p = PATTERNS[patternName] ?? PATTERNS.checker;
   return p.cells[wrap(y, p.height) * p.width + wrap(x, p.width)] === 1;
 }
+
+// The density screen for an ink that ALSO splits its admitted pixels between
+// two colours by a pattern -- one density decision per whole pattern PERIOD
+// rather than per pixel.
+//
+// Why the coarser grain: passesOpacity and patternPicksSecondary were being
+// asked to partition the same lattice independently, and they are not
+// independent. BAYER4's eight lowest values sit exactly on the even-parity
+// cells, which is precisely the primary phase of every 2x2 pattern here. So
+// the density gate admitted only primary-phase pixels first and only started
+// admitting the secondary phase once it had saturated the primary one: a
+// `checker` dither at opacity 50 came out as a 50%-density SOLID wash of the
+// primary, with the secondary swatch unreachable anywhere below opacity 54 --
+// on the one ink whose entire purpose is two colours. It also skewed each
+// pattern's own ratio at every level in between (`dots25`, a 25/75 pattern,
+// measured 50/50 at opacity 50).
+//
+// Deciding per period fixes both exactly rather than approximately: an
+// admitted period contains one full copy of the pattern, so every phase of it
+// appears inside every admitted period. Density is untouched -- the same
+// fraction of periods is admitted as the fraction of pixels was before -- and
+// each pattern keeps its own primary/secondary ratio at every one of the 17
+// levels, including the lowest.
+//
+// The cost, stated plainly: the translucency screen is one pattern period
+// coarser for these inks, so a low-opacity wash clumps at the pattern's own
+// grain (2x2 today) instead of the Bayer cell's. That is the trade -- a
+// slightly chunkier screen in exchange for a two-colour ink that is actually
+// two colours.
+//
+// Floor division, not `>> 1`: the period comes from the pattern itself, so a
+// pattern wider than 2 keeps its periods aligned to the same boundaries
+// `wrap` uses. Negative coordinates floor consistently, which is what keeps
+// the screen anchored to the sheet rather than to the stroke.
+export function passesPatternOpacity(patternName, x, y, opacity) {
+  const p = PATTERNS[patternName] ?? PATTERNS.checker;
+  return passesOpacity(Math.floor(x / p.width), Math.floor(y / p.height), opacity);
+}

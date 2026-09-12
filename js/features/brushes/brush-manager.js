@@ -14,14 +14,15 @@ import { makeDialogMovable, centerDialog, closeOnEscape } from '../../components
 import { isTextEntryTarget } from '../../components/dom-utils.js';
 import { CommandStack } from '../../core/commands.js';
 import {
-  rasterizeMask, maskGridFor, validateBrush,
-  MASK_KINDS, INK_KINDS, PRESSURE_TARGETS, PRESSURE_CURVES, PRESSURE_RANGES, MAX_MASK_SIZE,
+  rasterizeMask, maskGridFor, validateBrush, brushesEqual,
+  MASK_KINDS, INK_KINDS, PRESSURE_TARGETS, PRESSURE_CURVES, PRESSURE_RANGES,
+  MAX_MASK_SIZE, MAX_CUSTOM_BITMAP_DIM,
 } from '../../core/brushes.js';
 import { opacityLevel, PATTERNS } from '../../core/dither.js';
 import { strokeStamps } from '../../core/brush-stroke.js';
 import { makeInk } from '../../core/brush-ink.js';
 import { createBitmap, stamp } from '../../core/pixels.js';
-import { brushFromSelection } from '../../core/brush-io.js';
+import { brushFromSelection, boundedBrushRegion } from '../../core/brush-io.js';
 import { flattenSheet } from '../../core/model.js';
 import { getBrushLibrary, mergeIncoming } from './brush-library.js';
 import { exportBrush, importBrush } from './brush-files.js';
@@ -68,29 +69,6 @@ export function createBrushHistory(onChange) {
 
 // --- the edit-command shape, factored out of the DOM ------------------
 //
-// A generic deep-equal, not JSON.stringify: a custom mask's mask.bitmap.bits
-// is a Uint8Array, and while comparing two live Uint8Arrays via
-// JSON.stringify would happen to work today, that is an accident of key
-// order this function should not depend on. Handled explicitly instead.
-function deepEqualValue(a, b) {
-  if (a === b) return true;
-  if (a instanceof Uint8Array || b instanceof Uint8Array) {
-    if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
-  }
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((v, i) => deepEqualValue(v, b[i]));
-  }
-  if (a && b && typeof a === 'object' && typeof b === 'object') {
-    const ak = Object.keys(a), bk = Object.keys(b);
-    if (ak.length !== bk.length) return false;
-    return ak.every(k => Object.prototype.hasOwnProperty.call(b, k) && deepEqualValue(a[k], b[k]));
-  }
-  return false;
-}
-
 // Exported as a factory -- taking `library`/`history`/`getCurrentId`/
 // `refresh` as arguments rather than closing over a mounted dialog's own
 // variables -- so the edit-command shape (the plan's `editBrush`) and the
@@ -121,7 +99,7 @@ export function createBrushEditor(library, history, getCurrentId, refresh) {
     // put a no-op onto the undo stack -- palette-commands.js's
     // setPaletteLock and nameRamp guard the identical case for the identical
     // reason.
-    if (deepEqualValue(before, after)) return { ok: true, reason: '' };
+    if (brushesEqual(before, after)) return { ok: true, reason: '' };
     const check = validateBrush(after);
     if (!check.ok) return check;
     history.run({
@@ -654,6 +632,21 @@ export function mountBrushManager() {
   // Export acts on whichever brush is currently selected. The whole import
   // flow lives in performBrushImport (above) so it's testable without a
   // DOM; this handler is the thin adapter that reports its result.
+  // One place that decides WHERE a message goes. The dialog's own controls
+  // always have the banner in front of the user; `brush.fromSelection` is
+  // also reachable from the menu with the dialog shut, where a banner nobody
+  // can see is the same as saying nothing -- so that case falls back to the
+  // app's usual alert (layers-panel.js, file-controller.js, document-
+  // controller.js all report failures that way).
+  function notify(message) {
+    if (dlg.open) {
+      errorEl.hidden = false;
+      errorEl.textContent = message;
+      return;
+    }
+    alert(message);
+  }
+
   btnImport.addEventListener('click', async () => {
     const { message } = await performBrushImport(lib, importBrush);
     if (message == null) return; // cancelled picker -- leave the banner as-is
@@ -712,15 +705,33 @@ export function mountBrushManager() {
       // The composite of every visible layer, not activeLayer().bitmap --
       // see brushFromSelection's own comment (js/core/brush-io.js) for why.
       const composite = flattenSheet(sheet);
-      const brush = brushFromSelection(composite, rr.region, 'Selection brush');
-      lib.add(brush);
-      // Fix round 1, ruling 4: the action exists so the user can draw with
-      // what they just captured -- leaving it merely added-but-inactive
-      // means opening the picker and hunting for it, exactly the extra step
-      // this action was supposed to save. store.updateDrawingSettings, the
-      // same path tool-palette.js's own swatch click uses -- never a direct
-      // `workspace.drawing.brush =` assignment.
-      host().store.updateDrawingSettings({ brush });
+      // Bounded BEFORE the pixels are read. A marquee over 256px in either
+      // axis produced a mask that lib.add refused (fromPlain's hostile-file
+      // guard), and CommandRegistry.execute does not catch, so the whole
+      // action died in the console: no brush, no active-brush change, no
+      // feedback. Import in this same dialog has had a try/catch and the
+      // #bm-error banner since fix round 1 for exactly this reason; capture
+      // did not. Now both report, through the same banner when the dialog is
+      // open and the app's usual alert when it was run from the menu with the
+      // dialog closed.
+      const region = boundedBrushRegion(rr.region);
+      const cropped = region.w !== rr.region.w || region.h !== rr.region.h;
+      try {
+        const brush = brushFromSelection(composite, region, 'Selection brush');
+        lib.add(brush);
+        // Fix round 1, ruling 4: the action exists so the user can draw with
+        // what they just captured -- leaving it merely added-but-inactive
+        // means opening the picker and hunting for it, exactly the extra step
+        // this action was supposed to save. store.updateDrawingSettings, the
+        // same path tool-palette.js's own swatch click uses -- never a direct
+        // `workspace.drawing.brush =` assignment.
+        host().store.updateDrawingSettings({ brush });
+        if (cropped) {
+          notify(`Selection is larger than the ${MAX_CUSTOM_BITMAP_DIM}px brush limit — captured the top-left ${region.w}×${region.h} instead.`);
+        }
+      } catch (e) {
+        notify(`Could not make a brush from this selection: ${e.message}`);
+      }
     },
     isEnabled: () => hasSelection(),
   });

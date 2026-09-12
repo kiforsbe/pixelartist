@@ -863,3 +863,153 @@ test('an erase erases under trueAlpha, where a blend toward alpha 0 is a no-op',
     assert.ok(alpha.some(p => p.join() === CLEAR.join()), `${kind}: the trueAlpha erase erased nothing`);
   }
 });
+
+// --- final round: the density screen and the colour pattern were the SAME
+// --- lattice -------------------------------------------------------------
+//
+// `checker` is the default ink.pattern, and opacity-as-density runs through
+// BAYER4. The 4x4 Bayer matrix's eight LOWEST values sit exactly on the
+// even-parity cells -- which is precisely the primary phase of all three 2x2
+// patterns. So the density gate and the colour pattern partitioned the same
+// lattice, and every pixel the gate admitted at low opacity landed on the
+// primary phase.
+//
+// Measured on the code this replaces, 16x16, every pixel offered to the ink:
+//
+//   checker op 25  primary= 64 secondary=  0     (should be 32 / 32)
+//   checker op 50  primary=128 secondary=  0     (should be 64 / 64)
+//   lines   op 25  primary= 64 secondary=  0
+//   dots25  op 25  primary= 64 secondary=  0
+//   dots25  op 50  primary= 64 secondary= 64     (dots25 is a 25/75 pattern)
+//
+// The secondary swatch was unreachable anywhere in opacity 1..53 on the
+// default pattern -- more than half the slider, on the one ink whose entire
+// purpose is two colours -- and each pattern's own ratio was skewed at every
+// level in between. The fix decorrelates the two by screening one whole
+// pattern PERIOD at a time (dither.js's passesPatternOpacity).
+//
+// Every existing dither test in this file runs at opacity 100, the one level
+// at which this defect is invisible, which is how it survived.
+
+const DITHER_PATTERNS = ['checker', 'lines', 'dots25'];
+
+// Paints the whole of a `size` x `size` bitmap through a dither ink and
+// counts what came out. 16x16 is two full periods of the screen in each
+// axis, so the counts below are exact rather than approximate.
+function ditherCounts(pattern, opacity, size = 16) {
+  const bmp = createBitmap(size, size);
+  const ink = makeInk(normalizeBrush({ ink: { kind: 'dither', pattern, opacity } }), ctx());
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) ink.write(bmp, x, y);
+  const out = { primary: 0, secondary: 0, empty: 0 };
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const p = [...getPixel(bmp, x, y)].join();
+    if (p === RED.join()) out.primary++;
+    else if (p === BLUE.join()) out.secondary++;
+    else out.empty++;
+  }
+  return out;
+}
+
+function solidCoverage(opacity, size = 16) {
+  const bmp = createBitmap(size, size);
+  const ink = makeInk(normalizeBrush({ ink: { kind: 'solid', opacity } }), ctx());
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) ink.write(bmp, x, y);
+  let n = 0;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (getPixel(bmp, x, y)[3] > 0) n++;
+  return n;
+}
+
+test('a dither ink writes BOTH its colours at low opacity, on every pattern', () => {
+  // The headline case, and the one the user reports: pick a dither brush,
+  // primary red, secondary blue, drop opacity to 50 for a translucent
+  // two-tone wash -- and get a 50%-density solid RED.
+  //
+  // IF THE MECHANISM WERE ABSENT `secondary` would be 0 at every opacity
+  // below 54 (see the table above), so what is asserted is precisely what
+  // could not happen before: a non-zero count for BOTH colours.
+  for (const pattern of DITHER_PATTERNS) {
+    for (const opacity of [6, 13, 25, 50]) {
+      const { primary, secondary } = ditherCounts(pattern, opacity);
+      assert.ok(primary > 0, `${pattern} @ ${opacity}: no primary at all`);
+      assert.ok(secondary > 0,
+        `${pattern} @ ${opacity}: the secondary swatch was never written (primary=${primary})`);
+    }
+  }
+});
+
+test('each dither pattern keeps its own primary/secondary ratio at every opacity', () => {
+  // The subtler half of the same defect, and the reason "both colours appear"
+  // is not a strong enough assertion on its own. `dots25` is a 25/75 pattern:
+  // it must put the primary on a quarter of the pixels it covers whether it
+  // is covering 6% of the sheet or all of it. It measured 50/50 at opacity 50
+  // before, because the density gate was eating the pattern's phases in
+  // order rather than uniformly.
+  //
+  // The ratio is compared against the SAME pattern at opacity 100, not
+  // against a hand-written constant, so a pattern added later needs no edit
+  // here and cannot be checked against a stale expectation.
+  for (const pattern of DITHER_PATTERNS) {
+    const full = ditherCounts(pattern, 100);
+    assert.equal(full.empty, 0, `${pattern} @ 100: opacity 100 must cover everything`);
+    const share = full.primary / (full.primary + full.secondary);
+    for (const opacity of [6, 13, 25, 50, 75]) {
+      const at = ditherCounts(pattern, opacity);
+      const covered = at.primary + at.secondary;
+      assert.equal(at.primary, Math.round(covered * share),
+        `${pattern} @ ${opacity}: ${at.primary}/${covered} primary, but this pattern is ${full.primary}/${full.primary + full.secondary}`);
+    }
+  }
+});
+
+test('decorrelating the screen did not change the density opacity buys', () => {
+  // The constraint the fix had to preserve: opacity is DENSITY, it quantizes
+  // to the pattern's 17 levels, and it stays monotonic and correct across
+  // 0..100. A "fix" that bought two colours by painting more or fewer pixels
+  // would satisfy the two tests above and still be wrong.
+  //
+  // Compared against the SOLID ink at the same opacity -- the ink that does
+  // not go through the pattern screen at all -- so this pins the two
+  // together rather than restating the coarse screen's own arithmetic.
+  for (const pattern of DITHER_PATTERNS) {
+    let previous = -1;
+    for (const opacity of [0, 6, 13, 25, 50, 75, 100]) {
+      const at = ditherCounts(pattern, opacity);
+      const covered = at.primary + at.secondary;
+      assert.equal(covered, solidCoverage(opacity),
+        `${pattern} @ ${opacity}: covered ${covered} px where a solid ink at the same opacity covers ${solidCoverage(opacity)}`);
+      assert.ok(covered >= previous, `${pattern} @ ${opacity}: density went DOWN as opacity went up`);
+      previous = covered;
+    }
+  }
+});
+
+test('the coarser dither screen is still anchored to the bitmap, not the stroke', () => {
+  // The other constraint: the screen must stay a pure function of absolute
+  // position, so two strokes over one region line up and re-rasterizing a
+  // path prefix is byte-identical. Painting the same absolute pixels in a
+  // different ORDER, through a different ink instance, and (via originX) out
+  // of a detached sub-bitmap must all give the same answer.
+  const opacity = 25;
+  const dither = () => normalizeBrush({ ink: { kind: 'dither', pattern: 'checker', opacity } });
+  const forward = createBitmap(16, 16);
+  const inkA = makeInk(dither(), ctx());
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) inkA.write(forward, x, y);
+
+  const backward = createBitmap(16, 16);
+  const inkB = makeInk(dither(), ctx());
+  for (let y = 15; y >= 0; y--) for (let x = 15; x >= 0; x--) inkB.write(backward, x, y);
+  assert.deepEqual([...backward.data], [...forward.data], 'the screen depends on call order');
+
+  // A 4x4 window of the same sheet, painted into its own origin-(0,0) bitmap
+  // but told where it really sits -- the fill tools' path. The offset is odd
+  // in x and odd in y, so both the pattern phase and the screen phase differ
+  // from the sub-bitmap's own coordinates.
+  const OX = 5, OY = 3;
+  const sub = createBitmap(4, 4);
+  const inkC = makeInk(dither(), ctx({ originX: OX, originY: OY }));
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) inkC.write(sub, x, y);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+    assert.deepEqual([...getPixel(sub, x, y)], [...getPixel(forward, x + OX, y + OY)],
+      `sub-bitmap pixel ${x},${y} is out of phase with the sheet`);
+  }
+});
