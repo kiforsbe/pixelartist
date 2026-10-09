@@ -73,13 +73,41 @@ export function createBrushLibrary(preferences) {
   return {
     list: () => [...load()],
     get: (id) => load().find(b => b.id === id) ?? null,
-    add(brush) { load().push(fromStored(brush)); save(); },
+    indexOf: (id) => load().findIndex(b => b.id === id),
+    // `at` is optional and only honoured when it names a real slot: an
+    // omitted, out-of-range or non-integer position appends, which is what
+    // every pre-existing caller passes and relies on. It exists so an undone
+    // Delete can put the brush back WHERE IT WAS rather than at the end --
+    // an undo that silently reorders the library is not an undo.
+    add(brush, at) {
+      const list = load();
+      const i = Number.isInteger(at) ? Math.max(0, Math.min(list.length, at)) : list.length;
+      list.splice(i, 0, fromStored(brush));
+      save();
+    },
     update(brush) {
       const list = load();
       const i = list.findIndex(b => b.id === brush.id);
       if (i === -1) return;
       list[i] = fromStored(brush);
       save();
+    },
+    // Reorder in place. Returns whether anything actually moved, so a caller
+    // can decline to push a no-op onto its undo stack -- pressing the button
+    // at either end of the list must not leave an undoable step behind.
+    move(id, to) {
+      const list = load();
+      const from = list.findIndex(b => b.id === id);
+      if (from === -1) return false;
+      const target = Math.max(0, Math.min(list.length - 1, to));
+      if (target === from) return false;
+      // splice-out then splice-in, the same pair palettes.js's moveSwatch
+      // uses: `to` is read against the list BEFORE removal, so dragging
+      // rightwards lands after the entry currently at `to`, not before it.
+      const [moved] = list.splice(from, 1);
+      list.splice(target, 0, moved);
+      save();
+      return true;
     },
     remove(id) { brushes = load().filter(b => b.id !== id); save(); },
     replaceAll(next) { brushes = next.map(fromStored); save(); },

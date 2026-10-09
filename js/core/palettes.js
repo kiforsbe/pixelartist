@@ -85,9 +85,48 @@ export function setEntry(palette, index, rgba) {
 // lets nearestColor/quantizeBitmapToPalette/serialization stay untouched),
 // so nothing outside this file may splice either array on its own.
 
+// --- named ramps under index churn ---------------------------------------
+//
+// A named ramp stores palette INDICES, so every operation that renumbers or
+// removes an entry invalidates it. Before this, none of them touched
+// `ramps`: sorting a palette left a ramp pointing at whatever colours had
+// moved into those slots, and `ramp-shade` then walked an arbitrary set of
+// colours that had never been a shading run.
+//
+// The remap lives here, in the module that owns the mutation, rather than in
+// each of palette-commands.js's five callers -- a sixth caller would
+// otherwise have to remember, and this is exactly the kind of thing nobody
+// remembers.
+//
+// `mapOldToNew` carries only surviving indices; anything absent is dropped
+// from the ramp. A ramp left with fewer than two entries is dropped whole,
+// matching nameRamp's own minimum: a one-entry "ramp" has no neighbour to
+// step to, so stepAlongRamp would silently do nothing on it forever, which
+// is worse than the ramp visibly disappearing.
+function remapRamps(palette, mapOldToNew) {
+  if (!Array.isArray(palette.ramps) || palette.ramps.length === 0) return;
+  palette.ramps = palette.ramps
+    .map(r => ({
+      name: r.name,
+      indices: r.indices.map(i => mapOldToNew.get(i)).filter(i => i !== undefined),
+    }))
+    .filter(r => r.indices.length >= 2);
+}
+
+// Identity for every index except those `drop` names, which are removed.
+function rampsWithout(palette, drop) {
+  const m = new Map();
+  for (let i = 0; i < palette.colors.length; i++) if (!drop.has(i)) m.set(i, i);
+  remapRamps(palette, m);
+}
+
 export function clearEntry(palette, index) {
   palette.colors[index] = [...palette.emptyColor];
   palette.empty[index] = true;
+  // An unset slot holds `emptyColor`, not a colour anyone chose. Leaving it
+  // in a ramp would let ramp-shade step a pixel INTO the "nothing here"
+  // colour, so the entry leaves the ramp even though its index survives.
+  rampsWithout(palette, new Set([index]));
 }
 
 // Returns the index written, or -1 when a locked palette has no empty slot
@@ -111,15 +150,36 @@ export function addSwatch(palette, rgba) {
 export function removeSwatch(palette, index) {
   if (index < 0 || index >= palette.colors.length) return;
   if (palette.lock) { clearEntry(palette, index); return; }
+  // Everything above the removed slot shifts down one; the slot itself is
+  // dropped from any ramp that named it. Built before the splice, while the
+  // old indices are still the live ones.
+  const m = new Map();
+  for (let i = 0; i < palette.colors.length; i++) {
+    if (i < index) m.set(i, i);
+    else if (i > index) m.set(i, i - 1);
+  }
   palette.colors.splice(index, 1);
   palette.empty.splice(index, 1);
+  remapRamps(palette, m);
 }
 
 export function moveSwatch(palette, from, to) {
+  // The permutation is derived by running the SAME splice pair over an
+  // identity array, rather than reasoning about which direction the indices
+  // between `from` and `to` shift. The two moves cannot disagree, because
+  // there is only one description of the move.
+  const ids = [];
+  for (let i = 0; i < palette.colors.length; i++) ids.push(i);
+  const [movedId] = ids.splice(from, 1);
+  ids.splice(to, 0, movedId);
+  const m = new Map();
+  ids.forEach((oldIndex, newIndex) => m.set(oldIndex, newIndex));
+
   const [c] = palette.colors.splice(from, 1);
   const [e] = palette.empty.splice(from, 1);
   palette.colors.splice(to, 0, c);
   palette.empty.splice(to, 0, e);
+  remapRamps(palette, m);
 }
 
 // The unset color is a per-palette choice, so changing it re-assigns every
@@ -143,11 +203,27 @@ export function setLock(palette, size, reason = '') {
     palette.colors = keep.map(i => palette.colors[i]);
     palette.empty = keep.map(() => false);
     palette.lock = null;
+    // Unlocking COMPACTS: dropping the empty slots renumbers everything above
+    // each one. This is the second of the two paths that made a named ramp go
+    // stale, and the less obvious of them -- unlocking reads like it only
+    // removes a restriction.
+    const m = new Map();
+    keep.forEach((oldIndex, newIndex) => m.set(oldIndex, newIndex));
+    remapRamps(palette, m);
     return;
   }
+  const before = palette.colors.length;
   while (palette.colors.length > size) { palette.colors.pop(); palette.empty.pop(); }
   while (palette.colors.length < size) { palette.colors.push([...palette.emptyColor]); palette.empty.push(true); }
   palette.lock = { size, reason };
+  // Padding adds indices and disturbs none, so only a truncate needs a remap:
+  // the surviving indices keep their numbers and the dropped tail leaves any
+  // ramp that named it.
+  if (size < before) {
+    const m = new Map();
+    for (let i = 0; i < size; i++) m.set(i, i);
+    remapRamps(palette, m);
+  }
 }
 
 // Greys have no hue; -1 parks them ahead of every real hue rather than
@@ -177,6 +253,12 @@ export function sortOrder(colors, mode, usage = null) {
 export function applyOrder(palette, order) {
   palette.colors = order.map(i => palette.colors[i]);
   palette.empty = order.map(i => palette.empty[i]);
+  // `order[newIndex] = oldIndex`, so the remap needs its inverse. Sorting is
+  // the loudest way to invalidate a ramp -- every index moves at once -- and
+  // was the case that made a "Skin" ramp come back pointing at greens.
+  const m = new Map();
+  order.forEach((oldIndex, newIndex) => m.set(oldIndex, newIndex));
+  remapRamps(palette, m);
 }
 
 // Per-slot exact-RGBA hit counts across `bitmaps`. Duplicate colors in the

@@ -60,14 +60,28 @@ function runOnPalette(services, paletteId, label, apply, revert) {
 // Snapshot/restore of the two paired arrays plus the lock -- the honest way
 // to undo anything that changes length or order, and short enough that
 // per-operation inverse logic would only be a way to get it subtly wrong.
+//
+// `ramps` belongs here for exactly that reason. It was omitted, and because
+// every length- or order-changing operation now remaps ramps through
+// palettes.js, omitting it meant sort/lock/remove/move DESTROYED named ramps
+// on undo: the forward pass legitimately rewrote them, and restore put back
+// only colors/empty/lock, leaving the rewritten ramps in place against the
+// restored order.
 function snapshot(p) {
-  return { colors: p.colors.map(c => [...c]), empty: [...p.empty], emptyColor: [...p.emptyColor], lock: p.lock ? { ...p.lock } : null };
+  return {
+    colors: p.colors.map(c => [...c]),
+    empty: [...p.empty],
+    emptyColor: [...p.emptyColor],
+    lock: p.lock ? { ...p.lock } : null,
+    ramps: cloneRamps(p.ramps),
+  };
 }
 function restore(p, snap) {
   p.colors = snap.colors.map(c => [...c]);
   p.empty = [...snap.empty];
   p.emptyColor = [...snap.emptyColor];
   p.lock = snap.lock ? { ...snap.lock } : null;
+  p.ramps = cloneRamps(snap.ramps);
 }
 
 // ---- palette lifecycle ----

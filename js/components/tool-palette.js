@@ -29,6 +29,23 @@ export const TOOLS = [
 
 export const BRUSH_TOOLS = new Set(['pencil', 'eraser']);
 export const SHAPE_TOOLS = new Set(['line', 'rect', 'ellipse']);
+// Tools that fill a region the algorithm computed instead of stamping a mask
+// along a path. They run the active brush's INK -- opacity, dither,
+// ramp-shade and replace all apply to a flood -- but never its mask, so the
+// brush a flood uses is worth choosing and its size is meaningless.
+// Kept beside its two siblings because this is the tool taxonomy's one home;
+// drawing-engine.js reads the other two from here for the same reason.
+export const FLOOD_TOOLS = new Set(['fill', 'softflood']);
+
+// Which of the two brush controls a tool actually consumes. Split apart
+// because they answer different questions: the picker is relevant wherever
+// the brush reaches the output at all, the Size field only where a mask is
+// stamped. They used to share one gate, which hid the picker from five tools
+// that honour brushes.
+export function brushControlsFor(id) {
+  const stamps = BRUSH_TOOLS.has(id) || SHAPE_TOOLS.has(id);
+  return { picker: stamps || FLOOD_TOOLS.has(id), size: stamps };
+}
 
 // Shared tool options (fill contiguity, shape fill) — read by bindDrawing,
 // edited by the tool-options row built in mountToolPalette.
@@ -288,8 +305,10 @@ export function mountToolPalette(el) {
   }
 
   function optionVisibleFor(id) {
+    const brush = brushControlsFor(id);
     return {
-      size: BRUSH_TOOLS.has(id),
+      size: brush.size,
+      picker: brush.picker,
       contiguous: id === 'fill',
       filled: id === 'rect' || id === 'ellipse',
       softFlood: id === 'softflood',
@@ -310,9 +329,10 @@ export function mountToolPalette(el) {
     toolNameEl.textContent = toolTitle(toolId);
     const vis = optionVisibleFor(toolId);
     brushRow.style.display = vis.size ? '' : 'none';
-    // Same gate as Size -- the active-brush concept only matters while a
-    // brush tool (pencil/eraser) is selected.
-    brushPickerRow.style.display = vis.size ? '' : 'none';
+    // NOT the same gate as Size: a flood runs the brush's ink without ever
+    // stamping its mask, so the picker belongs there and the size field
+    // does not. See brushControlsFor.
+    brushPickerRow.style.display = vis.picker ? '' : 'none';
     contiguousRow.style.display = vis.contiguous ? '' : 'none';
     filledRow.style.display = vis.filled ? '' : 'none';
     optionChecks.style.display = (vis.contiguous || vis.filled) ? '' : 'none';
@@ -320,9 +340,10 @@ export function mountToolPalette(el) {
     for (const { id, els } of extraRows)
       for (const rEl of els) rEl.style.display = toolId === id ? '' : 'none';
     const cur = drawingSettings().brush;
+    // Live for a custom mask too, where it scales the bitmap rather than
+    // sizing a generated shape -- see rasterizeMask. [ and ] drive the same
+    // field, so the two stay consistent by construction.
     brushInput.value = String(cur.mask.size);
-    // A custom mask has no scalar size to edit.
-    brushInput.disabled = cur.mask.kind === 'custom';
     updateBrushSwatchSelection();
   }
 

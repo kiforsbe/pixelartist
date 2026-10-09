@@ -21,12 +21,13 @@ import { activeSheet, activeLayer } from '../../host/document-helpers.js';
 import {
   cloneBitmap, stamp, drawRect, drawEllipse, floodFill, softFloodFill,
   copyRegion, blitRegion, fillRegion, getPixel,
+  rectOutlinePath, ellipseOutlinePath,
 } from '../../core/pixels.js';
 import { makePixelPatch } from '../../core/commands.js';
 import { forwardPoint, inversePoint, floatBounds, solveScaleTransform } from '../../core/floating.js';
 import { nearestColor } from '../../core/palettes.js';
 import { maskGridFor, effectiveMaskSize } from '../../core/brushes.js';
-import { strokeStamps, newStrokeSeed, strokeBounds, pathSteps } from '../../core/brush-stroke.js';
+import { strokeStamps, stampsAlongPath, newStrokeSeed, strokeBounds, pathSteps } from '../../core/brush-stroke.js';
 import { makeInk } from '../../core/brush-ink.js';
 import { flattenSheet, animationGroup, flattenLayers } from '../../core/model.js';
 import { segmentAt } from '../../core/strips.js';
@@ -504,21 +505,46 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
           maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, stroke.target);
           stroke.dirty = extend(stroke.dirty, b.x0, b.y0, b.x1, b.y1);
         }
-      // KNOWN LIMITATION, deliberate: rect and ellipse OUTLINES are not
-      // stamp-aware, so a brush's spacing, scatter and rotateJitter do not
-      // apply to them -- unlike the line tool just above, which was converted
-      // to strokeStamps. The ink still applies (opacity, dither, ramp-shade
-      // all work), only the mask phase is skipped. drawRect/drawEllipse walk
-      // their own perimeter and take no stamp list; threading one through is a
-      // redesign of both primitives, not a fix, and it was ruled out of scope
-      // rather than overlooked. Do not "fix" this by widening the call
-      // signature without reworking the primitives themselves.
-      } else if (tool === 'rect') {
-        drawRect(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill, stroke.ink);
-        stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
-      } else if (tool === 'ellipse') {
-        drawEllipse(layer.bitmap, a.x, a.y, p.x, p.y, color, stroke.fill, stroke.ink);
-        stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
+      // Rect and ellipse are STAMPED too, the same way the line above is.
+      // Their primitives draw a shape; the engine's job is to lay the active
+      // brush along its border, so the border comes from an ordered perimeter
+      // path (pixels.js) and the primitive is left to draw the interior only.
+      //
+      // Consequence worth knowing: an outline is now BRUSH-WIDTH, not always
+      // 1px, which is what the line tool and every other paint program do.
+      } else if (tool === 'rect' || tool === 'ellipse') {
+        const box = [a.x, a.y, p.x, p.y];
+        // Interior first, with `outline: false`. A fill is a region, not a
+        // stroke -- scattering it would turn a filled shape into a cloud --
+        // but leaving the primitive's own border in would put an unscattered
+        // 1px outline underneath the stamped one, hiding the brush entirely
+        // on exactly the shapes where it is most visible.
+        if (stroke.fill) {
+          const noOutline = { outline: false };
+          if (tool === 'rect') drawRect(layer.bitmap, ...box, color, stroke.fill, stroke.ink, noOutline);
+          else drawEllipse(layer.bitmap, ...box, color, stroke.fill, stroke.ink, noOutline);
+          stroke.dirty = extend(stroke.dirty, Math.min(a.x, p.x), Math.min(a.y, p.y), Math.max(a.x, p.x), Math.max(a.y, p.y));
+        }
+        // stampsAlongPath, not strokeStamps: these paths are already one
+        // entry per border pixel, and densifying an ellipse's angle-ordered
+        // path would bridge between points with pixels the ellipse does not
+        // contain. See brush-stroke.js.
+        //
+        // As with the line, the whole shape re-rasterizes from its anchor on
+        // every pointer move with startDistance left at 0, so a preview is
+        // stable frame to frame rather than reshuffling under the cursor.
+        const size = effectiveMaskSize(stroke.brush, ev.pressure, ev.pointerType);
+        const path = tool === 'rect' ? rectOutlinePath(...box) : ellipseOutlinePath(...box);
+        for (const s of stampsAlongPath(path, stroke.brush.mask, stroke.seed)) {
+          const g = maskGridFor({ ...stroke.brush.mask, size }, { rotate: s.rotate });
+          stamp(layer.bitmap, s.x, s.y, color, size, stroke.ink, g);
+          // `clampPoint` keeps the BOX inside the target, but a stamp is
+          // wider than its path point and scatter moves it further still, so
+          // a shape now needs the same safety net the line tool has.
+          const b = strokeBounds(s.x, s.y, g.width, g.height, 0);
+          maskOutsideTarget(layer.bitmap, before, b.x0, b.y0, b.x1, b.y1, stroke.target);
+          stroke.dirty = extend(stroke.dirty, b.x0, b.y0, b.x1, b.y1);
+        }
       }
       notifyPixelsChanged();
       return;

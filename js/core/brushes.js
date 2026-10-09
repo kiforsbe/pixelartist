@@ -221,11 +221,54 @@ function attachColors(grid, colors) {
   grid.colors = out;
 }
 
+// How far a custom mask may be scaled before the OUTPUT grid breaks the same
+// 256 cap the source dimensions are clamped to. Without it a 200x200 imported
+// bitmap at scale 16 would allocate ~10M cells -- per stamp, on every stamp of
+// every stroke. `size` is already bounded by MAX_MASK_SIZE upstream, so this
+// only bites for bitmaps large enough that scaling them is meaningless anyway.
+function customScale(size, width, height) {
+  const fit = Math.floor(MAX_CUSTOM_BITMAP_DIM / Math.max(1, width, height));
+  return Math.max(1, Math.min(size, fit));
+}
+
+// Replicates every source cell into a `scale` x `scale` block, carrying the
+// stamp payload with it so a scaled multi-colour brush still paints its own
+// pixels rather than going blank.
+//
+// Nearest-neighbour is not a shortcut here, it is the only correct filter: a
+// mask is 1-bit by definition (see the header comment above), so there is no
+// in-between coverage value to interpolate to, and `colors` entries are
+// palette colours that must not be averaged into something off-palette.
+function scaleGrid(grid, scale) {
+  if (scale <= 1) return grid;
+  const width = grid.width * scale;
+  const height = grid.height * scale;
+  const out = emptyGrid(width, height);
+  const colors = grid.colors ? new Array(out.bits.length).fill(null) : null;
+  for (let y = 0; y < height; y++) {
+    const srcRow = ((y / scale) | 0) * grid.width;
+    for (let x = 0; x < width; x++) {
+      const src = srcRow + ((x / scale) | 0);
+      const dst = y * width + x;
+      out.bits[dst] = grid.bits[src];
+      if (colors) colors[dst] = grid.colors[src];
+    }
+  }
+  if (colors) out.colors = colors;
+  return out;
+}
+
 export function rasterizeMask(mask) {
   const size = Math.max(1, Math.min(MAX_MASK_SIZE, mask.size ?? 1));
   if (mask.kind === 'custom') {
     const bmp = mask.bitmap;
     if (!bmp) return emptyGrid(1, 1);
+    // For a custom mask `size` is a SCALE, not a dimension: the bitmap owns
+    // the shape, and size 1 renders it at its stored resolution. That keeps
+    // every existing custom brush pixel-identical while making the Size field
+    // and [ / ] mean something for them -- previously both were inert, since
+    // this function read `size` and then ignored it on every custom path.
+    const scale = customScale(size, clampCustomDim(bmp.width), clampCustomDim(bmp.height));
     // A custom mask may arrive as a 1-bit grid already, or as an RGBA bitmap
     // whose opaque pixels define coverage. Validation only checks that
     // `bitmap` is present, not that its shape is coherent, so guard against
@@ -237,7 +280,7 @@ export function rasterizeMask(mask) {
       const n = Math.min(grid.bits.length, bmp.bits.length ?? 0);
       for (let i = 0; i < n; i++) grid.bits[i] = bmp.bits[i] ? 1 : 0;
       attachColors(grid, mask.colors);
-      return grid;
+      return scaleGrid(grid, scale);
     }
     if (bmp.data) {
       const width = clampCustomDim(bmp.width);
@@ -247,7 +290,7 @@ export function rasterizeMask(mask) {
         grid.bits[i] = bmp.data[p + 3] > 0 ? 1 : 0;
       }
       attachColors(grid, mask.colors);
-      return grid;
+      return scaleGrid(grid, scale);
     }
     return emptyGrid(1, 1);
   }

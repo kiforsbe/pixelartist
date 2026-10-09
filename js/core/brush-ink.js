@@ -175,11 +175,13 @@ const ERASE_CAPABLE_KINDS = new Set(['solid', 'stamp', 'replace', 'dither']);
 // A set, in the same style and for the same reason as the three above: this
 // is ink taxonomy, it belongs to this module, and a seventh ink should have
 // to answer the question here rather than inherit whichever branch it happens
-// to fall into. Unlike `usesSecondary`/`usesMaskColors` this one is NOT
-// exposed on the ink object -- no caller needs it, exactly like
-// ERASE_CAPABLE_KINDS. Fail-closed: an ink absent from this set keeps the
-// finer per-pixel screen, which is the correct default for every ink that
-// paints ONE colour.
+// to fall into. Fail-closed: an ink absent from this set keeps the finer
+// per-pixel screen, which is the correct default for every ink that paints
+// ONE colour.
+//
+// Not exposed on the ink OBJECT (no painting caller needs it), but read by
+// the brush dialog through `inkUsesPattern` below, so it can disable the
+// Pattern control for the five inks that ignore it.
 //
 // Decided against the code of every arm, not assumed:
 //   dither      YES -- `patternPicksSecondary(pattern, px, py)` splits its
@@ -196,6 +198,39 @@ const ERASE_CAPABLE_KINDS = new Set(['solid', 'stamp', 'replace', 'dither']);
 //                      never reaches this gate on the patterned path anyway,
 //                      but the finer screen is still the right answer for it.
 const PATTERN_SCREENED_KINDS = new Set(['dither']);
+
+// Ink kinds whose `write` reads `brush.ink.jitter`. Only ramp-shade does: its
+// jitter perturbs how far along the ramp a pixel steps, and no other arm has
+// a magnitude to perturb -- the five that paint a definite colour would have
+// nothing to apply a wobble TO without inventing an off-palette value, which
+// is the one thing this editor never does.
+//
+// Decided against the code of every arm, as above:
+//   ramp-shade  YES -- `delta += round((r * 2 - 1) * jitter)`.
+//   solid       no  -- writes one colour; a jittered colour would be a colour
+//                      the user did not pick.
+//   dither      no  -- its randomness is the PATTERN, which is a separate
+//                      control; jitter would fight it on the same lattice.
+//   stamp       no  -- the payload's colours are the mask's, not ours to move.
+//   replace     no  -- same as solid; the gate is destination content.
+//   lock-alpha  no  -- same as solid, plus it must not move alpha either.
+const JITTER_CONSUMING_KINDS = new Set(['ramp-shade']);
+
+// Both exported as PREDICATES over a kind rather than as the sets themselves:
+// a consumer can ask the question but cannot mutate the taxonomy or enumerate
+// it for some unrelated purpose. The brush dialog uses them to disable the
+// controls an ink ignores, so a Pattern dropdown sitting live next to a
+// `solid` brush no longer reads as a setting that does something.
+//
+// `inkUsesPattern` deliberately reads PATTERN_SCREENED_KINDS rather than
+// declaring a fourth set: an ink needs the coarsened screen precisely BECAUSE
+// it splits its output on the pattern lattice, and splitting on the pattern
+// is what reading `ink.pattern` means -- so the two questions have one answer
+// by construction, not by coincidence. An ink that someday reads the pattern
+// WITHOUT splitting the density lattice on it would break that identity, and
+// must then get its own set rather than being added to this one.
+export function inkUsesPattern(kind) { return PATTERN_SCREENED_KINDS.has(kind); }
+export function inkUsesJitter(kind) { return JITTER_CONSUMING_KINDS.has(kind); }
 
 // A source colour of "nothing". The eraser's sentinel; see ERASE_CAPABLE_KINDS.
 // Alpha alone decides, rather than an exact match against [0,0,0,0]: a

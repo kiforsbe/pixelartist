@@ -14,13 +14,14 @@ import { makeDialogMovable, centerDialog, closeOnEscape } from '../../components
 import { isTextEntryTarget } from '../../components/dom-utils.js';
 import { CommandStack } from '../../core/commands.js';
 import {
-  rasterizeMask, maskGridFor, validateBrush, brushesEqual,
+  rasterizeMask, maskGridFor, validateBrush, brushesEqual, newBrushId,
   MASK_KINDS, INK_KINDS, PRESSURE_TARGETS, PRESSURE_CURVES, PRESSURE_RANGES,
-  MAX_MASK_SIZE, MAX_CUSTOM_BITMAP_DIM,
+  MAX_MASK_SIZE, MAX_CUSTOM_BITMAP_DIM, BUILTIN_BRUSHES,
 } from '../../core/brushes.js';
 import { opacityLevel, PATTERNS } from '../../core/dither.js';
 import { strokeStamps } from '../../core/brush-stroke.js';
-import { makeInk } from '../../core/brush-ink.js';
+import { makeInk, inkUsesPattern, inkUsesJitter } from '../../core/brush-ink.js';
+import { rgbaToHex, hexToRgb } from '../../components/color-utils.js';
 import { createBitmap, stamp } from '../../core/pixels.js';
 import { brushFromSelection, boundedBrushRegion } from '../../core/brush-io.js';
 import { flattenSheet } from '../../core/model.js';
@@ -109,6 +110,57 @@ export function createBrushEditor(library, history, getCurrentId, refresh) {
     });
     return { ok: true, reason: '' };
   };
+}
+
+// --- built-ins, duplication, and removal ---------------------------------
+//
+// All three are pure and exported for the same reason createBrushEditor is:
+// the gating and the name derivation are the parts worth testing, and this
+// repo has no DOM under `node --test`.
+
+// The factory definition a built-in brush was created from, or null for a
+// user brush. Matched by id, never by name -- a user is free to rename
+// "Circle 5", and a rename must not sever it from the entry Reset restores.
+export function builtinFor(brush) {
+  if (!brush) return null;
+  return BUILTIN_BRUSHES.find(b => b.id === brush.id) ?? null;
+}
+
+// A built-in that has drifted from its factory definition. Gates the Reset
+// button: offering Reset on a pristine built-in, or on a user brush that
+// never had a factory state, would both be lies.
+export function isModifiedBuiltin(brush) {
+  const factory = builtinFor(brush);
+  return !!factory && !brushesEqual(factory, brush);
+}
+
+// "Circle 5" -> "Circle 5 copy" -> "Circle 5 copy 2". Takes the existing
+// names rather than a library so it stays pure; the caller passes
+// lib.list().map(b => b.name).
+//
+// An existing " copy"/" copy N" suffix is stripped before appending, so a
+// second Duplicate gives "copy 2" rather than "copy copy". That chain is the
+// COMMON path, not an edge case: Duplicate selects the brush it just made,
+// so clicking it twice duplicates the duplicate.
+export function duplicateName(name, existingNames) {
+  const taken = new Set(existingNames);
+  const base = `${name.replace(/ copy(?: \d+)?$/, '')} copy`;
+  if (!taken.has(base)) return base;
+  // Starts at 2 because `base` itself is the unnumbered first copy.
+  for (let n = 2; ; n++) {
+    const candidate = `${base} ${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+// A detached copy carrying a fresh id. structuredClone, never a JSON round
+// trip: a custom mask's bits are a Uint8Array, and this branch has already
+// shipped the bug where that JSONs to an object and comes back empty.
+export function duplicateOf(brush, existingNames) {
+  const copy = structuredClone(brush);
+  copy.id = newBrushId();
+  copy.name = duplicateName(brush.name, existingNames);
+  return copy;
 }
 
 // --- coercing a free-typed field, consistently with a rejected one -------
@@ -304,6 +356,11 @@ export function mountBrushManager() {
   const grid = el('bm-grid');
   const btnUndo = el('bm-undo');
   const btnRedo = el('bm-redo');
+  const btnMoveLeft = el('bm-move-left');
+  const btnMoveRight = el('bm-move-right');
+  const btnDuplicate = el('bm-duplicate');
+  const btnDelete = el('bm-delete');
+  const btnReset = el('bm-reset');
   const btnImport = el('bm-import');
   const exportFormat = el('bm-export-format');
   const btnExport = el('bm-export');
@@ -327,6 +384,8 @@ export function mountBrushManager() {
   const inkTrueAlpha = el('bm-ink-truealpha');
   const inkJitter = el('bm-ink-jitter');
   const inkPattern = el('bm-ink-pattern');
+  const inkReplace = el('bm-ink-replace');
+  const inkRamp = el('bm-ink-ramp');
   const pressureTarget = el('bm-pressure-target');
   const pressureMin = el('bm-pressure-min');
   const pressureMax = el('bm-pressure-max');
@@ -454,6 +513,30 @@ export function mountBrushManager() {
     ctx.putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
   }
 
+  // bindActiveBrushSync deliberately preserves the ACTIVE brush's own
+  // mask.size when the library changes, so that a [ / ] keypress on the
+  // canvas can never persist a resize into a stored brush (a built-in
+  // included) from outside this dialog's undo stack. That guard is right and
+  // stays -- but it also meant an explicit Size edit HERE never reached the
+  // canvas, while the Preview above updated anyway, so the control
+  // demonstrated itself working and did nothing.
+  //
+  // The intent differs by SOURCE, so the push belongs at the source that
+  // knows it, not in the sync, which cannot tell a deliberate edit from a
+  // keypress echo. Only fires when the edited brush is the one being painted
+  // with; every other field already reaches the canvas through the sync.
+  function pushSizeToActiveBrush() {
+    const stored = selectedId ? lib.get(selectedId) : null;
+    if (!stored) return;
+    const store = host().store;
+    const active = store.getState().workspace.drawing.brush;
+    if (!active || active.id !== stored.id) return;
+    if (active.mask.size === stored.mask.size) return;
+    store.updateDrawingSettings({
+      brush: { ...active, mask: { ...active.mask, size: stored.mask.size } },
+    });
+  }
+
   // Controls only. The grid re-renders itself through lib.subscribe below,
   // registered once at mount -- this function must never also touch it, or
   // a single edit repaints the grid twice from two independent paths.
@@ -464,6 +547,21 @@ export function mountBrushManager() {
     // is nothing to export with no current brush. Import is never gated: it
     // always creates brushes rather than editing the current one.
     btnExport.disabled = !brush;
+    btnDuplicate.disabled = !brush;
+    // Each arrow is dead at its own end of the list, so the button states
+    // themselves say where the brush sits -- a live arrow that does nothing
+    // reads as a broken control, which is what the Size field used to be.
+    const pos = brush ? lib.indexOf(brush.id) : -1;
+    btnMoveLeft.disabled = pos <= 0;
+    btnMoveRight.disabled = pos === -1 || pos >= lib.list().length - 1;
+    // Deleting the LAST brush would leave the picker strip empty and the
+    // canvas painting with a brush no longer in the library, which nothing
+    // downstream can put back -- library.load() only seeds the built-ins when
+    // the stored list is absent, never when it is legitimately empty.
+    btnDelete.disabled = !brush || lib.list().length <= 1;
+    // Reset only means something for a built-in, and only when it has
+    // actually drifted from its factory definition.
+    btnReset.disabled = !brush || !isModifiedBuiltin(brush);
     errorEl.hidden = true;
     errorEl.textContent = '';
     if (!brush) {
@@ -477,6 +575,7 @@ export function mountBrushManager() {
       maskRotate.value = ''; maskFlipH.checked = false; maskFlipV.checked = false; maskRotateJitter.checked = false;
       inkKind.value = ''; inkOpacity.value = ''; inkOpacityLevel.textContent = '';
       inkTrueAlpha.checked = false; inkJitter.value = ''; inkPattern.value = '';
+      inkReplace.value = '#000000'; inkRamp.value = '';
       pressureTarget.value = ''; pressureMin.value = ''; pressureMax.value = ''; pressureCurve.value = '';
       drawPreview(null);
       return;
@@ -485,11 +584,11 @@ export function mountBrushManager() {
     nameInput.value = brush.name;
 
     maskKind.value = brush.mask.kind;
+    // Live for every mask kind. A custom mask reads this as a scale factor
+    // rather than a dimension (rasterizeMask replicates each cell into a
+    // size x size block), so the field means something there too -- it used
+    // to be disabled because nothing on the custom path read `size` at all.
     maskSize.value = String(brush.mask.size);
-    // A custom mask's dimensions come from its bitmap, not this field --
-    // tool-palette.js:235 disables the canvas-side size input the same way
-    // for the same brush.
-    maskSize.disabled = brush.mask.kind === 'custom';
     maskSpacing.value = String(brush.mask.spacing);
     maskScatter.value = String(brush.mask.scatter);
     maskRotate.value = String(brush.mask.rotate);
@@ -508,6 +607,40 @@ export function mountBrushManager() {
     inkTrueAlpha.checked = brush.ink.trueAlpha;
     inkJitter.value = String(brush.ink.jitter);
     inkPattern.value = brush.ink.pattern;
+
+    // Four controls that only one ink each actually reads. They used to sit
+    // live and editable next to every ink, so a Pattern dropdown beside a
+    // `solid` brush read as a setting that did something -- which is half of
+    // why "most of this doesn't work" was a reasonable thing to conclude.
+    // The taxonomy answering these questions belongs to brush-ink.js, never
+    // to a `kind ===` test here (the rule Ruling 38 settled for the drawing
+    // engine applies to the UI for the same reason: a seventh ink must not
+    // silently inherit whichever branch it lands in).
+    inkPattern.disabled = !inkUsesPattern(brush.ink.kind);
+    inkJitter.disabled = !inkUsesJitter(brush.ink.kind);
+    // `replace` gates WHICH pixels it repaints on an exact RGB match against
+    // this colour. There was no control for it at all, and validateBrush
+    // rejects a replace brush without one -- so the dropdown entry could
+    // never be selected and the ink was unreachable from the UI.
+    inkReplace.disabled = brush.ink.kind !== 'replace';
+    inkReplace.value = rgbaToHex(brush.ink.replaceColor ?? [0, 0, 0]);
+    // Named ramps are optional: an empty value means "auto-detect the ramp
+    // this pixel's colour belongs to", which is what ramp-shade did
+    // exclusively before there was any way to name one.
+    const ramps = activePalette()?.ramps ?? [];
+    fillOptions(inkRamp, ['', ...ramps.map(r => r.name)], v => v === '' ? '(auto-detect)' : v);
+    inkRamp.disabled = brush.ink.kind !== 'ramp-shade';
+    // A brush can name a ramp that the CURRENT palette does not define (the
+    // user switched palettes, or imported the brush). Re-add it rather than
+    // silently snapping the control to auto-detect, which would misreport
+    // what the stored brush actually says.
+    if (brush.ink.rampName && !ramps.some(r => r.name === brush.ink.rampName)) {
+      const o = document.createElement('option');
+      o.value = brush.ink.rampName;
+      o.textContent = `${brush.ink.rampName} (not in this palette)`;
+      inkRamp.appendChild(o);
+    }
+    inkRamp.value = brush.ink.rampName ?? '';
 
     pressureTarget.value = brush.pressure.target;
     // Retargets the min/max inputs' own bounds so a shade-step brush is not
@@ -532,6 +665,95 @@ export function mountBrushManager() {
 
   btnUndo.addEventListener('click', () => history.undo());
   btnRedo.addEventListener('click', () => history.redo());
+
+  // Add, remove and restore all go through `history` in the same shape
+  // createBrushEditor uses, so they land on the dialog's own undo stack
+  // alongside the field edits rather than being quietly irreversible. Each
+  // undo/redo pair restores `selectedId` too: a Delete that could not be
+  // undone back to the selection it removed would leave the dialog pointing
+  // at nothing after a Ctrl+Z.
+  //
+  // `selectedId` is assigned BEFORE the library call in every arm, never
+  // after. library.save() notifies its listeners synchronously, and the grid
+  // repaints from one of them -- so an assignment afterwards would paint the
+  // grid against the previous selection and leave the highlight one step
+  // behind. For the same reason none of these calls refreshGrid() itself:
+  // that subscription is the single path, as refreshControls' own comment
+  // requires.
+  // Both arrows are one step; `move` returns false at either end, and the
+  // gating above already keeps them disabled there. The guard is the same
+  // belt-and-braces as Delete's length check: the button could have been
+  // enabled against a list that has since changed under a subscription.
+  function moveBy(delta) {
+    const brush = selectedId ? lib.get(selectedId) : null;
+    if (!brush) return;
+    const from = lib.indexOf(brush.id);
+    const to = from + delta;
+    if (from === -1 || to < 0 || to >= lib.list().length) return;
+    history.run({
+      label: 'move brush',
+      redo: () => { lib.move(brush.id, to); refreshControls(); },
+      undo: () => { lib.move(brush.id, from); refreshControls(); },
+    });
+  }
+  btnMoveLeft.addEventListener('click', () => moveBy(-1));
+  btnMoveRight.addEventListener('click', () => moveBy(1));
+
+  btnDuplicate.addEventListener('click', () => {
+    const brush = selectedId ? lib.get(selectedId) : null;
+    if (!brush) return;
+    const copy = duplicateOf(brush, lib.list().map(b => b.name));
+    const previous = selectedId;
+    // Directly after its original rather than at the far end of the list:
+    // a copy made to experiment on a built-in belongs beside the thing it
+    // was copied from, and the position is now expressible.
+    const at = lib.indexOf(brush.id) + 1;
+    history.run({
+      label: 'duplicate brush',
+      redo: () => { selectedId = copy.id; lib.add(copy, at); refreshControls(); },
+      undo: () => { selectedId = previous; lib.remove(copy.id); refreshControls(); },
+    });
+  });
+
+  btnDelete.addEventListener('click', () => {
+    const brush = selectedId ? lib.get(selectedId) : null;
+    if (!brush) return;
+    // Guarded here as well as in refreshControls' gating: the button could
+    // have been enabled when the list was longer and not yet re-rendered.
+    if (lib.list().length <= 1) return;
+    // The whole brush, not just the id -- undo has to put back the edited
+    // state the user actually had, not the factory one.
+    const removed = structuredClone(brush);
+    // Where it was, so undo puts it back there. An undo that appended to the
+    // end quietly reordered the library -- invisible on a two-brush list and
+    // obvious on a curated one.
+    const at = lib.indexOf(removed.id);
+    history.run({
+      label: 'delete brush',
+      redo: () => { selectedId = null; lib.remove(removed.id); refreshControls(); },
+      undo: () => { selectedId = removed.id; lib.add(removed, at); refreshControls(); },
+    });
+  });
+
+  btnReset.addEventListener('click', () => {
+    const brush = selectedId ? lib.get(selectedId) : null;
+    const factory = builtinFor(brush);
+    if (!brush || !factory) return;
+    const before = structuredClone(brush);
+    // structuredClone the factory entry too: BUILTIN_BRUSHES is module state
+    // shared with every other consumer, and handing library.update a
+    // reference into it would let a later edit mutate the factory definition
+    // that Reset itself restores from.
+    const after = structuredClone(factory);
+    history.run({
+      label: 'reset brush',
+      redo: () => { lib.update(after); refreshControls(); },
+      undo: () => { lib.update(before); refreshControls(); },
+    });
+    // A reset can change mask.size, and the sync will not carry that to the
+    // canvas for the same reason an explicit Size edit does not.
+    pushSizeToActiveBrush();
+  });
 
   // The global Ctrl+Z/Y handler (document-controller.js) deliberately lets
   // non-modal dialogs through and only bails on a real `:modal` one, so a
@@ -564,6 +786,7 @@ export function mountBrushManager() {
   });
   maskSize.addEventListener('change', () => {
     commitNumberField(maskSize, 'brush mask size', (b, v) => { b.mask.size = v; });
+    pushSizeToActiveBrush();
   });
   maskSpacing.addEventListener('change', () => {
     commitNumberField(maskSpacing, 'brush mask spacing', (b, v) => { b.mask.spacing = v; });
@@ -585,7 +808,32 @@ export function mountBrushManager() {
   });
 
   inkKind.addEventListener('change', () => {
-    showEditResult(editBrush('brush ink kind', b => { b.ink.kind = inkKind.value; return b; }));
+    showEditResult(editBrush('brush ink kind', b => {
+      b.ink.kind = inkKind.value;
+      // validateBrush rejects a `replace` brush with no target colour, so
+      // selecting it on a brush that has none would be refused and reverted
+      // -- which is exactly why the entry looked permanently broken. Seed it
+      // from the primary swatch, the colour the user is most likely aiming
+      // at, rather than an arbitrary black that would match every blank
+      // pixel's RGB.
+      if (b.ink.kind === 'replace' && !b.ink.replaceColor) {
+        const p = host().store.getState().workspace.drawing.primary;
+        b.ink.replaceColor = [p[0], p[1], p[2]];
+      }
+      return b;
+    }));
+  });
+  inkReplace.addEventListener('change', () => {
+    showEditResult(editBrush('brush replace color', b => {
+      b.ink.replaceColor = hexToRgb(inkReplace.value); return b;
+    }));
+  });
+  inkRamp.addEventListener('change', () => {
+    showEditResult(editBrush('brush ink ramp', b => {
+      // '' is the auto-detect sentinel, and the model spells that null --
+      // rampContaining falls through to detectRamps when rampName is falsy.
+      b.ink.rampName = inkRamp.value || null; return b;
+    }));
   });
   inkOpacity.addEventListener('change', () => {
     commitNumberField(inkOpacity, 'brush ink opacity', (b, v) => { b.ink.opacity = v; });

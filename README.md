@@ -45,6 +45,15 @@ The top bar still carries its own New/Import/Rename/Delete sheet icon
 buttons (wired to the same Document actions) alongside the Sprite Sheets /
 Tile Sheets mode tabs.
 
+## Brushes
+
+Brushes are **mask × ink**: the mask decides which pixels a stroke touches,
+the ink decides what value is written there. Opacity is dither density, not
+transparency, and nothing is ever anti-aliased.
+
+See **[README-BRUSHES.md](README-BRUSHES.md)** for every control in the
+Brushes dialog, how to use each ink kind, and the current known gaps.
+
 ## Shortcuts
 
 Editor keyboard shortcuts leave focused inputs (including checkboxes),

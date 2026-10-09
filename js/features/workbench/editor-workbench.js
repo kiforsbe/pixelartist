@@ -1,6 +1,7 @@
 import { flattenSheet, layerAnimationContext } from '../../core/model.js';
 import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../../core/strips.js';
 import { copyRegion } from '../../core/pixels.js';
+import { MAX_MASK_SIZE } from '../../core/brushes.js';
 import { colorFrequency } from '../../core/quantize.js';
 import { PLATFORMS, checkItemAgainstPlatform } from '../../core/platforms.js';
 import { CanvasView } from '../../components/canvas/canvas-view.js';
@@ -43,7 +44,7 @@ export function mountEditorWorkbench() {
     } else if (e.key === ']') {
       e.preventDefault();
       const cur = drawing.brush;
-      editorHost.store.updateDrawingSettings({ brush: { ...cur, mask: { ...cur.mask, size: Math.min(16, cur.mask.size + 1) } } });
+      editorHost.store.updateDrawingSettings({ brush: { ...cur, mask: { ...cur.mask, size: Math.min(MAX_MASK_SIZE, cur.mask.size + 1) } } });
     } else if (e.key.toLowerCase() === 'x') {
       e.preventDefault();
       editorHost.store.updateDrawingSettings({ primary: drawing.secondary, secondary: drawing.primary });

@@ -108,10 +108,20 @@ export function pathSteps(a, b) {
 // track the pointer event rate and giving scatter a visible repeating rhythm
 // at the sampling period.
 export function strokeStamps(points, mask, seed, startDistance = 0) {
+  return stampsAlongPath(densifyPath(points), mask, seed, startDistance);
+}
+
+// The same spacing/scatter/jitter pass, for a caller whose path is ALREADY
+// one entry per pixel. The shape tools' perimeter generators
+// (pixels.js's rectOutlinePath / ellipseOutlinePath) are exactly that, and
+// densifying them would be worse than redundant: Bresenham-bridging two
+// outline pixels that the angle sort happened to order non-adjacently would
+// add pixels the shape does not contain, so a size-1 stamped ellipse would
+// stop matching the one drawEllipse draws.
+export function stampsAlongPath(dense, mask, seed, startDistance = 0) {
   const spacing = Math.max(1, mask.spacing ?? 1);
   const scatter = Math.max(0, mask.scatter ?? 0);
   const jitterRotate = !!mask.rotateJitter;
-  const dense = densifyPath(points);
   const stamps = [];
   for (let i = 0; i < dense.length; i++) {
     // Both the "is there a stamp here" test and the stamp's ordinal come from

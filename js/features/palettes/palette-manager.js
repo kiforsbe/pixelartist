@@ -20,6 +20,7 @@ import {
   addPaletteSwatch, setSwatchColor, remapSwatchColor, countSwatchPixels,
   clearSwatch, removePaletteSwatch, movePaletteSwatch, sortPalette,
   setPaletteLock, setPaletteEmptyColor, setPaletteIndexed,
+  nameRamp, deleteRamp,
 } from './palette-commands.js';
 
 function host() { return getEditorHost(); }
@@ -63,6 +64,11 @@ export function mountPaletteManager() {
   const emptyState = el('pm-empty-state');
   const btnAdd = el('pm-add');
   const sortSelect = el('pm-sort');
+  const rampName = el('pm-ramp-name');
+  const rampAdd = el('pm-ramp-add');
+  const rampHint = el('pm-ramp-hint');
+  const rampList = el('pm-ramp-list');
+  const rampEmpty = el('pm-ramp-empty');
   // The six ops that act on the selected swatch, as opposed to Add and Sort,
   // which act on the palette as a whole and live outside the selection bar.
   const selectionOps = ['pm-set', 'pm-pick', 'pm-clear', 'pm-remove', 'pm-left', 'pm-right'].map(el);
@@ -71,6 +77,12 @@ export function mountPaletteManager() {
   // whenever the palette changes, since an index means nothing across two
   // different palettes.
   let selected = -1;
+
+  // The pending ramp run as [firstIndex, lastIndex], or null. Shift-clicking
+  // a second swatch sets it; any plain click clears it. Reset alongside
+  // `selected` whenever the palette changes, for the same reason: a pair of
+  // indices means nothing across two different palettes.
+  let rampRange = null;
 
   function current() {
     const proj = project();
@@ -171,6 +183,11 @@ export function mountPaletteManager() {
     grid.innerHTML = '';
     const pal = current();
     if (selected >= (pal?.colors.length ?? 0)) selected = -1;
+    // A pending run that no longer fits the palette (it shrank, or a lock
+    // truncated it) is dropped rather than clamped: half of a shading run is
+    // not the run the user marked, and naming it would store a ramp they
+    // never chose.
+    if (rampRange && rampRange[1] >= (pal?.colors.length ?? 0)) rampRange = null;
 
     // An empty well with no explanation reads as broken, and the two ways to
     // get one need different answers.
@@ -186,17 +203,88 @@ export function mountPaletteManager() {
       if (i === selected) sw.classList.add('is-selected');
       sw.style.background = cssColor(c);
       sw.title = `index ${i}${pal.empty[i] ? ' — unset' : ` — ${rgbaToHex(c)}`}`;
-      sw.addEventListener('click', () => {
+      if (rampRange && i >= rampRange[0] && i <= rampRange[1]) sw.classList.add('is-in-ramp');
+      sw.addEventListener('click', (ev) => {
+        // Shift extends the current selection into a RUN, which is what a
+        // ramp is: nameRamp stores an ordered index list, and every ramp
+        // detectRamps produces is contiguous. Restricting the UI to a
+        // contiguous run keeps it one shift-click instead of a multi-select
+        // mode, at the cost of not being able to hand-pick a scattered ramp.
+        if (ev.shiftKey && selected >= 0 && selected !== i) {
+          rampRange = [Math.min(selected, i), Math.max(selected, i)];
+          refreshGrid();
+          return;
+        }
         // Clicking the selected swatch again deselects, so the ops bar can be
         // put back to "nothing selected" without closing the dialog.
         selected = selected === i ? -1 : i;
-        for (const cell of grid.children) cell.classList.remove('is-selected');
+        // A plain click starts a new run; leaving the old highlight up while
+        // the anchor moved would misreport what "Name ramp" would store.
+        rampRange = null;
+        for (const cell of grid.children) cell.classList.remove('is-selected', 'is-in-ramp');
         if (selected === i) sw.classList.add('is-selected');
         refreshSelection();
+        refreshRamps();
       });
       grid.appendChild(sw);
     });
     refreshSelection();
+    refreshRamps();
+  }
+
+  // The named-ramp panel: the pending run (from a shift-click) and the list
+  // of ramps already stored on this palette.
+  //
+  // Named ramps are what `ramp-shade` brushes walk when their Ramp control
+  // names one; with none named, ramp-shade falls back to detectRamps, which
+  // is deliberately conservative and finds nothing at all on some palettes.
+  // Naming a run is how you make shading work on those.
+  function refreshRamps() {
+    const pal = current();
+    const ramps = pal?.ramps ?? [];
+    const count = rampRange ? rampRange[1] - rampRange[0] + 1 : 0;
+    // nameRamp itself refuses a run shorter than two entries; the button
+    // must not offer what the command would silently drop.
+    const canName = !!pal && count >= 2;
+    rampName.disabled = !canName;
+    rampAdd.disabled = !canName || !rampName.value.trim();
+    rampHint.textContent = canName
+      ? `Indices ${rampRange[0]}–${rampRange[1]} · ${count} swatches`
+      : 'Shift-click a second swatch to mark a shading run';
+
+    rampList.innerHTML = '';
+    rampEmpty.hidden = ramps.length > 0;
+    for (const ramp of ramps) {
+      const row = document.createElement('div');
+      row.className = 'pm-ramp-row';
+      const strip = document.createElement('span');
+      strip.className = 'pm-ramp-strip';
+      // Draws the ramp's ACTUAL colours in its stored order, so a ramp whose
+      // palette has since been reordered or shrunk reads as wrong at a glance
+      // rather than only failing later at paint time.
+      for (const i of ramp.indices) {
+        const cell = document.createElement('span');
+        cell.className = 'pm-ramp-cell';
+        const c = pal.colors[i];
+        if (c) cell.style.background = cssColor(c);
+        else cell.classList.add('is-missing');
+        strip.appendChild(cell);
+      }
+      const label = document.createElement('span');
+      label.className = 'pm-ramp-name';
+      label.textContent = ramp.name;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn-sm';
+      del.textContent = 'Delete';
+      del.title = `Delete the ramp “${ramp.name}”`;
+      del.addEventListener('click', () => {
+        deleteRamp(services(), pal.id, ramp.name);
+        refreshRamps();
+      });
+      row.append(strip, label, del);
+      rampList.appendChild(row);
+    }
   }
 
   function refreshAll() {
@@ -234,6 +322,7 @@ export function mountPaletteManager() {
     proj.activePaletteId = list.value || null;
     host().projects.markDirty();
     selected = -1;
+    rampRange = null;
     refreshAll();
   });
 
@@ -277,6 +366,26 @@ export function mountPaletteManager() {
   el('pm-add').addEventListener('click', () => {
     const pal = current();
     if (pal) addPaletteSwatch(services(), pal.id, [...host().store.getState().workspace.drawing.primary]);
+  });
+
+  // `input`, not `change`: the Name ramp button's enabled state tracks
+  // whether the field is non-empty, and waiting for blur would leave it
+  // disabled while a perfectly good name sits typed in front of the user.
+  rampName.addEventListener('input', () => refreshRamps());
+  rampAdd.addEventListener('click', () => {
+    const pal = current();
+    const label = rampName.value.trim();
+    if (!pal || !rampRange || !label) return;
+    const indices = [];
+    for (let i = rampRange[0]; i <= rampRange[1]; i++) indices.push(i);
+    nameRamp(services(), pal.id, label, indices);
+    // Clear the pending run on success so the next shift-click starts fresh,
+    // and empty the field so the button does not sit enabled offering to
+    // re-name the same run under the same name (which nameRamp would refuse
+    // as a no-op anyway).
+    rampRange = null;
+    rampName.value = '';
+    refreshGrid();
   });
 
   el('pm-set').addEventListener('click', () => withSelection((pal, index) => {
@@ -328,6 +437,10 @@ export function mountPaletteManager() {
     if (pal && sortSelect.value) sortPalette(services(), pal.id, sortSelect.value);
     sortSelect.value = '';          // it is an action, not a stored setting
     selected = -1;
+    // Sorting permutes every index, so a run marked against the old order
+    // points at unrelated colours now. The STORED ramps have the same hazard
+    // and are a follow-up; this at least does not add a wrong one.
+    rampRange = null;
     refreshGrid();
   });
 
@@ -372,6 +485,7 @@ export function mountPaletteManager() {
     }
     setPaletteLock(services(), pal.id, size, reason);
     selected = -1;
+    rampRange = null;
     refreshGrid();
   }
 

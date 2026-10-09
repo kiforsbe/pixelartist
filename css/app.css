@@ -547,6 +547,28 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
    which is exactly the distinction the `empty` flag carries. */
 .pm-swatch.is-empty { border-style: dashed; border-color: #ffffff66;
   background-image: repeating-linear-gradient(45deg, #ffffff26 0 2px, #0000 2px 5px); }
+/* A swatch inside the pending ramp run. A soft inset ring rather than
+   .is-selected's outline, so the run and the anchor swatch inside it stay
+   separately legible instead of one hiding the other. */
+.pm-swatch.is-in-ramp { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* --- named ramps -----------------------------------------------------
+   The well matches .pm-well above; it is shorter because a palette rarely
+   has more than a handful of named ramps, and a tall empty box below the
+   swatch grid reads as something failing to load. */
+.pm-ramp-well { min-height: 0; max-height: 132px; }
+.pm-ramp-list { display: flex; flex-direction: column; gap: 4px; }
+.pm-ramp-row { display: flex; align-items: center; gap: 8px; }
+/* The ramp's own colors, in its stored order -- butted together with no gap
+   so a shading run reads as one gradient strip rather than as loose chips. */
+.pm-ramp-strip { display: flex; border: 1px solid #0006; border-radius: 3px; overflow: hidden; flex: none; }
+.pm-ramp-cell { width: 16px; height: 18px; }
+/* An index the palette no longer has. Must not render as a transparent gap,
+   which would read as a legitimately dark swatch. */
+.pm-ramp-cell.is-missing {
+  background-image: repeating-linear-gradient(45deg, #ff6b6b66 0 2px, #0000 2px 5px); }
+.pm-ramp-name { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pm-ramp-name { width: 128px; }
 
 /* What the ops act on, and the ops themselves, adjacent. Everything here
    disables with no selection rather than silently no-opping, so a button can

@@ -81,39 +81,125 @@ export function drawLine(bmp, x0, y0, x1, y1, rgba, size = 1, ink = null, grid =
   }
 }
 
+function boxOf(x0, y0, x1, y1) {
+  return {
+    xa: Math.min(x0, x1), xb: Math.max(x0, x1),
+    ya: Math.min(y0, y1), yb: Math.max(y0, y1),
+  };
+}
+
 // `filled` may be `true` (interior = rgba) or an rgba array (two-color shape:
 // rgba outline, `filled` interior); falsy draws the outline only.
-export function drawRect(bmp, x0, y0, x1, y1, rgba, filled, ink = null) {
+//
+// `options.outline` false suppresses the border and draws the interior alone.
+// The drawing engine uses it to lay a filled shape's interior BEFORE stamping
+// the border with the active brush: without it, every filled rect would carry
+// an unscattered 1px outline underneath the stamped one, so a scattering
+// brush would look like it was ignoring scatter on exactly the shapes where
+// the effect is most visible.
+export function drawRect(bmp, x0, y0, x1, y1, rgba, filled, ink = null, options = {}) {
+  const drawOutline = options.outline !== false;
   const fill = filled === true ? rgba : filled;
-  const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
-  const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
+  const { xa, xb, ya, yb } = boxOf(x0, y0, x1, y1);
   for (let y = ya; y <= yb; y++)
     for (let x = xa; x <= xb; x++) {
-      if (x === xa || x === xb || y === ya || y === yb) put(bmp, x, y, rgba, ink);
-      else if (fill) put(bmp, x, y, fill, ink);
+      if (x === xa || x === xb || y === ya || y === yb) {
+        if (drawOutline) put(bmp, x, y, rgba, ink);
+      } else if (fill) put(bmp, x, y, fill, ink);
     }
 }
 
-export function drawEllipse(bmp, x0, y0, x1, y1, rgba, filled, ink = null) {
-  const fill = filled === true ? rgba : filled;
-  const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
-  const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
+// The ordered perimeter of a rectangle, clockwise from its top-left corner:
+// one entry per border pixel, each adjacent to the next, no duplicates, and
+// the last adjacent to the first. This is what lets the engine treat a rect
+// as a STROKE and hand it to the same stamping machinery as a line, so a
+// brush's size, spacing, scatter and rotate jitter reach it.
+//
+// A box only one pixel wide or tall is all border and is walked once rather
+// than twice -- the four-edge walk below would otherwise emit its pixels
+// twice, double-stamping every one of them.
+export function rectOutlinePath(x0, y0, x1, y1) {
+  const { xa, xb, ya, yb } = boxOf(x0, y0, x1, y1);
+  const path = [];
+  if (xa === xb) {
+    for (let y = ya; y <= yb; y++) path.push({ x: xa, y });
+    return path;
+  }
+  if (ya === yb) {
+    for (let x = xa; x <= xb; x++) path.push({ x, y: ya });
+    return path;
+  }
+  for (let x = xa; x <= xb; x++) path.push({ x, y: ya });          // top, L->R
+  for (let y = ya + 1; y <= yb; y++) path.push({ x: xb, y });      // right, down
+  for (let x = xb - 1; x >= xa; x--) path.push({ x, y: yb });      // bottom, R->L
+  for (let y = yb - 1; y > ya; y--) path.push({ x: xa, y });       // left, up
+  return path;
+}
+
+// The ellipse's geometry in one place. `drawEllipse` and
+// `ellipseOutlinePath` MUST classify every pixel identically -- the engine
+// draws a filled ellipse's interior with one and its border with the other,
+// so any drift between them shows up as a seam or a doubled edge.
+function ellipseGeometry(x0, y0, x1, y1) {
+  const { xa, xb, ya, yb } = boxOf(x0, y0, x1, y1);
   const rx = (xb - xa) / 2, ry = (yb - ya) / 2;
-  const cx = xa + rx, cy = ya + ry;
-  if (rx < 0.5 || ry < 0.5) { drawRect(bmp, xa, ya, xb, yb, rgba, true, ink); return; }
-  // scanline test against ellipse equation; outline = inside but a 1px-shrunk ellipse misses
-  for (let y = ya; y <= yb; y++) {
-    for (let x = xa; x <= xb; x++) {
-      const nx = (x + 0.5 - (cx + 0.5)) / (rx + 0.5);
-      const ny = (y + 0.5 - (cy + 0.5)) / (ry + 0.5);
-      const inside = nx * nx + ny * ny <= 1;
-      if (!inside) continue;
-      const ix = (x + 0.5 - (cx + 0.5)) / Math.max(rx - 0.5, 0.5);
-      const iy = (y + 0.5 - (cy + 0.5)) / Math.max(ry - 0.5, 0.5);
-      if (ix * ix + iy * iy > 1) put(bmp, x, y, rgba, ink);
-      else if (fill) put(bmp, x, y, fill, ink);
+  return { xa, xb, ya, yb, rx, ry, cx: xa + rx, cy: ya + ry, degenerate: rx < 0.5 || ry < 0.5 };
+}
+
+// 0 outside, 1 on the outline, 2 interior. Outline = inside the ellipse but
+// outside a 1px-shrunk one, which is the original scanline test verbatim.
+const OUTSIDE = 0, OUTLINE = 1, INTERIOR = 2;
+function ellipseClass(g, x, y) {
+  const nx = (x + 0.5 - (g.cx + 0.5)) / (g.rx + 0.5);
+  const ny = (y + 0.5 - (g.cy + 0.5)) / (g.ry + 0.5);
+  if (nx * nx + ny * ny > 1) return OUTSIDE;
+  const ix = (x + 0.5 - (g.cx + 0.5)) / Math.max(g.rx - 0.5, 0.5);
+  const iy = (y + 0.5 - (g.cy + 0.5)) / Math.max(g.ry - 0.5, 0.5);
+  return ix * ix + iy * iy > 1 ? OUTLINE : INTERIOR;
+}
+
+export function drawEllipse(bmp, x0, y0, x1, y1, rgba, filled, ink = null, options = {}) {
+  const drawOutline = options.outline !== false;
+  const fill = filled === true ? rgba : filled;
+  const g = ellipseGeometry(x0, y0, x1, y1);
+  // One pixel wide or tall: there is no ellipse to speak of, and the equation
+  // degenerates. A filled box of the same extent is the shape every pixel
+  // editor draws here.
+  if (g.degenerate) { drawRect(bmp, g.xa, g.ya, g.xb, g.yb, rgba, true, ink, options); return; }
+  for (let y = g.ya; y <= g.yb; y++) {
+    for (let x = g.xa; x <= g.xb; x++) {
+      const c = ellipseClass(g, x, y);
+      if (c === OUTLINE) { if (drawOutline) put(bmp, x, y, rgba, ink); }
+      else if (c === INTERIOR && fill) put(bmp, x, y, fill, ink);
     }
   }
+}
+
+// The ellipse's border as an ordered path, for the same reason
+// rectOutlinePath exists. The point SET comes from `ellipseClass`, so a
+// stamped border covers exactly the pixels drawEllipse would have drawn --
+// the shape is unchanged, only how colour is laid onto it.
+//
+// Order is by angle about the centre. That is a walk AROUND the perimeter,
+// which is what `spacing` needs to space stamps evenly along the border
+// rather than in scanline order (which would stamp both sides of the ellipse
+// alternately and make spacing read as a vertical comb). It is deliberately
+// not required to be strictly pixel-adjacent: the engine stamps these points
+// directly without densifying between them, so ordering affects only which
+// points a spacing > 1 keeps, never which pixels the shape occupies.
+export function ellipseOutlinePath(x0, y0, x1, y1) {
+  const g = ellipseGeometry(x0, y0, x1, y1);
+  if (g.degenerate) return rectOutlinePath(g.xa, g.ya, g.xb, g.yb);
+  const points = [];
+  for (let y = g.ya; y <= g.yb; y++)
+    for (let x = g.xa; x <= g.xb; x++)
+      if (ellipseClass(g, x, y) === OUTLINE) points.push({ x, y, a: Math.atan2(y - g.cy, x - g.cx) });
+  // Ties broken by scanline order so the result is fully deterministic: a
+  // shape tool re-rasterizes from its anchor on every pointer move, and a
+  // path that reordered between frames would reshuffle scatter under the
+  // cursor -- the exact defect the stroke seed exists to prevent.
+  points.sort((p, q) => p.a - q.a || p.y - q.y || p.x - q.x);
+  return points.map(({ x, y }) => ({ x, y }));
 }
 
 // The contiguous branch tracks visited pixels with an explicit `seen` array

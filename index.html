@@ -385,6 +385,18 @@
       </div>
     </div>
 
+    <div class="pm-section-head">
+      <span class="pm-section-title">Ramps</span>
+      <span id="pm-ramp-hint" class="pm-meta">Shift-click a second swatch to mark a shading run</span>
+      <span class="pm-spacer"></span>
+      <input type="text" id="pm-ramp-name" placeholder="Ramp name" disabled>
+      <button id="pm-ramp-add" class="btn-sm" disabled title="Name the selected run of swatches as a ramp">Name ramp</button>
+    </div>
+    <div class="pm-well pm-ramp-well">
+      <div class="pm-ramp-list" id="pm-ramp-list"></div>
+      <p class="pm-empty-state" id="pm-ramp-empty" hidden>No named ramps. Ramp-shade auto-detects runs when none are named.</p>
+    </div>
+
     <div class="pm-fields">
       <label for="pm-name">Name</label>
       <div class="pm-field"><input type="text" id="pm-name"></div>
@@ -474,6 +486,8 @@
           <label class="bm-inline"><input type="checkbox" id="bm-ink-truealpha"> True alpha</label>
           <label class="bm-inline">Jitter <input type="number" id="bm-ink-jitter" min="0" max="8"></label>
           <label class="bm-inline">Pattern <select id="bm-ink-pattern"></select></label>
+          <label class="bm-inline">Target color <input type="color" id="bm-ink-replace" title="Replace ink: only pixels of this color are repainted"></label>
+          <label class="bm-inline">Ramp <select id="bm-ink-ramp" title="Ramp-shade: which named palette ramp to walk"></select></label>
         </div>
 
         <label>Pressure</label>
@@ -489,6 +503,11 @@
   <div class="row dlg-actions bm-footer">
     <button id="bm-undo" class="btn-sm" disabled>Undo</button>
     <button id="bm-redo" class="btn-sm" disabled>Redo</button>
+    <button id="bm-move-left" class="btn-sm btn-step" disabled title="Move brush earlier in the list">←</button>
+    <button id="bm-move-right" class="btn-sm btn-step" disabled title="Move brush later in the list">→</button>
+    <button id="bm-duplicate" class="btn-sm" disabled>Duplicate</button>
+    <button id="bm-delete" class="btn-sm" disabled>Delete</button>
+    <button id="bm-reset" class="btn-sm" disabled title="Restore this built-in brush to its factory settings">Reset</button>
     <button id="bm-import" class="btn-sm">Import…</button>
     <select id="bm-export-format" title="Export format">
       <option value="json">Brush (.json)</option>
