@@ -110,13 +110,18 @@ function idb() {
     req.onerror = () => reject(req.error);
   });
 }
+// Settles on the TRANSACTION, not the request. A request's success only means
+// the operation was queued; the transaction can still abort afterwards (quota
+// exceeded is the usual cause) and roll it back, so resolving on request
+// success reported an autosave as written when it never reached disk.
 async function idbOp(mode, fn) {
   const db = await idb();
   try {
     return await new Promise((resolve, reject) => {
       const tx = db.transaction('autosave', mode);
       const req = fn(tx.objectStore('autosave'));
-      req.onsuccess = () => resolve(req.result);
+      tx.oncomplete = () => resolve(req.result);
+      tx.onabort = () => reject(tx.error ?? req.error ?? new Error('autosave transaction aborted'));
       req.onerror = () => reject(req.error);
     });
   } finally { db.close(); }

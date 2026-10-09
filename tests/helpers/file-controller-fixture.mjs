@@ -67,16 +67,26 @@ export async function mountFileFixture() {
     queueMicrotask(() => {
       request.result = {
         close() {},
-        transaction() { return { objectStore() { return {
-          delete(key) { recovery.push({ kind: 'delete', key }); changed(); return succeed(); },
-          put(bytes, key) { recovery.push({ kind: 'put', bytes, key }); changed(); return succeed(); },
-        }; } }; },
+        transaction() {
+          const tx = {};
+          tx.objectStore = () => ({
+            delete(key) { recovery.push({ kind: 'delete', key }); changed(); return succeed(tx); },
+            put(bytes, key) { recovery.push({ kind: 'put', bytes, key }); changed(); return succeed(tx); },
+          });
+          return tx;
+        },
       };
       request.onsuccess();
     });
     return request;
   } };
-  function succeed() { const req = {}; queueMicrotask(() => req.onsuccess()); return req; }
+  // Real IndexedDB order: the request succeeds, then its transaction
+  // completes. Autosave settles on the latter (see project-io.js idbOp).
+  function succeed(tx) {
+    const req = {};
+    queueMicrotask(() => { req.onsuccess?.(); queueMicrotask(() => tx.oncomplete?.()); });
+    return req;
+  }
   const host = new EditorHost();
   setEditorHost(host);
   const { mountFileController } = await import('../../js/features/project/file-controller.js');

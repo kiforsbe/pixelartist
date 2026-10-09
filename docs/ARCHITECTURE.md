@@ -7,14 +7,17 @@ and reference-based map scenes. It uses native JavaScript ES modules, the DOM,
 and Canvas 2D, with no runtime package dependencies or build step.
 
 This document describes the implemented system, including its remaining
-coupling and limitations. The [codebase review](reviews/2026-08-28-codebase-review.md)
-records confirmed defects and follow-up work; completion of the architecture
-migration does **not** mean the application is defect-free.
+coupling and limitations. The 2026-08-28 codebase review recorded confirmed
+defects R01–R23, all since fixed; the review file itself was pruned in
+`14e5d3f` (read it with `git show 14e5d3f^:docs/reviews/2026-08-28-codebase-review.md`).
+What it left open is tracked under [Open work](#open-work) below. Completion of
+the architecture migration does **not** mean the application is defect-free.
 
 ## Migration status
 
-The [DDD target design](superpowers/specs/2026-08-08-ddd-target-architecture-design.md)
-is complete through its agreed Phase 5 scope:
+The DDD target design (`docs/superpowers/specs/2026-08-08-ddd-target-architecture-design.md`,
+pruned in `14e5d3f`, still in git history) is complete through its agreed
+Phase 5 scope:
 
 | Phase | Implemented result |
 |---|---|
@@ -25,15 +28,17 @@ is complete through its agreed Phase 5 scope:
 | 4 — Shell and legacy retirement | `js/app`, `js/ui`, the compatibility event bus, and the host-to-legacy mirror removed. |
 | 5 — Polish | Runtime tile metadata renamed to `sheet.tileLayerNames`; saved/exported `layers` remains compatible. |
 
-The [final Phase 4 plan](superpowers/plans/2026-08-18-phase-4-group-3-5-mode-cleanup.md)
-contains a dated closeout superseding its older follow-up notes. The owner
+The final Phase 4 plan (`docs/superpowers/plans/2026-08-18-phase-4-group-3-5-mode-cleanup.md`,
+likewise in git history) contains a dated closeout superseding its older
+follow-up notes. The owner
 accepted the outstanding manual layer-reorder check; that is an acceptance
 decision, not a claim that automation observed the gesture. Phase 5 and the
 startup canvas/panel follow-ups were committed in `55602e2`.
 
-Historical plans/specifications preserve the decisions and intermediate states.
-Use this document and the dated review for current-state status. New defects
-identified by the audit are follow-up work, not unfinished migration tasks.
+Historical plans/specifications preserve the decisions and intermediate states;
+older ones are pruned from the tree periodically and remain in git history.
+Use this document for current-state status. New defects are follow-up work,
+not unfinished migration tasks.
 
 ## Repository structure
 
@@ -60,7 +65,6 @@ tests/                     87 top-level Node test modules
   smoke.md                 Broader smoke checklist and manual gates
 docs/
   ARCHITECTURE.md           This implementation snapshot
-  reviews/                 Dated findings and follow-up register
   superpowers/specs/       Design history
   superpowers/plans/       Implementation and acceptance history
 package.json               Native-module package and Node test command
@@ -418,6 +422,26 @@ test inactive startup and shared-container visibility. For any asynchronous
 file work, preserve project identity/revision across awaits and verify that
 completion cannot overwrite newer session state.
 
-The [review and issue register](reviews/2026-08-28-codebase-review.md) is the
-next-work list: prioritize data integrity, selection/undo correctness, and
-export contracts before additional architectural abstraction.
+## Open work
+
+Carried forward from the 2026-08-28 review and re-checked against the code on
+2026-10-09. Prioritize data integrity, selection/undo correctness, and export
+contracts before additional architectural abstraction.
+
+- **Release tooling.** No checked-in CI workflow and no turnkey browser test
+  runner; `npm test` omits `tests/browser/`. `serve.ps1` runs an unpinned
+  `npx --yes serve`.
+- **Structural debt.** Everything under
+  [Dependency boundaries and known structural debt](#dependency-boundaries-and-known-structural-debt):
+  `model.js` still mixes construction, layer mutation, serialization and
+  validation; sprite and tile layer/palette handlers duplicate logic; store
+  state coexists with module singletons; ExportService/ViewManager are
+  scaffolding. Address these when a concrete requirement touches them.
+- **Conformance.** Tiled TSX output for nonuniform/spaced grids and transformed
+  terrain, native-binary toolchain output, and filter fidelity have no
+  contract tests.
+
+Closed since the review: ZIP loading now verifies each entry's CRC32 and
+declared size, bounds-checks headers, caps declared sizes, and stops inflating
+past an entry's declared size; IndexedDB autosave settles on transaction
+completion and rejects on abort.
