@@ -409,6 +409,7 @@ export function removeFrame(sheet, frameId) {
 export function addAnimation(sheet, name, defaults = {}) {
   const anim = {
     id: newId('an'), name, loop: true, frames: [], layout: 'manual', cell: null,
+    direction: 'forward', color: null,
     baseDuration: defaults.durationMs ?? 100,
     baseFps: defaults.baseFps,
     baseStep: defaults.baseStep,
@@ -417,9 +418,21 @@ export function addAnimation(sheet, name, defaults = {}) {
   return anim;
 }
 
+// How an animation plays its entries (domain/sprites/playback.js's
+// playbackSequence). Ping-pong does not repeat the end frames.
+export const ANIMATION_DIRECTIONS = ['forward', 'reverse', 'pingpong', 'pingpong-reverse'];
+
+// An animation's tag colour: '#rrggbb' (lowercased), or null when the value
+// is not one -- callers that must refuse a bad value compare against null.
+export function animationColor(value) {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null;
+}
+
 // The v4 animation shape: strips, breaks and animation-owned layer groups
 // are gone (js/core/legacy-animations.js converts older files). Used for
 // both save and load so neither direction can leak a legacy field.
+// `direction` and `color` are optional on disk (no version bump): a missing
+// or unknown value loads as forward / no colour.
 export function normalizeAnimation(a) {
   const { strip: _strip, breaks: _breaks, layerGroupId: _layerGroupId, ...rest } = a;
   const auto = a.layout === 'auto' && a.cell?.w >= 1 && a.cell?.h >= 1;
@@ -428,6 +441,8 @@ export function normalizeAnimation(a) {
     frames: (a.frames ?? []).map(e => ({ ...e })),
     layout: auto ? 'auto' : 'manual',
     cell: auto ? { w: a.cell.w, h: a.cell.h } : null,
+    direction: ANIMATION_DIRECTIONS.includes(a.direction) ? a.direction : 'forward',
+    color: animationColor(a.color),
   };
 }
 

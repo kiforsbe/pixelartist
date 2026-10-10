@@ -4,10 +4,15 @@
 import { flattenSheet, effectiveDuration } from '../model.js';
 import { copyRegion } from '../pixels.js';
 import { animationExportFiles } from './export-files.js';
+import { playOrder } from '../../domain/sprites/playback.js';
 
-function animFrameBitmaps(sheet, anim) {
+// Timeline order by default; `{ played: true }` gives the order one pass of
+// the animation shows (its direction, see playback.js's playOrder) for the
+// exports that play it as a sequence (GIF, image sequence).
+function animFrameBitmaps(sheet, anim, { played = false } = {}) {
   const flat = flattenSheet(sheet);
-  return anim.frames.map(af => {
+  const entries = played ? playOrder(anim, anim.loop).map(i => anim.frames[i]) : anim.frames;
+  return entries.map(af => {
     const frame = sheet.frames.find(f => f.id === af.frameId);
     return { frame, bitmap: copyRegion(flat, frame.x, frame.y, frame.w, frame.h), delayMs: effectiveDuration(anim, af) };
   });
@@ -51,13 +56,13 @@ export function buildAnimationSpritesheet(sheet, anim) {
 
 // One { name, bitmap } per frame, named `<anim>_000`, `<anim>_001`, ...
 export function buildAnimationImageSequence(sheet, anim) {
-  return animFrameBitmaps(sheet, anim).map((s, i) =>
-    ({ name: `${anim.name}_${String(i).padStart(3, '0')}`, bitmap: s.bitmap }));
+  return animFrameBitmaps(sheet, anim, { played: true }).map((s, i) =>
+    ({ name:`${anim.name}_${String(i).padStart(3, '0')}`, bitmap: s.bitmap }));
 }
 
 // { pixels, width, height, delayMs } per frame, ready for js/core/gif.js's
 // encodeGif.
 export function buildAnimationGifFrames(sheet, anim) {
-  return animFrameBitmaps(sheet, anim).map(s =>
+  return animFrameBitmaps(sheet, anim, { played: true }).map(s =>
     ({ pixels: s.bitmap.data, width: s.bitmap.width, height: s.bitmap.height, delayMs: s.delayMs }));
 }

@@ -162,6 +162,7 @@ export function mountAnimationTimeline(el) {
 
   // ---- playback (drives the Preview panel only) ----
   let playing = false, rafId = null, lastTs = null, acc = 0, position = 0;
+  let cursor = null; // place in the direction's play order (advancePlayback)
   let playingId = null; // the animation being played
 
   // Playback ends when the selection moves to another animation or the
@@ -183,9 +184,9 @@ export function mountAnimationTimeline(el) {
     const anim = selectedAnim();
     if (!playing || playbackStale(anim)) { stopPlaying(); return; }
     if (lastTs == null) lastTs = ts;
-    const result = advancePlayback(anim, position, acc, ts - lastTs, loopCheckbox.checked);
+    const result = advancePlayback(anim, position, acc, ts - lastTs, loopCheckbox.checked, cursor);
     lastTs = ts;
-    position = result.position; acc = result.acc;
+    position = result.position; acc = result.acc; cursor = result.cursor;
     if (result.stopped) stopPlaying();
     renderPreview(); updatePlayhead();
     if (playing) rafId = requestAnimationFrame(tick);
@@ -196,7 +197,7 @@ export function mountAnimationTimeline(el) {
     playing = true;
     playingId = anim.id;
     position = Math.max(0, current()?.animationId === anim.id ? current().index : 0);
-    acc = 0; lastTs = null;
+    acc = 0; lastTs = null; cursor = null;
     setPlayButton();
     updatePlayhead();
     rafId = requestAnimationFrame(tick);

@@ -1,5 +1,7 @@
 // js/modes/sprites/application/commands/animation-lifecycle-commands.js
-import { addAnimation, renameAnimation as renameAnimationOnSheet } from '../../../../core/model.js';
+import {
+  addAnimation, renameAnimation as renameAnimationOnSheet, ANIMATION_DIRECTIONS, animationColor,
+} from '../../../../core/model.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 function sheetDocument(sheet) {
@@ -76,6 +78,34 @@ export function toggleAnimationLoop(services, sheetId, animationId, loop) {
   runSheetCommand(services, sheetId, 'toggle animation loop',
     () => { anim.loop = loop; },
     () => { anim.loop = before; });
+}
+
+// Direction (core/model.js's ANIMATION_DIRECTIONS) and tag colour
+// ('#rrggbb' or null) work the same on both layouts: one history step each,
+// a repeated value records nothing, an unknown value is refused.
+export function setAnimationDirection(services, sheetId, animationId, direction) {
+  const anim = findSpriteSheet(services.projects.project, sheetId)?.animations.find(a => a.id === animationId);
+  if (!anim) return { ok: false, reason: 'No such animation' };
+  if (!ANIMATION_DIRECTIONS.includes(direction)) return { ok: false, reason: `Unknown direction "${direction}"` };
+  const before = anim.direction;
+  if (before === direction) return { ok: true };
+  runSheetCommand(services, sheetId, 'set animation direction',
+    () => { anim.direction = direction; },
+    () => { anim.direction = before; });
+  return { ok: true };
+}
+
+export function setAnimationColor(services, sheetId, animationId, color) {
+  const anim = findSpriteSheet(services.projects.project, sheetId)?.animations.find(a => a.id === animationId);
+  if (!anim) return { ok: false, reason: 'No such animation' };
+  const after = color === null ? null : animationColor(color);
+  if (color !== null && after === null) return { ok: false, reason: 'A colour must be #rrggbb or none' };
+  const before = anim.color ?? null;
+  if (before === after) return { ok: true };
+  runSheetCommand(services, sheetId, 'set animation colour',
+    () => { anim.color = after; },
+    () => { anim.color = before; });
+  return { ok: true };
 }
 
 // No before/after equality guard here -- matches animations-panel.js's

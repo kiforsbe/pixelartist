@@ -137,6 +137,7 @@ export function mountTimeline(el) {
   let lastTs = null;
   let acc = 0;
   let position = 0; // index into currentAnim().frames
+  let cursor = null; // place in the direction's play order (advancePlayback)
   let previewLoop = true; // session-only UI state -- never read from/written to anim or state
 
   // Cached flatten of the active sheet; invalidated at the top of every full
@@ -209,8 +210,9 @@ export function mountTimeline(el) {
     const dt = ts - lastTs;
     lastTs = ts;
     const speed = parseFloat(speedSelect.value) || 1;
-    const result = advancePlayback(anim, position, acc, dt * speed, previewLoop);
+    const result = advancePlayback(anim, position, acc, dt * speed, previewLoop, cursor);
     position = result.position;
+    cursor = result.cursor;
     acc = result.acc;
     if (result.stopped) stopPlaying();
     renderPreview();

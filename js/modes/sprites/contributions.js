@@ -14,10 +14,15 @@ import {
   autoLayoutAnimation, makeManual, reorderAnimations, duplicateAnimation, deleteAutoAnimation, setAnimationPivot,
   deleteLaidOutFrame,
 } from './application/commands/animation-layout-commands.js';
+import {
+  moveFrames as moveAnimationFrames, copyFrames, duplicateFrames, deleteFrames, reverseFrames, setFrameDurations,
+  unlinkFrame, clearCel,
+} from './application/commands/animation-range-commands.js';
 import { isPinnedFrame } from '../../domain/sprites/auto-layout.js';
 import { setFrameField, setFramePivot } from './application/commands/frame-metadata-commands.js';
 import {
   newAnimation, deleteAnimation, renameAnimation, toggleAnimationLoop, setAnimationBaseDuration,
+  setAnimationDirection, setAnimationColor,
 } from './application/commands/animation-lifecycle-commands.js';
 import {
   addAnimationFrame, removeAnimationFrame, reorderAnimationFrame, setAnimationFrameDuration, setAnimationFrameStep,
@@ -62,6 +67,8 @@ function registerSpriteCommands(api) {
   command('sprites.renameAnimation', (_context, { sheetId, animationId, name }) => renameAnimation(services(), sheetId, animationId, name));
   command('sprites.toggleAnimationLoop', (_context, { sheetId, animationId, loop }) => toggleAnimationLoop(services(), sheetId, animationId, loop));
   command('sprites.setAnimationBaseDuration', (_context, { sheetId, animationId, before, after }) => setAnimationBaseDuration(services(), sheetId, animationId, before, after));
+  command('sprites.setAnimationDirection', (_context, { sheetId, animationId, direction }) => setAnimationDirection(services(), sheetId, animationId, direction));
+  command('sprites.setAnimationColor', (_context, { sheetId, animationId, color }) => setAnimationColor(services(), sheetId, animationId, color));
 
   command('sprites.addAnimationFrame', (_context, { sheetId, animationId, frameId }) => addAnimationFrame(services(), sheetId, animationId, frameId));
   command('sprites.removeAnimationFrame', (_context, { sheetId, animationId, index }) => removeAnimationFrame(services(), sheetId, animationId, index));
@@ -105,6 +112,16 @@ function registerAnimationLayoutCommands(api) {
     return { ok: true };
   });
   command('animations.setPivot', (_c, { sheetId, animationId, pivotX, pivotY }) => setAnimationPivot(services(), sheetId, animationId, pivotX, pivotY));
+
+  // Range commands (inclusive entry ranges; both layouts, one history step).
+  command('animations.moveFrames', (_c, { sheetId, animationId, from, to, at }) => moveAnimationFrames(services(), sheetId, animationId, from, to, at));
+  command('animations.copyFrames', (_c, { sheetId, animationId, from, to, at }) => copyFrames(services(), sheetId, animationId, from, to, at));
+  command('animations.duplicateFrames', (_c, { sheetId, animationId, from, to }) => duplicateFrames(services(), sheetId, animationId, from, to));
+  command('animations.deleteFrames', (_c, { sheetId, animationId, from, to }) => deleteFrames(services(), sheetId, animationId, from, to));
+  command('animations.reverseFrames', (_c, { sheetId, animationId, from, to }) => reverseFrames(services(), sheetId, animationId, from, to));
+  command('animations.setFrameDurations', (_c, { sheetId, animationId, from, to, duration, step }) => setFrameDurations(services(), sheetId, animationId, from, to, { duration, step }));
+  command('animations.unlinkFrame', (_c, { sheetId, animationId, index }) => unlinkFrame(services(), sheetId, animationId, index));
+  command('animations.clearCel', (_c, { sheetId, frameId, layerId }) => clearCel(services(), sheetId, frameId, layerId));
 }
 
 export function registerSpriteContributions(api) {

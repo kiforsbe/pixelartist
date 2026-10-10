@@ -55,6 +55,7 @@ test('sprites mode registers exactly the expected sprites.* command ids', () => 
       'sprites.mergeDown', 'sprites.moveFrames', 'sprites.moveNode', 'sprites.newAnimation',
       'sprites.removeAnimationFrame', 'sprites.renameAnimation', 'sprites.renameNode',
       'sprites.reorderAnimationFrame', 'sprites.resizeFrame', 'sprites.setAnimationBaseDuration',
+      'sprites.setAnimationColor', 'sprites.setAnimationDirection',
       'sprites.setAnimationFrameDuration', 'sprites.setAnimationFrameStep', 'sprites.setFrameField', 'sprites.setFramePivot',
       'sprites.setLayerOpacity', 'sprites.sliceGrid', 'sprites.toggleAnimationLoop', 'sprites.toggleLayerLocked', 'sprites.toggleLayerVisible',
     ],
@@ -67,9 +68,11 @@ test('sprites mode registers the animations.* layout commands for both workbench
   assert.deepEqual(
     host.registries.commands.list().map(command => command.id).filter(id => id.startsWith('animations.')),
     [
-      'animations.addFrame', 'animations.autoLayout', 'animations.delete', 'animations.deleteFrame',
-      'animations.duplicate', 'animations.linkFrame', 'animations.makeManual', 'animations.moveFrame',
-      'animations.new', 'animations.reorderAnimations', 'animations.resizeCanvas', 'animations.setPivot',
+      'animations.addFrame', 'animations.autoLayout', 'animations.clearCel', 'animations.copyFrames',
+      'animations.delete', 'animations.deleteFrame', 'animations.deleteFrames', 'animations.duplicate',
+      'animations.duplicateFrames', 'animations.linkFrame', 'animations.makeManual', 'animations.moveFrame',
+      'animations.moveFrames', 'animations.new', 'animations.reorderAnimations', 'animations.resizeCanvas',
+      'animations.reverseFrames', 'animations.setFrameDurations', 'animations.setPivot', 'animations.unlinkFrame',
     ],
   );
   const when = host.registries.commands.get('animations.new').when;

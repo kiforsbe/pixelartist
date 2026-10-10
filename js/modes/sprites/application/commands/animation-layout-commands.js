@@ -14,7 +14,9 @@ import { planLayout, distinctFrameIds, autoAnimationOf } from '../../../../domai
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 export const NOT_AUTO = 'This animation is not auto-laid-out';
-export const BAD_SIZE = `Canvas size must be whole numbers in 1..${MAX_DIM}`;
+// The refusal for commands that create frames on a manual animation.
+export const NEEDS_AUTO = 'Auto-layout this animation first';
+export const BAD_SIZE =`Canvas size must be whole numbers in 1..${MAX_DIM}`;
 const NO_SUCH = 'No such animation or frame';
 
 export function layoutMaxWidth(settings) {
@@ -306,7 +308,7 @@ export function reorderAnimations(services, sheetId, from, to) {
 export function duplicateAnimation(services, sheetId, animationId) {
   const source = findAnimation(services, sheetId, animationId);
   if (!source) return { ok: false, reason: NO_SUCH };
-  if (source.layout !== 'auto') return { ok: false, reason: 'Auto-layout this animation first' };
+  if (source.layout !== 'auto') return { ok: false, reason: NEEDS_AUTO };
   // The copy cannot write into a locked layer, so its pixels there would be lost.
   const sourceSheet = findSpriteSheet(services.projects.project, sheetId);
   const lockedInk = sheetLayers(sourceSheet).find(l => l.locked && animFrames(sourceSheet, source).some(f => hasPixels(l.bitmap, f)));
@@ -319,6 +321,7 @@ export function duplicateAnimation(services, sheetId, animationId) {
     sheet.animations.splice(sheet.animations.indexOf(src) + 1, 0, copy);
     Object.assign(copy, {
       loop: src.loop, baseDuration: src.baseDuration, baseFps: src.baseFps, baseStep: src.baseStep,
+      direction: src.direction ?? 'forward', color: src.color ?? null,
       layout: 'auto', cell: { ...src.cell },
     });
     const ids = new Map(), content = new Map();

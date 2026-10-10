@@ -3,6 +3,7 @@ import { flattenSheet, effectiveDuration, refreshMapBounds, DEFAULT_MAP_BOUNDS }
 import { findSheet, snap, selectedTile, selectedTerrain, selectedSprite, itemSize, terrainResolution, MAP_ORIGIN } from '../application/map-geometry.js';
 import { mapBrushState as asset } from '../application/map-brush-state.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
+import { playOrder } from '../../../domain/sprites/playback.js';
 import { getEditorHost } from '../../../host/runtime.js';
 
 let playing = false, playStarted = 0;
@@ -49,10 +50,12 @@ export function toggleMapPlayback(onChange) {
 function animationFrame(sheet, anim) {
   if (!anim?.frames?.length) return null;
   const elapsed = playing ? performance.now() - playStarted : 0;
-  let cursor = anim.frames[0]; let t = elapsed;
-  const total = anim.frames.reduce((sum, f) => sum + effectiveDuration(anim, f), 0);
+  // In the animation's play order (its direction), not timeline order.
+  const entries = playOrder(anim, anim.loop).map(i => anim.frames[i]);
+  let cursor = entries[0]; let t = elapsed;
+  const total = entries.reduce((sum, f) => sum + effectiveDuration(anim, f), 0);
   if (anim.loop && total) t %= total;
-  for (const f of anim.frames) { cursor = f; const d = effectiveDuration(anim, f); if (t < d) break; t -= d; }
+  for (const f of entries) { cursor = f; const d = effectiveDuration(anim, f); if (t < d) break; t -= d; }
   return sheet.frames.find(f => f.id === cursor.frameId) ?? null;
 }
 
