@@ -6,13 +6,16 @@
 // composite thumbnails, then one row per visible layer-tree node -- the
 // shared layer row (layer-tree.js) and one cel per column, a filled dot
 // where that layer has pixels in that frame. Clicking a cel selects its
-// frame and layer; a tag selects its animation. Within an animation's tag,
-// `+` between columns inserts a blank frame (Alt: a copy of the frame to its
-// left), dragging a frame number reorders (Ctrl: inserts a linked use), and
-// Delete / Left / Right on the focused grid remove or step the selected
-// column. A manual animation is offered an auto-layout first. Playback plays
-// the selected animation into the Preview panel.
-import { flattenSheetLayers } from '../../../core/model.js';
+// frame and layer, Shift-click extends a range of columns within one
+// animation; a tag selects its animation and renames on double-click. Within
+// an animation's tag, `+` between columns inserts a blank frame (Alt: a copy
+// of the frame to its left), dragging a frame number moves it -- or the range
+// it is in -- (Alt: copies, Ctrl: inserts a linked use), and Delete / Left /
+// Right on the focused grid remove or step the selection. Frame operations
+// are actions with shortcuts and context menus (timeline-actions.js). A
+// manual animation is offered an auto-layout before an operation that needs
+// one. Playback plays the selected animation into the Preview panel.
+import { flattenSheetLayers, findLayer } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';
 import { advancePlayback } from '../../../domain/sprites/playback.js';
 import { getEditorHost } from '../../../host/runtime.js';
@@ -26,6 +29,8 @@ import { setPreviewBitmap } from '../../../components/panels/preview-panel.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
 import { buildFrameDurationInput } from '../../../components/panels/frame-duration-input.js';
 import { createDockResizer, workspaceDockMax } from '../../../components/dock-resizer.js';
+import { attachDragReorder } from '../../../components/drag-reorder.js';
+import { defineTimelineActions, attachTimelineShortcuts } from './timeline-actions.js';
 import {
   layerTreeRows, buildLayerRow, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode,
   nameClickPending, scheduleNameSelect, cancelNameClick,
@@ -305,6 +310,14 @@ export function mountAnimationTimeline(el) {
     if (!anim?.frames.length) return;
     pickEntry(anim, last ? anim.frames.length - 1 : 0);
   }
+  // `,` / `.`: the previous / next entry of the selected animation, wrapping.
+  function stepInAnimation(delta) {
+    const anim = selectedAnim();
+    if (!anim?.frames.length) return;
+    const column = current();
+    const index = column?.animationId === anim.id ? column.index : 0;
+    pickEntry(anim, (index + delta + anim.frames.length) % anim.frames.length);
+  }
   btnPrev.addEventListener('click', () => step(-1));
   btnNext.addEventListener('click', () => step(1));
   btnFirst.addEventListener('click', () => edge(false));
@@ -317,11 +330,21 @@ export function mountAnimationTimeline(el) {
   // work by hand, so they are not asked again this session.
   const declinedForReorder = new Set();
 
+  // Auto-lays-out `anim`. Frames of different sizes or pivots are re-framed
+  // at the suggested (largest) size only after an explicit yes, since that
+  // can crop pixels. -> the command result, or null when that yes was refused.
+  function autoLayoutWithSizePrompt(s, anim) {
+    const result = dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id });
+    if (!result?.needsSize) return result;
+    const { w, h } = result.suggested;
+    if (!confirmOrAuto(`"${anim.name}" has frames of different sizes or pivots. Lay it out at ${w}×${h}? `
+      + 'Each frame is re-framed around its pivot; pixels outside the new frame are cropped.')) return null;
+    return dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id, size: result.suggested });
+  }
+
   // An offer -- { mark } -- once the animation is auto-laid-out, else false.
   // `mark` is the history position before an accepted conversion (null when
-  // it already was auto), which settleOffer folds the gesture into. Frames of
-  // different sizes or pivots are re-framed at the suggested (largest) size
-  // only after a second, explicit yes, since that can crop pixels.
+  // it already was auto), which settleOffer folds the gesture into.
   function ensureAuto(s, anim, { forReorder = false } = {}) {
     if (anim.layout === 'auto') return { mark: null };
     if (forReorder && declinedForReorder.has(anim.id)) return false;
@@ -332,16 +355,8 @@ export function mountAnimationTimeline(el) {
     // A pending float commits as its own undo step, outside the gesture.
     commitFloatIfAny();
     const mark = host.history.mark();
-    let result = dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id });
-    if (result?.needsSize) {
-      const { w, h } = result.suggested;
-      if (!confirmOrAuto(`"${anim.name}" has frames of different sizes or pivots. Lay it out at ${w}×${h}? `
-        + 'Each frame is re-framed around its pivot; pixels outside the new frame are cropped.')) {
-        if (forReorder) declinedForReorder.add(anim.id);
-        return false;
-      }
-      result = dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id, size: result.suggested });
-    }
+    const result = autoLayoutWithSizePrompt(s, anim);
+    if (!result && forReorder) declinedForReorder.add(anim.id);
     return result?.ok ? { mark } : false;
   }
 
@@ -354,81 +369,210 @@ export function mountAnimationTimeline(el) {
     else host.history.rollbackTo(offer.mark);
   }
 
+  // Runs `gesture(s, anim)` -> a command result on `anim`, first offering
+  // the auto layout when it is manual; an accepted offer and the gesture
+  // are one undo step. -> the result when it succeeded, else null.
+  function withAuto(anim, gesture) {
+    const s = sheet();
+    if (!s || !anim) return null;
+    stopPlaying(); // a structural change; playback would index stale entries
+    const offer = ensureAuto(s, anim);
+    if (!offer) return null;
+    const result = gesture(s, findAnim(anim.id));
+    settleOffer(offer, !!result?.ok);
+    return result?.ok ? result : null;
+  }
+
   // Inserts a frame at entry `at` of an auto animation -- a copy of copyOf,
-  // else blank -- and selects it. True on success.
+  // else blank -- and selects it. -> the command result.
   function insertAt(s, animationId, at, copyOf) {
     stopPlaying(); // a structural change; playback would index stale entries
     const result = dispatchLayout('animations.addFrame', { sheetId: s.id, animationId, at, copyOf });
-    const anim = findAnim(animationId);
-    if (result?.ok && anim?.frames[at]) select({ animationId, index: at, frameId: anim.frames[at].frameId });
-    return !!result?.ok;
+    if (result?.ok) pickEntry(findAnim(animationId), at);
+    return result;
   }
 
-  function insert(copy) {
-    const s = sheet(), anim = selectedAnim();
-    if (!s || anim?.layout !== 'auto') return;
-    const column = current()?.animationId === anim.id ? current() : null;
-    const at = column ? column.index + 1 : anim.frames.length;
-    insertAt(s, anim.id, at, copy ? column?.frameId ?? null : null);
+  // ---- operations on the selection (the actions in timeline-actions.js) ----
+  const rangeArgs = (s, r) => ({ sheetId: s.id, animationId: r.anim.id, from: r.from, to: r.to });
+
+  // A blank frame after the selection (the animation's end without one).
+  function insertBlank() {
+    const anim = selectedAnim(), r = selectedRange();
+    if (!anim) return;
+    withAuto(anim, (s, a) => insertAt(s, a.id, r ? r.to + 1 : a.frames.length, null));
   }
-  btnAdd.addEventListener('click', () => insert(false));
-  btnDuplicate.addEventListener('click', () => insert(true));
+
+  // Copies of the selected entries right after them; the copies become the
+  // selection (the dragged column's counterpart selected).
+  function duplicateFrames() {
+    const r = selectedRange();
+    if (!r) return;
+    const result = withAuto(r.anim, s => dispatchLayout('animations.duplicateFrames', rangeArgs(s, r)));
+    if (result) setRange(findAnim(r.anim.id), result.from, result.to, result.from + r.column.index - r.from);
+  }
+
+  // Another use of the selected column's frame after the selection.
+  function insertLinked() {
+    const r = selectedRange();
+    if (!r) return;
+    const at = r.to + 1;
+    const result = withAuto(r.anim, (s, a) => dispatchLayout('animations.linkFrame', { sheetId: s.id, animationId: a.id, at, frameId: r.column.frameId }));
+    if (result) pickEntry(findAnim(r.anim.id), at);
+  }
+
+  // Gives the selected (linked) column a frame of its own.
+  function unlinkFrame() {
+    const r = selectedRange();
+    if (!r) return;
+    withAuto(r.anim, (s, a) => dispatchLayout('animations.unlinkFrame', { sheetId: s.id, animationId: a.id, index: r.column.index }));
+  }
+
+  // Removes the selected entries (both layouts) and selects the neighbour.
+  function deleteFrames() {
+    const s = sheet(), r = selectedRange();
+    if (!s || !r) return;
+    stopPlaying();
+    if (!dispatchLayout('animations.deleteFrames', rangeArgs(s, r))?.ok) return;
+    const anim = findAnim(r.anim.id);
+    pickEntry(anim, Math.min(r.from, (anim?.frames.length ?? 0) - 1));
+  }
+
+  function reverseFrames() {
+    const s = sheet(), r = selectedRange();
+    if (!s || !r || r.to === r.from) return;
+    stopPlaying();
+    if (dispatchLayout('animations.reverseFrames', rangeArgs(s, r))?.ok) setRange(findAnim(r.anim.id), r.from, r.to, r.column.index);
+  }
+
+  // The selected layer's pixels inside the selected column's frame.
+  function clearCel() {
+    const s = sheet(), r = selectedRange(), layerId = selection().layerId;
+    if (s && r && layerId) dispatchLayout('animations.clearCel', { sheetId: s.id, frameId: r.column.frameId, layerId });
+  }
+
+  // ---- tag operations ----
+  const animArgs = (s, anim) => ({ sheetId: s.id, animationId: anim.id });
+
+  function setDirection(direction) {
+    const s = sheet(), anim = selectedAnim();
+    if (s && anim) dispatch('sprites.setAnimationDirection', { ...animArgs(s, anim), direction });
+  }
+
+  function setColor(color) {
+    const s = sheet(), anim = findAnim(colorInput.dataset.animationId) ?? selectedAnim();
+    if (s && anim) dispatch('sprites.setAnimationColor', { ...animArgs(s, anim), color });
+  }
+  // Colour…: the browser's colour picker on a hidden input; its `change`
+  // (the picker closed on a colour) is one undo step.
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.className = 'anim-tl-color-input';
+  colorInput.tabIndex = -1;
+  colorInput.addEventListener('change', () => setColor(colorInput.value));
+  header.appendChild(colorInput);
+  function pickColor() {
+    const anim = selectedAnim();
+    if (!anim) return;
+    colorInput.dataset.animationId = anim.id;
+    colorInput.value = anim.color ?? '#4f8cff';
+    try { if (colorInput.showPicker) colorInput.showPicker(); else colorInput.click?.(); } catch { colorInput.click?.(); }
+  }
+
+  function toggleLoop() {
+    const s = sheet(), anim = selectedAnim();
+    if (s && anim) dispatch('sprites.toggleAnimationLoop', { ...animArgs(s, anim), loop: !anim.loop });
+  }
+
+  function duplicateAnimation() {
+    const result = withAuto(selectedAnim(), (s, a) => dispatchLayout('animations.duplicate', animArgs(s, a)));
+    if (result?.animationId) pickEntry(findAnim(result.animationId), 0);
+  }
+
+  function autoLayoutSelected() {
+    const s = sheet(), anim = selectedAnim();
+    if (s && anim && anim.layout !== 'auto') autoLayoutWithSizePrompt(s, anim);
+  }
+
+  function makeManualSelected() {
+    const s = sheet(), anim = selectedAnim();
+    if (s && anim?.layout === 'auto') dispatchLayout('animations.makeManual', animArgs(s, anim));
+  }
+
+  function deleteAnimation() {
+    const s = sheet(), anim = selectedAnim();
+    if (!s || !anim) return;
+    const message = anim.layout === 'auto' ? `Delete animation "${anim.name}" and its frames?` : `Delete animation "${anim.name}"?`;
+    if (!confirmOrAuto(message)) return;
+    stopPlaying();
+    dispatchLayout('animations.delete', animArgs(s, anim));
+  }
+
+  btnAdd.addEventListener('click', insertBlank);
+  btnDuplicate.addEventListener('click', duplicateFrames);
 
   // A `+` gap: a blank frame at `at`; Alt copies the frame to its left.
   function onGap(e, animationId, at) {
     e.stopPropagation();
-    const s = sheet(), anim = findAnim(animationId);
-    if (!s || !anim) return;
-    stopPlaying();
-    const offer = ensureAuto(s, anim);
-    if (!offer) return;
-    settleOffer(offer, insertAt(s, animationId, at, e.altKey ? anim.frames[at - 1]?.frameId ?? null : null));
+    const anim = findAnim(animationId);
+    withAuto(anim, (s, a) => insertAt(s, animationId, at, e.altKey ? a.frames[at - 1]?.frameId ?? null : null));
   }
 
-  // A frame number dropped before/after `target` (same animation only):
-  // reorder, or with Ctrl a linked use. A manual animation declining the
-  // auto-layout offer still reorders; it cannot take a linked use.
-  function dropColumn(from, target, before, link) {
-    const s = sheet(), anim = findAnim(target.animationId);
-    if (!s || !anim || from.animationId !== target.animationId) return;
-    stopPlaying();
-    const at = target.index + (before ? 0 : 1);
-    if (link) {
-      const offer = ensureAuto(s, anim);
-      if (!offer) return;
-      const result = dispatchLayout('animations.linkFrame', { sheetId: s.id, animationId: anim.id, at, frameId: from.frameId });
-      settleOffer(offer, !!result?.ok);
-      if (result?.ok) select({ animationId: anim.id, index: at, frameId: from.frameId });
+  // ---- frame-number drags (js/components/drag-reorder.js) ----
+  // Keys are global column indexes; drops stay inside the dragged column's
+  // animation. Plain: move the selected range when the dragged column is in
+  // it, else that column (animations.moveFrames, either layout -- a manual
+  // animation is offered the auto layout once, and a declined offer still
+  // moves the entries by hand). Alt: copies (needs the auto layout). Ctrl:
+  // a linked use of the dragged column alone.
+  function dragColumns(sourceKey, targetKey) {
+    const cols = columns();
+    const source = cols[Number(sourceKey)], target = cols[Number(targetKey)];
+    return source && target && source.animationId === target.animationId ? { source, target } : null;
+  }
+
+  function onFrameDrop({ sourceKey, targetKey, place, modifiers }) {
+    const pair = dragColumns(sourceKey, targetKey);
+    const s = sheet(), anim = pair && findAnim(pair.source.animationId);
+    if (!s || !anim) return;
+    const { source, target } = pair;
+    const at = target.index + (place === 'after' ? 1 : 0);
+    if (modifiers.link) {
+      const result = withAuto(anim, (sh, a) => dispatchLayout('animations.linkFrame', { sheetId: sh.id, animationId: a.id, at, frameId: source.frameId }));
+      if (result) pickEntry(findAnim(anim.id), at);
       return;
     }
-    const to = from.index < at ? at - 1 : at; // removal shifts later entries left
-    if (to === from.index) return;
+    const r = selectedRange();
+    const { from, to } = r && r.anim.id === anim.id && source.index >= r.from && source.index <= r.to ? r : { from: source.index, to: source.index };
+    const reselect = result => setRange(findAnim(anim.id), result.from, result.to, result.from + source.index - from);
+    if (modifiers.copy) {
+      const result = withAuto(anim, (sh, a) => dispatchLayout('animations.copyFrames', { sheetId: sh.id, animationId: a.id, from, to, at }));
+      if (result) reselect(result);
+      return;
+    }
+    if (at >= from && at <= to + 1) return; // inside or touching the moved entries
+    stopPlaying();
     const offer = ensureAuto(s, anim, { forReorder: true });
-    const result = offer
-      ? dispatchLayout('animations.moveFrame', { sheetId: s.id, animationId: anim.id, from: from.index, to })
-      : dispatch('sprites.reorderAnimationFrame', { sheetId: s.id, animationId: anim.id, fromIndex: from.index, toIndex: to });
-    settleOffer(offer, result?.ok !== false);
-    if (result?.ok !== false) select({ animationId: anim.id, index: to, frameId: from.frameId });
+    const result = dispatchLayout('animations.moveFrames', { sheetId: s.id, animationId: anim.id, from, to, at });
+    settleOffer(offer, !!result?.ok);
+    if (result?.ok) reselect(result);
   }
 
-  function removeSelected() {
-    const s = sheet(), anim = selectedAnim(), column = current();
-    if (!s || !anim || column?.animationId !== anim.id) return;
-    stopPlaying(); // a structural change; playback would index stale entries
-    const args = { sheetId: s.id, animationId: anim.id, index: column.index };
-    const result = anim.layout === 'auto' ? dispatchLayout('animations.deleteFrame', args) : dispatch('sprites.removeAnimationFrame', args);
-    if (!result?.ok) return;
-    const next = Math.min(column.index, anim.frames.length - 1);
-    if (next >= 0) select({ animationId: anim.id, index: next, frameId: anim.frames[next].frameId });
-  }
-  btnRemove.addEventListener('click', removeSelected);
+  const disposeDrag = attachDragReorder(numsRow, {
+    axis: 'x',
+    itemSelector: '.anim-tl-num',
+    canDrop: (sourceKey, { targetKey }) => !!dragColumns(sourceKey, targetKey),
+    modifiers: e => ({ link: !!(e.ctrlKey || e.metaKey), copy: !!e.altKey && !(e.ctrlKey || e.metaKey) }),
+    onDrop: onFrameDrop,
+  });
+
+  btnRemove.addEventListener('click', deleteFrames);
 
   // Keys on the focused grid itself: never from a control inside it (a
   // rename or duration input, a layer row's buttons).
   grid.tabIndex = 0;
   grid.addEventListener('keydown', (e) => {
     if (e.target !== grid) return;
-    if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); removeSelected(); }
+    if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); deleteFrames(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); if (e.shiftKey) extend(-1); else step(-1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); if (e.shiftKey) extend(1); else step(1); }
   });
@@ -530,13 +674,6 @@ export function mountAnimationTimeline(el) {
     return gap;
   }
 
-  // The column being dragged by its number, while a drag is on.
-  let dragColumn = null;
-  const dropBefore = (num, e) => {
-    const rect = num.getBoundingClientRect();
-    return (e.clientX - rect.left) < rect.width / 2;
-  };
-
   function buildNum(column, i, last, inRange) {
     const num = document.createElement('div');
     num.className = inRange ? 'anim-tl-num in-range' : 'anim-tl-num';
@@ -557,32 +694,11 @@ export function mountAnimationTimeline(el) {
     num.appendChild(gapButton(column.animationId, column.index, column.index === 0 ? 'start' : ''));
     if (last) num.appendChild(gapButton(column.animationId, column.index + 1, 'end'));
 
+    // Dragged through attachDragReorder on the numbers row (onFrameDrop).
+    num.dataset.dragKey = String(i);
     num.addEventListener('click', e => pick(column, e.shiftKey));
-    num.draggable = true;
-    num.title = 'Click to select; drag to reorder (Ctrl: insert a linked use)';
-    num.addEventListener('dragstart', (e) => {
-      dragColumn = column;
-      e.dataTransfer.effectAllowed = 'copyMove';
-      e.dataTransfer.setData('text/plain', String(column.index));
-    });
-    num.addEventListener('dragend', () => { dragColumn = null; });
-    num.addEventListener('dragover', (e) => {
-      if (dragColumn?.animationId !== column.animationId) return; // not across tags
-      e.preventDefault();
-      e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move';
-      const before = dropBefore(num, e);
-      num.classList.toggle('drag-before', before);
-      num.classList.toggle('drag-after', !before);
-    });
-    num.addEventListener('dragleave', () => num.classList.remove('drag-before', 'drag-after'));
-    num.addEventListener('drop', (e) => {
-      num.classList.remove('drag-before', 'drag-after');
-      const from = dragColumn;
-      dragColumn = null;
-      if (from?.animationId !== column.animationId) return;
-      e.preventDefault();
-      dropColumn(from, column, dropBefore(num, e), e.ctrlKey);
-    });
+    num.title = 'Click to select (Shift: extend), double-click for its duration; '
+      + 'drag to move (Alt: copy, Ctrl: insert a linked use)';
     return num;
   }
 
@@ -754,5 +870,30 @@ export function mountAnimationTimeline(el) {
   ], renderUnlessNameClickPending, { onDispose: stopPlaying });
   const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
   const disposePixels = host.store.subscribe(s => s.workspace.pixelRevision, refreshPixels);
-  return { ...panel, dispose() { disposeHistory(); disposePixels(); resizer.dispose(); panel.dispose(); } };
+
+  // ---- actions and shortcuts (timeline-actions.js) ----
+  const selectedLayerNode = () => { const s = sheet(), id = selection().layerId; return s && id ? findLayer(s.layerTree, id) : null; };
+  const frameUses = frameId => (sheet()?.animations ?? []).reduce((n, a) => n + a.frames.filter(e => e.frameId === frameId).length, 0);
+  const timeline = {
+    active: () => host.store.getState().session.activeModeId === 'animations',
+    state: () => {
+      const range = selectedRange();
+      return { anim: selectedAnim(), range, layer: selectedLayerNode(), linked: !!range && frameUses(range.column.frameId) > 1, playing };
+    },
+    togglePlay: () => (playing ? stopPlaying() : startPlaying()),
+    step: stepInAnimation,
+    focusDuration, insertBlank, insertLinked, deleteFrames, clearCel, setDirection, setColor, pickColor, toggleLoop,
+    duplicateAnimation, deleteAnimation,
+    duplicate: duplicateFrames, unlink: unlinkFrame, reverse: reverseFrames, renameTag: renameSelectedTag,
+    autoLayout: autoLayoutSelected, makeManual: makeManualSelected,
+  };
+  defineTimelineActions(timeline);
+  const disposeShortcuts = attachTimelineShortcuts(timeline);
+
+  return {
+    ...panel,
+    dispose() {
+      disposeHistory(); disposePixels(); disposeShortcuts(); disposeDrag(); resizer.dispose(); panel.dispose();
+    },
+  };
 }

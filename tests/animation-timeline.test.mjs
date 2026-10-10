@@ -26,6 +26,7 @@ host.start('animations');
 initFloatSession();
 registerFloatView('canvas', { getSelection: () => null, setSelection() {}, getTargetRect: () => ({ x: 0, y: 0, w: 24, h: 16 }) });
 const dock = new Element();
+document.body.append(dock); // connected, as drag-reorder requires
 mountAnimationTimeline(dock);
 const previewEl = new Element(); previewEl.parentElement = new Element();
 mountPreviewPanel(previewEl);
@@ -256,8 +257,15 @@ test('the playing column is marked on its number and, expanded, its composite ce
 const nums = () => dock.querySelectorAll('.anim-tl-num');
 const gaps = () => dock.querySelectorAll('.anim-tl-gap');
 const grid = () => dock.querySelector('.anim-tl-grid');
-const dragData = { setData() {}, effectAllowed: '' };
-const dropData = { getData: () => '' };
+const pointerEvent = (type, props) => Object.assign(new Event(type, { cancelable: true }), { pointerId: 1, button: 0, ...props });
+// Drags frame number `from` (numbers sit 24px apart from x = 0) to clientX
+// `toX` and drops it there, with modifier keys held throughout.
+function dragNum(from, toX, mods = {}) {
+  nums().forEach((n, i) => { n.rect = { left: i * 24, top: 0, width: 24, height: 20 }; });
+  nums()[from].dispatch('pointerdown', { pointerId: 1, button: 0, clientX: from * 24 + 12, clientY: 10, ...mods });
+  window.dispatchEvent(pointerEvent('pointermove', { clientX: toX, clientY: 10, ...mods }));
+  window.dispatchEvent(pointerEvent('pointerup', { clientX: toX, clientY: 10, ...mods }));
+}
 
 test('a gap inserts a blank frame there; Alt duplicates the frame to its left', async () => {
   const { run, a } = await reset();
@@ -282,27 +290,94 @@ test('the gap after an animation\'s last column appends to that animation', asyn
 
 test('dragging a header onto another column of its animation reorders it', async () => {
   const { run, a, b } = await reset();
-  nums()[0].fire('dragstart', { dataTransfer: dragData });
-  nums()[1].fire('drop', { clientX: 200, ctrlKey: false, dataTransfer: dropData });
+  dragNum(0, 44);
   assert.deepEqual(run.frames.map(e => e.frameId), [b.id, a.id]);
 });
 
 test('Ctrl+drop inserts a linked use of the dragged frame', async () => {
   const { run, a } = await reset();
-  nums()[0].fire('dragstart', { dataTransfer: dragData });
-  nums()[1].fire('drop', { clientX: 200, ctrlKey: true, dataTransfer: dropData });
+  dragNum(0, 44, { ctrlKey: true });
   assert.equal(run.frames.length, 3);
   assert.equal(run.frames[2].frameId, a.id);
 });
 
 test('a column dropped on another animation is ignored', async () => {
   const { run, jump } = await reset();
-  nums()[0].fire('dragstart', { dataTransfer: dragData });
-  let allowed = false;
-  nums()[2].fire('dragover', { clientX: 0, dataTransfer: {}, preventDefault() { allowed = true; } });
-  nums()[2].fire('drop', { clientX: 0, ctrlKey: false, dataTransfer: dropData });
-  assert.equal(allowed, false, 'not a drop target');
+  dragNum(0, 52);
+  dragNum(0, 70, { ctrlKey: true });
   assert.equal(run.frames.length, 2); assert.equal(jump.frames.length, 1);
+  assert.equal(document.body.querySelectorAll('.dr-line').length, 0, 'the drag cleaned up');
+});
+
+// Run becomes A, B, D (D a new auto frame); Jump stays C.
+async function resetThree() {
+  const fixture = await reset();
+  const d = addFrame(fixture.sheet, { name: 'D', x: 16, y: 0, w: 8, h: 8 });
+  fixture.run.frames.push({ frameId: d.id, duration: null });
+  host.history.execute({ do() {}, undo() {} }); host.history.clear();
+  await tick();
+  return { ...fixture, d };
+}
+
+test('frame numbers are pointer-drag items, no longer native draggables', async () => {
+  await reset();
+  assert.ok(nums().every(n => n.draggable !== true));
+  assert.deepEqual(nums().map(n => n.dataset.dragKey), ['0', '1', '2']);
+});
+
+test('dragging a column inside the range moves the whole range as one undo step', async () => {
+  const { run, a, b, d } = await resetThree();
+  nums()[0].fire('click', {}); nums()[1].fire('click', { shiftKey: true }); await tick();
+  dragNum(1, 68); // after D
+  assert.deepEqual(run.frames.map(e => e.frameId), [d.id, a.id, b.id]);
+  assert.equal(host.selections.get().entryIndex, 2, 'the dragged column stays selected');
+  await tick();
+  assert.deepEqual(rangeOfNums(), [false, true, true, false], 'the range moved with it');
+  host.history.undo();
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id, d.id]);
+});
+
+test('dragging a column outside the range moves only that column', async () => {
+  const { run, a, b, d } = await resetThree();
+  nums()[0].fire('click', {}); nums()[1].fire('click', { shiftKey: true }); await tick();
+  dragNum(2, 4); // D before A
+  assert.deepEqual(run.frames.map(e => e.frameId), [d.id, a.id, b.id]);
+  assert.equal(host.selections.get().frameId, d.id);
+});
+
+test('Alt+drop copies the dragged range there as one undo step', async () => {
+  const { run, a, b, d } = await resetThree();
+  nums()[0].fire('click', {}); nums()[1].fire('click', { shiftKey: true }); await tick();
+  dragNum(0, 68, { altKey: true });
+  assert.equal(run.frames.length, 5);
+  assert.deepEqual(run.frames.slice(0, 3).map(e => e.frameId), [a.id, b.id, d.id]);
+  assert.ok(run.frames.slice(3).every(e => ![a.id, b.id, d.id].includes(e.frameId)), 'independent copies');
+  assert.equal(host.selections.get().entryIndex, 3, 'the copy of the dragged column is selected');
+  host.history.undo();
+  assert.equal(run.frames.length, 3);
+});
+
+test('Alt+drop on a manual animation offers the auto layout; accepting is one undo step', async () => {
+  const { run, a, b } = await reset();
+  run.layout = 'manual'; run.cell = null; host.history.execute({ do() {}, undo() {} }); await tick();
+  confirmAnswer = false;
+  dragNum(0, 44, { altKey: true });
+  assert.equal(run.layout, 'manual'); assert.equal(run.frames.length, 2);
+  confirmAnswer = true;
+  dragNum(0, 44, { altKey: true });
+  assert.equal(run.layout, 'auto'); assert.equal(run.frames.length, 3);
+  host.history.undo();
+  assert.equal(run.layout, 'manual');
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id]);
+});
+
+test('Ctrl+drag links only the dragged column, even inside a range', async () => {
+  const { run, a, d } = await resetThree();
+  nums()[0].fire('click', {}); nums()[1].fire('click', { shiftKey: true }); await tick();
+  dragNum(0, 68, { ctrlKey: true });
+  assert.equal(run.frames.length, 4);
+  assert.equal(run.frames[3].frameId, a.id);
+  assert.equal(run.frames[2].frameId, d.id);
 });
 
 test('Delete on the focused timeline removes the selected column', async () => {
@@ -349,8 +424,7 @@ test('declining the offer still reorders a manual animation without layout', asy
   const { run, a, b } = await reset();
   run.layout = 'manual'; run.cell = null; host.history.execute({ do() {}, undo() {} }); await tick();
   confirmAnswer = false;
-  nums()[0].fire('dragstart', { dataTransfer: dragData });
-  nums()[1].fire('drop', { clientX: 200, ctrlKey: false, dataTransfer: dropData });
+  dragNum(0, 44);
   confirmAnswer = true;
   assert.equal(run.layout, 'manual');
   assert.deepEqual(run.frames.map(e => e.frameId), [b.id, a.id]);
@@ -438,8 +512,7 @@ test('a declined offer is not asked again when reordering that animation', async
   globalThis.confirm = () => { asked++; return false; };
   try {
     for (let i = 0; i < 2; i++) {
-      nums()[0].fire('dragstart', { dataTransfer: dragData });
-      nums()[1].fire('drop', { clientX: 200, ctrlKey: false, dataTransfer: dropData });
+      dragNum(0, 44);
     }
   } finally { globalThis.confirm = () => confirmAnswer; }
   assert.equal(asked, 1);
@@ -454,8 +527,7 @@ test('a declined crop prompt is not asked again when reordering that animation',
   globalThis.confirm = message => { asked.push(message); return /laid out by hand/.test(message); };
   try {
     for (let i = 0; i < 2; i++) {
-      nums()[0].fire('dragstart', { dataTransfer: dragData });
-      nums()[1].fire('drop', { clientX: 200, ctrlKey: false, dataTransfer: dropData });
+      dragNum(0, 44);
     }
   } finally { globalThis.confirm = () => confirmAnswer; }
   assert.equal(asked.length, 2, 'both prompts once, not again on the second reorder');
@@ -468,8 +540,7 @@ test('a declined crop prompt is not asked again when reordering that animation',
 test('accepting the offer and Ctrl+dropping a linked use is one undo step', async () => {
   const { run, a, b } = await reset();
   run.layout = 'manual'; run.cell = null; host.history.execute({ do() {}, undo() {} }); await tick();
-  nums()[0].fire('dragstart', { dataTransfer: dragData });
-  nums()[1].fire('drop', { clientX: 200, ctrlKey: true, dataTransfer: dropData });
+  dragNum(0, 44, { ctrlKey: true });
   assert.equal(run.layout, 'auto'); assert.equal(run.frames.length, 3);
   host.history.undo();
   assert.equal(run.layout, 'manual'); assert.equal(run.frames.length, 2);
@@ -479,8 +550,7 @@ test('accepting the offer and Ctrl+dropping a linked use is one undo step', asyn
 test('accepting the offer and reordering is one undo step', async () => {
   const { run, a, b } = await reset();
   run.layout = 'manual'; run.cell = null; host.history.execute({ do() {}, undo() {} }); await tick();
-  nums()[0].fire('dragstart', { dataTransfer: dragData });
-  nums()[1].fire('drop', { clientX: 200, ctrlKey: false, dataTransfer: dropData });
+  dragNum(0, 44);
   assert.equal(run.layout, 'auto');
   assert.deepEqual(run.frames.map(e => e.frameId), [b.id, a.id]);
   host.history.undo();
