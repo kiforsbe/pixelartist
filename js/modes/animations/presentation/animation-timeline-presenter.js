@@ -26,8 +26,13 @@ import { setPreviewBitmap } from '../../../components/panels/preview-panel.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
 import { buildFrameDurationInput } from '../../../components/panels/frame-duration-input.js';
 import { createDockResizer, workspaceDockMax } from '../../../components/dock-resizer.js';
-import { layerTreeRows, buildLayerRow, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode, nameClickPending } from '../../../components/panels/layer-tree.js';
-import { timelineColumns, tagSpans, selectedColumn, celFilled } from '../application/timeline-model.js';
+import {
+  layerTreeRows, buildLayerRow, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode,
+  nameClickPending, scheduleNameSelect, cancelNameClick,
+} from '../../../components/panels/layer-tree.js';
+import {
+  timelineColumns, tagSpans, selectedColumn, celFilled, entryDurationLabel, directionGlyph, columnInRange,
+} from '../application/timeline-model.js';
 
 // Column width, px: the header's size control, remembered per browser.
 // From EXPAND_AT up the timeline shows thumbnails: a composite row and one
@@ -92,11 +97,14 @@ export function mountAnimationTimeline(el) {
   sizeInput.min = String(COL_MIN); sizeInput.max = String(COL_MAX); sizeInput.step = '4';
   sizeInput.value = String(colW);
   sizeInput.title = 'Column width (wide columns show thumbnails)';
-  sizeInput.addEventListener('input', () => {
-    colW = Math.max(COL_MIN, Math.min(COL_MAX, Number(sizeInput.value) || COL_DEFAULT));
+  // The slider and Ctrl+wheel over the grid set the same width.
+  function setColumnWidth(width) {
+    colW = Math.max(COL_MIN, Math.min(COL_MAX, width));
+    sizeInput.value = String(colW);
     try { localStorage.setItem(COL_KEY, String(colW)); } catch { /* per-browser convenience only */ }
     panel.scheduleRender();
-  });
+  }
+  sizeInput.addEventListener('input', () => setColumnWidth(Number(sizeInput.value) || COL_DEFAULT));
   btnAddLayer.addEventListener('click', addSheetLayer);
   btnAddFolder.addEventListener('click', addSheetGroup);
   btnDeleteNode.addEventListener('click', deleteSheetNode);
@@ -121,6 +129,13 @@ export function mountAnimationTimeline(el) {
   const empty = document.createElement('div');
   empty.className = 'anim-tl-empty';
   grid.append(tagsRow, numsRow, cellsRow, layersBox, empty);
+  // Ctrl+wheel zooms the columns (the slider's setting); a plain wheel
+  // scrolls as usual.
+  grid.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey || !e.deltaY) return;
+    e.preventDefault();
+    setColumnWidth(colW + (e.deltaY < 0 ? 4 : -4));
+  }, { passive: false });
 
   const main = document.createElement('div');
   main.className = 'timeline-main';
@@ -158,6 +173,53 @@ export function mountAnimationTimeline(el) {
     const s = sheet();
     if (!s || !column) return;
     host.selections.patch({ animationId: column.animationId, frameId: column.frameId, entryIndex: column.index }, sheetDocument(s));
+  }
+
+  // ---- range selection: presenter-local, within one animation ----
+  // `range` ({ animationId, from, to }, two or more entries) holds while the
+  // selected column lies inside it; otherwise the selected column alone is
+  // the selection. `anchor` is the last plain click, where Shift extends
+  // from. Both are dropped when another animation is selected.
+  let range = null, anchor = null;
+
+  function selectedRange() {
+    const anim = selectedAnim(), column = current();
+    if (!anim || column?.animationId !== anim.id) return null;
+    if (range?.animationId === anim.id && range.to < anim.frames.length && columnInRange(column, range)) {
+      return { anim, from: range.from, to: range.to, column };
+    }
+    return { anim, from: column.index, to: column.index, column };
+  }
+
+  // Selects `column`; with `extend` (Shift) the range runs from the anchor
+  // (else the selected column) to it, inside one animation only.
+  function pick(column, extend = false) {
+    stopPlaying();
+    const cur = current();
+    const base = !extend ? null
+      : anchor?.animationId === column.animationId ? anchor
+        : cur?.animationId === column.animationId ? cur : null;
+    anchor = { animationId: column.animationId, index: base ? base.index : column.index };
+    range = base && base.index !== column.index
+      ? { animationId: column.animationId, from: Math.min(base.index, column.index), to: Math.max(base.index, column.index) }
+      : null;
+    select(column);
+    panel.scheduleRender();
+  }
+
+  // Selects entry `index` of `anim` alone (or, with `extend`, up to it).
+  function pickEntry(anim, index, extend = false) {
+    if (!anim?.frames[index]) return;
+    pick({ animationId: anim.id, index, frameId: anim.frames[index].frameId }, extend);
+  }
+
+  // Sets the range to entries [from..to] of `anim` and selects `at` in it.
+  function setRange(anim, from, to, at = from) {
+    if (!anim?.frames[at]) return;
+    anchor = { animationId: anim.id, index: from };
+    range = to > from ? { animationId: anim.id, from, to } : null;
+    select({ animationId: anim.id, index: at, frameId: anim.frames[at].frameId });
+    panel.scheduleRender();
   }
 
   // ---- playback (drives the Preview panel only) ----
@@ -229,14 +291,19 @@ export function mountAnimationTimeline(el) {
     const cols = columns();
     if (!cols.length) return;
     const index = selectedColumn(cols, selection());
-    select(cols[index === -1 ? 0 : Math.max(0, Math.min(cols.length - 1, index + delta))]);
+    pick(cols[index === -1 ? 0 : Math.max(0, Math.min(cols.length - 1, index + delta))]);
+  }
+  // Shift+Left/Right: moves the range's free end, never out of the animation.
+  function extend(delta) {
+    const anim = selectedAnim(), column = current();
+    if (!anim || column?.animationId !== anim.id) return;
+    pickEntry(anim, Math.max(0, Math.min(anim.frames.length - 1, column.index + delta)), true);
   }
   function edge(last) {
     stopPlaying();
     const anim = selectedAnim();
     if (!anim?.frames.length) return;
-    const index = last ? anim.frames.length - 1 : 0;
-    select({ animationId: anim.id, index, frameId: anim.frames[index].frameId });
+    pickEntry(anim, last ? anim.frames.length - 1 : 0);
   }
   btnPrev.addEventListener('click', () => step(-1));
   btnNext.addEventListener('click', () => step(1));
@@ -362,28 +429,82 @@ export function mountAnimationTimeline(el) {
   grid.addEventListener('keydown', (e) => {
     if (e.target !== grid) return;
     if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); removeSelected(); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); if (e.shiftKey) extend(-1); else step(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); if (e.shiftKey) extend(1); else step(1); }
   });
 
   // ---- render ----
+  // A tag: its animation's name and direction glyph, drawn in its colour.
+  // A click selects the animation at once but defers the re-render (the
+  // layer names' grace window), so a double-click still lands on this tag
+  // and renames it inline.
   function buildTag(span) {
+    const anim = findAnim(span.animationId);
     const tag = document.createElement('div');
     tag.className = 'anim-tag';
+    tag.dataset.animationId = span.animationId;
     tag.textContent = span.name;
-    tag.title = span.name;
+    const dir = document.createElement('span');
+    dir.className = 'anim-tag-dir';
+    dir.textContent = directionGlyph(anim?.direction);
+    tag.appendChild(dir);
+    tag.title = `${span.name} — double-click to rename`;
     tag.style.width = `${span.length * colW}px`;
+    const color = anim?.color ?? 'var(--accent)';
+    tag.style.borderColor = color;
+    tag.style.background = `color-mix(in srgb, ${color} 30%, var(--bg3))`;
     tag.addEventListener('click', () => {
+      if (renaming) return;
       stopPlaying();
-      const anim = sheet()?.animations.find(a => a.id === span.animationId);
-      if (anim) select({ animationId: anim.id, index: 0, frameId: anim.frames[0].frameId });
+      scheduleNameSelect(() => pickEntry(findAnim(span.animationId), 0), () => panel.scheduleRender());
+    });
+    tag.addEventListener('dblclick', () => {
+      const a = findAnim(span.animationId);
+      if (a && !renaming) startTagRename(tag, a);
     });
     return tag;
   }
 
-  function buildCell(s, column, selected) {
+  // Inline rename of a tag (sprites.renameAnimation, one undo step). Renders
+  // wait while it is open so the field is not rebuilt under the caret.
+  let renaming = false;
+  function startTagRename(tag, anim) {
+    cancelNameClick();
+    renaming = true;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'anim-tag-rename';
+    input.value = anim.name;
+    tag.innerHTML = '';
+    tag.appendChild(input);
+    for (const type of ['click', 'dblclick', 'pointerdown']) input.addEventListener(type, e => e.stopPropagation());
+    let done = false;
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      renaming = false;
+      const s = sheet(), name = input.value.trim();
+      if (commit && s && name && name !== anim.name) dispatch('sprites.renameAnimation', { sheetId: s.id, animationId: anim.id, name });
+      panel.scheduleRender();
+    };
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.focus();
+    input.select?.();
+  }
+  // The selected animation's tag, renamed inline (the Rename action).
+  function renameSelectedTag() {
+    const anim = selectedAnim();
+    const tag = anim && tagsRow.querySelectorAll('.anim-tag').find(t => t.dataset.animationId === anim.id);
+    if (tag) startTagRename(tag, anim);
+  }
+
+  function buildCell(s, column, selected, inRange) {
     const cell = document.createElement('div');
-    cell.className = selected ? 'anim-tl-cell selected' : 'anim-tl-cell';
+    cell.className = 'anim-tl-cell' + (selected ? ' selected' : '') + (inRange ? ' in-range' : '');
     cell.style.width = cell.style.height = `${colW}px`;
     const thumb = document.createElement('canvas');
     thumb.width = thumb.height = colW - 8;
@@ -392,7 +513,7 @@ export function mountAnimationTimeline(el) {
     paint();
     pixelViews.push({ frameId: column.frameId, paint });
     cell.appendChild(thumb);
-    cell.addEventListener('click', () => { stopPlaying(); select(column); });
+    cell.addEventListener('click', e => pick(column, e.shiftKey));
     return cell;
   }
 
@@ -416,11 +537,16 @@ export function mountAnimationTimeline(el) {
     return (e.clientX - rect.left) < rect.width / 2;
   };
 
-  function buildNum(column, i, last) {
+  function buildNum(column, i, last, inRange) {
     const num = document.createElement('div');
-    num.className = 'anim-tl-num';
+    num.className = inRange ? 'anim-tl-num in-range' : 'anim-tl-num';
     num.style.width = `${colW}px`;
     num.textContent = String(i + 1);
+    const anim = findAnim(column.animationId), entry = anim?.frames[column.index];
+    const dur = document.createElement('span');
+    dur.className = 'anim-tl-dur';
+    dur.textContent = entry ? entryDurationLabel(anim, entry) : '';
+    num.appendChild(dur);
     if (column.linked) {
       const link = document.createElement('span');
       link.className = 'anim-tl-linked';
@@ -431,7 +557,7 @@ export function mountAnimationTimeline(el) {
     num.appendChild(gapButton(column.animationId, column.index, column.index === 0 ? 'start' : ''));
     if (last) num.appendChild(gapButton(column.animationId, column.index + 1, 'end'));
 
-    num.addEventListener('click', () => { stopPlaying(); select(column); });
+    num.addEventListener('click', e => pick(column, e.shiftKey));
     num.draggable = true;
     num.title = 'Click to select; drag to reorder (Ctrl: insert a linked use)';
     num.addEventListener('dragstart', (e) => {
@@ -469,10 +595,11 @@ export function mountAnimationTimeline(el) {
 
   // One cel: a layer's dot in that frame, or in expanded mode its pixels
   // there (a folder's cel is blank).
-  function buildCel(s, node, column, colSelected) {
+  function buildCel(s, node, column, colSelected, inRange) {
     const cel = document.createElement('div');
     const layerSelected = node.type === 'layer' && node.id === selection().layerId;
-    cel.className = 'anim-tl-cel' + (colSelected ? ' col-selected' : '') + (colSelected && layerSelected ? ' selected' : '');
+    cel.className = 'anim-tl-cel' + (colSelected ? ' col-selected' : '') + (colSelected && layerSelected ? ' selected' : '')
+      + (inRange ? ' in-range' : '');
     cel.style.width = `${colW}px`;
     if (node.type === 'layer') {
       const expanded = colW >= EXPAND_AT;
@@ -488,22 +615,22 @@ export function mountAnimationTimeline(el) {
       pixelViews.push({ frameId: column.frameId, paint });
       cel.appendChild(view);
     }
-    cel.addEventListener('click', () => {
+    cel.addEventListener('click', (e) => {
       stopPlaying();
       if (node.type === 'layer') selectTreeNode(s, node);
-      select(column);
+      pick(column, e.shiftKey);
     });
     return cel;
   }
 
-  function buildLayerLine(s, node, depth, cols, selectedIndex) {
+  function buildLayerLine(s, node, depth, cols, selectedIndex, rangeFlags) {
     const line = document.createElement('div');
     line.className = 'anim-tl-row anim-tl-layer';
     const head = document.createElement('div');
     head.className = 'anim-tl-head';
     head.appendChild(buildLayerRow(node, depth, { thumbs: null, onChange: () => panel.scheduleRender() }));
     line.appendChild(head);
-    cols.forEach((column, i) => line.appendChild(buildCel(s, node, column, i === selectedIndex)));
+    cols.forEach((column, i) => line.appendChild(buildCel(s, node, column, i === selectedIndex, rangeFlags[i])));
     return line;
   }
 
@@ -528,6 +655,39 @@ export function mountAnimationTimeline(el) {
     });
   }
 
+  // The header's duration control for the selection: the selected column's
+  // entry, or with a range every entry in it (one setFrameDurations step;
+  // the control's own rule picks ms or an fps hold step).
+  let focusDurationOnRender = false;
+  function renderDuration(s, sel) {
+    durationBox.innerHTML = '';
+    const entry = sel?.anim.frames[sel.column.index];
+    if (!entry) { focusDurationOnRender = false; return; }
+    const { anim, from, to } = sel;
+    const label = document.createElement('span');
+    label.textContent = from === to ? 'Frame' : `Frames ${from + 1}–${to + 1}`;
+    const send = from === to ? dispatch : (id, args) => dispatch('animations.setFrameDurations', {
+      sheetId: s.id, animationId: anim.id, from, to,
+      ...(id === 'sprites.setAnimationFrameStep' ? { step: args.step } : { duration: args.duration }),
+    });
+    const controls = buildFrameDurationInput(s, anim, entry, sel.column.index, send);
+    durationBox.append(label, ...controls);
+    if (focusDurationOnRender) {
+      focusDurationOnRender = false;
+      controls[0].focus();
+      controls[0].select?.();
+    }
+  }
+  // Double-click a frame number (or the Duration… action): after the click's
+  // selection has rendered, the header's duration field takes focus.
+  function focusDuration() {
+    focusDurationOnRender = true;
+    panel.scheduleRender();
+  }
+  numsRow.addEventListener('dblclick', (e) => {
+    if (e.target?.closest?.('.anim-tl-num') && !e.target.closest('.anim-tl-gap')) focusDuration();
+  });
+
   function render() {
     if (host.store.getState().session.activeModeId !== 'animations') { el.hidden = true; stopPlaying(); return; }
     el.hidden = false;
@@ -536,6 +696,11 @@ export function mountAnimationTimeline(el) {
     const s = sheet(), anim = selectedAnim();
     const cols = columns();
     const selectedIndex = selectedColumn(cols, selection());
+    if (range && range.animationId !== anim?.id) range = null;
+    if (anchor && anchor.animationId !== anim?.id) anchor = null;
+    const sel = selectedRange();
+    const multi = sel && sel.to > sel.from ? { animationId: sel.anim.id, from: sel.from, to: sel.to } : null;
+    const rangeFlags = cols.map(column => columnInRange(column, multi));
     // Rebuilding drops a focused child (a clicked gap or row button); the
     // grid takes focus back so its keys keep working.
     const hadFocus = grid.contains(document.activeElement);
@@ -547,20 +712,15 @@ export function mountAnimationTimeline(el) {
       if (expanded) cellsRow.appendChild(corner('Frame'));
       for (const span of tagSpans(s)) tagsRow.appendChild(buildTag(span));
       cols.forEach((column, i) => {
-        numsRow.appendChild(buildNum(column, i, cols[i + 1]?.animationId !== column.animationId));
-        if (expanded) cellsRow.appendChild(buildCell(s, column, i === selectedIndex));
+        numsRow.appendChild(buildNum(column, i, cols[i + 1]?.animationId !== column.animationId, rangeFlags[i]));
+        if (expanded) cellsRow.appendChild(buildCell(s, column, i === selectedIndex, rangeFlags[i]));
       });
-      for (const { node, depth } of layerTreeRows(s.layerTree)) layersBox.appendChild(buildLayerLine(s, node, depth, cols, selectedIndex));
+      for (const { node, depth } of layerTreeRows(s.layerTree)) {
+        layersBox.appendChild(buildLayerLine(s, node, depth, cols, selectedIndex, rangeFlags));
+      }
     }
     if (hadFocus && !grid.contains(document.activeElement)) grid.focus({ preventScroll: true });
-    durationBox.innerHTML = '';
-    const col = cols[selectedIndex];
-    const colAnim = col && s?.animations.find(a => a.id === col.animationId);
-    if (colAnim?.frames[col.index]) {
-      const label = document.createElement('span');
-      label.textContent = 'Frame';
-      durationBox.append(label, ...buildFrameDurationInput(s, colAnim, colAnim.frames[col.index], col.index, dispatch));
-    }
+    renderDuration(s, sel);
     empty.hidden = cols.length > 0;
     empty.textContent = !s ? 'No sprite sheet.' : 'No animation frames yet — create an animation in the Animations panel.';
 
@@ -583,7 +743,7 @@ export function mountAnimationTimeline(el) {
   // window ends would lose a following double-click (rename). The window's
   // end renders.
   function renderUnlessNameClickPending() {
-    if (!nameClickPending()) render();
+    if (!nameClickPending() && !renaming) render();
   }
 
   const panel = mountStorePanel(host.store, [

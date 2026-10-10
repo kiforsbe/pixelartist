@@ -3,6 +3,7 @@
 // every animation's entries, animation after animation in sheet order, under
 // one lane of tags. Frames that belong to no animation have no column.
 import { regionHasPixels } from '../../../core/pixels.js';
+import { effectiveDuration } from '../../../core/model.js';
 
 export function timelineColumns(sheet) {
   const columns = [];
@@ -39,4 +40,23 @@ export function selectedColumn(columns, { animationId, frameId, entryIndex } = {
 export function celFilled(sheet, layer, frameId) {
   const f = sheet.frames.find(fr => fr.id === frameId);
   return !!f && regionHasPixels(layer.bitmap, f.x, f.y, f.w, f.h);
+}
+
+// The duration shown under a frame number: the held step of an fps-based
+// animation (frame-duration-input.js edits a step there), else its ms.
+export function entryDurationLabel(anim, entry) {
+  if (anim.baseFps != null) return `×${entry.step ?? anim.baseStep ?? 1}`;
+  return `${effectiveDuration(anim, entry)}ms`;
+}
+
+const DIRECTION_GLYPHS = { forward: '→', reverse: '←', pingpong: '⇄', 'pingpong-reverse': '⇆' };
+
+// A tag's playback-direction mark.
+export function directionGlyph(direction) {
+  return DIRECTION_GLYPHS[direction] ?? DIRECTION_GLYPHS.forward;
+}
+
+// True when `column` lies in `range` ({ animationId, from, to }, inclusive).
+export function columnInRange(column, range) {
+  return !!range && column.animationId === range.animationId && column.index >= range.from && column.index <= range.to;
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { timelineColumns, tagSpans, selectedColumn, celFilled } from '../js/modes/animations/application/timeline-model.js';
+import { timelineColumns, tagSpans, selectedColumn, celFilled, entryDurationLabel, directionGlyph, columnInRange } from '../js/modes/animations/application/timeline-model.js';
 
 const sheet = {
   animations: [
@@ -47,4 +47,28 @@ test('celFilled reads the layer bitmap inside the frame rect', () => {
   assert.equal(celFilled(sheet, layer, 'l'), false);
   assert.equal(celFilled(sheet, layer, 'r'), true);
   assert.equal(celFilled(sheet, layer, 'nope'), false);
+});
+
+test('entryDurationLabel shows ms, or the held step of an fps-based animation', () => {
+  assert.equal(entryDurationLabel({ baseDuration: 100 }, { duration: null }), '100ms');
+  assert.equal(entryDurationLabel({ baseDuration: 100 }, { duration: 250 }), '250ms');
+  assert.equal(entryDurationLabel({ baseFps: 10, baseStep: 1 }, { step: 2 }), '×2');
+  assert.equal(entryDurationLabel({ baseFps: 10, baseStep: 3 }, {}), '×3');
+});
+
+test('directionGlyph names each playback direction, forward by default', () => {
+  assert.equal(directionGlyph('forward'), '→');
+  assert.equal(directionGlyph('reverse'), '←');
+  assert.equal(directionGlyph('pingpong'), '⇄');
+  assert.equal(directionGlyph('pingpong-reverse'), '⇆');
+  assert.equal(directionGlyph(undefined), '→');
+});
+
+test('columnInRange matches the range animation and its inclusive entries', () => {
+  const range = { animationId: 'run', from: 1, to: 2 };
+  assert.equal(columnInRange({ animationId: 'run', index: 1 }, range), true);
+  assert.equal(columnInRange({ animationId: 'run', index: 2 }, range), true);
+  assert.equal(columnInRange({ animationId: 'run', index: 0 }, range), false);
+  assert.equal(columnInRange({ animationId: 'idle', index: 1 }, range), false);
+  assert.equal(columnInRange({ animationId: 'run', index: 1 }, null), false);
 });

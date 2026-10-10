@@ -11,6 +11,7 @@ import { mountAnimationTimeline } from '../js/modes/animations/presentation/anim
 import { mountPreviewPanel } from '../js/components/panels/preview-panel.js';
 import { renderAnimationsPreview } from '../js/modes/animations/preview.js';
 import { initFloatSession, registerFloatView, createFloat, activeFloating } from '../js/components/canvas/float-session.js';
+import { cancelNameClick } from '../js/components/panels/layer-tree.js';
 
 const { Element } = installSpriteContextDom();
 globalThis.alert = () => {};
@@ -37,6 +38,7 @@ async function expand(width = '48') { sizeInput().value = width; sizeInput().fir
 
 // Auto "Run" (A, B) then auto "Jump" (C), all 8x8.
 async function reset() {
+  cancelNameClick(); // a tag click's deferred render from the previous test
   const project = createProject('Timeline');
   const sheet = createSheet(project, { name: 'Sheet', width: 24, height: 16, kind: 'sprite' });
   const a = addFrame(sheet, { name: 'A', x: 0, y: 0, w: 8, h: 8 });
@@ -534,4 +536,148 @@ test('the Animations timeline dock keeps the shared dock resizer first across re
   await reset(); await expand();
   assert.equal(dock.children[0].classList.contains('dock-resizer'), true);
   assert.equal(dock.querySelectorAll('.dock-resizer').length, 1);
+});
+
+// ---- range selection, durations, tags, column width (spec 2026-10-10 §5) ----
+
+const inRange = el => el.classList.contains('in-range');
+const rangeOfNums = () => nums().map(inRange);
+
+test('Shift-clicking a frame number extends a range from the last plain click', async () => {
+  const { b } = await reset();
+  nums()[0].fire('click', {});
+  nums()[1].fire('click', { shiftKey: true }); await tick();
+  assert.deepEqual(rangeOfNums(), [true, true, false]);
+  assert.equal(host.selections.get().frameId, b.id, 'the clicked column is the selected one');
+  assert.deepEqual(celsOf(layerRows()[0]).map(inRange), [true, true, false], 'cels show the range too');
+  nums()[1].fire('click', {}); await tick();
+  assert.deepEqual(rangeOfNums(), [false, false, false], 'a plain click selects one column');
+});
+
+test('Shift-clicking into another animation selects that column alone', async () => {
+  const { jump } = await reset();
+  nums()[0].fire('click', {});
+  nums()[2].fire('click', { shiftKey: true }); await tick();
+  assert.deepEqual(rangeOfNums(), [false, false, false]);
+  assert.equal(host.selections.get().animationId, jump.id);
+});
+
+test('Shift-clicking a cel extends the range and selects its layer', async () => {
+  const { sheet } = await reset();
+  host.selections.patch({ layerId: null });
+  celsOf(layerRows()[0])[0].fire('click', {});
+  celsOf(layerRows()[0])[1].fire('click', { shiftKey: true }); await tick();
+  assert.deepEqual(rangeOfNums(), [true, true, false]);
+  assert.equal(host.selections.get().layerId, sheetLayers(sheet)[0].id);
+});
+
+test('Shift+Arrow on the focused grid extends the range within the animation', async () => {
+  await reset();
+  grid().fire('keydown', { key: 'ArrowRight', shiftKey: true, target: grid() }); await tick();
+  assert.deepEqual(rangeOfNums(), [true, true, false]);
+  grid().fire('keydown', { key: 'ArrowRight', shiftKey: true, target: grid() }); await tick();
+  assert.deepEqual(rangeOfNums(), [true, true, false], 'never into the next animation');
+  grid().fire('keydown', { key: 'ArrowLeft', shiftKey: true, target: grid() }); await tick();
+  assert.deepEqual(rangeOfNums(), [false, false, false], 'back to the anchor alone');
+});
+
+test('the range clears when another animation is selected', async () => {
+  const { run, jump, a } = await reset();
+  nums()[1].fire('click', { shiftKey: true }); await tick();
+  assert.deepEqual(rangeOfNums(), [true, true, false]);
+  host.selections.patch({ animationId: jump.id, frameId: jump.frames[0].frameId, entryIndex: 0 }); await tick();
+  host.selections.patch({ animationId: run.id, frameId: a.id, entryIndex: 0 }); await tick();
+  assert.deepEqual(rangeOfNums(), [false, false, false]);
+});
+
+test('frame numbers show each entry\'s duration, or its held step in an fps animation', async () => {
+  const { run } = await reset();
+  run.frames[1].duration = 250; host.history.execute({ do() {}, undo() {} }); await tick();
+  assert.deepEqual(nums().map(n => n.querySelector('.anim-tl-dur').textContent), ['100ms', '250ms', '100ms']);
+  run.baseFps = 10; run.baseStep = 1; run.frames[1].step = 2; host.history.execute({ do() {}, undo() {} }); await tick();
+  assert.deepEqual(nums().slice(0, 2).map(n => n.querySelector('.anim-tl-dur').textContent), ['×1', '×2']);
+});
+
+test('double-clicking a frame number focuses the duration input', async () => {
+  await reset();
+  nums()[1].fire('click', {});
+  nums()[1].dispatch('dblclick', {});
+  await tick();
+  assert.equal(document.activeElement, dock.querySelector('.anim-tl-duration').querySelector('input'));
+});
+
+test('with a range, the header duration sets every entry in it as one undo step', async () => {
+  const { run } = await reset();
+  nums()[1].fire('click', { shiftKey: true }); await tick();
+  const input = dock.querySelector('.anim-tl-duration').querySelector('input');
+  input.value = '40'; input.fire('change');
+  assert.deepEqual(run.frames.map(e => e.duration), [40, 40]);
+  host.history.undo();
+  assert.deepEqual(run.frames.map(e => e.duration), [null, null]);
+});
+
+test('with a range in an fps animation, the header sets the held step of every entry', async () => {
+  const { run } = await reset();
+  run.baseFps = 10; run.baseStep = 1; host.history.execute({ do() {}, undo() {} }); await tick();
+  nums()[1].fire('click', { shiftKey: true }); await tick();
+  const input = dock.querySelector('.anim-tl-duration').querySelector('input');
+  input.value = '3'; input.fire('change');
+  assert.deepEqual(run.frames.map(e => e.step), [3, 3]);
+});
+
+test('tags are drawn in their animation\'s colour (default accent) with a direction glyph', async () => {
+  const { run } = await reset();
+  run.color = '#ff0000'; run.direction = 'pingpong'; host.history.execute({ do() {}, undo() {} }); await tick();
+  const [runTag, jumpTag] = dock.querySelectorAll('.anim-tag');
+  assert.equal(runTag.style.borderColor, '#ff0000');
+  assert.equal(runTag.querySelector('.anim-tag-dir').textContent, '⇄');
+  assert.equal(jumpTag.style.borderColor, 'var(--accent)');
+  assert.equal(jumpTag.querySelector('.anim-tag-dir').textContent, '→');
+});
+
+test('double-clicking a tag renames its animation inline as one undo step', async () => {
+  const { run } = await reset();
+  const tag = dock.querySelectorAll('.anim-tag')[0];
+  tag.fire('dblclick', {});
+  const input = tag.querySelector('input');
+  assert.ok(input, 'an inline name field');
+  assert.equal(document.activeElement, input);
+  input.value = 'Sprint'; input.fire('keydown', { key: 'Enter' });
+  assert.equal(run.name, 'Sprint');
+  await tick();
+  assert.equal(dock.querySelectorAll('.anim-tag')[0].textContent, 'Sprint');
+  host.history.undo();
+  assert.equal(run.name, 'Run');
+});
+
+test('Escape cancels an inline tag rename', async () => {
+  const { run } = await reset();
+  const tag = dock.querySelectorAll('.anim-tag')[0];
+  tag.fire('dblclick', {});
+  const input = tag.querySelector('input');
+  input.value = 'Nope'; input.fire('keydown', { key: 'Escape' });
+  assert.equal(run.name, 'Run');
+  assert.equal(host.history.canUndo(), false);
+});
+
+test('Ctrl+wheel over the grid changes the column width; a plain wheel is left to scroll', async () => {
+  await reset();
+  const stored = [];
+  const saved = globalThis.localStorage;
+  globalThis.localStorage = { getItem: () => null, setItem: (k, v) => stored.push([k, v]) };
+  try {
+    let prevented = false;
+    grid().fire('wheel', { ctrlKey: true, deltaY: -100, preventDefault() { prevented = true; } }); await tick();
+    assert.equal(prevented, true);
+    assert.equal(sizeInput().value, '28');
+    assert.equal(celsOf(layerRows()[0])[0].style.width, '28px');
+    assert.deepEqual(stored.at(-1), ['pixelartist.animTimelineColumn', '28']);
+    prevented = false;
+    grid().fire('wheel', { ctrlKey: false, deltaY: -100, preventDefault() { prevented = true; } }); await tick();
+    assert.equal(prevented, false);
+    assert.equal(sizeInput().value, '28');
+    for (let i = 0; i < 20; i++) grid().fire('wheel', { ctrlKey: true, deltaY: -100, preventDefault() {} });
+    await tick();
+    assert.equal(sizeInput().value, '64', 'clamped');
+  } finally { globalThis.localStorage = saved; }
 });
