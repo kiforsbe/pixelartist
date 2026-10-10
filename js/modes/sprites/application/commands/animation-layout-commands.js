@@ -8,9 +8,9 @@
 // without touching history. See
 // docs/superpowers/specs/2026-10-09-animations-workbench-design.md §2.
 import { addFrame, addAnimation, sheetLayers, MAX_DIM } from '../../../../core/model.js';
-import { createBitmap, copyRegion, blitRegion } from '../../../../core/pixels.js';
-import { applyLayout, undoLayout, redoLayout, hasPixels } from '../../../../core/sheet-layout.js';
-import { planLayout, distinctFrameIds, autoAnimationOf } from '../../../../domain/sprites/auto-layout.js';
+import { copyRegion } from '../../../../core/pixels.js';
+import { applyLayout, undoLayout, redoLayout, hasPixels, reframedContent } from '../../../../core/sheet-layout.js';
+import { planLayout, distinctFrameIds, autoAnimationOf, layoutMaxWidth } from '../../../../domain/sprites/auto-layout.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 export const NOT_AUTO = 'This animation is not auto-laid-out';
@@ -18,10 +18,6 @@ export const NOT_AUTO = 'This animation is not auto-laid-out';
 export const NEEDS_AUTO = 'Auto-layout this animation first';
 export const BAD_SIZE =`Canvas size must be whole numbers in 1..${MAX_DIM}`;
 const NO_SUCH = 'No such animation or frame';
-
-export function layoutMaxWidth(settings) {
-  return settings?.sheetMaxWidth ?? settings?.spriteSheetW ?? 256;
-}
 
 export function sheetDocument(sheet) {
   return { kind: 'sprite-sheet', id: sheet.id };
@@ -49,15 +45,6 @@ export function frameContent(sheet, frame) {
   return new Map(sheetLayers(sheet).map(l => [l.id, copyRegion(l.bitmap, frame.x, frame.y, frame.w, frame.h)]));
 }
 
-// Every layer's pixels of `frame`, re-framed onto a w x h canvas with the
-// old content's top-left at (ox, oy) -- cropping or padding as needed.
-export function reframedContent(sheet, frame, w, h, ox, oy) {
-  return new Map(sheetLayers(sheet).map(l => {
-    const bitmap = createBitmap(w, h);
-    blitRegion(bitmap, copyRegion(l.bitmap, frame.x, frame.y, frame.w, frame.h), ox, oy);
-    return [l.id, bitmap];
-  }));
-}
 
 export function uniqueFrameName(sheet, base) {
   const names = new Set(sheet.frames.map(f => f.name));

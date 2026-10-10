@@ -7,6 +7,11 @@ import { sheetLayers } from '../../core/model.js';
 export const NO_ROOM = 'Not enough room on the sheet: raise the maximum sheet width or trim the sheet';
 export const PINNED_HINT = 'Auto-laid-out — edit in Animations, or Make manual';
 
+// The widest a band of frames may be packed (project settings).
+export function layoutMaxWidth(settings) {
+  return settings?.sheetMaxWidth ?? settings?.spriteSheetW ?? 256;
+}
+
 export function distinctFrameIds(anim) {
   const seen = new Set();
   const out = [];

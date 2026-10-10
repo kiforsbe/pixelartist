@@ -673,3 +673,24 @@ test('a custom-mask brush survives the REAL JSON boundary a bundle writes', () =
   assert.equal(bits.length, 4, 'an empty array here is the exact failure this guards');
   assert.equal([...bits].join(''), '1001');
 });
+
+test('a sprite sheet has one sprite size, from the project frame size unless given; tile sheets have none', () => {
+  const p = createProject('demo');
+  p.settings.frameW = 24; p.settings.frameH = 32;
+  assert.deepEqual(createSheet(p, { name: 'a', width: 64, height: 64, kind: 'sprite' }).spriteSize, { w: 24, h: 32 });
+  assert.deepEqual(createSheet(p, { name: 'b', width: 64, height: 64, kind: 'sprite', spriteSize: { w: 8, h: 8 } }).spriteSize, { w: 8, h: 8 });
+  assert.equal(createSheet(p, { name: 't', width: 64, height: 64, kind: 'tile' }).spriteSize, null);
+});
+
+test('the sprite size round-trips; a file without one gets the project frame size until the load unify', () => {
+  const { p, s } = proj();
+  s.spriteSize = { w: 12, h: 10 };
+  const { json, images } = serializeProject(p);
+  assert.deepEqual(json.sheets[0].spriteSize, { w: 12, h: 10 });
+  const map = new Map(images.map(i => [i.path, i.bitmap]));
+  assert.deepEqual(deserializeProject(structuredClone(json), map).sheets[0].spriteSize, { w: 12, h: 10 });
+  const old = structuredClone(json);
+  delete old.sheets[0].spriteSize;
+  old.settings.frameW = 20; old.settings.frameH = 18;
+  assert.deepEqual(deserializeProject(old, map).sheets[0].spriteSize, { w: 20, h: 18 });
+});

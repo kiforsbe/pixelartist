@@ -5,7 +5,7 @@
 // undoLayout/redoLayout replay byte-exactly. Locked layers are never
 // written; a plan that would move pixels out of one is refused up front.
 import { findLayer, sheetLayers, resizeSheetCanvas } from './model.js';
-import { copyRegion, blitRegion, fillRegion } from './pixels.js';
+import { copyRegion, blitRegion, fillRegion, createBitmap } from './pixels.js';
 
 const CLEAR = [0, 0, 0, 0];
 
@@ -15,6 +15,16 @@ export function hasPixels(bitmap, r) {
   for (let y = y0; y < y1; y++)
     for (let x = x0; x < x1; x++) if (bitmap.data[(y * bitmap.width + x) * 4 + 3] !== 0) return true;
   return false;
+}
+
+// Every layer's pixels of `frame`, re-framed onto a w x h canvas with the
+// old content's top-left at (ox, oy) -- cropping or padding as needed.
+export function reframedContent(sheet, frame, w, h, ox, oy) {
+  return new Map(sheetLayers(sheet).map(l => {
+    const bitmap = createBitmap(w, h);
+    blitRegion(bitmap, copyRegion(l.bitmap, frame.x, frame.y, frame.w, frame.h), ox, oy);
+    return [l.id, bitmap];
+  }));
 }
 
 export function applyLayout(sheet, plan, { content = new Map(), clears = [] } = {}) {

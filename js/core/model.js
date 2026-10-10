@@ -166,7 +166,10 @@ export function removeSheet(project, sheetId) {
   return project.sheets.splice(i, 1)[0];
 }
 
-export function createSheet(project, { name, width, height, kind }) {
+// A sprite sheet is one sprite: every frame on it is `spriteSize` (from the
+// project's frame size unless given; see docs/superpowers/specs/
+// 2026-10-10-sprite-size-per-sheet-design.md). Tile sheets have none.
+export function createSheet(project, { name, width, height, kind, spriteSize = null }) {
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 1 || height < 1 || width > MAX_DIM || height > MAX_DIM)
     throw new Error(`sheet size must be 1..${MAX_DIM}`);
@@ -174,6 +177,8 @@ export function createSheet(project, { name, width, height, kind }) {
   root.children.push(createLayerNode('Layer 1', width, height));
   const sheet = {
     id: newId('sh'), name, width, height, kind,
+    spriteSize: kind === 'sprite'
+      ? { ...(spriteSize ?? { w: project.settings?.frameW ?? 16, h: project.settings?.frameH ?? 16 }) } : null,
     layerTree: root, frames: [], animations: [],
     tileGrids: kind === 'tile' ? [] : null,
     tiles: kind === 'tile' ? [] : null,
@@ -624,6 +629,7 @@ export function serializeProject(project) {
     })),
     sheets: project.sheets.map(s => ({
       id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
+      spriteSize: s.spriteSize ? { ...s.spriteSize } : null,
       tileGrids: s.tileGrids ? s.tileGrids.map(g => ({ ...g })) : null,
       tiles: s.tiles ? s.tiles.map(t => ({
         ...t,
@@ -686,6 +692,11 @@ export function deserializeProject(json, imagesByPath) {
         : migrateLegacyLayers(s, imagesByPath);
       const sheet = {
         id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
+        // Files from before one size per sheet get the project frame size;
+        // domain/sprites/unify-sprite-size.js (run by bundle.js) then sets
+        // the real one from the frames.
+        spriteSize: s.kind === 'tile' ? null
+          : { ...(s.spriteSize ?? { w: json.settings.frameW, h: json.settings.frameH }) },
         ...(() => {
           if (s.kind !== 'tile') return { tileGrids: null, tiles: null, terrainSets: null, terrainLayoutPresets: null, tileLayerNames: null };
           if (!s.tiles && s.tile) return { ...migrateLegacyTile(s), terrainSets: [], terrainLayoutPresets: [], tileLayerNames: [] };

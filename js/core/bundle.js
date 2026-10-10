@@ -1,5 +1,6 @@
 import { serializeProject, deserializeProject, validateProjectJson } from './model.js';
 import { zipWrite, zipRead } from './zip.js';
+import { unifySpriteSizes } from '../domain/sprites/unify-sprite-size.js';
 
 export async function buildEntries(project, encodePng) {
   const { json, images } = serializeProject(project);
@@ -23,7 +24,9 @@ export async function loadEntries(entries, decodePng) {
   const imagesByPath = new Map();
   for (const e of entries)
     if (e.path !== 'project.json') imagesByPath.set(e.path, await decodePng(e.data));
-  return deserializeProject(json, imagesByPath);
+  const project = deserializeProject(json, imagesByPath);
+  unifySpriteSizes(project); // one sprite size per sprite sheet
+  return project;
 }
 
 export const packProject = async (project, encodePng) =>
