@@ -371,6 +371,32 @@ test('Alt+drop on a manual animation offers the auto layout; accepting is one un
   assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id]);
 });
 
+test('Alt-dragging frame 3 to just after itself duplicates it in place, one undo step', async () => {
+  const { run, a, b, d } = await resetThree();
+  dragNum(2, 70, { altKey: true }); // the right half of frame 3 itself
+  assert.equal(run.frames.length, 4);
+  assert.deepEqual(run.frames.slice(0, 3).map(e => e.frameId), [a.id, b.id, d.id]);
+  assert.ok(![a.id, b.id, d.id].includes(run.frames[3].frameId), 'an independent copy');
+  assert.equal(host.selections.get().entryIndex, 3, 'the copy is selected');
+  host.history.undo();
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id, d.id]);
+});
+
+test('Ctrl-dragging a frame number next to itself inserts a linked use there', async () => {
+  const { run, a, b } = await reset();
+  dragNum(1, 30, { ctrlKey: true }); // the left half of frame 2 itself
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id, b.id]);
+  host.history.undo();
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id]);
+});
+
+test('a plain drag next to itself still does nothing', async () => {
+  const { run, a, b } = await reset();
+  dragNum(1, 30);
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id]);
+  assert.equal(host.history.canUndo(), false);
+});
+
 test('Ctrl+drag links only the dragged column, even inside a range', async () => {
   const { run, a, d } = await resetThree();
   nums()[0].fire('click', {}); nums()[1].fire('click', { shiftKey: true }); await tick();
@@ -674,6 +700,34 @@ test('double-clicking a frame number focuses the duration input', async () => {
   nums()[1].dispatch('dblclick', {});
   await tick();
   assert.equal(document.activeElement, dock.querySelector('.anim-tl-duration').querySelector('input'));
+});
+
+test('double-clicking a frame number inside a range keeps the range for the duration input', async () => {
+  const { run } = await resetThree();
+  nums()[0].fire('click', { detail: 1 }); nums()[2].fire('click', { shiftKey: true, detail: 1 }); await tick();
+  assert.deepEqual(rangeOfNums(), [true, true, true, false]);
+  // The browser's double-click: click (detail 1), click (detail 2), dblclick.
+  nums()[1].fire('click', { detail: 1 }); await tick();
+  nums()[1].fire('click', { detail: 2 }); await tick();
+  nums()[1].dispatch('dblclick', { detail: 2 }); await tick();
+  assert.deepEqual(rangeOfNums(), [true, true, true, false], 'the range survived the double-click');
+  assert.equal(host.selections.get().entryIndex, 1, 'the double-clicked column is the selected one');
+  const input = dock.querySelector('.anim-tl-duration').querySelector('input');
+  assert.equal(document.activeElement, input);
+  input.value = '40'; input.fire('change');
+  assert.deepEqual(run.frames.map(e => e.duration), [40, 40, 40]);
+  host.history.undo();
+  assert.deepEqual(run.frames.map(e => e.duration), [null, null, null], 'one undo step');
+});
+
+test('double-clicking a frame number outside the range selects that column alone', async () => {
+  await resetThree();
+  nums()[0].fire('click', { detail: 1 }); nums()[1].fire('click', { shiftKey: true, detail: 1 }); await tick();
+  nums()[2].fire('click', { detail: 1 }); await tick();
+  nums()[2].fire('click', { detail: 2 }); await tick();
+  nums()[2].dispatch('dblclick', { detail: 2 }); await tick();
+  assert.deepEqual(rangeOfNums(), [false, false, false, false]);
+  assert.equal(host.selections.get().entryIndex, 2);
 });
 
 test('with a range, the header duration sets every entry in it as one undo step', async () => {

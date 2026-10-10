@@ -117,6 +117,9 @@ function findScroller(el, axis) {
 //   onDrop({ sourceKey, targetKey, sourceIndex, index, place, slot, modifiers })
 //   canDrop(sourceKey, { targetKey, index, place, slot, modifiers }) -> boolean
 //   tree: { depth(el) -> number, isGroup(el) -> boolean, indent? = 14 }
+//   allowInPlace(modifiers) -> boolean: true lets a drop land where the
+//     source already is (a copy or linked use beside itself), re-asked as
+//     the modifier keys change during the drag
 //
 // Indexes are positions among the items at drag start (top/left first);
 // `slot` is placementSlot (null for 'into').
@@ -129,6 +132,7 @@ export function attachDragReorder(container, {
   tree = null,
   canDrop = () => true,
   modifiers = () => ({}),
+  allowInPlace = () => false,
   onDrop,
   scroller = undefined,
 } = {}) {
@@ -228,7 +232,7 @@ export function attachDragReorder(container, {
     const placement = computePlacement(drag.rects, drag.point, axis, drag.info);
     const { index, place } = placement;
     const inSubtree = !!drag.info && index > drag.sourceIndex && index <= drag.subtreeEnd;
-    const noOp = !inSubtree && isNoOp(placement);
+    const noOp = !inSubtree && !allowInPlace(drag.mods) && isNoOp(placement);
     const target = { targetKey: keyOf(drag.items[index], index), index, place, slot: placementSlot(placement), modifiers: drag.mods };
     drag.placement = placement;
     drag.target = target;

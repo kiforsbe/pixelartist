@@ -14,7 +14,7 @@
 // Frame-creating operations on a manual animation stay enabled: the
 // presenter offers the auto layout first (its ensureAuto/settleOffer flow).
 import { defineAction, runAction } from '../../../features/shell/actions.js';
-import { isTypingTarget } from '../../../components/dom-utils.js';
+import { isTextEntryTarget } from '../../../components/dom-utils.js';
 
 const ID = name => `animations.timeline.${name}`;
 
@@ -50,12 +50,14 @@ export function timelineShortcut(e) {
 const BUTTON_LIKE = 'button,a,select,summary,[role="button"],[role="menuitem"]';
 const buttonLike = el => !!el?.closest?.(BUTTON_LIKE);
 
-// True when a shortcut must not fire: typing into a field (or a dialog has
-// focus), a modal dialog or context menu is open (`overlayOpen`), or Enter
-// would also press a focused button or link.
+// True when a shortcut must not fire: typing into a text field, a modal
+// dialog or context menu is open (`overlayOpen`), or Enter would also press
+// a focused button or link. Sliders and other inputs that keep focus after
+// use (column width, opacity) do not block, nor does a non-modal dialog --
+// as document-controller.js's Ctrl+Z/Y/S guard.
 export function shortcutBlocked(e, { activeElement = null, overlayOpen = false } = {}) {
   if (overlayOpen) return true;
-  if (isTypingTarget(e.target) || isTypingTarget(activeElement)) return true;
+  if (isTextEntryTarget(e.target) || isTextEntryTarget(activeElement)) return true;
   return e.key === 'Enter' && (buttonLike(e.target) || buttonLike(activeElement));
 }
 
@@ -66,7 +68,7 @@ export function attachTimelineShortcuts(timeline) {
     if (e.defaultPrevented || !timeline.active()) return;
     const id = timelineShortcut(e);
     if (!id || (e.repeat && id === ID('playStop'))) return;
-    const overlayOpen = !!document.querySelector?.('dialog[open], .context-menu');
+    const overlayOpen = !!document.querySelector?.('dialog:modal, .context-menu');
     if (shortcutBlocked(e, { activeElement: document.activeElement, overlayOpen })) return;
     e.preventDefault();
     runAction(id);

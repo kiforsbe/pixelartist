@@ -274,7 +274,7 @@ test('right-clicking a row selects it and opens the layer context menu', async (
   closeContextMenu();
 });
 
-test('the timeline rows drag with the same mapping and no empty-space target', async () => {
+async function timelineSheet() {
   const project = createProject('Timeline');
   const sheet = createSheet(project, { name: 'S', width: 8, height: 8, kind: 'sprite' });
   const f = addFrame(sheet, { name: 'A', x: 0, y: 0, w: 8, h: 8 });
@@ -282,6 +282,11 @@ test('the timeline rows drag with the same mapping and no empty-space target', a
   Object.assign(anim, { layout: 'auto', cell: { w: 8, h: 8 }, frames: [{ frameId: f.id, duration: null }] });
   host.setProject(project);
   host.activateMode('animations');
+  return sheet;
+}
+
+test('the timeline rows drag with the same mapping', async () => {
+  const sheet = await timelineSheet();
   const l1 = sheetLayers(sheet)[0].id;
   const l2 = exec('sprites.addLayer', { sheetId: sheet.id, targetGroupId: null });
   const l3 = exec('sprites.addLayer', { sheetId: sheet.id, targetGroupId: null });
@@ -289,8 +294,30 @@ test('the timeline rows drag with the same mapping and no empty-space target', a
   await tick();
   const box = dock.querySelector('.anim-tl-layers');
   const items = layout(box, '.layer-tree-item');
-  assert.deepEqual(items.map(r => r.dataset.nodeId), [l3, l2, l1], 'no end target in the timeline');
+  assert.deepEqual(items.map(r => r.dataset.nodeId), [l3, l2, l1, undefined], 'the rows, then the end target');
   drag(items[0], ROW + 15);
   assert.deepEqual(sheet.layerTree.children.map(n => n.id), [l1, l3, l2]);
+  host.activateMode('sprites');
+});
+
+test('in the timeline, a drop on the end target goes to the root bottom, below an open folder', async () => {
+  const sheet = await timelineSheet();
+  const g = exec('sprites.addGroup', { sheetId: sheet.id, targetGroupId: null });
+  const a = exec('sprites.addLayer', { sheetId: sheet.id, targetGroupId: g });
+  // The folder at the root bottom: its child is the last row.
+  exec('sprites.dragMoveNode', { sheetId: sheet.id, nodeId: g, destParentId: null, destIndex: 0 });
+  host.history.clear();
+  await tick();
+  const box = dock.querySelector('.anim-tl-layers');
+  const items = layout(box, '.layer-tree-item');
+  const end = items.at(-1);
+  assert.ok(end.classList.contains('layer-tree-end'), 'an end target after the rows');
+  assert.equal(items.at(-2).dataset.nodeId, a, 'the last row is inside the folder');
+  const source = items[0].dataset.nodeId;
+  drag(items[0], end.rect.top + 5);
+  assert.equal(sheet.layerTree.children[0].id, source, 'root, index 0 in model order');
+  assert.ok(findNode(sheet.layerTree, g).children.every(n => n.id !== source), 'not into the folder');
+  host.history.undo();
+  assert.notEqual(sheet.layerTree.children[0].id, source, 'one undo step');
   host.activateMode('sprites');
 });

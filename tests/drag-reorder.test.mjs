@@ -305,6 +305,50 @@ test('dropping where the item already is does nothing and hides the line', () =>
   dispose();
 });
 
+test('allowInPlace lets a modified drop land next to the source, re-evaluated as keys change', () => {
+  const { container, items } = makeList(3);
+  const drops = [];
+  const dispose = attachDragReorder(container, {
+    itemSelector: '.row',
+    modifiers: e => ({ copy: !!e.altKey }),
+    allowInPlace: m => !!m.copy,
+    onDrop: p => drops.push(p),
+  });
+  down(items[1].children[0], 10, 27);
+  move(10, 15); // lower half of row 0 = the slot row 1 already has
+  assert.equal(lines()[0].hidden, true, 'a plain drag there is a no-op');
+  window.dispatchEvent(ev('keydown', { key: 'Alt', altKey: true }));
+  assert.equal(lines()[0].hidden, false, 'Alt: a copy may land there');
+  window.dispatchEvent(ev('keyup', { key: 'Alt', altKey: false }));
+  assert.equal(lines()[0].hidden, true, 'released: a no-op again');
+  up(10, 15);
+  assert.equal(drops.length, 0);
+
+  down(items[1].children[0], 10, 27);
+  move(10, 33, { altKey: true }); // lower half of the source itself
+  assert.equal(lines()[0].hidden, false);
+  up(10, 33, { altKey: true });
+  assert.deepEqual(drops.map(d => [d.sourceKey, d.targetKey, d.place, d.modifiers.copy]), [['k1', 'k1', 'after', true]]);
+  dispose();
+});
+
+test('allowInPlace also applies in tree mode', () => {
+  const { container, items } = makeList(3);
+  items.forEach((item) => { item.dataset.depth = '0'; });
+  const drops = [];
+  const dispose = attachDragReorder(container, {
+    itemSelector: '.row',
+    tree: { depth: el => Number(el.dataset.depth), isGroup: () => false },
+    allowInPlace: () => true,
+    onDrop: p => drops.push(p),
+  });
+  down(items[1].children[0], 10, 27);
+  move(10, 15); // below row 0: where row 1 already is
+  up(10, 15);
+  assert.deepEqual(drops.map(d => [d.targetKey, d.place]), [['k0', 'after']]);
+  dispose();
+});
+
 test('modifiers are reported, follow key changes and mark the line', () => {
   const { container, items } = makeList(3);
   const drops = [];

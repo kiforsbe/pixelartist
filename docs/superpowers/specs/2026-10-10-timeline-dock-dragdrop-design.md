@@ -256,7 +256,9 @@ Decided while building (see `docs/superpowers/plans/2026-10-10-timeline-dock-dra
    depth, so the tree option needs no `isOpen`.
 3. **Root bottom.** The drag module only hit-tests items, so the Layers
    panel adds a 16 px end item (`.layer-tree-end`) below the rows; a drop
-   there goes to the bottom of the root. The timeline's rows have none.
+   there goes to the bottom of the root. The timeline's layer rows end with
+   the same item (8 px there): with the Layers panel hidden in Animations,
+   it is the only way to the root bottom when the last row is in a folder.
 4. **Context-menu submenus** are actions with a `submenu`, as in the menu
    bar; there are no `{ label, submenu }` literal items. Because labels and
    checks do not depend on `args`, the Direction submenu uses one action per

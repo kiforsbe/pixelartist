@@ -103,8 +103,22 @@ test('timelineShortcut maps the Aseprite keys to timeline actions', () => {
   assert.equal(k('.', { metaKey: true }), null);
 });
 
+test('shortcutBlocked: text fields only, not sliders or other inputs that keep focus', () => {
+  const div = new Element('div');
+  const input = type => Object.assign(new Element('input'), { type });
+  const e = (key, target) => ({ key, target });
+  for (const type of ['range', 'checkbox', 'color']) {
+    assert.equal(shortcutBlocked(e('.', input(type)), { activeElement: input(type) }), false, type);
+  }
+  for (const type of ['text', 'number', 'search']) {
+    assert.equal(shortcutBlocked(e('.', input(type)), { activeElement: div }), true, type);
+    assert.equal(shortcutBlocked(e('.', div), { activeElement: input(type) }), true, `${type} focused`);
+  }
+  assert.equal(shortcutBlocked(e('.', new Element('textarea')), { activeElement: div }), true, 'textarea');
+});
+
 test('shortcutBlocked: typing targets, an open dialog or menu, and Enter on a focused button', () => {
-  const div = new Element('div'), input = new Element('input'), button = new Element('button');
+  const div = new Element('div'), input = Object.assign(new Element('input'), { type: 'text' }), button = new Element('button');
   const e = (key, target) => ({ key, target });
   assert.equal(shortcutBlocked(e('.', div), { activeElement: div, overlayOpen: false }), false);
   assert.equal(shortcutBlocked(e('.', input), { activeElement: div, overlayOpen: false }), true);
@@ -215,12 +229,34 @@ test('Enter plays and stops; not while a button has focus or on a key repeat', a
   document.activeElement = null;
 });
 
+test('shortcuts work with a focused range slider (column width, opacity)', async () => {
+  const { run } = await reset();
+  const slider = dock.querySelector('.anim-tl-size');
+  assert.equal(slider.type, 'range');
+  slider.focus();
+  press('b', { ...alt('b'), target: slider });
+  assert.equal(run.frames.length, 4);
+  document.activeElement = null;
+});
+
+test('a non-modal open dialog does not block the shortcuts; a modal one does', async () => {
+  const { run } = await reset();
+  const savedQuery = document.querySelector;
+  // A non-modal dialog (dialog.show()) matches dialog[open] but not :modal.
+  document.querySelector = selector => (selector.split(',').some(s => s.trim() === 'dialog[open]') ? new Element('dialog') : null);
+  try { press('b', alt('b')); } finally { document.querySelector = savedQuery; }
+  assert.equal(run.frames.length, 4, 'non-modal dialog');
+  document.querySelector = selector => (selector.split(',').some(s => s.trim() === 'dialog:modal') ? new Element('dialog') : null);
+  try { press('b', alt('b')); } finally { document.querySelector = savedQuery; }
+  assert.equal(run.frames.length, 4, 'modal dialog');
+});
+
 test('shortcuts do nothing on a typing target, in another mode, or with a dialog open', async () => {
   const { run } = await reset();
-  press('b', { ...alt('b'), target: new Element('input') });
+  press('b', { ...alt('b'), target: Object.assign(new Element('input'), { type: 'text' }) });
   assert.equal(run.frames.length, 3, 'typing target');
   const savedQuery = document.querySelector;
-  document.querySelector = selector => (selector.includes('dialog[open]') ? new Element('dialog') : null);
+  document.querySelector = selector => (selector.includes('dialog') ? new Element('dialog') : null);
   try { press('b', alt('b')); } finally { document.querySelector = savedQuery; }
   assert.equal(run.frames.length, 3, 'dialog open');
   host.activateMode('sprites');

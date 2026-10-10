@@ -33,7 +33,7 @@ import { attachDragReorder } from '../../../components/drag-reorder.js';
 import { attachContextMenu } from '../../../components/context-menu.js';
 import { defineTimelineActions, attachTimelineShortcuts, FRAME_MENU, CEL_MENU, TAG_MENU } from './timeline-actions.js';
 import {
-  layerTreeRows, buildLayerRow, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode,
+  layerTreeRows, buildLayerRow, buildLayerTreeEnd, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode,
   nameClickPending, scheduleNameSelect, cancelNameClick,
 } from '../../../components/panels/layer-tree.js';
 import {
@@ -131,7 +131,10 @@ export function mountAnimationTimeline(el) {
   cellsRow.className = 'anim-tl-row anim-tl-cells';
   const layersBox = document.createElement('div');
   layersBox.className = 'anim-tl-layers';
-  attachLayerTreeDrop(layersBox, { emptyDropsToRoot: false });
+  // The end target after the rows (render) takes a node to the root bottom:
+  // the Layers panel is hidden here, so this is the only way to reach it
+  // when the last row sits inside an open folder.
+  const disposeLayerDrop = attachLayerTreeDrop(layersBox, { emptyDropsToRoot: true });
   const empty = document.createElement('div');
   empty.className = 'anim-tl-empty';
   grid.append(tagsRow, numsRow, cellsRow, layersBox, empty);
@@ -563,6 +566,8 @@ export function mountAnimationTimeline(el) {
     itemSelector: '.anim-tl-num',
     canDrop: (sourceKey, { targetKey }) => !!dragColumns(sourceKey, targetKey),
     modifiers: e => ({ link: !!(e.ctrlKey || e.metaKey), copy: !!e.altKey && !(e.ctrlKey || e.metaKey) }),
+    // A copy or linked use may land right beside its source; a move there is a no-op.
+    allowInPlace: m => !!(m.copy || m.link),
     onDrop: onFrameDrop,
   });
 
@@ -732,7 +737,12 @@ export function mountAnimationTimeline(el) {
     // Dragged through attachDragReorder on the numbers row (onFrameDrop).
     num.dataset.dragKey = String(i);
     hits.set(num, { column });
-    num.addEventListener('click', e => pick(column, e.shiftKey));
+    num.addEventListener('click', (e) => {
+      // The selection before a double-click's first click (detail 1; a
+      // keyboard click has 0), for the dblclick handler to restore.
+      if ((e.detail ?? 1) <= 1) beforeClick = { range, anchor };
+      pick(column, e.shiftKey);
+    });
     num.title = 'Click to select (Shift: extend), double-click for its duration; '
       + 'drag to move (Alt: copy, Ctrl: insert a linked use)';
     return num;
@@ -837,8 +847,17 @@ export function mountAnimationTimeline(el) {
     focusDurationOnRender = true;
     panel.scheduleRender();
   }
+  // A double-click's first click selected its column alone; one inside the
+  // range that click replaced gets that range back, so the duration input
+  // sets the whole range (spec §5) with the double-clicked column selected.
+  let beforeClick = null;
   numsRow.addEventListener('dblclick', (e) => {
-    if (e.target?.closest?.('.anim-tl-num') && !e.target.closest('.anim-tl-gap')) focusDuration();
+    const num = e.target?.closest?.('.anim-tl-num');
+    if (!num || e.target.closest('.anim-tl-gap')) return;
+    const saved = beforeClick, column = hits.get(num)?.column;
+    beforeClick = null;
+    if (saved?.range && column && columnInRange(column, saved.range)) ({ range, anchor } = saved);
+    focusDuration();
   });
 
   function render() {
@@ -871,6 +890,7 @@ export function mountAnimationTimeline(el) {
       for (const { node, depth } of layerTreeRows(s.layerTree)) {
         layersBox.appendChild(buildLayerLine(s, node, depth, cols, selectedIndex, rangeFlags));
       }
+      layersBox.appendChild(buildLayerTreeEnd());
     }
     if (hadFocus && !grid.contains(document.activeElement)) grid.focus({ preventScroll: true });
     renderDuration(s, sel);
@@ -930,7 +950,7 @@ export function mountAnimationTimeline(el) {
   return {
     ...panel,
     dispose() {
-      disposeHistory(); disposePixels(); disposeShortcuts(); disposeDrag(); disposeMenu(); resizer.dispose(); panel.dispose();
+      disposeHistory(); disposePixels(); disposeShortcuts(); disposeDrag(); disposeLayerDrop(); disposeMenu(); resizer.dispose(); panel.dispose();
     },
   };
 }
