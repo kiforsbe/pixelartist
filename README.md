@@ -256,12 +256,13 @@ Sprite Sheets timeline) jump between them.
   crosshair; turn on **Pivot** and drag on the canvas to move it (snapped
   to half pixels). An auto animation moves the pivot of all its frames
   together.
-- **Animations panel** — **New…** (a name; the frame is the sheet's
-  sprite size), **Duplicate** (auto animations), **Delete** and
-  **Sprite size…** (the size of every frame on the sheet, plus a 3×3
-  anchor for where the existing pixels sit); the list shows each
-  animation's thumbnail (bordered in its colour) and an auto/manual badge,
-  and rows reorder by dragging. Below it: name, Loop, **Direction**
+- **Animations panel** — the list shows each animation's thumbnail
+  (bordered in its colour) and an auto/manual badge; rows reorder by
+  dragging. Below the list: **New…** (a name; the frame is the sheet's
+  sprite size), **Duplicate** (auto animations), **Delete**, and the
+  sheet's **Sprite size** with **Change…** (the size of every frame on
+  the sheet, plus a 3×3 anchor for where the existing pixels sit).
+- **Animation panel** — the selected animation: name, Loop, **Direction**
   (Forward, Reverse, Ping-pong, Ping-pong reverse), **Colour** (or None),
   base duration, and **Auto-layout** / **Make manual**. Direction drives
   playback, the Preview and GIF / image-sequence exports; ping-pong does
@@ -390,7 +391,7 @@ with a click (the outline follows the pointer) and frames have no resize
 handles; the Frames panel's W/H are read-only. **Slice grid** defaults to
 the sprite size; slicing at another size needs **Replace existing frames**
 (or a sheet without frames), and then the slice size becomes the sprite
-size. **Sprite size…** in the Animations panel resizes every frame at once:
+size. **Change…** next to the sprite size in the Animations panel resizes every frame at once:
 auto animations re-pack, other frames grow or shrink in place around the
 anchor (refused, naming the frame, if one would leave the sheet or overlap
 another).

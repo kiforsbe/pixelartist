@@ -90,7 +90,7 @@ test('sprites commands run in the animations workbench too', () => {
 test('the animations mode contributes its canvas, panels and preview', () => {
   const host = new EditorHost();
   host.registerMode(spriteMode); host.registerMode(animationsMode);
-  assert.deepEqual(host.registries.panels.list({ modeId: 'animations' }).map(panel => panel.id), ['animations.timeline', 'animations.list']);
+  assert.deepEqual(host.registries.panels.list({ modeId: 'animations' }).map(panel => panel.id), ['animations.timeline', 'animations.list', 'animations.inspector']);
   assert.deepEqual(host.registries.previews.list({ modeId: 'animations' }).map(preview => preview.id), ['animations.preview']);
   assert.deepEqual(host.registries.views.list().map(view => view.id).filter(id => id.startsWith('animations.')), ['animations.canvas']);
 });
