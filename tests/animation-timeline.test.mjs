@@ -829,3 +829,12 @@ test('stopping from the main view selects the frame it was showing', async () =>
   assert.equal(playingFrameId(), null);
   assert.deepEqual([host.selections.get().frameId, host.selections.get().entryIndex], [b.id, 1]);
 });
+
+test('Play settles a float first, so it is not drawn over the playing frames', async () => {
+  await reset();
+  createFloat({ region: { x: 0, y: 0, w: 8, h: 8 } });
+  assert.ok(activeFloating());
+  byTitle('Play').fire('click');
+  assert.equal(activeFloating(), null);
+  byTitle('Stop').fire('click');
+});

@@ -278,3 +278,15 @@ Decided while building (see `docs/superpowers/plans/2026-10-10-timeline-dock-dra
    command exists); Rename was added.
 9. **Agent worktrees** were created from `origin/main`, three commits behind
    local `main`; every branch was moved onto local `main` before merging.
+10. **Follow-up: quick animations.** A **+** at the end of the tag lane
+    and **New Animation** in the frame and tag menus run `animations.new`
+    at the selected animation's cell size (else the project frame size),
+    then open the new tag's rename. **New Animation from Frames**
+    (`animations.splitFrames`) moves the selected range into a new
+    animation placed right after its source, as one undo step: on an auto
+    animation, a frame the source still uses is copied; a manual one
+    shares it. A range covering the whole animation is refused.
+11. **Follow-up: playback in the main view.** `timeline-playback.js` holds
+    the playing frame; the Animations canvas shows it (no onion ghosts) and
+    keeps its zoom across same-size frames. Play settles a float first; a
+    press on the canvas stops on the shown frame and selects it.

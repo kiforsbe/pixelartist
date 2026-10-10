@@ -269,6 +269,9 @@ export function mountAnimationTimeline(el) {
   function startPlaying() {
     const anim = selectedAnim();
     if (!anim?.frames.length) return;
+    // The main view plays frames under it: a float settles first (its own
+    // undo step), as on a column change.
+    commitFloatIfAny();
     playing = true;
     playingId = anim.id;
     position = Math.max(0, current()?.animationId === anim.id ? current().index : 0);
