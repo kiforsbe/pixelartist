@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  snapValue, snapPoint, rectBetween, snapRect, frameAt, clampMoveDelta,
+  snapValue, snapPoint, rectBetween, snapRect, frameAt, clampMoveDelta, stampRect,
 } from '../js/modes/sprites/application/frame-geometry.js';
 
 test('snapValue passes values through when snapping is off and rounds when on', () => {
@@ -50,3 +50,18 @@ test('clampMoveDelta keeps the whole bounding box on-sheet', () => {
   assert.deepEqual(clampMoveDelta(sheet, bbox, { dx: 100, dy: 100 }), { dx: 40, dy: 40 });
 });
 
+
+test('stampRect centres a sprite-size frame on the pointer, snapping its top-left to the grid', () => {
+  const sheet = { width: 64, height: 32 };
+  const size = { w: 16, h: 16 };
+  assert.deepEqual(stampRect(sheet, size, 10.5, 9.2, { snap: false }), { x: 2, y: 1, w: 16, h: 16 });
+  assert.deepEqual(stampRect(sheet, size, 10, 9, { snap: true, gridSize: 16 }), { x: 0, y: 0, w: 16, h: 16 }, 'the cell under the pointer');
+  assert.deepEqual(stampRect(sheet, size, 20, 25, { snap: true, gridSize: 16 }), { x: 16, y: 16, w: 16, h: 16 });
+});
+
+test('stampRect keeps the frame on the sheet, and is null when the sprite is bigger than the sheet', () => {
+  const sheet = { width: 64, height: 32 };
+  assert.deepEqual(stampRect(sheet, { w: 16, h: 16 }, 63, 31, { snap: false }), { x: 48, y: 16, w: 16, h: 16 });
+  assert.deepEqual(stampRect(sheet, { w: 16, h: 16 }, -5, -5, { snap: false }), { x: 0, y: 0, w: 16, h: 16 });
+  assert.equal(stampRect(sheet, { w: 16, h: 40 }, 8, 8, { snap: false }), null);
+});

@@ -7,7 +7,7 @@ import { SelectionService } from '../js/host/selection-service.js';
 import { createProject, createSheet, sheetLayers } from '../js/core/model.js';
 import { setPixel, getPixel } from '../js/core/pixels.js';
 import {
-  newAutoAnimation, addAutoFrame, resizeAutoCanvas, autoLayoutAnimation, makeManual, reorderAnimations,
+  newAutoAnimation, addAutoFrame, resizeSpriteSize, autoLayoutAnimation, makeManual, reorderAnimations,
   duplicateAnimation, deleteAutoAnimation, setAnimationPivot, deleteLaidOutFrame, SIZE_NEEDED,
 } from '../js/modes/sprites/application/commands/animation-layout-commands.js';
 
@@ -27,8 +27,8 @@ function setup({ width = 64, height = 64, maxWidth = 64 } = {}) {
     selection: () => services.selections.get({ kind: 'sprite-sheet', id: sheet.id }) ?? {},
   };
 }
-function runWith(ctx, count, { name = 'run', w = 16, h = 16 } = {}) {
-  newAutoAnimation(ctx.services, ctx.sheet.id, { name, w, h });
+function runWith(ctx, count, { name = 'run' } = {}) {
+  newAutoAnimation(ctx.services, ctx.sheet.id, { name });
   const anim = ctx.sheet.animations.at(-1);
   for (let i = 1; i < count; i++) addAutoFrame(ctx.services, ctx.sheet.id, anim.id, i);
   return anim;
@@ -41,31 +41,73 @@ function manualAnim(sheet, id, frameIds) {
 }
 const fr = (id, x, y, w = 16, h = 16, pivotX = 0, pivotY = 0) => ({ id, name: id, x, y, w, h, pivotX, pivotY });
 
-test('resizeCanvas re-frames every frame around the anchor and shifts the pivot; undo restores', () => {
+test('the sprite size re-frames every frame around the anchor and shifts the pivot; undo restores', () => {
   const ctx = setup();
   const anim = runWith(ctx, 2);
   const [f0, f1] = [0, 1].map(i => entryFrame(ctx, anim, i));
   setPixel(ctx.bitmap(), 0, 0, RED);
   setPixel(ctx.bitmap(), 31, 15, BLUE);
-  assert.equal(resizeAutoCanvas(ctx.services, ctx.sheet.id, anim.id, 20, 16, 'c').ok, true);
-  assert.deepEqual(anim.cell, { w: 20, h: 16 });
+  assert.equal(resizeSpriteSize(ctx.services, ctx.sheet.id, 20, 16, 'c').ok, true);
+  assert.deepEqual([anim.cell, ctx.sheet.spriteSize], [{ w: 20, h: 16 }, { w: 20, h: 16 }]);
   assert.deepEqual([f0.x, f0.w, f1.x, f1.w, f0.pivotX], [0, 20, 20, 20, 2]);
   assert.deepEqual(getPixel(ctx.bitmap(), 2, 0), RED);
   assert.deepEqual(getPixel(ctx.bitmap(), 37, 15), BLUE);
   ctx.services.history.undo();
-  assert.deepEqual(anim.cell, { w: 16, h: 16 });
+  assert.deepEqual([anim.cell, ctx.sheet.spriteSize], [{ w: 16, h: 16 }, { w: 16, h: 16 }]);
   assert.deepEqual([f0.w, f1.x, f0.pivotX], [16, 16, 0]);
   assert.deepEqual([getPixel(ctx.bitmap(), 0, 0), getPixel(ctx.bitmap(), 31, 15)], [RED, BLUE]);
 });
 
-test('resizeCanvas smaller crops around the anchor', () => {
+test('a smaller sprite size crops around the anchor', () => {
   const ctx = setup();
   const anim = runWith(ctx, 1);
   setPixel(ctx.bitmap(), 1, 1, RED);
   setPixel(ctx.bitmap(), 10, 10, BLUE);
-  resizeAutoCanvas(ctx.services, ctx.sheet.id, anim.id, 8, 8, 'nw');
+  resizeSpriteSize(ctx.services, ctx.sheet.id, 8, 8, 'nw');
   assert.deepEqual([getPixel(ctx.bitmap(), 1, 1), getPixel(ctx.bitmap(), 10, 10)], [RED, NONE]);
   assert.deepEqual(anim.cell, { w: 8, h: 8 });
+});
+
+test('the sprite size sets every auto cell and re-frames manual and loose frames in place', () => {
+  const ctx = setup();
+  const run = runWith(ctx, 1);
+  const idle = runWith(ctx, 1, { name: 'idle' });
+  ctx.sheet.frames.push(fr('m', 40, 40, 16, 16, 8, 16));
+  manualAnim(ctx.sheet, 'walk', ['m']);
+  setPixel(ctx.bitmap(), 41, 41, RED);
+  assert.equal(resizeSpriteSize(ctx.services, ctx.sheet.id, 20, 20, 'c').ok, true);
+  assert.deepEqual([run.cell, idle.cell], [{ w: 20, h: 20 }, { w: 20, h: 20 }]);
+  const m = ctx.sheet.frames.find(f => f.id === 'm');
+  assert.deepEqual([m.x, m.y, m.w, m.h, m.pivotX, m.pivotY], [38, 38, 20, 20, 10, 18]);
+  assert.deepEqual(getPixel(ctx.bitmap(), 41, 41), RED, 'the content stays put on the sheet');
+  ctx.services.history.undo();
+  assert.deepEqual([m.x, m.y, m.w, m.h, m.pivotX], [40, 40, 16, 16, 8]);
+});
+
+test('the sprite size is refused, naming the frame, when an in-place frame would leave the sheet', () => {
+  const ctx = setup();
+  ctx.sheet.frames.push(fr('edge', 0, 40));
+  const r = resizeSpriteSize(ctx.services, ctx.sheet.id, 20, 20, 'c');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /"edge"/);
+  assert.deepEqual([ctx.sheet.spriteSize, ctx.sheet.frames[0].w, ctx.services.history.canUndo()], [{ w: 16, h: 16 }, 16, false]);
+});
+
+test('the sprite size is refused when in-place frames would overlap', () => {
+  const ctx = setup();
+  ctx.sheet.frames.push(fr('a', 0, 40), fr('b', 16, 40));
+  const r = resizeSpriteSize(ctx.services, ctx.sheet.id, 20, 16, 'nw');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /"a".*"b"|"b".*"a"/);
+  assert.equal(ctx.sheet.frames[0].w, 16);
+});
+
+test('new animations take the sprite size of the sheet', () => {
+  const ctx = setup();
+  ctx.sheet.spriteSize = { w: 8, h: 12 };
+  const r = newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run' });
+  const frame = ctx.sheet.frames.find(f => f.id === r.frameId);
+  assert.deepEqual([ctx.sheet.animations[0].cell, frame.w, frame.h], [{ w: 8, h: 12 }, 8, 12]);
 });
 
 test('autoLayout lays out a manual animation of equal frames, carrying their pixels', () => {
@@ -85,8 +127,9 @@ test('autoLayout lays out a manual animation of equal frames, carrying their pix
 
 test('autoLayout asks for a size when frames differ, then aligns them on their pivots', () => {
   const ctx = setup();
-  ctx.sheet.frames.push(fr('a', 0, 32, 16, 16, 8, 16), fr('b', 32, 32, 8, 8, 4, 8));
+  ctx.sheet.frames.push(fr('a', 0, 32, 16, 16, 8, 16), fr('b', 32, 32, 16, 16, 4, 8));
   manualAnim(ctx.sheet, 'walk', ['a', 'b']);
+  assert.match(autoLayoutAnimation(ctx.services, ctx.sheet.id, 'walk', { w: 20, h: 20 }).reason, /16×16/, 'only the sprite size');
   const asked = autoLayoutAnimation(ctx.services, ctx.sheet.id, 'walk');
   assert.deepEqual(asked, { ok: false, reason: SIZE_NEEDED, needsSize: true, suggested: { w: 16, h: 16 } });
   assert.equal(ctx.sheet.animations[0].layout, 'manual');
@@ -119,13 +162,13 @@ test('makeManual releases an animation without touching pixels or rects; undo re
 test('reorderAnimations swaps band order and moves pixels with it', () => {
   const ctx = setup();
   const run = runWith(ctx, 1);
-  const idle = runWith(ctx, 1, { name: 'idle', w: 8, h: 8 });
+  const idle = runWith(ctx, 1, { name: 'idle' });
   const idleFrame = entryFrame(ctx, idle, 0);
   assert.deepEqual([idleFrame.x, idleFrame.y], [0, 16]);
   setPixel(ctx.bitmap(), 1, 17, BLUE);
   assert.equal(reorderAnimations(ctx.services, ctx.sheet.id, 1, 0).ok, true);
   assert.deepEqual(ctx.sheet.animations, [idle, run]);
-  assert.deepEqual([idleFrame.y, entryFrame(ctx, run, 0).y], [0, 8]);
+  assert.deepEqual([idleFrame.y, entryFrame(ctx, run, 0).y], [0, 16]);
   assert.deepEqual(getPixel(ctx.bitmap(), 1, 1), BLUE);
 });
 

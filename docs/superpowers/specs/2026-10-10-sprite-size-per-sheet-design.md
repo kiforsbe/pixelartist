@@ -77,6 +77,19 @@ Per sprite sheet:
   Canvas size… becomes sheet-wide **Sprite size…**.
 - Animations timeline: New Animation uses `spriteSize`.
 
+## Implementation notes
+
+- `animations.resizeCanvas` is the command id of Sprite size…
+  (`resizeSpriteSize`); in-place frames move by the anchor offset so their
+  pixels stay put on the sheet.
+- The frame tool's stamp is centred on the pointer, its top-left snapped
+  and clamped onto the sheet (`stampRect` in
+  `modes/sprites/application/frame-geometry.js`).
+- Auto-layout's needsSize prompt now only arises when pivots differ (sizes
+  are uniform); it asks to align them at the sprite size.
+- Sheets without `spriteSize` (tile sheets, and hand-built test fixtures)
+  skip every size check.
+
 ## Testing
 
 Unit tests per command (refusals, one undo step, byte-exact undo where

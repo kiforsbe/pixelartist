@@ -39,3 +39,18 @@ test('setFrameField edits one field, is undoable, and no-ops when the value is u
   assert.equal(services.history.canUndo(), false);
 });
 
+
+test('setFrameField refuses a size other than the sprite size; moves still apply', () => {
+  const project = makeProject();
+  const services = makeServices(project);
+  const sheet = project.sheets[0];
+  sheet.spriteSize = { w: 16, h: 16 };
+  sheet.frames.push({ id: 'f1', name: 'frame_0', x: 0, y: 0, w: 16, h: 16, pivotX: 0, pivotY: 0 });
+  for (const key of ['w', 'h']) {
+    const r = setFrameField(services, 'sheet1', 'f1', key, 20);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /16×16.*Sprite size/);
+  }
+  assert.deepEqual(setFrameField(services, 'sheet1', 'f1', 'x', 4), { ok: true });
+  assert.deepEqual([sheet.frames[0].x, sheet.frames[0].w], [4, 16]);
+});

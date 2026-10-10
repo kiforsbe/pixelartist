@@ -58,11 +58,16 @@ export function buildSliceDialog() {
     const sheet = activeSheet('sprite');
     if (!sheet) { dlg.close(); return; }
     const options = { ...readPreview(), namePrefix: $('#sg-prefix').value.trim() || 'frame' };
-    dispatch('sprites.sliceGrid', { sheetId: sheet.id, options, replace: $('#sg-replace').checked });
+    const result = dispatch('sprites.sliceGrid', { sheetId: sheet.id, options, replace: $('#sg-replace').checked });
+    // A cell other than the sprite size needs Replace: say so, stay open.
+    if (result?.ok === false) { if (typeof alert !== 'undefined') alert(result.reason); return; }
     dlg.close();
   });
   return {
+    // The cell defaults to the sheet's sprite size.
     open() {
+      const size = activeSheet('sprite')?.spriteSize;
+      if (size) { $('#sg-cellw').value = String(size.w); $('#sg-cellh').value = String(size.h); }
       slicePreviewOpts = readPreview();
       dlg.showModal();
       sheetViewForPreview?.requestRender();

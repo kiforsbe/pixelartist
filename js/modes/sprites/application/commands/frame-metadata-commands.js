@@ -1,4 +1,4 @@
-import { isPinnedFrame, PINNED_HINT } from '../../../../domain/sprites/auto-layout.js';
+import { isPinnedFrame, PINNED_HINT, spriteSizeHint } from '../../../../domain/sprites/auto-layout.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 const GEOMETRY_KEYS = new Set(['x', 'y', 'w', 'h', 'pivotX', 'pivotY']);
@@ -10,6 +10,8 @@ export function setFrameField(services, sheetId, frameId, key, value) {
   const frame = sheet?.frames.find(f => f.id === frameId);
   if (!frame) return;
   if (GEOMETRY_KEYS.has(key) && isPinnedFrame(sheet, frameId)) return { ok: false, reason: PINNED_HINT };
+  const size = sheet.spriteSize;
+  if (size && ((key === 'w' && value !== size.w) || (key === 'h' && value !== size.h))) return { ok: false, reason: spriteSizeHint(size) };
   const before = frame[key];
   if (before === value) return { ok: true };
   runSheetCommand(services, sheetId, `edit frame ${key}`,

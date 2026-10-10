@@ -11,6 +11,10 @@
 // A frame an auto-laid-out animation places ("pinned", see
 // domain/sprites/auto-layout.js) selects and opens like any other, but never
 // drags or resizes here: its rect belongs to the layout.
+//
+// Every frame on a sprite sheet is the sheet's sprite size, so there a click
+// on empty sheet stamps a frame of that size (previewed under the pointer)
+// and frames have no resize handles; Sprite size… in Animations resizes them.
 import { getEditorHost } from '../../../host/runtime.js';
 import { activeSheet } from '../../../host/document-helpers.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
@@ -18,18 +22,20 @@ import { registerTool } from '../../../components/tool-palette.js';
 import { isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../../core/resizeAnchor.js';
 import { isPinnedFrame } from '../../../domain/sprites/auto-layout.js';
 import { frameToolOptions } from '../application/frame-tool-state.js';
-import { snapPoint, snapRect, rectBetween, frameAt, clampMoveDelta } from '../application/frame-geometry.js';
+import { snapPoint, snapRect, rectBetween, frameAt, clampMoveDelta, stampRect } from '../application/frame-geometry.js';
 import { hitHandle } from '../application/frame-chrome-geometry.js';
 import { paintFrameToolGhost, paintFrameChrome } from './frame-overlay-renderer.js';
 import { buildSliceDialog, setSlicePreviewView, slicePreviewOptions } from './slice-grid-dialog.js';
 import { dispatchLayout } from '../../../components/layout-dispatch.js';
 import { bindDragCancelGuard } from '../../../components/canvas/drag-cancel-guard.js';
 
-// In-progress drag state (create/move/resize), module-scoped like
+// In-progress drag state (create/stamp/move/resize), module-scoped like
 // drawing-engine.js's `selection`/`stroke` -- there is only ever one
-// frame-tool drag at a time. `lastClick` is the previous pointerdown's
-// { frameId, t } for double-click detection.
+// frame-tool drag at a time. `hover` is the stamp preview rect while the
+// pointer is over empty sprite sheet, else null. `lastClick` is the previous
+// pointerdown's { frameId, t } for double-click detection.
 let drag = null;
+let hover = null;
 let lastClick = null;
 
 // Set once by registerFrameTool() (which builds the dialog before the tool
@@ -87,9 +93,11 @@ function handleDown(ev, view) {
   }
   lastClick = hit ? { frameId: hit.id, t: now } : null;
   const selected = sheet.frames.find(f => f.id === sheetSelection(sheet).frameId) || null;
-  // Pinned frames have no resize handles: skip the hit test entirely so a
-  // down on a handle-shaped spot falls through to the select checks below.
-  const handle = (selected && !isPinnedFrame(sheet, selected.id)) ? hitHandle(projector(view), selected, ev.sx, ev.sy) : null;
+  // Pinned frames, and every frame on a sheet with one sprite size, have no
+  // resize handles: skip the hit test entirely so a down on a handle-shaped
+  // spot falls through to the select checks below.
+  const resizable = selected && !sheet.spriteSize && !isPinnedFrame(sheet, selected.id);
+  const handle = resizable ? hitHandle(projector(view), selected, ev.sx, ev.sy) : null;
   if (handle) {
     drag = {
       kind: 'resize', frame: selected, handle,
@@ -116,13 +124,30 @@ function handleDown(ev, view) {
   }
   const cleared = sheetSelection(sheet);
   if (cleared.frameId != null || cleared.animationId != null) setSheetSelection(sheet, { frameId: null, animationId: null });
-  drag = { kind: 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
+  hover = null;
+  drag = sheet.spriteSize
+    ? { kind: 'stamp', rect: stampRect(sheet, sheet.spriteSize, ev.x, ev.y, frameToolOptions) }
+    : { kind: 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
+  view.requestRender();
+}
+
+const sameRect = (a, b) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
+
+// The stamp preview follows the pointer over empty sprite sheet.
+function updateHover(ev, view) {
+  const sheet = activeSheet('sprite');
+  const next = sheet?.spriteSize && !frameAt(sheet, ev.x, ev.y) ? stampRect(sheet, sheet.spriteSize, ev.x, ev.y, frameToolOptions) : null;
+  if (sameRect(next, hover)) return;
+  hover = next;
   view.requestRender();
 }
 
 function handleMove(ev, view) {
-  if (!drag) return;
-  if (drag.kind === 'create') {
+  if (!drag) { updateHover(ev, view); return; }
+  if (drag.kind === 'stamp') {
+    const sheet = activeSheet('sprite');
+    if (sheet?.spriteSize) drag.rect = stampRect(sheet, sheet.spriteSize, ev.x, ev.y, frameToolOptions);
+  } else if (drag.kind === 'create') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, true), frameToolOptions);
   } else if (drag.kind === 'move') {
     const target = snapPoint(drag.frame.x + (ev.x - drag.anchor.x), drag.frame.y + (ev.y - drag.anchor.y), frameToolOptions);
@@ -144,6 +169,12 @@ function handleUp(ev, view) {
   view.requestRender();
   if (!sheet) return;
 
+  if (d.kind === 'stamp') {
+    if (d.rect) dispatch('sprites.createFrame', { sheetId: sheet.id, rect: d.rect });
+    else if (typeof alert !== 'undefined') alert(`The sprite size (${sheet.spriteSize.w}×${sheet.spriteSize.h}) is larger than this sheet`);
+    updateHover(ev, view);
+    return;
+  }
   if (d.kind === 'create') {
     const moved = ev.x !== d.anchor.x || ev.y !== d.anchor.y;
     if (moved && d.rect && d.rect.w >= 1 && d.rect.h >= 1)
@@ -223,7 +254,7 @@ export function registerFrameTool() {
 
 function drawFrameToolGhost(ctx, view) {
   if (currentModeId() !== 'sprites') return;
-  paintFrameToolGhost(ctx, view, activeSheet('sprite'), { drag, slicePreview: slicePreviewOptions() });
+  paintFrameToolGhost(ctx, view, activeSheet('sprite'), { drag, hover, slicePreview: slicePreviewOptions() });
 }
 
 // Chained by contributions.js as the final sheet-overlay layer so selection
@@ -257,8 +288,13 @@ export function bindFrameTool(view) {
 
   bindDragCancelGuard(storeOn, {
     isToolActive: () => currentToolId() === 'frametool',
-    hasDrag: () => !!drag,
-    cancel: () => { drag = null; },
+    hasDrag: () => !!drag || !!hover,
+    cancel: () => { drag = null; hover = null; },
     requestRender: () => view.requestRender(),
+  });
+  view.canvas?.addEventListener?.('pointerleave', () => {
+    if (!hover) return;
+    hover = null;
+    view.requestRender();
   });
 }

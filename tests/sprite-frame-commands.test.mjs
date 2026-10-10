@@ -190,3 +190,69 @@ test('moveFrames moves multiple plain frames by the same delta and undoes', () =
   assert.deepEqual({ x: frame1.x, y: frame1.y }, { x: 20, y: 0 });
 });
 
+
+// ---- one sprite size per sprite sheet ----
+
+function sizedProject(spriteSize = { w: 16, h: 16 }) {
+  const project = makeProject();
+  project.sheets[0].spriteSize = { ...spriteSize };
+  return project;
+}
+
+test('createFrame stamps the sprite size at the rect\'s top-left', () => {
+  const project = sizedProject();
+  const services = makeServices(project);
+  assert.deepEqual(createFrame(services, 'sheet1', { x: 4, y: 8, w: 3, h: 5 }), { ok: true });
+  const f = project.sheets[0].frames[0];
+  assert.deepEqual([f.x, f.y, f.w, f.h], [4, 8, 16, 16]);
+});
+
+test('createFrame refuses a frame that would leave the sheet', () => {
+  const project = sizedProject();
+  const services = makeServices(project);
+  const r = createFrame(services, 'sheet1', { x: 56, y: 0, w: 1, h: 1 });
+  assert.equal(r.ok, false);
+  assert.deepEqual([project.sheets[0].frames.length, services.history.canUndo()], [0, false]);
+});
+
+test('resizeFrame refuses a size change but still moves a frame', () => {
+  const project = sizedProject();
+  const services = makeServices(project);
+  createFrame(services, 'sheet1', { x: 0, y: 0, w: 16, h: 16 });
+  const frame = project.sheets[0].frames[0];
+  const r = resizeFrame(services, 'sheet1', frame.id, { x: 0, y: 0, w: 16, h: 16 }, { x: 2, y: 3, w: 20, h: 24 });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /16×16/);
+  assert.deepEqual(resizeFrame(services, 'sheet1', frame.id, { x: 0, y: 0, w: 16, h: 16 }, { x: 2, y: 3, w: 16, h: 16 }), { ok: true });
+  assert.deepEqual([frame.x, frame.y, frame.w], [2, 3, 16]);
+});
+
+test('sliceSheetIntoFrames appending to a sheet with frames needs the sprite size', () => {
+  const project = sizedProject();
+  const services = makeServices(project);
+  createFrame(services, 'sheet1', { x: 0, y: 0, w: 16, h: 16 });
+  const r = sliceSheetIntoFrames(services, 'sheet1', { cellW: 32, cellH: 32, namePrefix: 'cell' }, false);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /16×16/);
+  assert.equal(project.sheets[0].frames.length, 1);
+  assert.equal(sliceSheetIntoFrames(services, 'sheet1', { cellW: 16, cellH: 16, namePrefix: 'cell' }, false).ok, true);
+});
+
+test('sliceSheetIntoFrames with replace adopts the slice size as the sprite size; undo restores it', () => {
+  const project = sizedProject();
+  const services = makeServices(project);
+  const sheet = project.sheets[0];
+  createFrame(services, 'sheet1', { x: 0, y: 0, w: 16, h: 16 });
+  sheet.animations.push({ id: 'an1', name: 'a', loop: true, layout: 'auto', cell: { w: 16, h: 16 }, frames: [] });
+  assert.equal(sliceSheetIntoFrames(services, 'sheet1', { cellW: 32, cellH: 32, namePrefix: 'cell' }, true).ok, true);
+  assert.deepEqual([sheet.spriteSize, sheet.animations[0].cell, sheet.frames.length], [{ w: 32, h: 32 }, { w: 32, h: 32 }, 4]);
+  services.history.undo();
+  assert.deepEqual([sheet.spriteSize, sheet.animations[0].cell], [{ w: 16, h: 16 }, { w: 16, h: 16 }]);
+});
+
+test('sliceSheetIntoFrames on a sheet without frames adopts the slice size', () => {
+  const project = sizedProject();
+  const services = makeServices(project);
+  assert.equal(sliceSheetIntoFrames(services, 'sheet1', { cellW: 8, cellH: 32, namePrefix: 'cell' }, false).ok, true);
+  assert.deepEqual(project.sheets[0].spriteSize, { w: 8, h: 32 });
+});

@@ -350,14 +350,14 @@ export function mountAnimationTimeline(el) {
   // work by hand, so they are not asked again this session.
   const declinedForReorder = new Set();
 
-  // Auto-lays-out `anim`. Frames of different sizes or pivots are re-framed
-  // at the suggested (largest) size only after an explicit yes, since that
-  // can crop pixels. -> the command result, or null when that yes was refused.
+  // Auto-lays-out `anim`. Frames whose pivots differ are re-framed onto one
+  // pivot at the sprite size only after an explicit yes, since that can crop
+  // pixels. -> the command result, or null when that yes was refused.
   function autoLayoutWithSizePrompt(s, anim) {
     const result = dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id });
     if (!result?.needsSize) return result;
     const { w, h } = result.suggested;
-    if (!confirmOrAuto(`"${anim.name}" has frames of different sizes or pivots. Lay it out at ${w}×${h}? `
+    if (!confirmOrAuto(`"${anim.name}" has frames whose pivots differ. Align them on one pivot at ${w}×${h}? `
       + 'Each frame is re-framed around its pivot; pixels outside the new frame are cropped.')) return null;
     return dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id, size: result.suggested });
   }
@@ -516,16 +516,13 @@ export function mountAnimationTimeline(el) {
     panel.scheduleRender();
   }
 
-  // A new auto animation of one blank frame, the selected animation's cell
-  // size (else the project frame size), named for now -- the rename opens.
+  // A new auto animation of one blank frame of the sprite size, named for
+  // now -- the rename opens.
   function newAnimation() {
     const s = sheet();
     if (!s) return;
     stopPlaying();
-    const anim = selectedAnim(), settings = host.projects.project?.settings;
-    const first = anim && s.frames.find(f => f.id === anim.frames[0]?.frameId);
-    const size = anim?.cell ?? first ?? { w: settings?.frameW ?? 16, h: settings?.frameH ?? 16 };
-    const result = dispatchLayout('animations.new', { sheetId: s.id, w: size.w, h: size.h });
+    const result = dispatchLayout('animations.new', { sheetId: s.id });
     if (result?.ok) adoptNew(result.animationId);
   }
 

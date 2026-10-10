@@ -256,16 +256,16 @@ Sprite Sheets timeline) jump between them.
   crosshair; turn on **Pivot** and drag on the canvas to move it (snapped
   to half pixels). An auto animation moves the pivot of all its frames
   together.
-- **Animations panel** — **New…** (name and frame size, defaulting to the
-  project's frame size), **Duplicate** (auto animations) and **Delete**;
-  the list shows each animation's thumbnail (bordered in its colour) and
-  an auto/manual badge, and rows reorder by dragging. Below it: name,
-  Loop, **Direction** (Forward, Reverse, Ping-pong, Ping-pong reverse),
-  **Colour** (or None), base duration, and **Auto-layout** /
-  **Make manual** / **Canvas size…** (new frame size plus a 3×3 anchor for
-  where the existing pixels sit). Direction drives playback, the Preview
-  and GIF / image-sequence exports; ping-pong does not repeat its end
-  frames.
+- **Animations panel** — **New…** (a name; the frame is the sheet's
+  sprite size), **Duplicate** (auto animations), **Delete** and
+  **Sprite size…** (the size of every frame on the sheet, plus a 3×3
+  anchor for where the existing pixels sit); the list shows each
+  animation's thumbnail (bordered in its colour) and an auto/manual badge,
+  and rows reorder by dragging. Below it: name, Loop, **Direction**
+  (Forward, Reverse, Ping-pong, Ping-pong reverse), **Colour** (or None),
+  base duration, and **Auto-layout** / **Make manual**. Direction drives
+  playback, the Preview and GIF / image-sequence exports; ping-pong does
+  not repeat its end frames.
 - **Timeline** — every animation's frames in sheet order under a lane of
   name tags, with a row per layer (and folder) below. Tags take the
   animation's colour and show its direction (→ ← ⇄ ⇆); click a tag to
@@ -284,8 +284,8 @@ Sprite Sheets timeline) jump between them.
   🔗 marks a frame used again in the same animation.
   - **New animations** — the **+** at the end of the tag lane (or **New
     Animation** in a frame or tag right-click menu) adds an auto-laid-out
-    animation of one blank frame, sized like the selected animation's
-    frames (else the project frame size), and opens its name for editing.
+    animation of one blank frame of the sprite size and opens its name for
+    editing.
     **New Animation from Frames** (frame right-click menu) turns the
     selected frame or range into a new animation placed right after the
     original, as one undo step. Frames the original still uses elsewhere
@@ -379,6 +379,26 @@ rejected):
 Version 4 also requires `sheetMaxWidth` (an integer in 1..4096, set as
 "Max layout width" in Project Settings): the width auto-laid-out
 animations wrap at. Older files take it from `spriteSheetW`.
+
+### One sprite size per sprite sheet
+
+A sprite sheet is one sprite: its animations are states of the same
+sprite, so **every frame on a sprite sheet has the sheet's sprite size**
+(`sheet.spriteSize`, saved with the sheet; a new sheet takes the project's
+frame size). In Sprite Sheets the frame tool stamps a frame of that size
+with a click (the outline follows the pointer) and frames have no resize
+handles; the Frames panel's W/H are read-only. **Slice grid** defaults to
+the sprite size; slicing at another size needs **Replace existing frames**
+(or a sheet without frames), and then the slice size becomes the sprite
+size. **Sprite size…** in the Animations panel resizes every frame at once:
+auto animations re-pack, other frames grow or shrink in place around the
+anchor (refused, naming the frame, if one would leave the sheet or overlap
+another).
+
+Projects saved before this are unified on load: a sheet whose frames
+differ is re-framed to the smallest size that holds every frame with the
+pivots aligned (nothing is cropped), manual animations become auto where
+they can, and the sheet is re-packed.
 
 ### Animations, pinned frames and locked layers
 

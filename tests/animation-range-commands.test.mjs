@@ -40,7 +40,7 @@ function setup({ width = 64, height = 64, maxWidth = 64 } = {}) {
 // An auto animation "run" of `count` 16x16 frames, frame i marked at (1,1)
 // with COLOURS[i], laid out left to right.
 function autoRun(ctx, count) {
-  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run', w: 16, h: 16 });
+  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run' });
   const anim = ctx.sheet.animations.at(-1);
   for (let i = 1; i < count; i++) addAutoFrame(ctx.services, ctx.sheet.id, anim.id, i);
   anim.frames.forEach((e, i) => {

@@ -37,7 +37,7 @@ test('new animations default to forward with no colour', () => {
   const plain = addAnimation(sheet, 'a');
   assert.deepEqual([plain.direction, plain.color], ['forward', null]);
   newAnimation(services, sheet.id);
-  newAutoAnimation(services, sheet.id, { name: 'run', w: 8, h: 8 });
+  newAutoAnimation(services, sheet.id, { name: 'run' });
   for (const a of sheet.animations) assert.deepEqual([a.direction, a.color], ['forward', null]);
 });
 
@@ -218,7 +218,7 @@ test('setAnimationColor refuses anything but #rrggbb or null', () => {
 
 test('duplicateAnimation copies direction and colour', () => {
   const { sheet, services } = setup();
-  const { animationId } = newAutoAnimation(services, sheet.id, { name: 'run', w: 8, h: 8 });
+  const { animationId } = newAutoAnimation(services, sheet.id, { name: 'run' });
   const src = sheet.animations.find(a => a.id === animationId);
   src.direction = 'pingpong-reverse'; src.color = '#123456';
   const r = duplicateAnimation(services, sheet.id, animationId);

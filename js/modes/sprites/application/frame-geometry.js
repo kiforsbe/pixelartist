@@ -32,3 +32,17 @@ export function clampMoveDelta(sheet, bbox, delta) {
     dy: Math.max(-bbox.y, Math.min(sheet.height - (bbox.y + bbox.h), delta.dy)),
   };
 }
+
+// Where a click stamps a new frame on a sprite sheet: the sprite size,
+// centred on the pointer, its top-left snapped and kept on the sheet. Null
+// when the sprite is larger than the sheet.
+export function stampRect(sheet, size, x, y, options) {
+  const { w, h } = size;
+  if (w > sheet.width || h > sheet.height) return null;
+  const at = snapPoint(Math.floor(x) - Math.floor(w / 2), Math.floor(y) - Math.floor(h / 2), options);
+  return {
+    x: Math.max(0, Math.min(sheet.width - w, at.x)),
+    y: Math.max(0, Math.min(sheet.height - h, at.y)),
+    w, h,
+  };
+}

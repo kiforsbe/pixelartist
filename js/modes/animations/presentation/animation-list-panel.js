@@ -1,11 +1,12 @@
 // js/modes/animations/presentation/animation-list-panel.js
 // The Animations workbench's Animations panel: the active sheet's
 // animations (thumbnail bordered in the tag colour, name, layout badge; click
-// to select, drag to reorder), New / Duplicate / Delete, and the selected
-// animation's details -- name, loop, direction, colour, base duration,
-// Auto-layout / Make manual and Canvas size…
-// (with an anchor grid). Layout changes go through dispatchLayout (settles
-// a float, explains a refusal); a needsSize refusal opens the size form.
+// to select, drag to reorder), New / Duplicate / Delete / Sprite size… (the
+// sheet-wide frame size, with an anchor grid: every frame on a sprite sheet
+// is one size), and the selected animation's details -- name, loop,
+// direction, colour, base duration, Auto-layout / Make manual. Layout
+// changes go through dispatchLayout (settles a float, explains a refusal); a
+// needsSize refusal opens the size form to confirm aligning the pivots.
 import { flattenSheetLayers } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';
 import { getEditorHost } from '../../../host/runtime.js';
@@ -76,15 +77,11 @@ export function mountAnimationListPanel(el) {
   newForm.hidden = true;
   const newName = document.createElement('input');
   newName.type = 'text'; newName.placeholder = 'Name';
-  const newW = numberInput('Canvas width'), newH = numberInput('Canvas height');
-  const newRow = document.createElement('div');
-  newRow.className = 'row';
-  newRow.append(labelled('W', newW), labelled('H', newH));
-  newForm.append(newName, newRow, textButton('Create', '', () => {
+  newForm.append(newName, textButton('Create', '', () => {
     const s = sheet();
     if (!s) return;
     const name = newName.value.trim() || undefined;
-    const result = dispatchLayout('animations.new', { sheetId: s.id, name, w: sizeValue(newW), h: sizeValue(newH) });
+    const result = dispatchLayout('animations.new', { sheetId: s.id, name });
     if (result?.ok) {
       newForm.hidden = true;
       host.selections.patch({ entryIndex: 0 }, sheetDocument(s));
@@ -101,14 +98,15 @@ export function mountAnimationListPanel(el) {
     const message = anim.layout === 'auto' ? `Delete animation "${anim.name}" and its frames?` : `Delete animation "${anim.name}"?`;
     if (confirmOrAuto(message)) dispatchLayout('animations.delete', { sheetId: s.id, animationId: anim.id });
   });
-  const btnNew = textButton('New…', 'New animation', () => {
-    const settings = host.projects.project?.settings;
+  const btnNew = textButton('New…', 'New animation, one blank frame of the sprite size', () => {
     newName.value = '';
-    newW.value = String(settings?.frameW ?? 16);
-    newH.value = String(settings?.frameH ?? 16);
     newForm.hidden = false;
   });
-  toolbar.append(btnNew, btnDuplicate, btnDelete);
+  const btnSpriteSize = textButton('Sprite size…', 'Resize every frame on this sheet', () => {
+    const size = sheet()?.spriteSize;
+    if (size) openSizeForm('resize', size);
+  });
+  toolbar.append(btnNew, btnDuplicate, btnDelete, btnSpriteSize);
 
   // ---- list ----
   const list = document.createElement('div');
@@ -231,25 +229,21 @@ export function mountAnimationListPanel(el) {
     const s = sheet(), anim = selectedAnim();
     if (!s || !anim) return;
     const result = dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id });
-    if (result?.needsSize) openSizeForm('autolayout', result.suggested);
+    if (result?.needsSize) openSizeForm('align', result.suggested);
   });
   const btnMakeManual = textButton('Make manual', 'Stop auto-laying-out this animation; its frames stay where they are', () => {
     const s = sheet(), anim = selectedAnim();
     if (s && anim) dispatch('animations.makeManual', { sheetId: s.id, animationId: anim.id });
   });
-  const btnCanvasSize = textButton('Canvas size…', 'Resize every frame of this animation', () => {
-    const anim = selectedAnim();
-    if (anim?.cell) openSizeForm('resize', anim.cell);
-  });
-  layoutRow.append(btnAutoLayout, btnMakeManual, btnCanvasSize);
+  layoutRow.append(btnAutoLayout, btnMakeManual);
 
-  // ---- size form (Canvas size…, and Auto-layout when frames differ) ----
+  // ---- size form (Sprite size…, and Auto-layout when pivots differ) ----
   const sizeForm = document.createElement('div');
   sizeForm.className = 'anim-form anim-size-form';
   sizeForm.hidden = true;
   const sizeTitle = document.createElement('div');
   sizeTitle.className = 'frame-field';
-  const sizeW = numberInput('Canvas width'), sizeH = numberInput('Canvas height');
+  const sizeW = numberInput('Sprite width'), sizeH = numberInput('Sprite height');
   const sizeRow = document.createElement('div');
   sizeRow.className = 'row';
   sizeRow.append(labelled('W', sizeW), labelled('H', sizeH));
@@ -266,39 +260,46 @@ export function mountAnimationListPanel(el) {
   anchorGrid.append(...anchorButtons);
   sizeForm.append(sizeTitle, sizeRow, anchorGrid, textButton('Apply', '', () => {
     const s = sheet(), anim = selectedAnim();
-    if (!s || !anim) return;
+    if (!s) return;
     const w = sizeValue(sizeW), h = sizeValue(sizeH);
-    const result = sizeMode === 'resize'
-      ? dispatchLayout('animations.resizeCanvas', { sheetId: s.id, animationId: anim.id, w, h, anchor })
-      : dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id, size: { w, h } });
+    let result = null;
+    if (sizeMode === 'resize') result = dispatchLayout('animations.resizeCanvas', { sheetId: s.id, w, h, anchor });
+    else if (anim) result = dispatchLayout('animations.autoLayout', { sheetId: s.id, animationId: anim.id, size: { w, h } });
     if (result?.ok) sizeForm.hidden = true;
   }), textButton('Cancel', '', () => { sizeForm.hidden = true; }));
 
+  // 'resize': the sheet's sprite size, editable, with the anchor. 'align':
+  // Auto-layout's confirmation that frames whose pivots differ are re-framed
+  // (at the sprite size) to share one pivot.
   function openSizeForm(mode, size) {
     sizeMode = mode;
     anchor = 'c';
     syncAnchors();
-    sizeTitle.textContent = mode === 'resize' ? 'Canvas size' : 'Frames differ: lay them out at this size';
-    anchorGrid.hidden = mode !== 'resize';
-    sizeW.value = String(size?.w ?? 16);
-    sizeH.value = String(size?.h ?? 16);
+    sizeTitle.textContent = mode === 'resize' ? 'Sprite size (every frame on this sheet)' : `Frame pivots differ: align them on one pivot at ${size.w}×${size.h}`;
+    sizeRow.hidden = anchorGrid.hidden = mode !== 'resize';
+    sizeW.value = String(size.w);
+    sizeH.value = String(size.h);
     sizeForm.hidden = false;
   }
 
-  details.append(nameRow, styleRow, durationControl.el, layoutRow, sizeForm);
+  details.append(nameRow, styleRow, durationControl.el, layoutRow);
 
   const hint = document.createElement('div');
   hint.className = 'frame-field';
-  el.append(heading, toolbar, newForm, list, hint, details);
+  el.append(heading, toolbar, newForm, sizeForm, list, hint, details);
 
-  let lastAnimationId = null;
+  let lastAnimationId = null, lastSheetId = null;
   function render() {
     if (host.store.getState().session.activeModeId !== 'animations') { el.hidden = true; return; }
     el.hidden = false;
     flatCache.invalidate();
     const s = sheet();
     const anim = selectedAnim();
-    if (anim?.id !== lastAnimationId) { sizeForm.hidden = true; lastAnimationId = anim?.id ?? null; }
+    // The align confirmation belongs to the animation it was opened for,
+    // Sprite size… to the sheet.
+    if (anim?.id !== lastAnimationId && sizeMode === 'align') sizeForm.hidden = true;
+    if ((s?.id ?? null) !== lastSheetId) sizeForm.hidden = true;
+    lastAnimationId = anim?.id ?? null; lastSheetId = s?.id ?? null;
     list.innerHTML = '';
     s?.animations.forEach(a => list.appendChild(buildRow(s, a, a === anim)));
     hint.hidden = !!anim;
@@ -308,6 +309,8 @@ export function mountAnimationListPanel(el) {
     btnDuplicate.title = anim && anim.layout !== 'auto' ? 'Auto-layout this animation first' : 'Duplicate the selected animation and its frames';
     btnDelete.disabled = !anim;
     btnNew.disabled = !s;
+    btnSpriteSize.disabled = !s?.spriteSize;
+    btnSpriteSize.title = s?.spriteSize ? `Every frame on this sheet is ${s.spriteSize.w}×${s.spriteSize.h} — resize them all` : 'Resize every frame on this sheet';
     if (!s) newForm.hidden = true;
     if (!anim) return;
     nameInput.value = anim.name;
@@ -320,7 +323,6 @@ export function mountAnimationListPanel(el) {
     const auto = anim.layout === 'auto';
     btnAutoLayout.hidden = auto;
     btnMakeManual.hidden = !auto;
-    btnCanvasSize.hidden = !auto;
   }
 
   const panel = mountStorePanel(host.store, [

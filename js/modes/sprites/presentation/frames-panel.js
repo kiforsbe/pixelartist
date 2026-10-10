@@ -1,7 +1,7 @@
 // js/modes/sprites/presentation/frames-panel.js
 import { getEditorHost } from '../../../host/runtime.js';
 import { activeSheet } from '../../../host/document-helpers.js';
-import { autoAnimationOf, PINNED_HINT } from '../../../domain/sprites/auto-layout.js';
+import { autoAnimationOf, PINNED_HINT, spriteSizeHint } from '../../../domain/sprites/auto-layout.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
 import { dispatchLayout } from '../../../components/layout-dispatch.js';
 
@@ -17,9 +17,10 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
-function numericField(labelText, value, { step, disabled = false, onCommit }) {
+function numericField(labelText, value, { step, disabled = false, title = '', onCommit }) {
   const label = document.createElement('label');
   label.className = 'frame-field';
+  if (title) label.title = title;
   label.appendChild(document.createTextNode(labelText));
   const input = document.createElement('input');
   input.type = 'number';
@@ -102,13 +103,16 @@ export function mountFramesPanel(element) {
     });
 
     const pinned = !!auto;
+    // Every frame on a sprite sheet is the sheet's sprite size.
+    const sized = !!sheet.spriteSize;
+    const sizeTitle = sized ? spriteSizeHint(sheet.spriteSize) : '';
     const fields = document.createElement('div');
     fields.className = 'frame-fields';
     fields.append(
       numericField('X', frame.x, { disabled: pinned, onCommit: value => setField('x', Math.round(value)) }),
       numericField('Y', frame.y, { disabled: pinned, onCommit: value => setField('y', Math.round(value)) }),
-      numericField('W', frame.w, { disabled: pinned, onCommit: value => setField('w', Math.max(1, Math.round(value))) }),
-      numericField('H', frame.h, { disabled: pinned, onCommit: value => setField('h', Math.max(1, Math.round(value))) }),
+      numericField('W', frame.w, { disabled: pinned || sized, title: sizeTitle, onCommit: value => setField('w', Math.max(1, Math.round(value))) }),
+      numericField('H', frame.h, { disabled: pinned || sized, title: sizeTitle, onCommit: value => setField('h', Math.max(1, Math.round(value))) }),
       numericField('PivotX', frame.pivotX, { step: 0.5, onCommit: value => setPivot('pivotX', value) }),
       numericField('PivotY', frame.pivotY, { step: 0.5, onCommit: value => setPivot('pivotY', value) }),
     );

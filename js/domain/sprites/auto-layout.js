@@ -6,6 +6,8 @@ import { sheetLayers } from '../../core/model.js';
 
 export const NO_ROOM = 'Not enough room on the sheet: raise the maximum sheet width or trim the sheet';
 export const PINNED_HINT = 'Auto-laid-out — edit in Animations, or Make manual';
+// Every frame on a sprite sheet is its spriteSize (one sprite per sheet).
+export const spriteSizeHint = ({ w, h }) => `Every frame on this sheet is ${w}×${h} — change it with Sprite size…`;
 
 // The widest a band of frames may be packed (project settings).
 export function layoutMaxWidth(settings) {

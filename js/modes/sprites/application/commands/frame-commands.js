@@ -1,7 +1,7 @@
 import { addFrame, removeFrame } from '../../../../core/model.js';
 import { sliceGrid } from '../../../../core/slicing.js';
 import { runEntityCommand } from '../../../../host/command-helpers.js';
-import { isPinnedFrame, PINNED_HINT } from '../../../../domain/sprites/auto-layout.js';
+import { isPinnedFrame, PINNED_HINT, spriteSizeHint } from '../../../../domain/sprites/auto-layout.js';
 
 export function findSpriteSheet(project, sheetId) {
   return project?.sheets.find(sheet => sheet.id === sheetId) ?? null;
@@ -15,9 +15,15 @@ export function runSheetCommand(services, sheetId, label, apply, revert) {
   runEntityCommand(services, label, project => findSpriteSheet(project, sheetId), apply, revert);
 }
 
+// On a sprite sheet the frame is the sheet's sprite size at rect's top-left.
 export function createFrame(services, sheetId, rect) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   if (!sheet) return;
+  if (sheet.spriteSize) {
+    rect = { x: rect.x, y: rect.y, ...sheet.spriteSize };
+    if (rect.x < 0 || rect.y < 0 || rect.x + rect.w > sheet.width || rect.y + rect.h > sheet.height)
+      return { ok: false, reason: `A ${rect.w}×${rect.h} frame does not fit there` };
+  }
   const doc = sheetDocument(sheet);
   const name = `frame_${sheet.frames.length}`;
   let created = null;
@@ -31,6 +37,7 @@ export function createFrame(services, sheetId, rect) {
       target.frames = target.frames.filter(f => f !== created);
       if (services.selections.get(doc)?.frameId === created.id) services.selections.set({ ...services.selections.get(doc), frameId: null }, doc);
     });
+  return { ok: true };
 }
 
 // A plain (unpinned) frame's delete. contributions.js routes pinned frames
@@ -62,6 +69,8 @@ export function resizeFrame(services, sheetId, frameId, before, after) {
   const frame = sheet?.frames.find(f => f.id === frameId);
   if (!frame) return;
   if (isPinnedFrame(sheet, frameId)) return { ok: false, reason: PINNED_HINT };
+  const size = sheet.spriteSize;
+  if (size && (after.w !== size.w || after.h !== size.h)) return { ok: false, reason: spriteSizeHint(size) };
   runSheetCommand(services, sheetId, 'resize frame',
     () => { frame.x = after.x; frame.y = after.y; frame.w = after.w; frame.h = after.h; },
     () => { frame.x = before.x; frame.y = before.y; frame.w = before.w; frame.h = before.h; });
@@ -85,10 +94,24 @@ export function moveFrames(services, sheetId, frameIds, dx, dy) {
 
 // Slice-grid dialog's Create action, minus the DOM reads. `options` carries
 // cellW/cellH/marginX/marginY/spacingX/spacingY/namePrefix already clamped by
-// the dialog; sheetWidth/sheetHeight come from the sheet itself.
+// the dialog; sheetWidth/sheetHeight come from the sheet itself. On a sprite
+// sheet the cell must be the sprite size -- unless the slice replaces every
+// frame (or there are none), when the cell becomes the new sprite size.
 export function sliceSheetIntoFrames(services, sheetId, options, replace) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   if (!sheet) return;
+  const sizeBefore = sheet.spriteSize ? { ...sheet.spriteSize } : null;
+  let sizeAfter = sizeBefore;
+  if (sizeBefore && (options.cellW !== sizeBefore.w || options.cellH !== sizeBefore.h)) {
+    if (!replace && sheet.frames.length) return { ok: false, reason: `Every frame on this sheet is ${sizeBefore.w}×${sizeBefore.h}: slice at that size, or turn on Replace` };
+    sizeAfter = { w: options.cellW, h: options.cellH };
+  }
+  const autoAnims = sheet.animations.filter(a => a.layout === 'auto');
+  const setSize = (target, size) => {
+    if (!size) return;
+    target.spriteSize = { ...size };
+    for (const a of autoAnims) a.cell = { ...size };
+  };
   const newFrames = sliceGrid({ sheetWidth: sheet.width, sheetHeight: sheet.height, ...options });
 
   const beforeFrames = sheet.frames.slice();
@@ -105,9 +128,12 @@ export function sliceSheetIntoFrames(services, sheetId, options, replace) {
     target => {
       target.frames = afterFrames.slice();
       for (const snap of afterAnimSnapshots) snap.anim.frames = snap.frames.slice();
+      setSize(target, sizeAfter);
     },
     target => {
       target.frames = beforeFrames.slice();
       for (const snap of beforeAnimSnapshots) snap.anim.frames = snap.frames.slice();
+      setSize(target, sizeBefore);
     });
+  return { ok: true };
 }

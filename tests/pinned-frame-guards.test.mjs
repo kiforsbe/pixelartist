@@ -27,7 +27,7 @@ function setup() {
   store.setProject(project, { dirty: false });
   store.updateSession({ activeDocument: { kind: 'sprite-sheet', id: sheet.id } });
   const services = { store, projects: new ProjectService(store, null), history: new HistoryService({ store }), selections: new SelectionService(store) };
-  const { animationId } = newAutoAnimation(services, sheet.id, { name: 'run', w: 16, h: 16 });
+  const { animationId } = newAutoAnimation(services, sheet.id, { name: 'run' });
   const anim = sheet.animations[0];
   return { project, sheet, services, anim, animationId, pinned: sheet.frames[0] };
 }
@@ -76,7 +76,7 @@ test('sprites.deleteFrame routes a pinned frame to the layout-aware delete', () 
   host.setProject(project);
   host.store.updateSession({ activeDocument: { kind: 'sprite-sheet', id: sheet.id } });
   const run = (id, args) => host.registries.commands.execute(id, { modeId: 'sprites' }, { sheetId: sheet.id, ...args });
-  const { animationId } = run('animations.new', { name: 'run', w: 16, h: 16 });
+  const { animationId } = run('animations.new', { name: 'run' });
   run('animations.addFrame', { animationId, at: 1 });
   const [f0, f1] = sheet.frames;
   setPixel(sheetLayers(sheet)[0].bitmap, 17, 1, RED);

@@ -42,7 +42,7 @@ async function expand(width = '48') { sizeInput().value = width; sizeInput().fir
 async function reset() {
   cancelNameClick(); // a tag click's deferred render from the previous test
   const project = createProject('Timeline');
-  const sheet = createSheet(project, { name: 'Sheet', width: 24, height: 16, kind: 'sprite' });
+  const sheet = createSheet(project, { name: 'Sheet', width: 24, height: 16, kind: 'sprite', spriteSize: { w: 8, h: 8 } });
   const a = addFrame(sheet, { name: 'A', x: 0, y: 0, w: 8, h: 8 });
   const b = addFrame(sheet, { name: 'B', x: 8, y: 0, w: 8, h: 8 });
   const c = addFrame(sheet, { name: 'C', x: 0, y: 8, w: 8, h: 8 });
@@ -439,12 +439,12 @@ test('a manual animation is offered auto-layout before an insert; declining chan
   assert.equal(run.layout, 'auto'); assert.equal(run.frames.length, 3);
 });
 
-test('accepting the offer for differently sized frames lays out at the suggested size', async () => {
-  const { run, b } = await reset();
-  run.layout = 'manual'; run.cell = null; b.w = 10; host.history.execute({ do() {}, undo() {} }); await tick();
+test('accepting the offer for frames whose pivots differ aligns them at the sprite size', async () => {
+  const { run, a, b } = await reset();
+  run.layout = 'manual'; run.cell = null; b.pivotX = 2; host.history.execute({ do() {}, undo() {} }); await tick();
   gaps()[1].fire('click', {});
   assert.equal(run.layout, 'auto');
-  assert.deepEqual(run.cell, { w: 10, h: 8 });
+  assert.deepEqual([run.cell, b.w, b.pivotX], [{ w: 8, h: 8 }, 8, a.pivotX]);
 });
 
 test('declining the offer still reorders a manual animation without layout', async () => {

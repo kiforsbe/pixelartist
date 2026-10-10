@@ -29,7 +29,8 @@ function setup({ width = 64, height = 64, maxWidth = 64 } = {}) {
 }
 // An auto animation "run" with `count` frames, laid out left to right.
 function runWith(ctx, count, cell = { w: 16, h: 16 }) {
-  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run', ...cell });
+  ctx.sheet.spriteSize = { ...cell };
+  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run' });
   const anim = ctx.sheet.animations.at(-1);
   for (let i = 1; i < count; i++) addAutoFrame(ctx.services, ctx.sheet.id, anim.id, i);
   return anim;
@@ -38,7 +39,8 @@ const entryFrame = (ctx, anim, i) => ctx.sheet.frames.find(f => f.id === anim.fr
 
 test('new creates an auto animation with one blank frame and selects it; undo/redo keep identity', () => {
   const ctx = setup();
-  const r = newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run', w: 16, h: 24 });
+  ctx.sheet.spriteSize = { w: 16, h: 24 };
+  const r = newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run' });
   assert.equal(r.ok, true);
   const anim = ctx.sheet.animations[0];
   const frame = ctx.sheet.frames[0];
@@ -55,8 +57,8 @@ test('new creates an auto animation with one blank frame and selects it; undo/re
 
 test('a second animation gets its own band below the first', () => {
   const ctx = setup();
-  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run', w: 16, h: 16 });
-  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'idle', w: 8, h: 8 });
+  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'run' });
+  newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'idle' });
   assert.deepEqual([ctx.sheet.frames[1].x, ctx.sheet.frames[1].y], [0, 16]);
 });
 
@@ -160,7 +162,8 @@ test('moveFrame reorders entries and the frames swap places with their pixels', 
 
 test('a layout refusal changes nothing and records no history', () => {
   const ctx = setup({ maxWidth: 64 });
-  assert.deepEqual(newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'big', w: 80, h: 16 }), { ok: false, reason: NO_ROOM });
+  ctx.sheet.spriteSize = { w: 80, h: 16 };
+  assert.deepEqual(newAutoAnimation(ctx.services, ctx.sheet.id, { name: 'big' }), { ok: false, reason: NO_ROOM });
   assert.deepEqual([ctx.sheet.animations.length, ctx.sheet.frames.length], [0, 0]);
   assert.equal(ctx.services.history.canUndo(), false);
 });

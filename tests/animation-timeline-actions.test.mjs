@@ -44,7 +44,7 @@ async function reset() {
   closeContextMenu();
   document.activeElement = null;
   const project = createProject('Timeline');
-  const sheet = createSheet(project, { name: 'Sheet', width: 24, height: 16, kind: 'sprite' });
+  const sheet = createSheet(project, { name: 'Sheet', width: 24, height: 16, kind: 'sprite', spriteSize: { w: 8, h: 8 } });
   const a = addFrame(sheet, { name: 'A', x: 0, y: 0, w: 8, h: 8 });
   const b = addFrame(sheet, { name: 'B', x: 8, y: 0, w: 8, h: 8 });
   const d = addFrame(sheet, { name: 'D', x: 16, y: 0, w: 8, h: 8 });
@@ -546,7 +546,7 @@ test('the frame and tag menus offer New Animation', async () => {
   assert.ok(menuItem('New Animation'));
 });
 
-test('New Animation adds an auto animation of one blank frame at the selected cell size and opens its rename', async () => {
+test('New Animation adds an auto animation of one blank frame of the sprite size and opens its rename', async () => {
   const { sheet } = await reset();
   runAction(T('newAnimation'));
   const made = sheet.animations.at(-1);
@@ -562,7 +562,7 @@ test('New Animation adds an auto animation of one blank frame at the selected ce
   assert.equal(sheet.animations.length, 2, 'one undo step');
 });
 
-test('the + at the end of the tag lane creates an animation, at the project frame size without a selection', async () => {
+test('the + at the end of the tag lane creates an animation of the sprite size, also without a selection', async () => {
   const { sheet } = await reset();
   host.selections.patch({ animationId: null, frameId: null, entryIndex: null });
   await tick();
@@ -571,5 +571,5 @@ test('the + at the end of the tag lane creates an animation, at the project fram
   add.fire('click', {});
   const made = sheet.animations.at(-1);
   assert.equal(sheet.animations.length, 3);
-  assert.deepEqual(made.cell, { w: 16, h: 16 });
+  assert.deepEqual(made.cell, { w: 8, h: 8 });
 });

@@ -10,7 +10,7 @@
 import { addFrame, addAnimation, sheetLayers, MAX_DIM } from '../../../../core/model.js';
 import { copyRegion } from '../../../../core/pixels.js';
 import { applyLayout, undoLayout, redoLayout, hasPixels, reframedContent } from '../../../../core/sheet-layout.js';
-import { planLayout, distinctFrameIds, autoAnimationOf, layoutMaxWidth } from '../../../../domain/sprites/auto-layout.js';
+import { planLayout, distinctFrameIds, autoAnimationOf, layoutMaxWidth, spriteSizeHint } from '../../../../domain/sprites/auto-layout.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 export const NOT_AUTO = 'This animation is not auto-laid-out';
@@ -67,6 +67,7 @@ export function isFrameReferenced(project, sheet, frameId) {
 
 function snapshot(sheet) {
   return {
+    spriteSize: sheet.spriteSize ? { ...sheet.spriteSize } : null,
     frames: sheet.frames.slice(),
     frameFields: sheet.frames.map(f => [f, { name: f.name, x: f.x, y: f.y, w: f.w, h: f.h, pivotX: f.pivotX, pivotY: f.pivotY }]),
     animations: sheet.animations.slice(),
@@ -75,6 +76,7 @@ function snapshot(sheet) {
 }
 
 function restore(sheet, snap) {
+  sheet.spriteSize = snap.spriteSize ? { ...snap.spriteSize } : null;
   sheet.frames = snap.frames.slice();
   for (const [f, v] of snap.frameFields) Object.assign(f, v);
   sheet.animations = snap.animations.slice();
@@ -134,10 +136,11 @@ function sharedPivot(sheet, anim) {
   return { pivotX: first?.pivotX ?? 0, pivotY: first?.pivotY ?? 0 };
 }
 
-export function newAutoAnimation(services, sheetId, { name, w, h }) {
-  if (!validSize(w, h)) return { ok: false, reason: BAD_SIZE };
+// One blank frame of the sheet's sprite size.
+export function newAutoAnimation(services, sheetId, { name } = {}) {
   let ids = null;
   const r = runLayoutCommand(services, sheetId, 'new animation', sheet => {
+    const { w, h } = sheet.spriteSize;
     const anim = addAnimation(sheet, name ?? uniqueAnimationName(sheet, 'anim', sheet.animations.length), services.projects.project?.settings);
     anim.layout = 'auto';
     anim.cell = { w, h };
@@ -213,7 +216,7 @@ export function moveAutoFrame(services, sheetId, animationId, from, to) {
   });
 }
 
-export const SIZE_NEEDED = 'Frames differ in size or pivot: choose a canvas size';
+export const SIZE_NEEDED = 'Frame pivots differ: align them at the sprite size';
 
 const ANCHORS = {
   nw: [0, 0], n: [0.5, 0], ne: [1, 0],
@@ -221,22 +224,33 @@ const ANCHORS = {
   sw: [0, 1], s: [0.5, 1], se: [1, 1],
 };
 
-export function resizeAutoCanvas(services, sheetId, animationId, w, h, anchor = 'c') {
+// "Sprite size…": every frame on the sheet re-framed to w x h around the
+// anchor, as one step. Auto animations re-plan; every other frame grows or
+// shrinks in place around the same anchor, so its pixels stay put -- refused,
+// naming it, if it would leave the sheet or overlap another such frame.
+export function resizeSpriteSize(services, sheetId, w, h, anchor = 'c') {
   if (!validSize(w, h)) return { ok: false, reason: BAD_SIZE };
-  const current = findAnimation(services, sheetId, animationId);
-  if (current?.layout !== 'auto') return { ok: false, reason: NOT_AUTO };
-  if (current.cell.w === w && current.cell.h === h) return { ok: true };
+  const current = findSpriteSheet(services.projects.project, sheetId);
+  if (!current?.spriteSize) return { ok: false, reason: NO_SUCH };
+  if (current.spriteSize.w === w && current.spriteSize.h === h) return { ok: true };
   const [fx, fy] = ANCHORS[anchor] ?? ANCHORS.c;
-  return runLayoutCommand(services, sheetId, 'resize animation canvas', sheet => {
-    const anim = autoIn(sheet, animationId);
-    const ox = Math.floor(fx * (w - anim.cell.w)), oy = Math.floor(fy * (h - anim.cell.h));
-    const content = new Map(), clears = [];
-    for (const f of animFrames(sheet, anim)) {
+  return runLayoutCommand(services, sheetId, 'sprite size', sheet => {
+    const ox = Math.floor(fx * (w - sheet.spriteSize.w)), oy = Math.floor(fy * (h - sheet.spriteSize.h));
+    const content = new Map(), clears = [], inPlace = [];
+    for (const f of sheet.frames) {
       clears.push(rectOf(f));
       content.set(f.id, reframedContent(sheet, f, w, h, ox, oy));
+      if (!autoAnimationOf(sheet, f.id)) { f.x -= ox; f.y -= oy; inPlace.push(f); }
       f.w = w; f.h = h; f.pivotX += ox; f.pivotY += oy;
     }
-    anim.cell = { w, h };
+    for (const f of inPlace) {
+      if (f.x < 0 || f.y < 0 || f.x + w > sheet.width || f.y + h > sheet.height)
+        return { ok: false, reason: `Frame "${f.name}" would leave the sheet at ${w}×${h}` };
+      const hit = inPlace.find(g => g !== f && f.x < g.x + w && g.x < f.x + w && f.y < g.y + h && g.y < f.y + h);
+      if (hit) return { ok: false, reason: `Frames "${f.name}" and "${hit.name}" would overlap at ${w}×${h}` };
+    }
+    sheet.spriteSize = { w, h };
+    for (const anim of sheet.animations) if (anim.layout === 'auto') anim.cell = { w, h };
     return { content, clears };
   });
 }
@@ -253,14 +267,12 @@ export function autoLayoutAnimation(services, sheetId, animationId, size = null)
     const other = autoAnimationOf(sheet0, f.id);
     if (other) return { ok: false, reason: `Frame "${f.name}" is already laid out by "${other.name}"` };
   }
+  const sprite = sheet0.spriteSize;
+  if (size && (size.w !== sprite.w || size.h !== sprite.h))
+    return { ok: false, reason: spriteSizeHint(sprite) };
   const first = frames0[0];
-  const uniform = frames0.every(f => f.w === first.w && f.h === first.h && f.pivotX === first.pivotX && f.pivotY === first.pivotY);
-  if (!uniform && !size) {
-    return {
-      ok: false, reason: SIZE_NEEDED, needsSize: true,
-      suggested: { w: Math.max(...frames0.map(f => f.w)), h: Math.max(...frames0.map(f => f.h)) },
-    };
-  }
+  const uniform = frames0.every(f => f.w === sprite.w && f.h === sprite.h && f.pivotX === first.pivotX && f.pivotY === first.pivotY);
+  if (!uniform && !size) return { ok: false, reason: SIZE_NEEDED, needsSize: true, suggested: { ...sprite } };
   return runLayoutCommand(services, sheetId, 'auto-layout animation', sheet => {
     const anim = sheet.animations.find(a => a.id === animationId);
     const frames = animFrames(sheet, anim);

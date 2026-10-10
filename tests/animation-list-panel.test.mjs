@@ -22,15 +22,16 @@ mountAnimationListPanel(panel);
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const button = text => panel.querySelectorAll('button').find(b => b.textContent === text);
 
-// "Run": auto, two 8x8 frames. "Idle": manual, a 4x4 and an 8x8 frame.
+// An 8x8 sprite. "Run": auto, two frames. "Idle": manual, two frames whose
+// pivots differ.
 async function reset() {
   alerts.length = 0;
   const project = createProject('Panel');
-  const sheet = createSheet(project, { name: 'Sheet', width: 32, height: 16, kind: 'sprite' });
+  const sheet = createSheet(project, { name: 'Sheet', width: 40, height: 16, kind: 'sprite', spriteSize: { w: 8, h: 8 } });
   const a = addFrame(sheet, { name: 'A', x: 0, y: 0, w: 8, h: 8 });
   const b = addFrame(sheet, { name: 'B', x: 8, y: 0, w: 8, h: 8 });
-  const c = addFrame(sheet, { name: 'C', x: 0, y: 8, w: 4, h: 4 });
-  const d = addFrame(sheet, { name: 'D', x: 8, y: 8, w: 8, h: 8 });
+  const c = addFrame(sheet, { name: 'C', x: 0, y: 8, w: 8, h: 8 });
+  const d = addFrame(sheet, { name: 'D', x: 16, y: 8, w: 8, h: 8, pivotX: 4, pivotY: 8 });
   const run = addAnimation(sheet, 'Run');
   Object.assign(run, { layout: 'auto', cell: { w: 8, h: 8 }, frames: [{ frameId: a.id, duration: null }, { frameId: b.id, duration: null }] });
   const idle = addAnimation(sheet, 'Idle');
@@ -56,43 +57,46 @@ test('clicking a row selects the animation and its first frame', async () => {
   assert.equal(sel.entryIndex, 0);
 });
 
-test('New creates an auto animation of the entered size', async () => {
+test('New asks only for a name and makes an animation of the sprite size', async () => {
   const { sheet } = await reset();
   button('New…').fire('click');
   const form = panel.querySelector('.anim-new-form');
   assert.equal(form.hidden, false);
-  const [name, w, h] = form.querySelectorAll('input');
-  assert.deepEqual([w.value, h.value], ['16', '16'], 'defaults to the project frame size');
-  name.value = 'Jump'; w.value = '12'; h.value = '10';
+  const inputs = form.querySelectorAll('input');
+  assert.equal(inputs.length, 1);
+  inputs[0].value = 'Jump';
   button('Create').fire('click');
   const jump = sheet.animations.at(-1);
-  assert.equal(jump.name, 'Jump'); assert.deepEqual(jump.cell, { w: 12, h: 10 });
+  assert.equal(jump.name, 'Jump'); assert.deepEqual(jump.cell, { w: 8, h: 8 });
   assert.equal(host.selections.get().animationId, jump.id);
 });
 
-test('Auto-layout of mixed sizes asks for a canvas size instead of alerting', async () => {
+test('Auto-layout of frames whose pivots differ offers to align them instead of alerting', async () => {
   const { idle } = await reset();
   host.selections.patch({ animationId: idle.id }); await tick();
   button('Auto-layout').fire('click'); await tick();
   assert.deepEqual(alerts, []);
   const form = panel.querySelector('.anim-size-form');
   assert.equal(form.hidden, false);
-  const [w, h] = form.querySelectorAll('input');
-  assert.deepEqual([w.value, h.value], ['8', '8']);
+  assert.match(form.querySelector('.frame-field').textContent, /8×8/);
   button('Apply').fire('click');
   assert.equal(idle.layout, 'auto'); assert.deepEqual(idle.cell, { w: 8, h: 8 });
 });
 
-test('Canvas size applies with the chosen anchor', async () => {
-  const { run } = await reset();
-  host.selections.patch({ animationId: run.id }); await tick();
-  button('Canvas size…').fire('click'); await tick();
+test('Sprite size… re-frames the whole sheet with the chosen anchor, without a selected animation', async () => {
+  const { sheet, run, idle } = await reset();
+  button('Sprite size…').fire('click'); await tick();
   const form = panel.querySelector('.anim-size-form');
-  const [w, h] = form.querySelectorAll('input'); w.value = '10'; h.value = '8';
+  assert.equal(form.hidden, false);
+  const [w, h] = form.querySelectorAll('input');
+  assert.deepEqual([w.value, h.value], ['8', '8']);
+  w.value = '10'; h.value = '8';
   form.querySelector('.anchor-grid').querySelectorAll('button').find(b => b.dataset.anchor === 'w').fire('click');
   button('Apply').fire('click');
-  assert.deepEqual(run.cell, { w: 10, h: 8 });
-  host.history.undo(); assert.deepEqual(run.cell, { w: 8, h: 8 });
+  assert.deepEqual([sheet.spriteSize, run.cell], [{ w: 10, h: 8 }, { w: 10, h: 8 }]);
+  assert.ok(sheet.frames.every(f => f.w === 10 && f.h === 8));
+  assert.equal(idle.layout, 'manual');
+  host.history.undo(); assert.deepEqual([sheet.spriteSize, run.cell], [{ w: 8, h: 8 }, { w: 8, h: 8 }]);
 });
 
 test('Make manual turns an auto animation manual', async () => {
@@ -222,10 +226,10 @@ test('New… is disabled without a sprite sheet', async () => {
 
 test('a fractional size is refused, not truncated', async () => {
   const { sheet } = await reset();
-  button('New…').fire('click');
-  const [, w, h] = panel.querySelector('.anim-new-form').querySelectorAll('input');
+  button('Sprite size…').fire('click');
+  const [w, h] = panel.querySelector('.anim-size-form').querySelectorAll('input');
   w.value = '12.9'; h.value = '10';
-  button('Create').fire('click');
-  assert.equal(sheet.animations.length, 2, 'nothing created');
+  button('Apply').fire('click');
+  assert.deepEqual(sheet.spriteSize, { w: 8, h: 8 }, 'nothing changed');
   assert.equal(alerts.length, 1, 'the refusal says why');
 });

@@ -85,10 +85,20 @@ function drawSlicePreview(ctx, view, sheet, o) {
   });
 }
 
-export function paintFrameToolGhost(ctx, view, sheet, { drag, slicePreview }) {
+export function paintFrameToolGhost(ctx, view, sheet, { drag, hover = null, slicePreview }) {
   if (!sheet) return;
   if (slicePreview) drawSlicePreview(ctx, view, sheet, slicePreview);
-  if (!drag) return;
+  const stamp = drag ? (drag.kind === 'stamp' ? drag.rect : null) : hover;
+  if (stamp) {
+    ctx.save();
+    ctx.strokeStyle = '#fff';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    strokeGhostRect(ctx, view, stamp);
+    ctx.restore();
+    if (drag) drawRectDims(ctx, view, stamp);
+  }
+  if (!drag || drag.kind === 'stamp') return;
 
   ctx.save();
   ctx.strokeStyle = '#fff';
@@ -121,5 +131,6 @@ export function paintFrameChrome(ctx, view, sheet, { tool, drag, selectedFrameId
   const pinned = isPinnedFrame(sheet, selected.id);
   if (!drag) drawRectDims(ctx, view, selected, { quiet: true });
   if (pinned) { if (!drag) drawPinnedHint(ctx, view, selected); }
-  else drawHandles(ctx, view, selected);
+  else if (!sheet.spriteSize) drawHandles(ctx, view, selected); // one sprite size: no resizing here
+
 }

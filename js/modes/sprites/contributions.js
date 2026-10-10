@@ -10,7 +10,7 @@ import {
   createFrame, deleteFrame, resizeFrame, moveFrames, sliceSheetIntoFrames, findSpriteSheet,
 } from './application/commands/frame-commands.js';
 import {
-  newAutoAnimation, addAutoFrame, linkAutoFrame, deleteAutoFrame, moveAutoFrame, resizeAutoCanvas,
+  newAutoAnimation, addAutoFrame, linkAutoFrame, deleteAutoFrame, moveAutoFrame, resizeSpriteSize,
   autoLayoutAnimation, makeManual, reorderAnimations, duplicateAnimation, deleteAutoAnimation, setAnimationPivot,
   deleteLaidOutFrame,
 } from './application/commands/animation-layout-commands.js';
@@ -94,12 +94,12 @@ function registerSpriteCommands(api) {
 function registerAnimationLayoutCommands(api) {
   const when = keys => keys.modeId === 'sprites' || keys.modeId === 'animations';
   const command = (id, execute) => api.commands.register({ id, when, execute });
-  command('animations.new', (_c, { sheetId, name, w, h }) => newAutoAnimation(services(), sheetId, { name, w, h }));
+  command('animations.new', (_c, { sheetId, name }) => newAutoAnimation(services(), sheetId, { name }));
   command('animations.addFrame', (_c, { sheetId, animationId, at, copyOf, count }) => addAutoFrame(services(), sheetId, animationId, at, { copyOf, count }));
   command('animations.linkFrame', (_c, { sheetId, animationId, at, frameId }) => linkAutoFrame(services(), sheetId, animationId, at, frameId));
   command('animations.deleteFrame', (_c, { sheetId, animationId, index }) => deleteAutoFrame(services(), sheetId, animationId, index));
   command('animations.moveFrame', (_c, { sheetId, animationId, from, to }) => moveAutoFrame(services(), sheetId, animationId, from, to));
-  command('animations.resizeCanvas', (_c, { sheetId, animationId, w, h, anchor }) => resizeAutoCanvas(services(), sheetId, animationId, w, h, anchor));
+  command('animations.resizeCanvas', (_c, { sheetId, w, h, anchor }) => resizeSpriteSize(services(), sheetId, w, h, anchor));
   command('animations.autoLayout', (_c, { sheetId, animationId, size }) => autoLayoutAnimation(services(), sheetId, animationId, size));
   command('animations.makeManual', (_c, { sheetId, animationId }) => makeManual(services(), sheetId, animationId));
   command('animations.reorderAnimations', (_c, { sheetId, from, to }) => reorderAnimations(services(), sheetId, from, to));
