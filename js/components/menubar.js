@@ -13,78 +13,8 @@
 // current animation) can depend on live app state. An action with a
 // `submenu` never runs on click -- clicking it opens the submenu instead;
 // its own `isEnabled()` still governs whether that submenu can be opened.
-import { getAction, runAction } from '../features/shell/actions.js';
-
-// Renders `items` into `dropdownEl` (clearing it first). `onLeafClick` is
-// called before any leaf action's own `run` fires -- used to close the
-// whole open menu chain, not just this one dropdown. Recurses for nested
-// submenus.
-function populate(dropdownEl, items, onLeafClick) {
-  dropdownEl.innerHTML = '';
-  let openSubmenu = null; // { btn, childDropdown } currently open among this dropdown's own children
-
-  function closeOpenSubmenu() {
-    if (!openSubmenu) return;
-    openSubmenu.btn.classList.remove('open');
-    openSubmenu.childDropdown.hidden = true;
-    openSubmenu = null;
-  }
-
-  for (const item of items) {
-    if (item.separator) {
-      dropdownEl.appendChild(Object.assign(document.createElement('div'), { className: 'menubar-separator' }));
-      continue;
-    }
-
-    const a = getAction(item.action);
-    if (!a || !a.isAvailable()) continue;
-
-    if (a.submenu) {
-      const wrap = document.createElement('div');
-      wrap.className = 'menubar-submenu-wrap';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'menubar-dropdown-item menubar-has-submenu';
-      btn.disabled = !a.isEnabled();
-      const label = document.createElement('span'); label.textContent = a.label;
-      const arrow = document.createElement('span'); arrow.className = 'menubar-submenu-arrow'; arrow.textContent = '▸';
-      btn.append(label, arrow);
-      const childDropdown = document.createElement('div');
-      childDropdown.className = 'menubar-dropdown menubar-submenu';
-      childDropdown.hidden = true;
-      wrap.append(btn, childDropdown);
-      dropdownEl.appendChild(wrap);
-
-      const open = () => {
-        if (btn.disabled || openSubmenu?.childDropdown === childDropdown) return;
-        closeOpenSubmenu();
-        const resolved = typeof a.submenu === 'function' ? a.submenu() : a.submenu;
-        populate(childDropdown, resolved, onLeafClick);
-        btn.classList.add('open');
-        childDropdown.hidden = false;
-        openSubmenu = { btn, childDropdown };
-      };
-      btn.addEventListener('mouseenter', open);
-      btn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
-      continue;
-    }
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'menubar-dropdown-item';
-    btn.disabled = !a.isEnabled();
-    const label = document.createElement('span');
-    const check = a.isChecked ? (a.isChecked() ? '✓ ' : '  ') : '';
-    label.textContent = check + a.label;
-    const shortcut = document.createElement('span');
-    shortcut.className = 'menubar-dropdown-shortcut';
-    shortcut.textContent = a.shortcut ?? '';
-    btn.append(label, shortcut);
-    btn.addEventListener('mouseenter', closeOpenSubmenu);
-    btn.addEventListener('click', () => { onLeafClick(); runAction(item.action); });
-    dropdownEl.appendChild(btn);
-  }
-}
+// Item rendering is shared with the context menu: js/components/menu-items.js.
+import { populateMenu } from './menu-items.js';
 
 export function mountMenuBar(el, menus) {
   el.innerHTML = '';
@@ -101,7 +31,7 @@ export function mountMenuBar(el, menus) {
     if (openMenu === menuEl) return;
     closeOpen();
     const dropdown = menuEl.querySelector('.menubar-dropdown');
-    populate(dropdown, menuEl._items, closeOpen);
+    populateMenu(dropdown, menuEl._items, closeOpen);
     menuEl.querySelector('.menubar-item').classList.add('open');
     dropdown.hidden = false;
     openMenu = menuEl;
