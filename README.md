@@ -258,33 +258,79 @@ Sprite Sheets timeline) jump between them.
   together.
 - **Animations panel** — **New…** (name and frame size, defaulting to the
   project's frame size), **Duplicate** (auto animations) and **Delete**;
-  the list shows each animation's thumbnail and an auto/manual badge, and
-  rows reorder by dragging. Below it: name, Loop, base duration, and
-  **Auto-layout** / **Make manual** / **Canvas size…** (new frame size plus
-  a 3×3 anchor for where the existing pixels sit).
+  the list shows each animation's thumbnail (bordered in its colour) and
+  an auto/manual badge, and rows reorder by dragging. Below it: name,
+  Loop, **Direction** (Forward, Reverse, Ping-pong, Ping-pong reverse),
+  **Colour** (or None), base duration, and **Auto-layout** /
+  **Make manual** / **Canvas size…** (new frame size plus a 3×3 anchor for
+  where the existing pixels sit). Direction drives playback, the Preview
+  and GIF / image-sequence exports; ping-pong does not repeat its end
+  frames.
 - **Timeline** — every animation's frames in sheet order under a lane of
-  name tags, with a row per layer (and folder) below. Each cel shows a dot,
-  filled when that layer has pixels in that frame; clicking a cel selects
-  its frame and layer, and clicking a frame number selects its column.
-  The layer rows replace the Layers panel, which is hidden in this tab:
-  they show, rename, lock, add, delete and drag-nest layers and folders
-  like the panel does. The column-width slider in the
-  header widens the columns; past 40 px each cel shows the layer's pixels
-  and a composite row of whole frames appears. A 🔗 marks a frame used
-  again in the same animation.
+  name tags, with a row per layer (and folder) below. Tags take the
+  animation's colour and show its direction (→ ← ⇄ ⇆); click a tag to
+  select the animation, double-click to rename it. Each frame number shows
+  its duration underneath (`100ms`, or `×2` held frames for an fps-based
+  animation). Each cel shows a dot, filled when that layer has pixels in
+  that frame; clicking a cel selects its frame and layer, and clicking a
+  frame number selects its column. **Shift**+click (or **Shift**+Left/
+  Right) extends a range of columns within one animation; Duplicate,
+  Delete, Reverse, drags and the duration field then act on the whole
+  range. The layer rows replace the Layers panel, which is hidden in this
+  tab: they show, rename, lock, add, delete and drag-nest layers and
+  folders like the panel does. The column-width slider in the header (or
+  **Ctrl**+wheel over the grid) widens the columns; past 40 px each cel
+  shows the layer's pixels and a composite row of whole frames appears. A
+  🔗 marks a frame used again in the same animation.
   - **Editing columns** — hover between two frame numbers for a **+** that
     inserts a blank frame there (**Alt**+click: a copy of the frame to its
     left); the **+** after an animation's last number appends. Drag a frame
-    number to reorder it within its animation, or **Ctrl**+drag to insert
-    a linked use of the frame. A manually laid-out animation is offered an
-    auto-layout first; declining still allows reordering.
+    number (or the selected range) to move it within its animation;
+    **Alt**+drag copies, **Ctrl**+drag inserts a linked use of the frame.
+    Double-click a frame number to edit its duration. A manually laid-out
+    animation is offered an auto-layout before anything that creates
+    frames; declining still allows reordering.
+  - **Right-click** a frame number for Duration…, Insert blank / linked
+    frame, Duplicate, Unlink (give a linked frame its own pixels),
+    Reverse and Delete; a cel adds **Clear cel** (that layer in that
+    frame); a tag offers Rename, Direction, Colour, Loop, Duplicate,
+    Auto-layout / Make manual and Delete.
   - **Header** — First/Previous/Play/Next/Last, a playback-only Loop
-    toggle, **+ Frame**, **Duplicate** and **✕** for the selected column,
-    and its duration (or held frames, for an fps-based animation).
-  - **Keys** — with the timeline focused, **Left**/**Right** step through
-    columns and **Delete** removes the selected one.
+    toggle, **+ Frame**, **Duplicate** and **✕** for the selected columns,
+    and their duration (or held frames, for an fps-based animation).
+  - **Dock** — drag the bar above the timeline to resize it, or
+    double-click it (or focus it and press Enter) to fit the whole
+    timeline; again to go back. Arrow keys resize it from the keyboard.
+    The size is remembered per workbench.
 
   Playback shows in the Preview panel.
+
+### Timeline shortcuts
+
+Active in the Animations tab, never while typing in a field or with a
+dialog or menu open.
+
+| Keys | Action |
+|---|---|
+| Enter | Play / stop |
+| `,` / `.` | Previous / next frame within the animation (wraps) |
+| Alt+N | Duplicate the selected frames after them |
+| Alt+B | Insert a blank frame after the selection |
+| Alt+M | Insert a linked use after the selection |
+| Alt+C | Delete the selected frames (Delete with the timeline focused) |
+| Alt+I | Reverse the selected frames |
+| Left / Right | Previous / next column (timeline focused); Shift extends the range |
+
+### Layers: drag, solo, paint
+
+Layer rows (the Layers panel and the timeline) and map layers reorder by
+dragging: a line shows where the row lands, a folder highlights for a drop
+into it, and **Escape** cancels. Drag past the last row to move to the
+bottom of the root. **Alt**+click an eye to solo that layer (again to
+restore); press an eye or lock and drag across other rows to set them all
+the same way, as one undo step. Right-click a row for Rename, Add layer /
+group, Merge down and Delete. The animations list and the Sprite Sheets
+timeline strip use the same dragging.
 
 ## File format
 

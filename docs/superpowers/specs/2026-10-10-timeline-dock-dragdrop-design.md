@@ -240,3 +240,39 @@ auto-layout first, as for inserts).
 Overlapping tags, per-layer linked cels, repeat counts, onion-skin range
 handles in the header, tag-edge dragging to resize ranges, resizable side
 docks.
+
+## Implementation notes
+
+Decided while building (see `docs/superpowers/plans/2026-10-10-timeline-dock-dragdrop.md`):
+
+1. **Dock fit** sums the handle, header and visible rows instead of the
+   grid's `scrollHeight`: a `flex: 1` grid never reports less than its own
+   height, so a fit could never shrink the dock. The Sprites strip fits to
+   its largest thumbnail size. The maximum is the workspace height minus
+   120 px; the old fixed 400 px is gone.
+2. **Drag payload** is `{ sourceKey, targetKey, sourceIndex, index, place,
+   slot, modifiers }`; `placementSlot` turns a placement into the
+   pre-removal slot. A tree row's open state comes from the next row's
+   depth, so the tree option needs no `isOpen`.
+3. **Root bottom.** The drag module only hit-tests items, so the Layers
+   panel adds a 16 px end item (`.layer-tree-end`) below the rows; a drop
+   there goes to the bottom of the root. The timeline's rows have none.
+4. **Context-menu submenus** are actions with a `submenu`, as in the menu
+   bar; there are no `{ label, submenu }` literal items. Because labels and
+   checks do not depend on `args`, the Direction submenu uses one action per
+   direction (`animations.timeline.direction.<name>`).
+5. **`setFrameDurations`** takes `duration` and/or `step`, since fps-based
+   animations edit held steps.
+6. **Exports.** GIF and image-sequence exports follow the direction; the
+   per-animation sprite sheet and Frames JSON keep timeline order (a packed
+   sheet is not a played sequence).
+7. **Manual animations.** A plain reorder still offers the auto-layout once
+   (declining is remembered); either way it is one `animations.moveFrames`.
+   Copy, link, duplicate, unlink and the insert shortcuts use the offer
+   flow. The header's + Frame / Duplicate stay disabled on a manual
+   animation; the shortcuts and menus offer the auto-layout instead.
+8. **Solo and paint** apply to sprite-sheet layers; map-layer visibility
+   stays an unrecorded toggle as before. There is no Duplicate layer (no
+   command exists); Rename was added.
+9. **Agent worktrees** were created from `origin/main`, three commits behind
+   local `main`; every branch was moved onto local `main` before merging.

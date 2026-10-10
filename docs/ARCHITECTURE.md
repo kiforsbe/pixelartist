@@ -56,11 +56,11 @@ js/
                            history primitives, codecs, ZIP, export builders
   host/                    25 modules: store/services, registries, workbench helpers
   platform/browser/        7 modules: browser I/O, adapters, preferences, test mode
-  modes/                   67 modules in sprites/, animations/, tiles/, maps/
+  modes/                   69 modules in sprites/, animations/, tiles/, maps/
   features/                16 modules: shell/workbench/project/file/filter coordination
-  components/              24 shared DOM/canvas/panel modules
+  components/              28 shared DOM/canvas/panel modules
 assets/                    Blob-47 reference artwork and documentation screenshot
-tests/                     129 top-level Node test modules
+tests/                     136 top-level Node test modules
   helpers/                 Isolated controller/panel fixtures
   browser/                 Focused Playwright workbench regression checks
   smoke.md                 Broader smoke checklist and manual gates
@@ -243,6 +243,27 @@ share `components/panels/layer-tree.js` (row building, selection, rename,
 add/delete/merge, drag-and-drop nesting), and both timelines share
 `components/panels/frame-duration-input.js`. The Layers panel hides itself
 while Animations is active.
+
+Three interaction components are shared by every panel that needs them:
+
+- `components/drag-reorder.js` — the only reorder mechanism (pointer events,
+  no HTML5 drag-and-drop): layer rows, map layers, the animations list, and
+  both timelines' frame columns. Hit-testing (`computePlacement`), slot maths
+  (`placementSlot`, `slotToFinalIndex`) and the layer-tree mapping
+  (`treeDropDestination`, which owns the reversed display order) are pure
+  functions.
+- `components/context-menu.js` — right-click menus whose items are actions
+  (`{ action, args }`), rendered by `components/menu-items.js`, which the
+  menu bar uses too.
+- `components/dock-resizer.js` — the resize handle of both bottom docks
+  (drag, keys, fit-to-content), persisted per dock in `host.preferences`.
+
+The Animations timeline's operations are actions in
+`modes/animations/presentation/timeline-actions.js` (`animations.timeline.*`);
+its shortcuts, context menus and header buttons all run them. Multi-frame
+edits go through the range commands in
+`modes/sprites/application/commands/animation-range-commands.js`, one
+history step each for both auto and manual animations.
 
 ### Panels and views
 
