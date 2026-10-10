@@ -88,9 +88,9 @@ test('Auto-layout of frames whose pivots differ offers to align them instead of 
   assert.equal(idle.layout, 'auto'); assert.deepEqual(idle.cell, { w: 8, h: 8 });
 });
 
-test('the sprite size Change… re-frames the whole sheet with the chosen anchor, without a selected animation', async () => {
+test('Sprite size… re-frames the whole sheet with the chosen anchor, without a selected animation', async () => {
   const { sheet, run, idle } = await reset();
-  button('Change…').fire('click'); await tick();
+  button('Sprite size…').fire('click'); await tick();
   const form = panel.querySelector('.anim-size-form');
   assert.equal(form.hidden, false);
   const [w, h] = form.querySelectorAll('input');
@@ -231,7 +231,7 @@ test('New… is disabled without a sprite sheet', async () => {
 
 test('a fractional size is refused, not truncated', async () => {
   const { sheet } = await reset();
-  button('Change…').fire('click');
+  button('Sprite size…').fire('click');
   const [w, h] = panel.querySelector('.anim-size-form').querySelectorAll('input');
   w.value = '12.9'; h.value = '10';
   button('Apply').fire('click');
@@ -239,14 +239,14 @@ test('a fractional size is refused, not truncated', async () => {
   assert.equal(alerts.length, 1, 'the refusal says why');
 });
 
-test('the list panel ends with the toolbar and the sprite size, below the list', async () => {
-  const { sheet } = await reset();
+test('the toolbar, with Sprite size…, sits below the list', async () => {
+  await reset();
   const kids = panel.children.map(c => c.className);
   const at = cls => kids.findIndex(k => k.split(' ').includes(cls));
-  assert.ok(at('anim-list') < at('anim-toolbar') && at('anim-toolbar') < at('anim-sprite-size'));
-  assert.equal(panel.querySelector('.anim-sprite-size').querySelector('.frame-field').textContent, 'Sprite size 8×8');
+  assert.ok(at('anim-list') < at('anim-toolbar'));
+  assert.deepEqual(panel.querySelector('.anim-toolbar').querySelectorAll('button').map(b => b.textContent), ['New…', 'Duplicate', 'Delete', 'Sprite size…']);
+  assert.match(button('Sprite size…').title, /8×8/);
   assert.equal(panel.querySelector('.anim-details'), null, 'the details are the separate Animation panel');
-  assert.ok(sheet);
 });
 
 test('the Animation panel asks for a selection when none is made', async () => {

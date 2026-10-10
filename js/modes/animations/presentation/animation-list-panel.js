@@ -1,9 +1,9 @@
 // js/modes/animations/presentation/animation-list-panel.js
 // The Animations workbench's Animations panel: the active sheet's
 // animations (thumbnail bordered in the tag colour, name, layout badge; click
-// to select, drag to reorder), then New… / Duplicate / Delete and the sheet's
-// sprite size with Change… (every frame on a sprite sheet is one size; the
-// form adds a 3×3 anchor). The selected animation's details are the separate
+// to select, drag to reorder), then New… / Duplicate / Delete / Sprite size…
+// (every frame on a sprite sheet is one size; its form adds a 3×3 anchor).
+// The selected animation's details are the separate
 // Animation panel (animation-inspector-panel.js). Layout changes go through
 // dispatchLayout (settles a float, explains a refusal).
 import { flattenSheetLayers } from '../../../core/model.js';
@@ -122,19 +122,13 @@ export function mountAnimationListPanel(el) {
     const message = anim.layout === 'auto' ? `Delete animation "${anim.name}" and its frames?` : `Delete animation "${anim.name}"?`;
     if (confirmOrAuto(message)) dispatchLayout('animations.delete', { sheetId: s.id, animationId: anim.id });
   });
-  toolbar.append(btnNew, btnDuplicate, btnDelete);
-
-  // ---- sprite size: the sheet-wide frame size, and its form ----
-  const spriteRow = document.createElement('div');
-  spriteRow.className = 'row anim-sprite-size';
-  const spriteLabel = document.createElement('span');
-  spriteLabel.className = 'frame-field';
-  const btnSpriteSize = textButton('Change…', 'Resize every frame on this sheet', () => {
+  const btnSpriteSize = textButton('Sprite size…', 'Resize every frame on this sheet', () => {
     const size = sheet()?.spriteSize;
     if (size) openSizeForm(size);
   });
-  spriteRow.append(spriteLabel, btnSpriteSize);
+  toolbar.append(btnNew, btnDuplicate, btnDelete, btnSpriteSize);
 
+  // ---- the sprite size form: the sheet-wide frame size ----
   const sizeForm = document.createElement('div');
   sizeForm.className = 'anim-form anim-size-form';
   sizeForm.hidden = true;
@@ -171,7 +165,7 @@ export function mountAnimationListPanel(el) {
     sizeForm.hidden = false;
   }
 
-  el.append(heading, list, hint, toolbar, newForm, spriteRow, sizeForm);
+  el.append(heading, list, hint, toolbar, newForm, sizeForm);
 
   let lastSheetId = null;
   function render() {
@@ -191,11 +185,8 @@ export function mountAnimationListPanel(el) {
     btnDelete.disabled = !anim;
     btnNew.disabled = !s;
     if (!s) newForm.hidden = true;
-    spriteRow.hidden = !s?.spriteSize;
-    if (s?.spriteSize) {
-      spriteLabel.textContent = `Sprite size ${s.spriteSize.w}×${s.spriteSize.h}`;
-      spriteLabel.title = 'Every frame on this sheet is this size';
-    }
+    btnSpriteSize.disabled = !s?.spriteSize;
+    btnSpriteSize.title = s?.spriteSize ? `Every frame on this sheet is ${s.spriteSize.w}×${s.spriteSize.h} — resize them all` : 'Resize every frame on this sheet';
   }
 
   const panel = mountStorePanel(host.store, [

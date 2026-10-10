@@ -526,9 +526,8 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .anim-badge { font-size: 10px; color: #9a9ca8; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .anim-form { display: flex; flex-direction: column; gap: 4px; padding: 6px; margin: 4px 0; background: var(--bg3); border-radius: 4px; }
 .anim-form input[type="number"] { width: 56px; }
-.anim-toolbar, .anim-sprite-size { flex-wrap: wrap; }
-.anim-toolbar button, .anim-sprite-size button { white-space: nowrap; }
-.anim-sprite-size .frame-field { flex: 1; min-width: 0; }
+.anim-toolbar { gap: 4px; flex-wrap: wrap; }
+.anim-toolbar button { flex: 1 1 auto; padding: 2px 4px; font-size: 12px; white-space: nowrap; }
 .anchor-grid { display: grid; grid-template-columns: repeat(3, 18px); gap: 2px; }
 .anchor-grid button { width: 18px; height: 18px; padding: 0; }
 
