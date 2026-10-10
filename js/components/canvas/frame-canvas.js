@@ -31,7 +31,7 @@ import { activeSheet, currentContextLayers } from '../../host/document-helpers.j
 
 function onionSettings() { return getEditorHost().projects.project?.settings?.onion ?? null; }
 
-export function createFrameCanvas(hostEl, { viewKind, getFrame, getOnionAnimation, onStateChange }) {
+export function createFrameCanvas(hostEl, { viewKind, getFrame, getOnionAnimation, onStateChange, keepViewAcrossFrames = false }) {
   const view = new CanvasView(hostEl);
 
   view.imageToScreen = (x, y) => {
@@ -163,6 +163,8 @@ export function createFrameCanvas(hostEl, { viewKind, getFrame, getOnionAnimatio
   // Sets content size + recenters. Only when the frame's identity or size
   // changed -- never on a pixel edit, so drawing never resets zoom/pan. A
   // different frame has a different raster, so the flat cache goes too.
+  // With keepViewAcrossFrames (the Animations canvas, which plays frames
+  // through it) a frame of the same size keeps the zoom/pan instead.
   function loadFrame(f) {
     invalidateFlat();
     view.setContent({ width: f.w, height: f.h });
@@ -173,7 +175,9 @@ export function createFrameCanvas(hostEl, { viewKind, getFrame, getOnionAnimatio
   function sync() {
     const f = getFrame();
     if (!f) return null;
-    if (loadedFrameId !== f.id || view.width !== f.w || view.height !== f.h) loadFrame(f);
+    const sameSize = view.width === f.w && view.height === f.h;
+    if (keepViewAcrossFrames && sameSize && loadedFrameId != null) loadedFrameId = f.id;
+    else if (loadedFrameId !== f.id || !sameSize) loadFrame(f);
     view.requestRender();
     return f;
   }

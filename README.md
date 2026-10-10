@@ -312,7 +312,9 @@ Sprite Sheets timeline) jump between them.
     timeline; again to go back. Arrow keys resize it from the keyboard.
     The size is remembered per workbench.
 
-  Playback shows in the Preview panel.
+  Playback shows in the main view and the Preview panel; the view keeps
+  its zoom while frames of the same size play. Pressing on the canvas
+  while playing stops on the frame shown and selects it for editing.
 
 ### Timeline shortcuts
 

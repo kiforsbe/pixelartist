@@ -13,6 +13,7 @@ import { activeSheet } from '../../../host/document-helpers.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
 import { pivotFromPoint, pivotCommand } from '../application/pivot.js';
 import { timelineColumns, selectedColumn } from '../application/timeline-model.js';
+import { playingFrameId, onPlaybackChange, stopPlayback } from './timeline-playback.js';
 
 const PIVOT_ARM = 6; // crosshair half-length, screen px
 
@@ -44,10 +45,13 @@ export function mountAnimationCanvas(hostEl) {
 
   // The timeline's selected column's frame (as in the timeline and the
   // Preview): a selected frame in no column of the selected animation -- a
-  // stray frame picked in Sprite Sheets, say -- is not edited here.
+  // stray frame picked in Sprite Sheets, say -- is not edited here. While
+  // the timeline plays, the playing frame instead.
   function currentFrame() {
     const sheet = activeSheet('sprite');
     if (!sheet) return null;
+    const playingId = playingFrameId();
+    if (playingId) return sheet.frames.find(f => f.id === playingId) ?? null;
     const columns = timelineColumns(sheet);
     const frameId = columns[selectedColumn(columns, selection(sheet))]?.frameId;
     return sheet.frames.find(f => f.id === frameId) ?? null;
@@ -58,7 +62,9 @@ export function mountAnimationCanvas(hostEl) {
   }
 
   const frameCanvas = createFrameCanvas(canvasDiv, {
-    viewKind: 'canvas', getFrame: currentFrame, getOnionAnimation: currentAnimation, onStateChange: () => refresh(),
+    viewKind: 'canvas', getFrame: currentFrame, onStateChange: () => refresh(),
+    // No ghosts while playing; the view keeps its zoom across same-size frames.
+    getOnionAnimation: () => (playingFrameId() ? null : currentAnimation()), keepViewAcrossFrames: true,
   });
   const { view } = frameCanvas;
   const onionControls = buildOnionControls({ onChange: () => view.requestRender() });
@@ -140,6 +146,12 @@ export function mountAnimationCanvas(hostEl) {
   btnPivot.addEventListener('click', () => setPivotMode(!pivotMode));
 
   btnShow.addEventListener('click', () => getEditorHost().activateMode('sprites'));
+
+  // ---- timeline playback ----
+  // Each advance only re-syncs the canvas. A press while playing stops on
+  // the shown frame first (capture: before the paint tools see it).
+  onPlaybackChange(() => { if (frameCanvas.isVisible()) refresh(); });
+  canvasDiv.addEventListener('pointerdown', () => { if (playingFrameId()) stopPlayback(); }, { capture: true });
 
   // ---- state ----
   function refresh() {

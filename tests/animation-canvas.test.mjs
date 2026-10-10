@@ -10,6 +10,7 @@ import { createProject, createSheet, createMap, addFrame, addAnimation, sheetLay
 import { setPixel, getPixel } from '../js/core/pixels.js';
 import { mountAnimationCanvas } from '../js/modes/animations/presentation/animation-canvas-presenter.js';
 import { initFloatSession, createFloat, activeFloating, hasSelection } from '../js/components/canvas/float-session.js';
+import { setPlayingFrame, registerPlaybackStop } from '../js/modes/animations/presentation/timeline-playback.js';
 
 const { Element } = installSpriteContextDom();
 const host = new EditorHost();
@@ -23,6 +24,7 @@ const blue = [0, 0, 255, 255];
 
 // An auto animation "Run" of two 8x8 frames, A at (0,0) and B at (8,0).
 async function reset() {
+  setPlayingFrame(null);
   host.activateMode('sprites');
   const project = createProject('Anim'); project.settings.onion.enabled = false;
   const sheet = createSheet(project, { name: 'Sheet', width: 16, height: 8, kind: 'sprite' });
@@ -155,4 +157,31 @@ test('holding Space lets pointer input through the pivot overlay, for panning', 
   window.dispatchEvent(keyEvent('keyup', 'Space'));
   assert.equal(layer.style.pointerEvents, '');
   pivotButton().fire('click');
+});
+
+// ---- timeline playback in the main view ----
+
+const nameShown = () => surface.querySelector('.frame-editor-name').textContent;
+
+test('while the timeline plays, the canvas shows the playing frame and keeps its zoom', async () => {
+  const { b } = await reset();
+  canvas.view.zoom = 7;
+  setPlayingFrame(b.id);
+  assert.equal(nameShown(), 'Run · B');
+  assert.equal(canvas.view.zoom, 7, 'a same-size frame does not re-fit the view');
+  setPlayingFrame(null);
+  assert.equal(nameShown(), 'Run · A', 'stopping shows the selected column again');
+  assert.equal(canvas.view.zoom, 7);
+});
+
+test('a press on the canvas while the timeline plays stops playback first', async () => {
+  const { b } = await reset();
+  let stops = 0;
+  const dispose = registerPlaybackStop(() => { stops++; setPlayingFrame(null); });
+  surface.querySelector('.frame-editor-canvas').fire('pointerdown', { button: 0 });
+  assert.equal(stops, 0, 'nothing to stop');
+  setPlayingFrame(b.id);
+  surface.querySelector('.frame-editor-canvas').fire('pointerdown', { button: 0 });
+  assert.equal(stops, 1);
+  dispose();
 });

@@ -32,6 +32,7 @@ import { createDockResizer, workspaceDockMax } from '../../../components/dock-re
 import { attachDragReorder } from '../../../components/drag-reorder.js';
 import { attachContextMenu } from '../../../components/context-menu.js';
 import { defineTimelineActions, attachTimelineShortcuts, FRAME_MENU, CEL_MENU, TAG_MENU } from './timeline-actions.js';
+import { setPlayingFrame, registerPlaybackStop } from './timeline-playback.js';
 import {
   layerTreeRows, buildLayerRow, buildLayerTreeEnd, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode,
   nameClickPending, scheduleNameSelect, cancelNameClick,
@@ -231,7 +232,8 @@ export function mountAnimationTimeline(el) {
     panel.scheduleRender();
   }
 
-  // ---- playback (drives the Preview panel only) ----
+  // ---- playback (drives the Preview panel and, through timeline-playback.js,
+  // the main view) ----
   let playing = false, rafId = null, lastTs = null, acc = 0, position = 0;
   let cursor = null; // place in the direction's play order (advancePlayback)
   let playingId = null; // the animation being played
@@ -248,6 +250,7 @@ export function mountAnimationTimeline(el) {
     playing = false;
     if (rafId != null) cancelAnimationFrame(rafId);
     rafId = null; lastTs = null;
+    setPlayingFrame(null);
     setPlayButton();
     updatePlayhead();
   }
@@ -259,6 +262,7 @@ export function mountAnimationTimeline(el) {
     lastTs = ts;
     position = result.position; acc = result.acc; cursor = result.cursor;
     if (result.stopped) stopPlaying();
+    else setPlayingFrame(anim.frames[position]?.frameId ?? null);
     renderPreview(); updatePlayhead();
     if (playing) rafId = requestAnimationFrame(tick);
   }
@@ -269,11 +273,20 @@ export function mountAnimationTimeline(el) {
     playingId = anim.id;
     position = Math.max(0, current()?.animationId === anim.id ? current().index : 0);
     acc = 0; lastTs = null; cursor = null;
+    setPlayingFrame(anim.frames[position].frameId);
     setPlayButton();
     updatePlayhead();
     rafId = requestAnimationFrame(tick);
   }
   btnPlay.addEventListener('click', () => { if (playing) stopPlaying(); else startPlaying(); });
+  // A press on the main view while playing stops on the frame it shows and
+  // selects it, so what is painted is what was seen.
+  const disposePlaybackStop = registerPlaybackStop(() => {
+    if (!playing) return;
+    const anim = selectedAnim(), at = position;
+    stopPlaying();
+    pickEntry(anim, at);
+  });
 
   function renderPreview() {
     const s = sheet();
@@ -997,7 +1010,7 @@ export function mountAnimationTimeline(el) {
   return {
     ...panel,
     dispose() {
-      disposeHistory(); disposePixels(); disposeShortcuts(); disposeDrag(); disposeLayerDrop(); disposeMenu(); resizer.dispose(); panel.dispose();
+      disposeHistory(); disposePixels(); disposeShortcuts(); disposePlaybackStop(); disposeDrag(); disposeLayerDrop(); disposeMenu(); resizer.dispose(); panel.dispose();
     },
   };
 }

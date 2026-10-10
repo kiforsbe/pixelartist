@@ -12,8 +12,9 @@ import { mountPreviewPanel } from '../js/components/panels/preview-panel.js';
 import { renderAnimationsPreview } from '../js/modes/animations/preview.js';
 import { initFloatSession, registerFloatView, createFloat, activeFloating } from '../js/components/canvas/float-session.js';
 import { cancelNameClick } from '../js/components/panels/layer-tree.js';
+import { playingFrameId, stopPlayback } from '../js/modes/animations/presentation/timeline-playback.js';
 
-const { Element } = installSpriteContextDom();
+const { Element, stepAnimationFrames } = installSpriteContextDom();
 globalThis.alert = () => {};
 let confirmAnswer = true;
 globalThis.confirm = () => confirmAnswer;
@@ -804,4 +805,27 @@ test('Ctrl+wheel over the grid changes the column width; a plain wheel is left t
     await tick();
     assert.equal(sizeInput().value, '64', 'clamped');
   } finally { globalThis.localStorage = saved; }
+});
+
+// ---- playback in the main view (timeline-playback.js) ----
+
+test('playing publishes the playing frame for the main view; it advances and clears on Stop', async () => {
+  const { a, b } = await reset();
+  assert.equal(playingFrameId(), null);
+  byTitle('Play').fire('click');
+  assert.equal(playingFrameId(), a.id);
+  stepAnimationFrames(1000); stepAnimationFrames(1150);
+  assert.equal(playingFrameId(), b.id);
+  byTitle('Stop').fire('click');
+  assert.equal(playingFrameId(), null);
+});
+
+test('stopping from the main view selects the frame it was showing', async () => {
+  const { b } = await reset();
+  byTitle('Play').fire('click');
+  stepAnimationFrames(2000); stepAnimationFrames(2150);
+  stopPlayback();
+  assert.ok(byTitle('Play'), 'stopped');
+  assert.equal(playingFrameId(), null);
+  assert.deepEqual([host.selections.get().frameId, host.selections.get().entryIndex], [b.id, 1]);
 });
