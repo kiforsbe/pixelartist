@@ -370,12 +370,12 @@ export function scheduleNameSelect(selectFn, onChange) {
 
 // ---------------------------------------------------------- drag and drop
 
-// The drag key of the Layers panel's end target: the empty space below the
-// rows, which stands for the bottom of the root.
+// The drag key of a layer list's end target: the space below the rows,
+// which stands for the bottom of the root.
 export const LAYER_TREE_END = ':end';
 
-// The end target the Layers panel appends after its rows (see
-// attachLayerTreeDrop's emptyDropsToRoot).
+// The end target the Layers panel and the timeline append after their rows
+// (see attachLayerTreeDrop's emptyDropsToRoot).
 export function buildLayerTreeEnd() {
   const end = document.createElement('div');
   end.className = 'layer-tree-item layer-tree-end';
@@ -401,10 +401,9 @@ function layerDropDestination(sheet, sourceId, { targetKey, index, place }, empt
 const treeLists = new Set();
 
 // Pointer drag-reorder for a container of layer rows (js/components/
-// drag-reorder.js in tree mode). With emptyDropsToRoot (the Layers panel)
-// the container's end target (buildLayerTreeEnd) takes a node to the bottom
-// of the root; elsewhere nothing below the rows is a target. Returns
-// dispose().
+// drag-reorder.js in tree mode). With emptyDropsToRoot (the default) the
+// container's end target (buildLayerTreeEnd) takes a node to the bottom of
+// the root; without it the end target refuses drops. Returns dispose().
 export function attachLayerTreeDrop(list, { emptyDropsToRoot = true } = {}) {
   treeLists.add(list);
   const destination = (sourceKey, target) => {
