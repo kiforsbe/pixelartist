@@ -758,3 +758,21 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .context-menu .menubar-dropdown-item.active:not(:disabled) { background: var(--accent); color: #fff; }
 .context-menu .menubar-dropdown-item.active:not(:disabled) .menubar-dropdown-shortcut { color: #dbe6ff; }
 .context-menu .menubar-submenu.context-menu-flip-x { left: auto; right: 100%; }
+
+/* drag-reorder (js/components/drag-reorder.js): one indicator vocabulary for
+   every pointer-dragged list. The line is position: fixed in client
+   coordinates; .dr-y lines are horizontal (vertical lists), .dr-x vertical. */
+.dr-active, .dr-active * { cursor: grabbing !important; user-select: none; }
+.dr-active.dr-no-drop, .dr-active.dr-no-drop * { cursor: not-allowed !important; }
+.dr-lifted { opacity: 0.45; }
+.dr-line { position: fixed; z-index: 1000; pointer-events: none; background: var(--accent);
+  border-radius: 1px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.dr-line[hidden] { display: none; }
+.dr-line.dr-y { height: 2px; transform: translateY(-1px); }
+.dr-line.dr-x { width: 2px; transform: translateX(-1px); }
+.dr-line.dr-copy { background: #4caf50; }
+.dr-line.dr-link { background: repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
+.dr-line.dr-x.dr-link { background: repeating-linear-gradient(180deg, var(--accent) 0 4px, transparent 4px 7px); }
+.dr-line.dr-invalid { background: #e05252; }
+.dr-into { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.dr-into.dr-invalid { outline-color: #e05252; }
