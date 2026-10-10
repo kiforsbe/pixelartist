@@ -386,9 +386,10 @@ animations wrap at. Older files take it from `spriteSheetW`.
 A sprite sheet is one sprite: its animations are states of the same
 sprite, so **every frame on a sprite sheet has the sheet's sprite size**
 (`sheet.spriteSize`, saved with the sheet; a new sheet takes the project's
-frame size). In Sprite Sheets the frame tool stamps a frame of that size
-with a click (the outline follows the pointer) and frames have no resize
-handles; the Frames panel's W/H are read-only. **Slice grid** defaults to
+frame size). In Sprite Sheets the frame tool places a frame of that size
+by dragging on empty sheet (the outline follows the pointer; release
+places it, **Escape** cancels, a plain click only deselects) and frames
+have no resize handles; the Frames panel's W/H are read-only. **Slice grid** defaults to
 the sprite size; slicing at another size needs **Replace existing frames**
 (or a sheet without frames), and then the slice size becomes the sprite
 size. 📐 **Sprite size** in the Animations panel resizes every frame at once:

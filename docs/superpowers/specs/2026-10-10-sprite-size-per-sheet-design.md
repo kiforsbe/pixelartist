@@ -68,9 +68,11 @@ Per sprite sheet:
 
 ## UI
 
-- Sprite Sheets frame tool: a click stamps a `spriteSize` frame at the
-  (snapped) pointer; the preview box follows the pointer; no resize
-  handles. Frames still move by dragging.
+- Sprite Sheets frame tool: a drag on empty sheet places a `spriteSize`
+  frame at the (snapped) pointer -- the preview box follows the pointer
+  during the drag, release places it, Escape cancels; a plain click only
+  deselects (a click-to-stamp made every deselecting click create a
+  frame). No resize handles. Frames still move by dragging.
 - Frames panel: W/H read-only, titled with the reason.
 - Slice dialog: cell W/H default to `spriteSize`.
 - Animations panel: the New form has a name only; per-animation

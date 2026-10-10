@@ -12,9 +12,10 @@
 // domain/sprites/auto-layout.js) selects and opens like any other, but never
 // drags or resizes here: its rect belongs to the layout.
 //
-// Every frame on a sprite sheet is the sheet's sprite size, so there a click
-// on empty sheet stamps a frame of that size (previewed under the pointer)
-// and frames have no resize handles; Sprite size… in Animations resizes them.
+// Every frame on a sprite sheet is the sheet's sprite size, so there a drag
+// on empty sheet places a frame of that size (its outline follows the
+// pointer; release makes it, Escape cancels, a plain click only deselects)
+// and frames have no resize handles; Sprite size in Animations resizes them.
 import { getEditorHost } from '../../../host/runtime.js';
 import { activeSheet } from '../../../host/document-helpers.js';
 import { isTypingTarget } from '../../../components/dom-utils.js';
@@ -31,11 +32,9 @@ import { bindDragCancelGuard } from '../../../components/canvas/drag-cancel-guar
 
 // In-progress drag state (create/stamp/move/resize), module-scoped like
 // drawing-engine.js's `selection`/`stroke` -- there is only ever one
-// frame-tool drag at a time. `hover` is the stamp preview rect while the
-// pointer is over empty sprite sheet, else null. `lastClick` is the previous
-// pointerdown's { frameId, t } for double-click detection.
+// frame-tool drag at a time. `lastClick` is the previous pointerdown's
+// { frameId, t } for double-click detection.
 let drag = null;
-let hover = null;
 let lastClick = null;
 
 // Set once by registerFrameTool() (which builds the dialog before the tool
@@ -124,29 +123,17 @@ function handleDown(ev, view) {
   }
   const cleared = sheetSelection(sheet);
   if (cleared.frameId != null || cleared.animationId != null) setSheetSelection(sheet, { frameId: null, animationId: null });
-  hover = null;
-  drag = sheet.spriteSize
-    ? { kind: 'stamp', rect: stampRect(sheet, sheet.spriteSize, ev.x, ev.y, frameToolOptions) }
-    : { kind: 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
-  view.requestRender();
-}
-
-const sameRect = (a, b) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
-
-// The stamp preview follows the pointer over empty sprite sheet.
-function updateHover(ev, view) {
-  const sheet = activeSheet('sprite');
-  const next = sheet?.spriteSize && !frameAt(sheet, ev.x, ev.y) ? stampRect(sheet, sheet.spriteSize, ev.x, ev.y, frameToolOptions) : null;
-  if (sameRect(next, hover)) return;
-  hover = next;
+  // The rect appears once the pointer moves: a plain click only deselects.
+  drag = { kind: sheet.spriteSize ? 'stamp' : 'create', anchor: { x: ev.x, y: ev.y }, rect: null };
   view.requestRender();
 }
 
 function handleMove(ev, view) {
-  if (!drag) { updateHover(ev, view); return; }
+  if (!drag) return;
   if (drag.kind === 'stamp') {
     const sheet = activeSheet('sprite');
-    if (sheet?.spriteSize) drag.rect = stampRect(sheet, sheet.spriteSize, ev.x, ev.y, frameToolOptions);
+    const moved = ev.x !== drag.anchor.x || ev.y !== drag.anchor.y;
+    if (sheet?.spriteSize && moved) drag.rect = stampRect(sheet, sheet.spriteSize, ev.x, ev.y, frameToolOptions);
   } else if (drag.kind === 'create') {
     drag.rect = snapRect(rectBetween(drag.anchor.x, drag.anchor.y, ev.x, ev.y, true), frameToolOptions);
   } else if (drag.kind === 'move') {
@@ -170,9 +157,10 @@ function handleUp(ev, view) {
   if (!sheet) return;
 
   if (d.kind === 'stamp') {
+    const moved = ev.x !== d.anchor.x || ev.y !== d.anchor.y;
+    if (!moved) return;
     if (d.rect) dispatch('sprites.createFrame', { sheetId: sheet.id, rect: d.rect });
-    else if (typeof alert !== 'undefined') alert(`The sprite size (${sheet.spriteSize.w}×${sheet.spriteSize.h}) is larger than this sheet`);
-    updateHover(ev, view);
+    else if (sheet.spriteSize && typeof alert !== 'undefined') alert(`The sprite size (${sheet.spriteSize.w}×${sheet.spriteSize.h}) is larger than this sheet`);
     return;
   }
   if (d.kind === 'create') {
@@ -254,7 +242,7 @@ export function registerFrameTool() {
 
 function drawFrameToolGhost(ctx, view) {
   if (currentModeId() !== 'sprites') return;
-  paintFrameToolGhost(ctx, view, activeSheet('sprite'), { drag, hover, slicePreview: slicePreviewOptions() });
+  paintFrameToolGhost(ctx, view, activeSheet('sprite'), { drag, slicePreview: slicePreviewOptions() });
 }
 
 // Chained by contributions.js as the final sheet-overlay layer so selection
@@ -288,13 +276,14 @@ export function bindFrameTool(view) {
 
   bindDragCancelGuard(storeOn, {
     isToolActive: () => currentToolId() === 'frametool',
-    hasDrag: () => !!drag || !!hover,
-    cancel: () => { drag = null; hover = null; },
+    hasDrag: () => !!drag,
+    cancel: () => { drag = null; },
     requestRender: () => view.requestRender(),
   });
-  view.canvas?.addEventListener?.('pointerleave', () => {
-    if (!hover) return;
-    hover = null;
+  // Escape abandons a frame-tool drag (the release then does nothing).
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !drag) return;
+    drag = null;
     view.requestRender();
   });
 }

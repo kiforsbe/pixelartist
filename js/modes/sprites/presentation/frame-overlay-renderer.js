@@ -85,31 +85,21 @@ function drawSlicePreview(ctx, view, sheet, o) {
   });
 }
 
-export function paintFrameToolGhost(ctx, view, sheet, { drag, hover = null, slicePreview }) {
+export function paintFrameToolGhost(ctx, view, sheet, { drag, slicePreview }) {
   if (!sheet) return;
   if (slicePreview) drawSlicePreview(ctx, view, sheet, slicePreview);
-  const stamp = drag ? (drag.kind === 'stamp' ? drag.rect : null) : hover;
-  if (stamp) {
-    ctx.save();
-    ctx.strokeStyle = '#fff';
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1;
-    strokeGhostRect(ctx, view, stamp);
-    ctx.restore();
-    if (drag) drawRectDims(ctx, view, stamp);
-  }
-  if (!drag || drag.kind === 'stamp') return;
+  if (!drag) return;
 
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.setLineDash([4, 4]);
   ctx.lineWidth = 1;
-  if (drag.kind === 'create' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
+  if ((drag.kind === 'create' || drag.kind === 'stamp') && drag.rect) strokeGhostRect(ctx, view, drag.rect);
   else if (drag.kind === 'move') strokeGhostRect(ctx, view, { ...drag.bbox, x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy });
   else if (drag.kind === 'resize' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
   ctx.restore();
 
-  if (drag.kind === 'create' && drag.rect) {
+  if ((drag.kind === 'create' || drag.kind === 'stamp') && drag.rect) {
     drawRectDims(ctx, view, drag.rect);
   } else if (drag.kind === 'move') {
     const { dx, dy } = drag.delta;
