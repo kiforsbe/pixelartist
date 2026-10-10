@@ -1,7 +1,8 @@
 // The sheet layer tree shared by the Layers panel and the Animations
-// timeline: rows, row actions, drag-and-drop, and the one selected tree
-// node. Both trees build their rows here, so a folder selected in one is
-// where the other adds a layer. Map layers are the Layers panel's own.
+// timeline: rows, row actions, drag-and-drop, eye/lock gestures, the row
+// context menu, and the one selected tree node. Both trees build their rows
+// here, so a folder selected in one is where the other adds a layer. Map
+// layers are the Layers panel's own.
 
 import { getEditorHost } from '../../host/runtime.js';
 import { activeSheet, activeLayer, activeMap } from '../../host/document-helpers.js';
@@ -10,6 +11,8 @@ import { activeFloating, commitFloatIfAny } from '../canvas/float-session.js';
 import { findNode, findParent, flattenLayers, findGroup } from '../../core/model.js';
 import { compositeFloatOnLayer } from '../../core/floating.js';
 import { drawFit } from '../canvas/draw-fit.js';
+import { attachDragReorder, treeDropDestination } from '../drag-reorder.js';
+import { attachContextMenu } from '../context-menu.js';
 
 // Dispatches a Command Handler by id (registered in each mode's
 // contributions.js) rather than importing it directly.
@@ -201,6 +204,97 @@ function toggleVisible(layer) {
   dispatch(`${commandPrefix()}.toggleLayerVisible`, { sheetId: activeSheet().id, layerId: layer.id });
 }
 
+function toggleLocked(layer) {
+  dispatch('sprites.toggleLayerLocked', { sheetId: activeSheet().id, layerId: layer.id });
+}
+
+// ----------------------------------------------- eye/lock solo and paint
+
+const PAINT = {
+  visible: { get: layer => !!layer.visible, toggle: toggleVisible },
+  locked: { get: layer => !!layer.locked, toggle: toggleLocked },
+};
+
+// Runs `steps` as one history entry (each toggle is its own command).
+function asOneStep(steps) {
+  const history = getEditorHost().history;
+  const token = history.mark();
+  try { steps(); } finally { history.combineSince(token); }
+}
+
+// Alt-click an eye: show only that layer. Alt-click it again (while the
+// solo still stands) restores the visibility saved at solo time; soloing
+// another layer meanwhile keeps that saved state.
+let solo = null; // { sheetId, layerId, saved: Map<layerId, visible> }
+
+function soloLayer(layer) {
+  const sheet = activeSheet();
+  if (!sheet) return;
+  const layers = flattenLayers(sheet.layerTree);
+  const soloed = id => layers.every(l => !!l.visible === (l.id === id));
+  let want;
+  if (solo?.sheetId === sheet.id && soloed(solo.layerId)) {
+    if (solo.layerId === layer.id) {
+      const saved = solo.saved;
+      want = l => saved.get(l.id) ?? !!l.visible;
+      solo = null;
+    } else {
+      solo.layerId = layer.id;
+      want = l => l.id === layer.id;
+    }
+  } else {
+    solo = { sheetId: sheet.id, layerId: layer.id, saved: new Map(layers.map(l => [l.id, !!l.visible])) };
+    want = l => l.id === layer.id;
+  }
+  asOneStep(() => { for (const l of layers) if (!!l.visible !== want(l)) toggleVisible(l); });
+}
+
+// Pressing an eye (or lock) toggles it; dragging on over other eyes (locks)
+// paints that same state onto each, and the whole gesture is one history
+// step. Module state, so it survives the re-render every toggle causes.
+let paint = null; // { kind, sheetId, value, token }
+
+function paintLayer(layer) {
+  const sheet = activeSheet();
+  if (!paint || sheet?.id !== paint.sheetId || !findNode(sheet.layerTree, layer.id)) return;
+  if (PAINT[paint.kind].get(layer) !== paint.value) PAINT[paint.kind].toggle(layer);
+}
+
+function endPaint() {
+  if (!paint) return;
+  window.removeEventListener('pointerup', endPaint, true);
+  window.removeEventListener('pointercancel', endPaint, true);
+  getEditorHost().history.combineSince(paint.token);
+  paint = null;
+}
+
+function onToggleButtonDown(e, kind, layer) {
+  e.stopPropagation();
+  if ((e.button ?? 0) !== 0) return;
+  const sheet = activeSheet();
+  if (!sheet) return;
+  endPaint();
+  if (kind === 'visible' && e.altKey) { soloLayer(layer); return; }
+  // Touch captures the pointer on the pressed button; release it so the
+  // buttons passed over still see the pointer enter.
+  try { e.target?.releasePointerCapture?.(e.pointerId); } catch { /* not captured */ }
+  paint = { kind, sheetId: sheet.id, value: !PAINT[kind].get(layer), token: getEditorHost().history.mark() };
+  window.addEventListener('pointerup', endPaint, true);
+  window.addEventListener('pointercancel', endPaint, true);
+  paintLayer(layer);
+}
+
+// Wires an eye/lock button: the press does the work, so a pointer click
+// (detail >= 1) is ignored; a keyboard click (detail 0) toggles.
+function wireToggleButton(btn, kind, layer) {
+  btn.addEventListener('pointerdown', (e) => onToggleButtonDown(e, kind, layer));
+  btn.addEventListener('pointerenter', () => { if (paint?.kind === kind) paintLayer(layer); });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!e.detail) PAINT[kind].toggle(layer);
+  });
+}
+
 function autoName(node) {
   const sheet = activeSheet();
   if (!sheet) return node.name;
@@ -264,125 +358,98 @@ export function scheduleNameSelect(selectFn, onChange) {
 
 // ---------------------------------------------------------- drag and drop
 
-let draggedId = null;
-const dropLists = new Set();
+// The drag key of the Layers panel's end target: the empty space below the
+// rows, which stands for the bottom of the root.
+export const LAYER_TREE_END = ':end';
 
-function isDescendant(parent, childId) {
-  if (parent.id === childId) return true;
-  if (!parent.children) return false;
-  return parent.children.some(c => c.type === 'group' && isDescendant(c, childId));
+// The end target the Layers panel appends after its rows (see
+// attachLayerTreeDrop's emptyDropsToRoot).
+export function buildLayerTreeEnd() {
+  const end = document.createElement('div');
+  end.className = 'layer-tree-item layer-tree-end';
+  end.dataset.dragKey = LAYER_TREE_END;
+  end.dataset.depth = '0';
+  return end;
 }
 
-function clearDropIndicators() {
-  for (const list of dropLists) {
-    for (const row of list.querySelectorAll('.layer-row')) {
-      row.classList.remove('dragging', 'drop-before', 'drop-after', 'drop-into');
-    }
+// Where a drop of `sourceId` on `target` (attachDragReorder's target) puts
+// it: { destParentId, destIndex, noOp }, or null when it cannot go there.
+function layerDropDestination(sheet, sourceId, { targetKey, index, place }, emptyDropsToRoot) {
+  if (targetKey === LAYER_TREE_END) {
+    const loc = emptyDropsToRoot ? findParent(sheet.layerTree, sourceId) : null;
+    if (!loc) return null;
+    return { destParentId: null, destIndex: 0, noOp: loc.parent === sheet.layerTree && loc.index === 0 };
   }
+  const rows = layerTreeRows(sheet.layerTree);
+  if (rows[index]?.node.id !== targetKey) return null; // rows changed under the drag
+  return treeDropDestination(sheet.layerTree, rows, sourceId, { index, place });
 }
 
-function getDropPosition(row, clientY) {
-  const rect = row.getBoundingClientRect();
-  const rel = clientY - rect.top;
-  const pct = rel / rect.height;
-  if (pct < 0.3) return 'before';
-  if (pct > 0.7) return 'after';
-  if (row.classList.contains('group-row')) return 'into';
-  return rel < rect.height / 2 ? 'before' : 'after';
-}
+// Lists that show layer rows (for the rename action to find its row).
+const treeLists = new Set();
 
-function applyDropIndicator(row, position) {
-  clearDropIndicators();
-  if (row && row.dataset.nodeId !== draggedId) row.classList.add('drop-' + position);
-}
-
-function performMove(sheet, nodeId, destParentId, destIndex) {
-  const destParent = findGroup(sheet.layerTree, destParentId) ?? sheet.layerTree;
-  dispatch(`${commandPrefix()}.dragMoveNode`, { sheetId: sheet.id, nodeId, destParentId: destParent === sheet.layerTree ? null : destParent.id, destIndex });
-}
-
-function onRowDragStart(e, node) {
-  draggedId = node.id;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', node.id);
-  e.currentTarget.classList.add('dragging');
-}
-
-function onRowDragEnd() {
-  draggedId = null;
-  clearDropIndicators();
-}
-
-// List-level drop handling for a container of layer rows. A drop outside
-// any row moves the node to the root's top when emptyDropsToRoot is set
-// (the Layers panel's empty space); elsewhere it is not a drop target.
+// Pointer drag-reorder for a container of layer rows (js/components/
+// drag-reorder.js in tree mode). With emptyDropsToRoot (the Layers panel)
+// the container's end target (buildLayerTreeEnd) takes a node to the bottom
+// of the root; elsewhere nothing below the rows is a target. Returns
+// dispose().
 export function attachLayerTreeDrop(list, { emptyDropsToRoot = true } = {}) {
-  dropLists.add(list);
-
-  list.addEventListener('dragover', (e) => {
-    const row = e.target.closest('.layer-row');
-    if (!row) {
-      clearDropIndicators();
-      if (!emptyDropsToRoot) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      return;
-    }
-    e.preventDefault();
-    if (row.dataset.nodeId === draggedId) {
-      clearDropIndicators();
-      return;
-    }
-    const pos = getDropPosition(row, e.clientY);
-    applyDropIndicator(row, pos);
-    e.dataTransfer.dropEffect = 'move';
-  });
-
-  list.addEventListener('dragleave', (e) => {
-    if (!list.contains(e.relatedTarget)) clearDropIndicators();
-  });
-
-  list.addEventListener('drop', (e) => {
-    const row = e.target.closest('.layer-row');
-    if (!row && !emptyDropsToRoot) return;
-    e.preventDefault();
-    const sourceId = draggedId ?? e.dataTransfer.getData('text/plain');
-    clearDropIndicators();
-    if (!sourceId) return;
-
+  treeLists.add(list);
+  const destination = (sourceKey, target) => {
     const sheet = activeSheet();
-    if (!sheet) return;
-    const srcNode = findNode(sheet.layerTree, sourceId);
-    if (!srcNode) return;
-
-    let destParent, destIndex;
-    if (!row || row.dataset.nodeId === sourceId) {
-      // Dropping in empty space or on the source row defaults to the root.
-      destParent = sheet.layerTree;
-      destIndex = sheet.layerTree.children.length;
-    } else {
-      const targetId = row.dataset.nodeId;
-      if (targetId === sourceId) return;
-      const targetNode = findNode(sheet.layerTree, targetId);
-      if (!targetNode) return;
-
-      const pos = getDropPosition(row, e.clientY);
-      if (pos === 'into' && targetNode.type === 'group') {
-        destParent = targetNode;
-        destIndex = targetNode.children.length;
-      } else {
-        const targetLoc = findParent(sheet.layerTree, targetId);
-        if (!targetLoc) return;
-        destParent = targetLoc.parent;
-        destIndex = targetLoc.index + (pos === 'after' ? 1 : 0);
-      }
-    }
-
-    // Guards against invalid drops.
-    if (srcNode.type === 'group' && isDescendant(srcNode, destParent.id)) return;
-
-    performMove(sheet, sourceId, destParent.id, destIndex);
+    return sheet ? layerDropDestination(sheet, sourceKey, target, emptyDropsToRoot) : null;
+  };
+  const dispose = attachDragReorder(list, {
+    itemSelector: '.layer-tree-item',
+    handleSelector: '.layer-row', // the end target is never a drag source
+    tree: { depth: el => Number(el.dataset.depth) || 0, isGroup: el => el.classList.contains('group-row') },
+    canDrop: (sourceKey, target) => destination(sourceKey, target) !== null,
+    onDrop: ({ sourceKey, targetKey, index, place }) => {
+      const sheet = activeSheet();
+      const dest = destination(sourceKey, { targetKey, index, place });
+      if (!sheet || !dest || dest.noOp) return;
+      dispatch(`${commandPrefix()}.dragMoveNode`, { sheetId: sheet.id, nodeId: sourceKey, destParentId: dest.destParentId, destIndex: dest.destIndex });
+    },
   });
+  return () => { treeLists.delete(list); dispose(); };
+}
+
+// ------------------------------------------------------------ context menu
+
+// The row context menu: the layer actions (defined by the Layers panel).
+export const LAYER_MENU_ITEMS = [
+  { action: 'layer.rename' },
+  { separator: true },
+  { action: 'layer.add' },
+  { action: 'layer.addGroup' },
+  { separator: true },
+  { action: 'layer.mergeDown' },
+  { action: 'layer.delete' },
+];
+
+// Right-click selects the row (select(); onChange()) and opens the menu.
+export function attachLayerRowMenu(row, select, onChange) {
+  attachContextMenu(row, () => {
+    select();
+    onChange();
+    return LAYER_MENU_ITEMS;
+  });
+}
+
+// Each row's inline rename, for the layer.rename action.
+const rowRenames = new WeakMap();
+
+export function setRowRename(row, rename) { rowRenames.set(row, rename); }
+
+// Starts the inline rename of the active row in the visible layer list.
+export function renameActiveRow() {
+  for (const list of treeLists) {
+    if (list.isConnected === false || list.closest?.('[hidden]')) continue;
+    const row = list.querySelectorAll('.layer-row').find(r => r.classList.contains('active'));
+    const rename = row && rowRenames.get(row);
+    if (rename) { rename(); return true; }
+  }
+  return false;
 }
 
 // ------------------------------------------------------------------- rows
@@ -392,7 +459,6 @@ function nameSpan(node, onChange, select) {
   nameEl.className = 'layer-name';
   nameEl.textContent = node.name;
   nameEl.addEventListener('selectstart', (e) => e.preventDefault());
-  nameEl.addEventListener('dragstart', (e) => e.stopPropagation());
   nameEl.addEventListener('click', (e) => {
     e.stopPropagation();
     scheduleNameSelect(select, onChange);
@@ -405,20 +471,32 @@ function nameSpan(node, onChange, select) {
   return nameEl;
 }
 
-function buildGroupRow(group, depth, { onChange }) {
+// The parts every tree row shares: drag key and depth (attachLayerTreeDrop),
+// click to select, ArrowUp/Down to reorder, the context menu, and the inline
+// rename the layer.rename action starts.
+function treeRow(node, depth, className, { onChange, select, isSelected }) {
   const row = document.createElement('div');
-  row.className = 'layer-row group-row' + (group.id === selectedNodeId() ? ' active' : '');
+  row.className = `layer-row ${className} layer-tree-item` + (isSelected() ? ' active' : '');
   row.style.paddingLeft = (4 + depth * 14) + 'px';
-  row.draggable = true;
-  row.dataset.nodeId = group.id;
+  row.dataset.nodeId = node.id;
+  row.dataset.dragKey = node.id;
+  row.dataset.depth = String(depth);
   row.tabIndex = 0;
-  row.addEventListener('dragstart', (e) => onRowDragStart(e, group));
-  row.addEventListener('dragend', onRowDragEnd);
+  row.addEventListener('click', () => { select(); onChange(); });
   row.addEventListener('keydown', (e) => {
-    if (group.id !== selectedNodeId()) return;
-    if (e.key === 'ArrowUp') { e.preventDefault(); moveNode(group, 1); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); moveNode(group, -1); }
+    if (!isSelected()) return;
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveNode(node, 1); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); moveNode(node, -1); }
   });
+  attachLayerRowMenu(row, select, onChange);
+  const nameEl = nameSpan(node, onChange, select);
+  setRowRename(row, () => { cancelNameClick(); startRename(node, nameEl, onChange); });
+  return { row, nameEl };
+}
+
+function buildGroupRow(group, depth, { onChange }) {
+  const select = () => { const sheet = activeSheet(); if (sheet) selectTreeNode(sheet, group); };
+  const { row, nameEl } = treeRow(group, depth, 'group-row', { onChange, select, isSelected: () => group.id === selectedNodeId() });
 
   const toggle = document.createElement('button');
   toggle.type = 'button';
@@ -430,29 +508,14 @@ function buildGroupRow(group, depth, { onChange }) {
   icon.className = 'group-icon';
   icon.textContent = '📁';
 
-  const select = () => { const sheet = activeSheet(); if (sheet) selectTreeNode(sheet, group); };
-  row.append(toggle, icon, nameSpan(group, onChange, select));
-  row.addEventListener('click', () => { select(); onChange(); });
+  row.append(toggle, icon, nameEl);
   return row;
 }
 
 function buildLeafRow(layer, depth, { thumbs, onChange }) {
   const sheet = activeSheet();
-  const row = document.createElement('div');
-  row.className = 'layer-row layer-leaf' + (layer.id === currentLayerId() ? ' active' : '');
-  row.style.paddingLeft = (4 + depth * 14) + 'px';
-  row.draggable = true;
-  row.dataset.nodeId = layer.id;
-  row.tabIndex = 0;
   const select = () => { if (sheet) selectTreeNode(sheet, layer); };
-  row.addEventListener('dragstart', (e) => onRowDragStart(e, layer));
-  row.addEventListener('dragend', onRowDragEnd);
-  row.addEventListener('click', () => { select(); onChange(); });
-  row.addEventListener('keydown', (e) => {
-    if (layer.id !== currentLayerId()) return;
-    if (e.key === 'ArrowUp') { e.preventDefault(); moveNode(layer, 1); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); moveNode(layer, -1); }
-  });
+  const { row, nameEl } = treeRow(layer, depth, 'layer-leaf', { onChange, select, isSelected: () => layer.id === currentLayerId() });
 
   // A thin spacer for layer rows keeps a consistent visual rhythm with
   // group rows while not pushing the thumbnail far to the right.
@@ -469,27 +532,27 @@ function buildLeafRow(layer, depth, { thumbs, onChange }) {
     row.append(thumb);
   }
 
+  // Press toggles, drag across paints, Alt-click solos (see wireToggleButton).
   const visBtn = document.createElement('button');
   visBtn.type = 'button';
+  visBtn.className = 'layer-eye';
   visBtn.textContent = layer.visible ? '👁' : '🚫';
   visBtn.title = 'Toggle visibility';
-  visBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleVisible(layer); });
-  visBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  wireToggleButton(visBtn, 'visible', layer);
   // Locking is a sprite-sheet feature (tile sheets share this tree but
   // register no toggleLayerLocked command).
   const lockBtn = document.createElement('button');
   lockBtn.type = 'button';
+  lockBtn.className = 'layer-lock';
   lockBtn.textContent = layer.locked ? '🔒' : '🔓';
   lockBtn.title = layer.locked ? 'Unlock layer' : 'Lock layer';
   lockBtn.hidden = commandPrefix() !== 'sprites';
-  lockBtn.addEventListener('click', (e) => { e.stopPropagation(); dispatch('sprites.toggleLayerLocked', { sheetId: activeSheet().id, layerId: layer.id }); });
-  lockBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  wireToggleButton(lockBtn, 'locked', layer);
 
   const opacityInput = document.createElement('input');
   opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100';
   opacityInput.value = String(Math.round(layer.opacity * 100));
   opacityInput.addEventListener('click', (e) => e.stopPropagation());
-  opacityInput.addEventListener('dragstart', (e) => e.stopPropagation());
   let opacityBefore = null;
   opacityInput.addEventListener('pointerdown', (e) => { e.stopPropagation(); opacityBefore = layer.opacity; });
   opacityInput.addEventListener('input', () => {
@@ -510,7 +573,7 @@ function buildLeafRow(layer, depth, { thumbs, onChange }) {
     dispatch(`${commandPrefix()}.setLayerOpacity`, { sheetId: activeSheet().id, layerId: layer.id, opacity: after });
   });
 
-  row.append(visBtn, lockBtn, nameSpan(layer, onChange, select), opacityInput);
+  row.append(visBtn, lockBtn, nameEl, opacityInput);
   return row;
 }
 

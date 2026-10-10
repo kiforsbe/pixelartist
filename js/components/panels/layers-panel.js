@@ -10,9 +10,11 @@ import { mountStorePanel } from '../panel-mount.js';
 import { documentKey } from '../../host/editor-store.js';
 import { findNode, sheetLayers } from '../../core/model.js';
 import { defineAction, bindAction } from '../../features/shell/actions.js';
+import { attachDragReorder, slotToFinalIndex } from '../drag-reorder.js';
 import {
   LAYER_THUMB_SIZE, currentModeId, layerTreeRows, buildLayerRow, attachLayerTreeDrop, drawLayerThumb,
-  addSheetLayer, addSheetGroup, deleteSheetNode, mergeSheetLayerDown,
+  addSheetLayer, addSheetGroup, deleteSheetNode, mergeSheetLayerDown, selectedNodeId,
+  buildLayerTreeEnd, attachLayerRowMenu, setRowRename, renameActiveRow,
   startRename, scheduleNameSelect, nameClickPending, cancelNameClick,
 } from './layer-tree.js';
 
@@ -75,17 +77,32 @@ export function mountLayersPanel(el) {
 
   const thumbCanvases = new Map();
   attachLayerTreeDrop(list);
+  // Map layers: a flat list shown top layer first (the reverse of
+  // map.layers), so a move from row s to row f is a delta of s - f.
+  attachDragReorder(list, {
+    itemSelector: '.map-layer-row',
+    onDrop: ({ sourceKey, sourceIndex, slot }) => {
+      const map = activeMap();
+      const delta = map ? sourceIndex - slotToFinalIndex(sourceIndex, slot) : 0;
+      if (!delta) return;
+      dispatch('maps.moveLayer', { mapId: map.id, layerId: sourceKey, delta });
+      getEditorHost().store.notifyPixelsChanged();
+      storePanel.scheduleRender();
+    },
+  });
 
   function renderMapLayer(layer) {
     const host = getEditorHost();
     const map = activeMap();
     const activeLayerId = (host.selections.get({ kind: 'map', id: map?.id }) ?? {}).layerId;
     const row = document.createElement('div');
-    row.className = 'layer-row layer-leaf' + (layer.id === activeLayerId ? ' active' : '');
+    row.className = 'layer-row layer-leaf map-layer-row' + (layer.id === activeLayerId ? ' active' : '');
     row.style.paddingLeft = '4px'; row.tabIndex = 0;
+    row.dataset.dragKey = layer.id;
     row.addEventListener('click', () => {
       host.selections.set({ ...host.selections.get({ kind: 'map', id: map.id }), layerId: layer.id }, { kind: 'map', id: map.id });
     });
+    attachLayerRowMenu(row, () => setMapLayer(map, layer.id), renderList);
     row.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
       const map = activeMap(); if (!map) return;
@@ -109,6 +126,7 @@ export function mountLayersPanel(el) {
     const nameEl = document.createElement('span'); nameEl.className = 'layer-name'; nameEl.textContent = layer.name;
     nameEl.addEventListener('click', e => { e.stopPropagation(); scheduleNameSelect(() => setMapLayer(map, layer.id), renderList); });
     nameEl.addEventListener('dblclick', e => { e.stopPropagation(); cancelNameClick(); startRename(layer, nameEl, renderList); });
+    setRowRename(row, () => { cancelNameClick(); startRename(layer, nameEl, renderList); });
     const opacityInput = document.createElement('input'); opacityInput.type = 'range'; opacityInput.min = '0'; opacityInput.max = '100'; opacityInput.value = String(Math.round(layer.opacity * 100)); opacityInput.addEventListener('click', e => e.stopPropagation());
     let before = null;
     opacityInput.addEventListener('pointerdown', e => { e.stopPropagation(); before = layer.opacity; });
@@ -146,6 +164,8 @@ export function mountLayersPanel(el) {
     for (const { node, depth } of layerTreeRows(sheet.layerTree)) {
       list.appendChild(buildLayerRow(node, depth, { thumbs: thumbCanvases, onChange: renderList }));
     }
+    // The empty space below the rows: a drop there goes to the root bottom.
+    list.appendChild(buildLayerTreeEnd());
   }
 
   let thumbRedrawQueued = false;
@@ -180,6 +200,16 @@ export function mountLayersPanel(el) {
   bindAction(btnDelete, 'layer.delete');
   defineAction('layer.mergeDown', { label: 'Merge Down', run: mergeSheetLayerDown, isEnabled: () => !!activeSheet() });
   bindAction(btnMerge, 'layer.mergeDown');
+  // Inline rename of the selected row (the row context menu's first item).
+  defineAction('layer.rename', {
+    label: 'Rename…',
+    run: renameActiveRow,
+    isEnabled: () => {
+      if (currentModeId() !== 'maps') return !!selectedNodeId();
+      const map = activeMap();
+      return !!map && !!(getEditorHost().selections.get({ kind: 'map', id: map.id }) ?? {}).layerId;
+    },
+  });
 
   // Selecting a layer/group via its name click always replaces the store's
   // selectionsByDocument entry wholesale (see the selector comment below),
