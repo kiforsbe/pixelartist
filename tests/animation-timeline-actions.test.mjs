@@ -15,6 +15,7 @@ import { mountAnimationTimeline } from '../js/modes/animations/presentation/anim
 import { timelineShortcut, shortcutBlocked } from '../js/modes/animations/presentation/timeline-actions.js';
 import { initFloatSession, registerFloatView } from '../js/components/canvas/float-session.js';
 import { cancelNameClick } from '../js/components/panels/layer-tree.js';
+import { closeContextMenu } from '../js/components/context-menu.js';
 
 const { Element } = installSpriteContextDom();
 globalThis.alert = () => {};
@@ -40,6 +41,7 @@ const T = name => `animations.timeline.${name}`;
 // Auto "Run" (A, B, D) then auto "Jump" (C), all 8x8, A with a red pixel.
 async function reset() {
   cancelNameClick();
+  closeContextMenu();
   document.activeElement = null;
   const project = createProject('Timeline');
   const sheet = createSheet(project, { name: 'Sheet', width: 24, height: 16, kind: 'sprite' });
@@ -381,4 +383,88 @@ test('Play/Stop and Previous/Next run from the actions too', async () => {
   assert.ok(byTitle('Stop'));
   runAction(T('playStop'));
   assert.ok(byTitle('Play'));
+});
+
+// ------------------------------------------------------------ context menus
+
+const menu = () => document.body.querySelector('.context-menu');
+const menuItems = (root = menu()) => root.children.filter(c => c.classList.contains('menubar-dropdown-item') || c.classList.contains('menubar-submenu-wrap'))
+  .map(c => (c.classList.contains('menubar-submenu-wrap') ? c.children[0] : c));
+const labelOf = btn => btn.children[0].textContent.replace(/^[✓ ]+/, '');
+const menuLabels = root => menuItems(root).map(labelOf);
+const menuItem = (label, root) => menuItems(root).find(b => labelOf(b) === label);
+const rightClick = el => el.dispatch('contextmenu', { clientX: 10, clientY: 10 });
+const layerCels = () => dock.querySelectorAll('.anim-tl-layer')[0].querySelectorAll('.anim-tl-cel');
+const FRAME_ITEMS = ['Frame Duration…', 'Insert Blank Frame', 'Duplicate Frames', 'Insert Linked Frame', 'Unlink Frame', 'Reverse Frames', 'Delete Frames'];
+
+test('right-clicking a frame number selects that column and opens the frame menu', async () => {
+  const { b } = await reset();
+  const e = rightClick(nums()[1]);
+  assert.equal(e.defaultPrevented, true);
+  assert.equal(host.selections.get().frameId, b.id);
+  assert.deepEqual(menuLabels(), FRAME_ITEMS);
+  assert.equal(menuItem('Unlink Frame').disabled, true, 'B is not linked');
+  assert.equal(menuItem('Reverse Frames').disabled, true, 'one column');
+});
+
+test('right-clicking inside the range keeps it, and the menu acts on the whole range', async () => {
+  const { run, a, b, d } = await reset();
+  await selectRange(0, 2);
+  rightClick(nums()[1]);
+  await tick();
+  assert.deepEqual(nums().map(n => n.classList.contains('in-range')), [true, true, true, false]);
+  menuItem('Reverse Frames').fire('click');
+  assert.deepEqual(run.frames.map(e => e.frameId), [d.id, b.id, a.id]);
+  assert.equal(menu(), null, 'running an item closes the menu');
+});
+
+test('right-clicking outside the range selects that column alone', async () => {
+  const { jump } = await reset();
+  await selectRange(0, 1);
+  rightClick(nums()[3]);
+  await tick();
+  assert.equal(host.selections.get().animationId, jump.id);
+  assert.ok(nums().every(n => !n.classList.contains('in-range')));
+});
+
+test('right-clicking a cel selects its frame and layer; its menu adds Clear Cel', async () => {
+  const { b, layer } = await reset();
+  host.selections.patch({ layerId: null });
+  rightClick(layerCels()[1]);
+  assert.equal(host.selections.get().frameId, b.id);
+  assert.equal(host.selections.get().layerId, layer.id);
+  assert.deepEqual(menuLabels(), ['Clear Cel', ...FRAME_ITEMS]);
+});
+
+test('right-clicking a tag selects its animation and opens the tag menu', async () => {
+  const { jump } = await reset();
+  rightClick(dock.querySelectorAll('.anim-tag')[1]);
+  assert.equal(host.selections.get().animationId, jump.id);
+  assert.deepEqual(menuLabels(), ['Rename Animation…', 'Direction', 'Colour…', 'No Colour', 'Loop', 'Duplicate Animation', 'Make Manual', 'Delete Animation']);
+  assert.equal(menuItem('No Colour').disabled, true);
+});
+
+test('the tag menu\'s Direction submenu sets the direction', async () => {
+  const { run } = await reset();
+  rightClick(dock.querySelectorAll('.anim-tag')[0]);
+  menuItem('Direction').fire('click');
+  const submenu = menu().querySelector('.menubar-submenu');
+  assert.deepEqual(menuLabels(submenu), ['Forward', 'Reverse', 'Ping-pong', 'Ping-pong Reverse']);
+  menuItem('Ping-pong', submenu).fire('click');
+  assert.equal(run.direction, 'pingpong');
+});
+
+test('a manual animation\'s tag menu offers Auto-layout instead of Make Manual', async () => {
+  const { run } = await reset();
+  await makeManual(run);
+  rightClick(dock.querySelectorAll('.anim-tag')[0]);
+  assert.ok(menuItem('Auto-layout'));
+  assert.equal(menuItem('Make Manual'), undefined);
+});
+
+test('a right-click on the grid outside numbers, cels and tags keeps the native menu', async () => {
+  await reset();
+  const e = rightClick(grid());
+  assert.equal(e.defaultPrevented, false);
+  assert.equal(menu(), null);
 });

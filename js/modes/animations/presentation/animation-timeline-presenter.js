@@ -30,7 +30,8 @@ import { mountStorePanel } from '../../../components/panel-mount.js';
 import { buildFrameDurationInput } from '../../../components/panels/frame-duration-input.js';
 import { createDockResizer, workspaceDockMax } from '../../../components/dock-resizer.js';
 import { attachDragReorder } from '../../../components/drag-reorder.js';
-import { defineTimelineActions, attachTimelineShortcuts } from './timeline-actions.js';
+import { attachContextMenu } from '../../../components/context-menu.js';
+import { defineTimelineActions, attachTimelineShortcuts, FRAME_MENU, CEL_MENU, TAG_MENU } from './timeline-actions.js';
 import {
   layerTreeRows, buildLayerRow, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode,
   nameClickPending, scheduleNameSelect, cancelNameClick,
@@ -567,6 +568,39 @@ export function mountAnimationTimeline(el) {
 
   btnRemove.addEventListener('click', deleteFrames);
 
+  // ---- context menus (js/components/context-menu.js) ----
+  // What a number, composite cell or cel stands for: { column, layer? }.
+  const hits = new WeakMap();
+
+  // A right-click selects what it hits first -- a column inside the current
+  // range keeps the range -- and the menu's actions then act on the
+  // selection. Anything else in the grid keeps the browser's menu (layer
+  // rows bring their own).
+  const disposeMenu = attachContextMenu(grid, (e) => {
+    const target = e.target;
+    const tag = target?.closest?.('.anim-tag');
+    if (tag) {
+      const anim = findAnim(tag.dataset.animationId);
+      if (!anim || renaming) return null;
+      if (selectedAnim()?.id !== anim.id) pickEntry(anim, 0);
+      return TAG_MENU;
+    }
+    const el = target?.closest?.('.anim-tl-num, .anim-tl-cell, .anim-tl-cel');
+    const hit = el && hits.get(el);
+    if (!hit) return null;
+    const s = sheet();
+    if (hit.layer && s) selectTreeNode(s, hit.layer);
+    const r = selectedRange();
+    if (r && r.to > r.from && columnInRange(hit.column, { animationId: r.anim.id, from: r.from, to: r.to })) {
+      stopPlaying();
+      select(hit.column);
+      panel.scheduleRender();
+    } else {
+      pick(hit.column);
+    }
+    return hit.layer ? CEL_MENU : FRAME_MENU;
+  });
+
   // Keys on the focused grid itself: never from a control inside it (a
   // rename or duration input, a layer row's buttons).
   grid.tabIndex = 0;
@@ -657,6 +691,7 @@ export function mountAnimationTimeline(el) {
     paint();
     pixelViews.push({ frameId: column.frameId, paint });
     cell.appendChild(thumb);
+    hits.set(cell, { column });
     cell.addEventListener('click', e => pick(column, e.shiftKey));
     return cell;
   }
@@ -696,6 +731,7 @@ export function mountAnimationTimeline(el) {
 
     // Dragged through attachDragReorder on the numbers row (onFrameDrop).
     num.dataset.dragKey = String(i);
+    hits.set(num, { column });
     num.addEventListener('click', e => pick(column, e.shiftKey));
     num.title = 'Click to select (Shift: extend), double-click for its duration; '
       + 'drag to move (Alt: copy, Ctrl: insert a linked use)';
@@ -717,6 +753,7 @@ export function mountAnimationTimeline(el) {
     cel.className = 'anim-tl-cel' + (colSelected ? ' col-selected' : '') + (colSelected && layerSelected ? ' selected' : '')
       + (inRange ? ' in-range' : '');
     cel.style.width = `${colW}px`;
+    hits.set(cel, { column, layer: node.type === 'layer' ? node : null });
     if (node.type === 'layer') {
       const expanded = colW >= EXPAND_AT;
       const view = document.createElement(expanded ? 'canvas' : 'span');
@@ -893,7 +930,7 @@ export function mountAnimationTimeline(el) {
   return {
     ...panel,
     dispose() {
-      disposeHistory(); disposePixels(); disposeShortcuts(); disposeDrag(); resizer.dispose(); panel.dispose();
+      disposeHistory(); disposePixels(); disposeShortcuts(); disposeDrag(); disposeMenu(); resizer.dispose(); panel.dispose();
     },
   };
 }
