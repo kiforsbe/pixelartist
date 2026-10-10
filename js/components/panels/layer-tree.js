@@ -260,12 +260,23 @@ function paintLayer(layer) {
   if (PAINT[paint.kind].get(layer) !== paint.value) PAINT[paint.kind].toggle(layer);
 }
 
+// Ends on pointerup/pointercancel, and also on window blur or on entering a
+// button with the primary button up, so a missed pointerup (Alt-Tab while
+// pressing, a capture listener stopping it) cannot leave the gesture open to
+// fold later, unrelated edits into its undo step.
 function endPaint() {
   if (!paint) return;
   window.removeEventListener('pointerup', endPaint, true);
   window.removeEventListener('pointercancel', endPaint, true);
+  window.removeEventListener('blur', endPaint);
   getEditorHost().history.combineSince(paint.token);
   paint = null;
+}
+
+function onToggleButtonEnter(e, kind, layer) {
+  if (!paint) return;
+  if (!((e.buttons ?? 0) & 1)) { endPaint(); return; }
+  if (paint.kind === kind) paintLayer(layer);
 }
 
 function onToggleButtonDown(e, kind, layer) {
@@ -281,6 +292,7 @@ function onToggleButtonDown(e, kind, layer) {
   paint = { kind, sheetId: sheet.id, value: !PAINT[kind].get(layer), token: getEditorHost().history.mark() };
   window.addEventListener('pointerup', endPaint, true);
   window.addEventListener('pointercancel', endPaint, true);
+  window.addEventListener('blur', endPaint);
   paintLayer(layer);
 }
 
@@ -288,7 +300,7 @@ function onToggleButtonDown(e, kind, layer) {
 // (detail >= 1) is ignored; a keyboard click (detail 0) toggles.
 function wireToggleButton(btn, kind, layer) {
   btn.addEventListener('pointerdown', (e) => onToggleButtonDown(e, kind, layer));
-  btn.addEventListener('pointerenter', () => { if (paint?.kind === kind) paintLayer(layer); });
+  btn.addEventListener('pointerenter', (e) => onToggleButtonEnter(e, kind, layer));
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!e.detail) PAINT[kind].toggle(layer);
@@ -445,7 +457,7 @@ export function setRowRename(row, rename) { rowRenames.set(row, rename); }
 export function renameActiveRow() {
   for (const list of treeLists) {
     if (list.isConnected === false || list.closest?.('[hidden]')) continue;
-    const row = list.querySelectorAll('.layer-row').find(r => r.classList.contains('active'));
+    const row = Array.from(list.querySelectorAll('.layer-row')).find(r => r.classList.contains('active'));
     const rename = row && rowRenames.get(row);
     if (rename) { rename(); return true; }
   }

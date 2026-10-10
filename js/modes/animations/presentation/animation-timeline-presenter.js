@@ -676,7 +676,7 @@ export function mountAnimationTimeline(el) {
   // The selected animation's tag, renamed inline (the Rename action).
   function renameSelectedTag() {
     const anim = selectedAnim();
-    const tag = anim && tagsRow.querySelectorAll('.anim-tag').find(t => t.dataset.animationId === anim.id);
+    const tag = anim && Array.from(tagsRow.querySelectorAll('.anim-tag')).find(t => t.dataset.animationId === anim.id);
     if (tag) startTagRename(tag, anim);
   }
 

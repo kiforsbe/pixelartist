@@ -184,13 +184,13 @@ test('pressing an eye and dragging across others paints that state, as one undo 
   const visibility = () => [l1, l2, l3].map(id => findNode(sheet.layerTree, id).visible);
   eyeOf(l3).dispatch('pointerdown', { pointerId: 1, button: 0 });
   assert.deepEqual(visibility(), [true, true, false], 'the press toggles at once');
-  eyeOf(l2).fire('pointerenter', { pointerId: 1 });
-  eyeOf(l3).fire('pointerenter', { pointerId: 1 }); // back over the first: stays hidden
-  eyeOf(l1).fire('pointerenter', { pointerId: 1 });
+  eyeOf(l2).fire('pointerenter', { pointerId: 1, buttons: 1 });
+  eyeOf(l3).fire('pointerenter', { pointerId: 1, buttons: 1 }); // back over the first: stays hidden
+  eyeOf(l1).fire('pointerenter', { pointerId: 1, buttons: 1 });
   window.dispatchEvent(ev('pointerup'));
   eyeOf(l1).fire('click', { detail: 1 }); // the press already toggled
   assert.deepEqual(visibility(), [false, false, false]);
-  eyeOf(l2).fire('pointerenter', { pointerId: 1 }); // gesture over: nothing
+  eyeOf(l2).fire('pointerenter', { pointerId: 1, buttons: 1 }); // gesture over: nothing
   assert.deepEqual(visibility(), [false, false, false]);
   host.history.undo();
   assert.deepEqual(visibility(), [true, true, true]);
@@ -204,12 +204,51 @@ test('dragging across locks paints the lock state, as one undo step', async () =
   const { sheet, l1, l2, l3 } = await flatSheet();
   const locked = () => [l1, l2, l3].map(id => !!findNode(sheet.layerTree, id).locked);
   lockOf(l1).dispatch('pointerdown', { pointerId: 1, button: 0 });
-  lockOf(l2).fire('pointerenter', { pointerId: 1 });
-  eyeOf(l3).fire('pointerenter', { pointerId: 1 }); // an eye is not part of a lock gesture
+  lockOf(l2).fire('pointerenter', { pointerId: 1, buttons: 1 });
+  eyeOf(l3).fire('pointerenter', { pointerId: 1, buttons: 1 }); // an eye is not part of a lock gesture
   window.dispatchEvent(ev('pointerup'));
   assert.deepEqual(locked(), [true, true, false]);
   host.history.undo();
   assert.deepEqual(locked(), [false, false, false]);
+  assert.equal(host.history.canUndo(), false);
+});
+
+test('hovering an eye without the primary button pressed does not paint and ends the gesture', async () => {
+  const { sheet, l1, l2, l3 } = await flatSheet();
+  const visibility = () => [l1, l2, l3].map(id => findNode(sheet.layerTree, id).visible);
+  eyeOf(l3).dispatch('pointerdown', { pointerId: 1, button: 0 });
+  // The pointerup was missed (e.g. released outside the window).
+  eyeOf(l2).fire('pointerenter', { pointerId: 1, buttons: 0 });
+  assert.deepEqual(visibility(), [true, true, false], 'no paint without the button down');
+  eyeOf(l1).fire('pointerenter', { pointerId: 1, buttons: 1 });
+  assert.deepEqual(visibility(), [true, true, false], 'the gesture ended');
+  // An unrelated edit, then a stray pointerup: not folded into the paint step.
+  exec('sprites.toggleLayerLocked', { sheetId: sheet.id, layerId: l1 });
+  window.dispatchEvent(ev('pointerup'));
+  host.history.undo();
+  assert.equal(!!findNode(sheet.layerTree, l1).locked, false, 'undo restores the unrelated edit');
+  assert.deepEqual(visibility(), [true, true, false], '... and only it');
+  host.history.undo();
+  assert.deepEqual(visibility(), [true, true, true]);
+  assert.equal(host.history.canUndo(), false);
+});
+
+test('losing window focus ends the paint gesture; later edits stay their own undo steps', async () => {
+  const { sheet, l1, l2, l3 } = await flatSheet();
+  const visibility = () => [l1, l2, l3].map(id => findNode(sheet.layerTree, id).visible);
+  eyeOf(l3).dispatch('pointerdown', { pointerId: 1, button: 0 });
+  eyeOf(l2).fire('pointerenter', { pointerId: 1, buttons: 1 });
+  assert.deepEqual(visibility(), [true, false, false]);
+  window.dispatchEvent(new Event('blur')); // Alt-Tab while pressing: the pointerup never comes
+  eyeOf(l1).fire('pointerenter', { pointerId: 1, buttons: 1 });
+  assert.deepEqual(visibility(), [true, false, false], 'the gesture ended on blur');
+  exec('sprites.toggleLayerLocked', { sheetId: sheet.id, layerId: l1 });
+  window.dispatchEvent(ev('pointerup'));
+  host.history.undo();
+  assert.equal(!!findNode(sheet.layerTree, l1).locked, false, 'undo restores only the unrelated edit');
+  assert.deepEqual(visibility(), [true, false, false]);
+  host.history.undo();
+  assert.deepEqual(visibility(), [true, true, true], 'the paint is one step of its own');
   assert.equal(host.history.canUndo(), false);
 });
 

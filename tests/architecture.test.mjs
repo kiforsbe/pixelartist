@@ -214,6 +214,19 @@ test('presentation-layer mode code dispatches commands by id only, never imports
   }
 });
 
+test('nothing calls an Array-only method directly on a querySelectorAll() NodeList', async () => {
+  // A real NodeList has forEach but no find/map/filter/...; the test fake DOM
+  // returns plain Arrays, so these calls pass in node and throw in a browser.
+  // Wrap the result in Array.from(...) (or spread it) first.
+  const arrayOnly = /querySelectorAll\([^)]*\)\s*\.(?:find|map|filter|some|every|reduce|includes|indexOf|findIndex|at)\(/;
+  const offenders = [];
+  for (const file of await jsFiles(join(root, 'js'))) {
+    const source = await readFile(file, 'utf8');
+    if (arrayOnly.test(source)) offenders.push(relative(root, file).split(sep).join('/'));
+  }
+  assert.deepEqual(offenders, [], `these files call an Array-only method on a NodeList:\n${offenders.join('\n')}`);
+});
+
 test('only the tracked terrain-preset-art.js exception imports core/commands.js from outside application/presentation', async () => {
   const modeFiles = (await jsFiles(join(root, 'js/modes')))
     .filter(file => !file.includes(`${sep}application${sep}`) && !file.includes(`${sep}presentation${sep}`));
