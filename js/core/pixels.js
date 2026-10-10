@@ -396,3 +396,15 @@ export function flipBitmap(bmp, flipH, flipV) {
     }
   return out;
 }
+
+// True when any pixel of the (clipped) rect has non-zero alpha.
+export function regionHasPixels(bmp, x, y, w, h) {
+  const x0 = Math.max(0, x), y0 = Math.max(0, y);
+  const x1 = Math.min(bmp.width, x + w), y1 = Math.min(bmp.height, y + h);
+  for (let py = y0; py < y1; py++) {
+    for (let i = (py * bmp.width + x0) * 4 + 3, px = x0; px < x1; px++, i += 4) {
+      if (bmp.data[i] !== 0) return true;
+    }
+  }
+  return false;
+}

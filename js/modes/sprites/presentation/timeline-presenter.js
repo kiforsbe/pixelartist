@@ -1,5 +1,5 @@
 // Animation timeline dock: header (animation picker + New/Rename/Delete/Loop
-// + "Add selected frame" + playback transport) and a horizontal strip of
+// + "Add selected frame" + playback transport) and a horizontal row of
 // frame cells (thumbnail + duration + remove, drag to reorder, click to
 // scrub/select/open). The live playhead preview itself renders in the
 // right-hand Preview panel (components/panels/preview-panel.js) -- this module still owns
@@ -14,16 +14,19 @@
 // presentation-layer file never touches state.commands or core/model.js
 // mutators directly.
 
-import { contextLayers, flattenSheetLayers, effectiveDuration } from '../../../core/model.js';
+import { flattenSheetLayers } from '../../../core/model.js';
 import { copyRegion } from '../../../core/pixels.js';
 import { getEditorHost } from '../../../host/runtime.js';
 import { activeSheet, currentContextLayers } from '../../../host/document-helpers.js';
 import { confirmOrAuto } from '../../../platform/browser/autotest.js';
-import { activeFloating, commitFloatIfAny } from '../../../components/canvas/float-session.js';
-import { advancePlayback } from '../application/timeline-playback.js';
+import { activeFloating } from '../../../components/canvas/float-session.js';
+import { dispatchLayout } from '../../../components/layout-dispatch.js';
+import { advancePlayback } from '../../../domain/sprites/playback.js';
 import { setPreviewBitmap } from '../../../components/panels/preview-panel.js';
 import { createRasterCache } from '../../../components/canvas/raster-cache.js';
+import { drawFit } from '../../../components/canvas/draw-fit.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
+import { buildFrameDurationInput } from '../../../components/panels/frame-duration-input.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly -- this file lives under presentation/, and
@@ -53,51 +56,6 @@ const DOCK_MIN = 100, DOCK_MAX = 400;
 const DOCK_HEIGHT_KEY = 'pixelartist.timelineDockHeight';
 const SPEEDS = [0.25, 0.5, 1, 2];
 
-// ------------------------------------------------------------- drawing helpers
-
-// Module-level scratch canvas and context, reused across all drawFit() calls
-// to avoid allocating a new canvas on every rAF tick during playback.
-let scratchCanvas = null;
-let scratchCtx = null;
-
-function getScratchCanvas(width, height) {
-  if (!scratchCanvas) {
-    scratchCanvas = document.createElement('canvas');
-    scratchCtx = scratchCanvas.getContext('2d');
-  }
-  // Only resize if dimensions differ (resize resets context state)
-  if (scratchCanvas.width !== width || scratchCanvas.height !== height) {
-    scratchCanvas.width = width;
-    scratchCanvas.height = height;
-    // Restore imageSmoothingEnabled after resize (canvas resize resets context)
-    scratchCtx.imageSmoothingEnabled = false;
-  }
-  return scratchCanvas;
-}
-
-// Draws `bmp` into `canvas`, scaled to fit (contain) and centered. Used for
-// both 64px strip thumbnails and the 96px preview. Shrinking a large sprite
-// down to a tiny thumbnail with nearest-neighbor drops most of its pixels
-// and aliases badly; smoothing (project setting, on by default) only kicks
-// in for that shrink case -- an upscaled thumbnail stays crisp
-// nearest-neighbor or the pixel art would turn to mush.
-function drawFit(canvas, bmp) {
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!bmp || bmp.width === 0 || bmp.height === 0) return;
-  const tmp = getScratchCanvas(bmp.width, bmp.height);
-  tmp.getContext('2d').putImageData(new ImageData(bmp.data, bmp.width, bmp.height), 0, 0);
-  const scale = Math.min(canvas.width / bmp.width, canvas.height / bmp.height);
-  const dw = Math.max(1, Math.round(bmp.width * scale));
-  const dh = Math.max(1, Math.round(bmp.height * scale));
-  const dx = Math.floor((canvas.width - dw) / 2);
-  const dy = Math.floor((canvas.height - dh) / 2);
-  const smooth = scale < 1 && getEditorHost().projects.project?.settings?.smoothThumbnails !== false;
-  ctx.imageSmoothingEnabled = smooth;
-  if (smooth) ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(tmp, 0, 0, bmp.width, bmp.height, dx, dy, dw, dh);
-}
-
 // ------------------------------------------------------------- public API
 
 export function mountTimeline(el) {
@@ -117,8 +75,9 @@ export function mountTimeline(el) {
   previewLoopLabel.title = "Loops the preview playback only -- doesn't affect the exported animation's Loop flag (set that in the Animation panel).";
   previewLoopLabel.append(previewLoopCheckbox, document.createTextNode('Preview Loop'));
   const btnAddFrame = document.createElement('button'); btnAddFrame.type = 'button'; btnAddFrame.textContent = 'Add selected frame';
-  // Visible only when the selected animation is an intact strip (strip === true).
-  const btnBreakApart = document.createElement('button'); btnBreakApart.type = 'button'; btnBreakApart.className = 'btn-icon-sm'; btnBreakApart.textContent = '✂'; btnBreakApart.title = 'Break apart';
+  // Visible only for an auto-laid-out animation.
+  const btnMakeManual = document.createElement('button'); btnMakeManual.type = 'button'; btnMakeManual.textContent = 'Make manual'; btnMakeManual.title = 'Stop auto-laying-out this animation; its frames stay where they are';
+  const btnEditInAnimations = document.createElement('button'); btnEditInAnimations.type = 'button'; btnEditInAnimations.textContent = 'Edit in Animations'; btnEditInAnimations.title = 'Open this animation in the Animations workbench';
 
   const btnFirst = document.createElement('button'); btnFirst.type = 'button'; btnFirst.className = 'btn-icon-sm'; btnFirst.textContent = '⏮';
   const btnPlay = document.createElement('button'); btnPlay.type = 'button'; btnPlay.className = 'btn-icon-sm'; btnPlay.textContent = '▶';
@@ -132,7 +91,7 @@ export function mountTimeline(el) {
   }
 
   header.append(
-    animSelect, btnNewAnim, btnRenameAnim, btnDeleteAnim, previewLoopLabel, btnAddFrame, btnBreakApart,
+    animSelect, btnNewAnim, btnRenameAnim, btnDeleteAnim, previewLoopLabel, btnAddFrame, btnMakeManual, btnEditInAnimations,
     btnFirst, btnPlay, btnLast, speedSelect,
   );
 
@@ -292,24 +251,9 @@ export function mountTimeline(el) {
 
   // ---- header controls ----
   animSelect.addEventListener('change', () => {
-    const sheet = activeSheet('sprite');
-    const animationId = animSelect.value || null;
     stopPlaying();
     position = 0; acc = 0;
-    // Keep the active layer inside whatever context is now on screen -- see
-    // commitNewStripFromFrame's matching comment in frames.js. Only reassign
-    // when the current active layer doesn't already belong to the newly selected
-    // context, so a deliberate in-context choice survives switching away and
-    // back. contextLayers(sheet, null) (deselecting to "(none)") returns
-    // every layer in the sheet, matching how a null selection is already
-    // treated everywhere else -- so an in-context layer stays active rather
-    // than being forced back to a root layer.
-    if (sheet) {
-      const layers = contextLayers(sheet, animationId);
-      const layerId = currentSelection().layerId ?? null;
-      const nextLayerId = layers.some(l => l.id === layerId) ? layerId : (layers[0]?.id ?? null);
-      setSelection({ animationId, layerId: nextLayerId });
-    }
+    setSelection({ animationId: animSelect.value || null });
     render();
   });
 
@@ -333,12 +277,11 @@ export function mountTimeline(el) {
     const sheet = activeSheet('sprite');
     const anim = currentAnim();
     if (!sheet || !anim) return;
-    if (!confirmOrAuto(`Delete animation "${anim.name}"?`)) return;
+    const message = anim.layout === 'auto' ? `Delete animation "${anim.name}" and its frames?` : `Delete animation "${anim.name}"?`;
+    if (!confirmOrAuto(message)) return;
     stopPlaying();
-    // The command removes the accepted layer group before changing selection.
-    // Commit here while its float's source layers are still reachable.
-    commitFloatIfAny();
-    dispatch('sprites.deleteAnimation', { sheetId: sheet.id, animationId: anim.id });
+    // An auto delete clears and moves pixels (dispatchLayout settles floats).
+    dispatchLayout('animations.delete', { sheetId: sheet.id, animationId: anim.id });
   });
 
   previewLoopCheckbox.addEventListener('change', () => {
@@ -353,18 +296,32 @@ export function mountTimeline(el) {
     dispatch('sprites.addAnimationFrame', { sheetId: sheet.id, animationId: anim.id, frameId });
   });
 
-  btnBreakApart.addEventListener('click', () => {
+  btnMakeManual.addEventListener('click', () => {
     const sheet = activeSheet('sprite');
     const anim = currentAnim();
-    if (!sheet || !anim || !anim.strip) return;
-    dispatch('sprites.breakApartStrip', { sheetId: sheet.id, animationId: anim.id });
+    if (!sheet || anim?.layout !== 'auto') return;
+    dispatch('animations.makeManual', { sheetId: sheet.id, animationId: anim.id });
+  });
+
+  // The Animations workbench opens on the selected frame's column when the
+  // animation uses it, else on its first column.
+  btnEditInAnimations.addEventListener('click', () => {
+    const sheet = activeSheet('sprite');
+    const anim = currentAnim();
+    if (!sheet || !anim) return;
+    stopPlaying();
+    const frameId = currentSelection().frameId ?? null;
+    const used = anim.frames.findIndex(entry => entry.frameId === frameId);
+    const entryIndex = used === -1 ? 0 : used;
+    getEditorHost().selections.patch({ frameId: anim.frames[entryIndex]?.frameId ?? null, entryIndex }, sheetDocument(sheet));
+    getEditorHost().activateMode('animations');
   });
 
   // ---- strip cell ----
   function buildCell(anim, entry, index, sheet) {
     const cell = document.createElement('div');
     cell.className = 'timeline-cell';
-    cell.draggable = !anim.strip;
+    cell.draggable = true;
     cell.style.width = THUMB_SIZE + 'px';
 
     const thumbCanvas = document.createElement('canvas');
@@ -378,42 +335,17 @@ export function mountTimeline(el) {
     const controls = document.createElement('div');
     controls.className = 'timeline-cell-controls';
 
-    if (anim.baseFps != null) {
-      // fps-primary: per-frame override is a whole-frame "Frames" (step)
-      // count, never a raw ms value -- see the Animation-panel design doc.
-      const stepInput = document.createElement('input');
-      stepInput.type = 'number'; stepInput.min = '1';
-      stepInput.title = "Frames to hold (overrides the animation's base step)";
-      stepInput.value = String(entry.step ?? anim.baseStep ?? 1);
-      stepInput.addEventListener('click', (e) => e.stopPropagation());
-      stepInput.addEventListener('change', () => {
-        let v = parseInt(stepInput.value, 10);
-        if (!Number.isFinite(v) || v < 1) v = 1;
-        stepInput.value = String(v);
-        dispatch('sprites.setAnimationFrameStep', { sheetId: sheet.id, animationId: anim.id, index, step: v });
-      });
-      const msCaption = document.createElement('span');
-      msCaption.className = 'timeline-cell-ms-caption';
-      msCaption.textContent = `${effectiveDuration(anim, entry)}ms`;
-      controls.append(stepInput, msCaption);
-    } else {
-      const durationInput = document.createElement('input');
-      durationInput.type = 'number'; durationInput.min = '1';
-      durationInput.value = String(effectiveDuration(anim, entry));
-      durationInput.addEventListener('click', (e) => e.stopPropagation());
-      durationInput.addEventListener('change', () => {
-        let v = parseInt(durationInput.value, 10);
-        if (!Number.isFinite(v) || v < 1) v = 1;
-        durationInput.value = String(v);
-        dispatch('sprites.setAnimationFrameDuration', { sheetId: sheet.id, animationId: anim.id, index, duration: v });
-      });
-      controls.append(durationInput);
-    }
+    controls.append(...buildFrameDurationInput(sheet, anim, entry, index, dispatch));
 
     const btnRemove = document.createElement('button');
     btnRemove.type = 'button'; btnRemove.textContent = '✕'; btnRemove.className = 'timeline-remove';
-    btnRemove.addEventListener('click', (e) => { e.stopPropagation(); dispatch('sprites.removeAnimationFrame', { sheetId: sheet.id, animationId: anim.id, index }); });
-    if (!anim.strip) controls.append(btnRemove);
+    btnRemove.addEventListener('click', (e) => {
+      e.stopPropagation();
+      stopPlaying(); // a structural change; playback would index stale entries
+      if (anim.layout === 'auto') dispatchLayout('animations.deleteFrame', { sheetId: sheet.id, animationId: anim.id, index });
+      else dispatch('sprites.removeAnimationFrame', { sheetId: sheet.id, animationId: anim.id, index });
+    });
+    controls.append(btnRemove);
 
     cell.append(thumbCanvas, controls);
 
@@ -439,7 +371,6 @@ export function mountTimeline(el) {
       e.dataTransfer.effectAllowed = 'move';
     });
     cell.addEventListener('dragover', (e) => {
-      if (anim.strip) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       const rect = cell.getBoundingClientRect();
@@ -449,7 +380,6 @@ export function mountTimeline(el) {
     });
     cell.addEventListener('dragleave', () => cell.classList.remove('drag-before', 'drag-after'));
     cell.addEventListener('drop', (e) => {
-      if (anim.strip) return;
       e.preventDefault();
       const before = cell.classList.contains('drag-before');
       cell.classList.remove('drag-before', 'drag-after');
@@ -458,7 +388,9 @@ export function mountTimeline(el) {
       let toIndex = index + (before ? 0 : 1);
       if (fromIndex < toIndex) toIndex -= 1; // removal shifts everything after it left by one
       if (toIndex === fromIndex) return;
-      dispatch('sprites.reorderAnimationFrame', { sheetId: sheet.id, animationId: anim.id, fromIndex, toIndex });
+      stopPlaying();
+      if (anim.layout === 'auto') dispatchLayout('animations.moveFrame', { sheetId: sheet.id, animationId: anim.id, from: fromIndex, to: toIndex });
+      else dispatch('sprites.reorderAnimationFrame', { sheetId: sheet.id, animationId: anim.id, fromIndex, toIndex });
     });
 
     return cell;
@@ -498,8 +430,9 @@ export function mountTimeline(el) {
 
     btnRenameAnim.disabled = !anim;
     btnDeleteAnim.disabled = !anim;
-    btnAddFrame.disabled = !anim || !currentSelection().frameId || !!anim.strip;
-    btnBreakApart.hidden = !anim?.strip;
+    btnAddFrame.disabled = !anim || !currentSelection().frameId || anim.layout === 'auto';
+    btnMakeManual.hidden = anim?.layout !== 'auto';
+    btnEditInAnimations.disabled = !anim;
     const hasFrames = !!anim && anim.frames.length > 0;
     btnPlay.disabled = !hasFrames;
     btnFirst.disabled = !hasFrames;

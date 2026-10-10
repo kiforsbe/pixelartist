@@ -6,6 +6,7 @@ import { BrowserAutosave } from './platform/browser/autosave.js';
 import { BrowserClipboard } from './platform/browser/clipboard.js';
 import { BrowserImageCodec } from './platform/browser/image-codec.js';
 import { spriteMode } from './modes/sprites/index.js';
+import { animationsMode } from './modes/animations/index.js';
 import { tileMode } from './modes/tiles/index.js';
 import { mapMode } from './modes/maps/index.js';
 import { mountEditorWorkbench } from './features/workbench/editor-workbench.js';
@@ -28,6 +29,7 @@ export const editorHost = new EditorHost({
 });
 
 editorHost.registerMode(spriteMode);
+editorHost.registerMode(animationsMode);
 editorHost.registerMode(tileMode);
 editorHost.registerMode(mapMode);
 editorHost.start('sprites');

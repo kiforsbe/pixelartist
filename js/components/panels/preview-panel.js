@@ -93,8 +93,8 @@ function draw() {
 // same as CanvasView, whose zoom doesn't reset just because content changed.
 export function setPreviewBitmap(bmp) {
   // A timeline playback callback may still arrive during a mode switch; it
-  // must never overwrite the active map preview.
-  if (currentModeId() !== 'sprites') return;
+  // must never overwrite the active map or tile preview.
+  if (currentModeId() !== 'sprites' && currentModeId() !== 'animations') return;
   exactFit = false;
   lastBmp = bmp;
   draw();

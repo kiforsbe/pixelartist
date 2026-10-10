@@ -171,3 +171,15 @@ for (const operation of ['commit', 'cancel']) {
     assert.equal(hasSelection(), false);
   });
 }
+
+test('a Delete already handled elsewhere does not clear the canvas selection', t => {
+  const f = drawingFixture(t);
+  setPixel(f.bitmap(), 1, 1, red);
+  f.select();
+  const event = new Event('keydown', { cancelable: true });
+  Object.defineProperty(event, 'key', { value: 'Delete' });
+  event.preventDefault(); // e.g. the Animations timeline removed a column
+  window.dispatchEvent(event);
+  assert.deepEqual(getPixel(f.bitmap(), 1, 1), red);
+  assert.equal(f.host.history.canUndo(), false);
+});

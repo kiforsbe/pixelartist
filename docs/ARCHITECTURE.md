@@ -42,7 +42,7 @@ not unfinished migration tasks.
 
 ## Repository structure
 
-There are 167 production JavaScript modules at this snapshot.
+There are 191 production JavaScript modules at this snapshot.
 
 ```text
 index.html                 Static shell, mount points, and most dialogs
@@ -50,16 +50,17 @@ css/app.css                Shared desktop workbench and control styling
 js/
   bootstrap.js             Browser composition root
   version.js               Browser release version, tested against package.json
-  domain/                  5 modules: map model, sprite frames/strips/timing, IDs
-  core/                    34 modules: model, pixels, grids, terrain, filters,
+  domain/                  7 modules: map model, sprite frames/auto layout/timing,
+                           onion skin/playback, IDs
+  core/                    43 modules: model, pixels, grids, terrain, filters,
                            history primitives, codecs, ZIP, export builders
   host/                    25 modules: store/services, registries, workbench helpers
   platform/browser/        7 modules: browser I/O, adapters, preferences, test mode
-  modes/                   66 modules in sprites/, tiles/, maps/
-  features/                10 modules: shell/workbench/project/file/filter coordination
-  components/              18 shared DOM/canvas/panel modules
+  modes/                   67 modules in sprites/, animations/, tiles/, maps/
+  features/                16 modules: shell/workbench/project/file/filter coordination
+  components/              24 shared DOM/canvas/panel modules
 assets/                    Blob-47 reference artwork and documentation screenshot
-tests/                     87 top-level Node test modules
+tests/                     129 top-level Node test modules
   helpers/                 Isolated controller/panel fixtures
   browser/                 Focused Playwright workbench regression checks
   smoke.md                 Broader smoke checklist and manual gates
@@ -83,7 +84,7 @@ checked-in CI workflow. IndexedDB is used locally in the browser for recovery.
 
 1. Construct `EditorHost` with browser preferences and file/autosave/clipboard/
    image-codec adapters.
-2. Register the three built-in modes and their document providers/contributions.
+2. Register the four built-in modes and their document providers/contributions.
 3. Start `sprites`, then publish the host through `host/runtime.js`.
 4. Mount workbench, filters, project controls, document controls, menu, and file
    controller, in that order.
@@ -174,9 +175,11 @@ registry. Buttons refresh from store/history/context changes. Menus use a
 static action-ID tree from `menu-controller.js`; the menu contribution
 registry is not the active menu-building pipeline.
 
-Shared drawing and filters still submit raw pixel/history commands.
-`features/animations/commands.js` is a small ID-dispatch facade used by shared
-drawing/layer UI; it is not a resurrected legacy state bus.
+Shared drawing and filters still submit raw pixel/history commands. Shared
+layer UI dispatches the active mode's registered commands by ID (Animations
+maps to the `sprites.*` layer commands); sprite and animation presenters use
+`components/layout-dispatch.js`, which settles a float, executes the command
+and alerts on a refusal (except a `needsSize` one, which callers handle).
 
 Context keys are used chiefly for mode-level panel/preview visibility.
 They are not a fully synchronized mirror of every session field: view/tool
@@ -190,12 +193,25 @@ plus `application/` and `presentation/` folders. Modes do not import siblings.
 
 | Mode / document kind | Views | Principal presentation and application work |
 |---|---|---|
-| `sprites` / `sprite-sheet` | `sprites.sheet`, `sprites.frame` | Frame tool, frames/animations panels, timeline, frame editor; frame/strip geometry and movement, playback/onion skin, animation/frame/layer/palette commands. |
+| `sprites` / `sprite-sheet` | `sprites.sheet`, `sprites.frame` | Frame tool, frames/animations panels, timeline, frame editor; frame geometry and pinning, auto layout, animation/frame/layer/palette commands. |
+| `animations` / `sprite-sheet` | `animations.canvas` | Animation canvas (pivot overlay), animation list panel, animation timeline (layer rows and cels in place of the Layers panel, column insert/reorder/link gestures, per-column duration), preview hand-off; pivot, timeline-column and cel-fill math. Its commands are the sprites mode's (`sprites.*`, `animations.*`). |
 | `tiles` / `tile-sheet` | `tiles.sheet`, `tiles.tile` | Tile tool/panel, tile-layer tags, terrain editor/panel, autotile painter, tile neighbor editor; grid/tile/terrain commands and geometry. |
 | `maps` / `map` | `maps.canvas` | `map-tool-presenter.js`, `map-renderer.js`, `map-panel.js`, `map-assets-panel.js`; brush state/geometry, placement/layer/palette commands. |
 
-Sprites use domain modules for frames, strips, and timing, while substantial
-layer/model logic remains in `core/model.js`. Tiles use core grids, neighbor
+Sprites use domain modules for frames, auto layout, and timing, while
+substantial layer/model logic remains in `core/model.js`. Animations are
+`auto` or `manual`. Auto layout runs in three layers:
+`domain/sprites/auto-layout.js` is the pure planner (one band of rows per
+auto animation, in `sheet.animations` order, at most
+`settings.sheetMaxWidth` wide; it also defines which frames are pinned);
+`core/sheet-layout.js` applies a plan, moving pixels and growing the sheet
+downward, with undo/redo; and
+`modes/sprites/application/commands/animation-layout-commands.js` holds
+`runLayoutCommand`, which records structure and pixels as one history step
+(a refusal records nothing), plus the `animations.*` commands. Frames of an
+auto animation are pinned in Sprite Sheets: frame commands refuse to move
+or resize them, and **Make manual** releases them without moving pixels.
+`core/legacy-animations.js` converts version 2/3 strips on load. Tiles use core grids, neighbor
 rules, Blob-47 terrain, and slot/back-reference snapshots. Maps reference source
 sheets/assets by ID; they do not copy sheet bitmaps into placements. Their
 renderer resolves tile, terrain, frame, and animation sources at paint time.
@@ -210,16 +226,30 @@ surface centered at offset 4096, not an unbounded rendering surface.
 - `project/file-controller.js` and `file-session.js`: open/save/export/recovery and native handles.
 - `transforms/filter-controller.js`: quantize, chroma-key, checkerboard-removal dialogs and live previews.
 - `shell/actions.js` and `shell/menu-controller.js`: shared action facade and menus/help.
-- `animations/commands.js`: shared UI's sprite-command dispatch bridge.
+- `workbench/view-switching.js`: shows the active view's controller and hides the others.
 
 The workbench has no concrete mode imports, but still recognizes the built-in
-mode/view IDs for routing. Adding a fourth mode is not purely declarative.
+mode/view IDs for routing. Adding a fifth mode is not purely declarative.
+
+Sprite Sheets and Animations edit the same `sprite-sheet` documents.
+`DocumentService.activateMode` keeps the active document when the new mode
+accepts its kind, so switching between the two keeps the sheet and its
+selection (`animationId`, `frameId`, `entryIndex`). The frame editor and the
+animation canvas share `components/canvas/frame-canvas.js` (one frame, its
+layers, onion ghosts and the drawing binding) and
+`components/canvas/onion-controls.js`; onion-skin and playback math live in
+`domain/sprites/`. The Layers panel and the Animations timeline's layer rows
+share `components/panels/layer-tree.js` (row building, selection, rename,
+add/delete/merge, drag-and-drop nesting), and both timelines share
+`components/panels/frame-duration-input.js`. The Layers panel hides itself
+while Animations is active.
 
 ### Panels and views
 
 `index.html` defines left, center, right, and bottom workbench regions.
 Tools/colors occupy the left; the canvas center; layers, contextual panels,
-animations, terrain, preview, and map assets the right; timeline the bottom.
+animations, terrain, preview, and map assets the right; timelines the bottom
+(`#timeline-dock` for Sprite Sheets, `#anim-timeline-dock` for Animations).
 
 `PanelManager` reconciles registered panels against context keys. Persistent
 panels are hidden rather than disposed. It aggregates visibility for shared
@@ -231,8 +261,8 @@ disposal. Some components remain page-lifetime mounts. Generic collapsible
 panel frames/preferences apply to generated panel chrome; fixed mount-point
 contributions do not all use that chrome.
 
-The workbench eagerly creates registered views and explicitly shows/hides the
-frame/tile editors. `ViewManager` exists but is not used in this path.
+The workbench eagerly creates registered views; `applyViewControllers`
+shows the active view's controller and hides the rest. `ViewManager` exists but is not used in this path.
 Dialogs are native `<dialog>` elements, mostly static in HTML; the movable
 filter dialogs use non-modal `.show()`, while many other dialogs use
 `.showModal()`.
@@ -245,7 +275,7 @@ grids, terrain sets/presets, and tile-layer-name metadata.
 
 ```text
 sheet.layerTree
-  group { type: 'group', children, animationId? }
+  group { type: 'group', children }
     group ...
     layer { type: 'layer', visible, opacity, bitmap }
       bitmap { width, height, data: Uint8ClampedArray }  // RGBA bytes
@@ -258,7 +288,11 @@ map.layers = [{ type: 'tile', tiles, terrain }, ...]   // map placements
 ```
 
 `sheetLayers()` traverses pixel-layer leaves. `flattenSheet()` composites
-sheet layers and accepted animation groups into frame rectangles; floating
+the visible sheet layers; groups are plain folders, never owned by an
+animation. A layer's `locked` flag blocks edits, not rendering: pixel
+writers resolve their target through `activeEditableLayer()` /
+`activeLayerScope()` in `host/document-helpers.js`, which skip locked
+layers, and auto layout refuses to move pixels out of one. Floating
 buffers and filter override layers can alter the rendered result without
 committing the underlying pixels. `ImageData` is created at the canvas
 boundary; stored bitmaps are ordinary objects containing typed arrays.
@@ -297,8 +331,13 @@ metadata with encoded layer images; `core/zip.js` handles the archive.
 `createImageBitmap`; consequently **not every core module is Node-only or
 independent of browser APIs**. Bundle tests can inject codecs.
 
-Current saves use **project version 3**. Loading accepts version 2 and 3, migrates
-old flat pixel `layers[]` into `layerTree`, and migrates older uniform tile grids.
+Current saves use **project version 4**. Loading accepts versions 2, 3 and 4,
+migrates old flat pixel `layers[]` into `layerTree`, and migrates older uniform
+tile grids. Version 2/3 sprite sheets also pass through `convertLegacySheet`:
+accepted, contiguous, equal-size, equal-pivot strips become auto animations,
+everything else becomes manual, and pixels a strip used to hide go into a
+hidden `Covered by strips (converted)` folder so the sheet looks unchanged.
+Version 4 requires `settings.sheetMaxWidth`.
 For tree-based tile sheets the serialized `layers` property maps to runtime
 `tileLayerNames`. Without `layerTree`, `layers` is interpreted as legacy
 pixel records, never tile tag names. Tile JSON exports retain `layers` and

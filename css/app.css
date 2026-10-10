@@ -388,9 +388,11 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 /* timeline dock -- sits in #workspace's middle column, under the canvas, so
    it spans only between the tool palette and the side panels rather than
    the full window width. */
-#timeline-dock { grid-column: 2; grid-row: 2; height: 140px; background: var(--bg2); border-top: 1px solid var(--border);
+/* The Animations workbench's timeline (#anim-timeline-dock) takes the same
+   cell; only one of the two docks is shown at a time. */
+#timeline-dock, #anim-timeline-dock { grid-column: 2; grid-row: 2; height: 140px; background: var(--bg2); border-top: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden; }
-#timeline-dock[hidden] { display: none; }
+#timeline-dock[hidden], #anim-timeline-dock[hidden] { display: none; }
 .timeline-resize-handle { flex: none; height: 5px; margin-top: -1px; cursor: ns-resize;
   touch-action: none; background: transparent; }
 .timeline-resize-handle:hover, .timeline-resize-handle.dragging { background: var(--accent); }
@@ -414,6 +416,49 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .timeline-cell input[type="number"] { width: 100%; font-size: 10px; padding: 1px 2px; min-width: 0; }
 .timeline-remove { font-size: 10px; padding: 1px 4px; flex: none; }
 
+/* animations timeline: tags, frame numbers, cells -- one 40px column each */
+.anim-tl-grid { flex: 1; overflow: auto; padding: 4px 8px; }
+.anim-tl-row { display: flex; }
+.anim-tag { flex: none; box-sizing: border-box; padding: 1px 6px; margin-bottom: 2px; font-size: 11px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; background: var(--bg3); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
+.anim-tag:hover { border-color: var(--accent); }
+.anim-tl-num { flex: none; box-sizing: border-box; text-align: center; font-size: 10px; color: #9a9ca8; }
+.anim-tl-cell { flex: none; box-sizing: border-box; position: relative; display: flex; align-items: center;
+  justify-content: center; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
+.anim-tl-cell:hover { background: var(--bg3); }
+.anim-tl-cell.selected { border-color: var(--accent); background: var(--bg3); }
+.anim-tl-cell.playhead { box-shadow: inset 0 -3px 0 var(--accent); }
+.anim-tl-thumb, .anim-tl-cel-thumb { image-rendering: pixelated; }
+.anim-tl-linked { position: absolute; right: 1px; top: 0; font-size: 9px; }
+.anim-tl-empty { font-size: 12px; color: #9a9ca8; padding: 8px 0; }
+/* Layer rows: a sticky head (the shared .layer-row) then one cel per column. */
+.anim-tl-layer { align-items: stretch; }
+.anim-tl-head, .anim-tl-corner { position: sticky; left: 0; z-index: 1; flex: none; box-sizing: border-box; width: 180px;
+  background: var(--bg2); font-size: 10px; color: #9a9ca8; }
+.anim-tl-head .layer-row { padding: 1px 3px; }
+.anim-tl-corner { z-index: 3; } /* above the "+" gaps (z-index 2) scrolling under it */
+.anim-tl-cel { flex: none; box-sizing: border-box; min-height: 22px; display: flex; align-items: center; justify-content: center;
+  border-left: 1px solid var(--border); cursor: pointer; }
+.anim-tl-cel:hover { background: var(--bg3); }
+.anim-tl-cel.col-selected { background: var(--bg3); }
+.anim-tl-cel.selected { outline: 1px solid var(--accent); outline-offset: -1px; }
+.anim-tl-dot { width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid #9a9ca8; }
+.anim-tl-dot.filled { background: #d7d9e0; border-color: #d7d9e0; }
+.anim-tl-num { position: relative; }
+.anim-tl-num.playhead { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.anim-tl-size { width: 80px; }
+.anim-tl-num .anim-tl-linked { right: 2px; top: -1px; }
+.anim-tl-gap { position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; padding: 0; border: 0; background: transparent;
+  color: transparent; font-size: 10px; cursor: pointer; z-index: 2; }
+.anim-tl-gap.start { left: 0; width: 5px; }
+.anim-tl-gap.end { left: auto; right: 0; width: 5px; }
+.anim-tl-gap:hover { color: var(--accent); background: var(--bg3); }
+.anim-tl-num[draggable="true"] { cursor: grab; }
+.anim-tl-num.drag-before { box-shadow: inset 2px 0 0 var(--accent); }
+.anim-tl-num.drag-after { box-shadow: inset -2px 0 0 var(--accent); }
+.anim-tl-grid:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.timeline-separator { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--border); }
+
 /* frame editor */
 .frame-editor { position: absolute; inset: 0; display: none; flex-direction: column; background: var(--bg); }
 .frame-editor-strip { display: flex; align-items: center; gap: 10px; padding: 4px 10px;
@@ -433,6 +478,23 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .frame-editor-onion-icon-slider { display: inline-flex; align-items: center; gap: 3px; }
 .frame-editor-onion-icon { font-size: 12px; color: #9a9ca8; cursor: default; }
 .frame-editor-canvas { position: relative; flex: 1; min-height: 0; }
+/* animations canvas (reuses the frame editor's layout) */
+.anim-canvas-empty { position: absolute; inset: 34px 0 0 0; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: #9a9ca8; font-size: 12px; }
+.anim-pivot-layer { position: absolute; inset: 0; cursor: crosshair; }
+
+/* animations panel */
+.anim-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.anim-row { display: flex; align-items: center; gap: 6px; padding: 3px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.anim-row:hover { background: var(--bg3); }
+.anim-row.active { background: var(--bg3); border-color: var(--accent); }
+.anim-thumb { width: 32px; height: 32px; flex: none; background: var(--bg); }
+.anim-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anim-badge { font-size: 10px; color: #9a9ca8; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+.anim-form { display: flex; flex-direction: column; gap: 4px; padding: 6px; margin: 4px 0; background: var(--bg3); border-radius: 4px; }
+.anim-form input[type="number"] { width: 56px; }
+.anchor-grid { display: grid; grid-template-columns: repeat(3, 18px); gap: 2px; }
+.anchor-grid button { width: 18px; height: 18px; padding: 0; }
 
 /* tile editor */
 .tile-editor { position: absolute; inset: 0; display: none; flex-direction: column; background: var(--bg); }
@@ -674,3 +736,5 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
    dither pattern or a scattered stroke is actually legible. */
 .bm-preview-canvas { display: block; width: 144px; height: 144px; image-rendering: pixelated;
   background: conic-gradient(#777 25%, #aaa 25% 50%, #777 50% 75%, #aaa 75%) 0 0 / 8px 8px; }
+.anim-tl-duration { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+.anim-tl-duration input { width: 52px; }

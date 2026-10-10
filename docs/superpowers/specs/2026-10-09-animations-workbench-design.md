@@ -328,3 +328,42 @@ Three plans, each leaving the app working:
 - Overlapping tags / frames shared between animations in auto layout.
 - Automatic sheet trimming.
 - Packing strategies other than one band per animation.
+
+## Implementation notes (Phase 1)
+
+Decided while planning Phase 1 (see `docs/superpowers/plans/2026-10-09-animations-model-engine.md`):
+
+1. **Band width** uses only the columns a band needs: `min(cols, distinct)·cell.w`. Reserving `cols·cell.w` would widen a narrow sheet to `sheetMaxWidth` for a one-frame animation.
+2. **Stray-pixel obstacles** are computed exactly, per row, instead of as connected-component bounding boxes. `rowMinX[y]` is the smallest x of a non-empty pixel in row `y` that lies in no frame rect. A band `[0,W)×[y,y+H)` is blocked if `min(rowMinX[y..y+H)) < W`.
+3. **Covered pixels** go into a hidden *folder* named `Covered by strips (converted)`, with one hidden layer per source layer. A single layer would lose pixels where two source layers overlap, which D6 forbids.
+4. **Command registration:** the `animations.*` ids are registered for both the `sprites` and `animations` modes. The Sprite Sheets workbench needs Make manual, the shared pivot, and deleting an auto frame. The `animations` mode itself arrives in Phase 2; its id is already in the `when` predicate.
+5. **`animations.delete` on a manual animation** behaves as `sprites.deleteAnimation` does today: it keeps the frames. Only auto animations delete their unreferenced frames and pixels.
+6. **`animations.duplicate`** requires an auto source. A manual source is refused with "Auto-layout this animation first".
+7. **`animations.autoLayout`** needs an explicit canvas size when frames differ in size **or pivot**, because equal pivots are an auto invariant. v3 conversion likewise requires equal pivots for `auto`.
+
+## Implementation notes (Phase 2)
+
+Decided while building Phase 2 (see `docs/superpowers/plans/2026-10-09-animations-workbench-shell.md`):
+
+1. **Own presenters, shared helpers.** The Animations panel and timeline are new presenters in `js/modes/animations/presentation/` rather than the sprites ones taking mode/view ids as options (§3 "Shared presentation"). The two workbenches differ in nearly every control, so sharing happens one level down instead: `components/canvas/frame-canvas.js`, `components/canvas/onion-controls.js`, `components/canvas/draw-fit.js`, `components/layout-dispatch.js`, `components/panels/base-duration-control.js`, and `domain/sprites/{onion-skin,playback}.js`.
+2. **`frame-canvas.js` signature** is `createFrameCanvas(hostEl, { viewKind, getFrame, getOnionAnimation, onStateChange })` → `{ view, sync, shown, hidden, isVisible }`, not `{ frameRect, layers, onionSource }`. Both callers edit the active sheet's layers, so the canvas resolves the layers itself; the callers only say which frame and which animation's neighbours to ghost.
+3. **Pivot editing** is a **Pivot** toggle in the canvas strip. While it is on, an overlay takes the pointer, so a pivot drag never reaches the paint tools. The crosshair is always drawn. A drag is one history step: `animations.setPivot` for an auto animation (shared pivot), or the new `sprites.setFramePivot` for a frame of a manual animation. Pivots snap to half pixels and clamp to the frame.
+4. **Selection** gains `entryIndex`, so an animation that uses a frame twice can tell its columns apart. Anything that only patches `frameId` (undo/redo, layout commands) falls back to that frame's first use in the animation.
+5. **Minimal timeline editing** is done with header buttons for now: **+ Frame**, **Duplicate** and **✕** act on the selected column, and the add buttons are disabled with the hint "Auto-layout this animation first" on a manual animation. The column gestures in §3 arrive with Phase 3. Removing a column selects its neighbour. The timeline mounts in its own `#anim-timeline-dock`, sharing the Sprite Sheets dock's CSS.
+6. **The Layers panel stays visible** in Phase 2, because the timeline has no layer rows yet. In Animations mode its commands map to `sprites.*`, and the lock toggle shows. Phase 3 hides it.
+7. **Duplicate** in the Animations panel is disabled for manual animations (Phase 1 note 6).
+8. **Edit in Animations** keeps the selected frame when the animation uses it, and otherwise selects the animation's first entry.
+9. **View kind:** `animations.canvas` resolves to the float/drawing kind `canvas`, the same as `maps.canvas`. Maps never binds a drawing engine, so the two cannot collide; a test pins that `createFloat` stays refused in Maps.
+
+## Implementation notes (Phase 3)
+
+Decided while building Phase 3 (see `docs/superpowers/plans/2026-10-10-animations-full-timeline.md`):
+
+1. **One layer-tree module.** The Layers panel's sheet rows, selection, rename, add/delete/merge and drag-and-drop moved into `components/panels/layer-tree.js`; the panel and the timeline's layer rows both build from it, so the two trees cannot drift. The Layers panel hides itself in Animations (the timeline's rows replace it).
+2. **Folder selection.** The shared selection keeps only a selected folder (`selectedGroupId`); a selected layer stays the sheet selection's `layerId` and wins over the folder, so every path that activates a layer (a cel click, undo, the Frame Editor) reads correctly in both trees.
+3. **Drops onto cels.** `attachLayerTreeDrop` takes `{ emptyDropsToRoot }`; the timeline passes `false`, so a row dropped between cels is not moved to the root.
+4. **Compact and expanded.** The column-width slider (16–64 px, remembered per browser) shows dots below 40 px, and per-cel thumbnails plus a composite row of whole frames from 40 px up. The playhead marks the frame number (the only column marker when compact) and, expanded, the composite cell.
+5. **Gestures need the auto layout, except reorder.** A gap insert or a Ctrl+drop link on a manual animation first offers an auto-layout; frames of different sizes or pivots then need a second yes that names the suggested (largest) size and warns that re-framing around the pivots can crop pixels. Declining either does nothing. A plain reorder that declines the offer still reorders by hand (`sprites.reorderAnimationFrame`). Drops never cross animations.
+6. **Keys.** Delete/Left/Right act only on the focused timeline grid and never on a typing target. The drawing engine's window Delete handler skips events already handled (`defaultPrevented`), so a column delete does not also clear a canvas selection.
+7. **Pixel edits repaint in place.** A stroke bumps `pixelRevision` on every pointer move; the timeline repaints only the selected frame's cels, composite cells and the preview rather than rebuilding the grid. Structural changes (history, model, selection) still render in full, and a layer-name click defers that render for the double-click grace window so rename still works.
+8. **Per-column duration.** The duration control moved into `components/panels/frame-duration-input.js`, which the Sprite Sheets timeline cells and the Animations timeline header (selected column) both use: held frames for an fps-based animation, otherwise ms.

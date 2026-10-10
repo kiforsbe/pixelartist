@@ -17,7 +17,7 @@
 // undo/redo is covered by main.js listening on 'history' the same way.
 
 import { getEditorHost } from '../../host/runtime.js';
-import { activeSheet, activeLayer } from '../../host/document-helpers.js';
+import { activeSheet, activeEditableLayer } from '../../host/document-helpers.js';
 import {
   cloneBitmap, stamp, drawRect, drawEllipse, floodFill, softFloodFill,
   copyRegion, blitRegion, fillRegion, getPixel,
@@ -29,11 +29,10 @@ import { nearestColor } from '../../core/palettes.js';
 import { maskGridFor, effectiveMaskSize } from '../../core/brushes.js';
 import { strokeStamps, stampsAlongPath, newStrokeSeed, strokeBounds, pathSteps } from '../../core/brush-stroke.js';
 import { makeInk } from '../../core/brush-ink.js';
-import { flattenSheet, animationGroup, flattenLayers } from '../../core/model.js';
-import { segmentAt } from '../../core/strips.js';
+import { flattenSheet } from '../../core/model.js';
 import { registerFloatView, isTypingTarget, createFloat, commitFloatIfAny, pushTransformCommand, syncFrameFloat, activeFloating, currentEditRegion } from './float-session.js';
-import { commitAcceptAnimation } from '../../features/animations/commands.js';
-import { stripForFrame as stripOf } from '../../domain/sprites/strips.js';
+import { frameAt } from '../../domain/sprites/frames.js';
+import { isPinnedFrame } from '../../domain/sprites/auto-layout.js';
 import { HANDLES_ALL, handlePoint, isCenterAnchorModifier, isProportionalModifier, resizeRectFromHandle } from '../../core/resizeAnchor.js';
 import { drawRectDims, drawAngleLabel } from './dim-labels.js';
 import { BRUSH_TOOLS, SHAPE_TOOLS, toolOptions } from '../tool-palette.js';
@@ -151,7 +150,9 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   function selectionContext(state = getEditorHost().store.getState()) {
     const doc = state.session.activeDocument;
     const selected = getEditorHost().selections.get(doc);
+    // The Animations canvas ('canvas') edits the selected column's frame.
     const regionId = viewKind === 'frame' ? selected?.editingFrameId
+      : viewKind === 'canvas' ? selected?.frameId
       : viewKind === 'tile' ? selected?.editingTileId : null;
     return [state.project.model, doc?.kind, doc?.id, regionId];
   }
@@ -190,12 +191,12 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   }, { equals: sameSelectionContext });
 
   // Clamp an image-space point into `target`; null when the target is empty
-  // (no sheet, or outside any paintable segment). Live drawing pre-masks
+  // (no sheet, or outside the paintable rect). Live drawing pre-masks
   // coordinates with this so strokes cannot start or extend outside the
   // editable rect. `target` is resolved ONCE per stroke at handleDown and
   // threaded through explicitly (not re-queried via getTargetRect() on every
-  // event) so a strip with multiple segments can't "flicker" mid-drag if the
-  // pointer strays near another segment -- mirrors how the select tool
+  // event) so the paintable rect can't change mid-drag if the selection
+  // context moves under the pointer -- mirrors how the select tool
   // already freezes `selStroke.target` once at handleSelectDown.
   function clampPoint(x, y, target) {
     if (target.w <= 0 || target.h <= 0) return null;
@@ -278,27 +279,10 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
     getEditorHost().history.execute(makePixelPatch(bmp, rect, beforeRegion, afterRegion, label));
   }
 
-  // If the currently selected animation is floating (no layer yet -- see
-  // acceptAnimation in core/model.js), accept it before resolving the
-  // active layer to write into, so drawing "just works" without the user
-  // needing to explicitly accept first (Enter key, frames.js's
-  // registerFrameTool). No-ops for read-only tools (eyedropper doesn't call
-  // this), tile mode (animation selection isn't used there), or
-  // when nothing is selected/already accepted.
-  function acceptFloatingContextIfAny() {
-    const sheet = activeSheet();
-    if (!sheet) return;
-    const animationId = getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null;
-    if (!animationId) return;
-    const anim = sheet.animations.find(a => a.id === animationId);
-    if (anim && !anim.layerGroupId) commitAcceptAnimation(sheet, anim);
-  }
-
   // ---- pencil / eraser / fill / soft flood / line / rect / ellipse ----
 
   function handleDown(ev) {
-    acceptFloatingContextIfAny();
-    const layer = activeLayer();
+    const layer = activeEditableLayer();
     if (!layer) return;
     const tool = activeTool();
     const before = cloneBitmap(layer.bitmap);
@@ -323,7 +307,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       return;
     }
     if (tool === 'softflood') {
-      // Work on a target-sized copy, preserving the same strip/tile boundary
+      // Work on a target-sized copy, preserving the same frame/tile boundary
       // guarantees as hard fill while the core algorithm computes its region.
       const t = getTargetRect(ev.x, ev.y);
       if (ev.x < t.x || ev.y < t.y || ev.x >= t.x + t.w || ev.y >= t.y + t.h) return;
@@ -605,8 +589,7 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   }
 
   function handleSelectDown(ev) {
-    acceptFloatingContextIfAny();
-    if (!activeLayer()) return;
+    if (!activeEditableLayer()) return;
     const target = getTargetRect(ev.x, ev.y);
     const handle = hitSelHandle(ev);
     if (handle) {
@@ -738,25 +721,19 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
       commitFloatIfAny(); // pressed outside: commit; next press starts fresh
       return;
     }
-    // No float yet. On the sheet view with no marquee, a down on a frame or
-    // strip segment starts a FRAME-FLOAT: the region's pixels float exactly
-    // like a selection — live preview, commit on Enter/outside click — but
-    // translate-only, and on commit the frame rects move with the pixels.
+    // No float yet. On the sheet view with no marquee, a down on a frame
+    // starts a FRAME-FLOAT: its pixels float exactly like a selection --
+    // live preview, commit on Enter/outside click -- but translate-only, and
+    // on commit the frame rect moves with the pixels. A pinned frame's rect
+    // belongs to its auto layout, so the move tool leaves it alone.
     // Everything else keeps the classic behavior: cut the selection (or
     // whole target) and drag it.
     if (activeViewKind() === 'sheet' && !selection) {
-      const seg = segmentAt(sheet, ev.x, ev.y);
-      if (seg) {
-        // An accepted strip's own segment carries only ITS OWN layer(s) --
-        // resolved from the segment's owning strip, never from whatever's
-        // ambiently selected in the timeline (see docs/superpowers/specs/
-        // 2026-07-18-strip-area-constraint-design.md). A floating strip or a
-        // plain frame has no strip-owned layer to resolve, so falls back to
-        // today's ambient allLayers:true capture.
-        const owner = stripOf(sheet, seg.frameIds[0]);
-        const ownGroup = owner?.layerGroupId ? animationGroup(sheet, owner.id) : null;
-        const layers = ownGroup ? flattenLayers(ownGroup) : null;
-        if (!createFloat({ allLayers: true, region: seg.rect, frameIds: seg.frameIds, layers, x: ev.x, y: ev.y })) return;
+      const frame = frameAt(sheet, ev.x, ev.y);
+      if (frame && isPinnedFrame(sheet, frame.id)) return;
+      if (frame) {
+        const region = { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+        if (!createFloat({ allLayers: true, region, frameIds: [frame.id], x: ev.x, y: ev.y })) return;
         moveStroke = { kind: 'translate', t0: { ...activeFloating().transform }, anchor: { x: ev.x, y: ev.y } };
         return;
       }
@@ -956,11 +933,12 @@ export function bindDrawing(view, getTargetRect, mapPoint, viewKind = 'sheet') {
   };
 
   window.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented) return; // handled by a focused panel (e.g. the Animations timeline's Delete)
     if (document.querySelector('dialog[open]')) return;
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
     if (e.key === 'Delete' && !e.ctrlKey && !e.metaKey && !e.altKey
       && activeTool() === 'select' && activeViewKind() === viewKind && selection && !activeFloating()) {
-      const layer = activeLayer();
+      const layer = activeEditableLayer();
       if (!layer) return;
       // Geometry can change without changing the editing-region identity.
       // Use the same current-target intersection as cut and move.

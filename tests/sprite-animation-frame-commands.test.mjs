@@ -22,14 +22,14 @@ function makeProject() {
       { id: 'f1', name: 'f1', x: 16, y: 0, w: 16, h: 16, pivotX: 0, pivotY: 0 },
     ],
     animations: [{
-      id: 'an1', name: 'walk', loop: true, strip: false, breaks: [],
+      id: 'an1', name: 'walk', loop: true,
       frames: [
         { frameId: 'f0', duration: 100, step: null },
         { frameId: 'f1', duration: 150, step: null },
       ],
-      layerGroupId: null, baseDuration: 100, baseFps: undefined, baseStep: undefined,
+      layout: 'manual', cell: null, baseDuration: 100, baseFps: undefined, baseStep: undefined,
     }],
-    layerTree: { id: 'root', type: 'group', name: 'root', animationId: null, open: true, children: [] },
+    layerTree: { id: 'root', type: 'group', name: 'root', open: true, children: [] },
   };
   return { version: 6, name: 'test', settings: { durationMs: 100 }, sheets: [sheet], maps: [], palettes: [], activePaletteId: null };
 }

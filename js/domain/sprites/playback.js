@@ -1,5 +1,5 @@
-// js/modes/sprites/application/timeline-playback.js
-import { effectiveDuration } from '../../../core/model.js';
+// js/domain/sprites/playback.js
+import { effectiveDuration } from '../../core/model.js';
 
 // Pure step function for the timeline's playback loop: given how much time
 // elapsed since the last tick (already scaled by the playback-speed

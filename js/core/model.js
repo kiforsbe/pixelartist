@@ -1,7 +1,7 @@
-import { createBitmap, cloneBitmap, getPixel, setPixel, copyRegion, blitRegion } from './pixels.js';
+import { createBitmap, cloneBitmap, getPixel, setPixel, blitRegion } from './pixels.js';
 import { newId, normalizePalette } from './palettes.js';
 import { compositeFloatOnLayer } from './floating.js';
-import { removeEntry } from './strips.js';
+import { convertLegacySheet } from './legacy-animations.js';
 import { NEIGHBOR_DIRS } from './neighbors.js';
 import { MAX_PALETTE_COLORS, DEFAULT_PIXEL_SNAPPER_CONFIG } from './pixelSnapper.js';
 import { DEFAULT_MAP_BOUNDS, mapContentBounds } from '../domain/maps/maps.js';
@@ -10,13 +10,17 @@ import { toPlain as brushToPlain, fromPlain as brushFromPlain } from './brush-io
 export { DEFAULT_MAP_BOUNDS, createMap, createMapLayer, mapContentBounds, refreshMapBounds } from '../domain/maps/maps.js';
 export { fpsStepToMs, msToFps, effectiveDuration } from '../domain/sprites/animation-timing.js';
 
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 4;
 export const DEFAULT_SETTINGS = {
   spriteSheetW: 256, spriteSheetH: 256,
   tileSheetW: 256, tileSheetH: 256,
   tileW: 16, tileH: 16,
   frameW: 16, frameH: 16,
   durationMs: 100,
+  // Widest the Animations workbench's auto layout may pack a band of frames
+  // (js/domain/sprites/auto-layout.js). Files saved before it existed load
+  // with spriteSheetW instead (deserializeProject).
+  sheetMaxWidth: 256,
   smoothThumbnails: true,
   targetPlatform: 'none', // see js/core/platforms.js -- drives live edit-time compatibility warnings
   // 'strict': export quantization is capped at the target's real per-
@@ -60,7 +64,7 @@ export const DEFAULT_SETTINGS = {
   pixelSnapperFallbackSegments: DEFAULT_PIXEL_SNAPPER_CONFIG.fallbackTargetSegments,
   pixelSnapperMaxStepRatio: DEFAULT_PIXEL_SNAPPER_CONFIG.maxStepRatio,
 };
-const MAX_DIM = 4096;
+export const MAX_DIM = 4096;
 
 // 8 maximally-distinct hues (one per possible Back/Ahead step count), reused
 // for both directions -- so "step 3 back" and "step 3 ahead" read the same
@@ -97,22 +101,19 @@ export const LAYER = 'layer';
 export const GROUP = 'group';
 
 // ---------------------------------------------------------------- tree model
-// A sheet now stores its layers inside a hierarchical `layerTree` instead of
-// a flat `layers[]` array. The tree is made of group nodes (folders) and leaf
-// layer nodes. Groups can own an animation (`animationId`), meaning the group
-// holds the animation's private sub-layers. Every operation that used to read
-// `sheet.layers` now goes through `sheetLayers(sheet)` or `contextLayers(sheet,
-// animId)`.
+// A sheet stores its layers inside a hierarchical `layerTree` of group
+// nodes (folders) and leaf layer nodes. Read them through
+// `sheetLayers(sheet)`; animations do not own layers.
 
 export function createLayerNode(name, width, height) {
   return {
-    id: newId('ly'), type: LAYER, name, visible: true, opacity: 1,
+    id: newId('ly'), type: LAYER, name, visible: true, opacity: 1, locked: false,
     bitmap: createBitmap(width, height),
   };
 }
 
-export function createGroupNode(name, { animationId = null, open = true } = {}) {
-  return { id: newId('gp'), type: GROUP, name, animationId, open, children: [] };
+export function createGroupNode(name, { open = true } = {}) {
+  return { id: newId('gp'), type: GROUP, name, open, children: [] };
 }
 
 export function createProject(name, settings = { ...DEFAULT_SETTINGS }) {
@@ -197,6 +198,27 @@ export function flattenLayers(root) {
 }
 
 export function sheetLayers(sheet) { return flattenLayers(sheet.layerTree); }
+
+// Crops or pads every layer to width x height, keeping content at its
+// coordinates (anchored top-left). The auto-layout engine grows a sheet with
+// it and undo shrinks the sheet back (js/core/sheet-layout.js). Each layer
+// keeps its bitmap object: earlier history entries (stroke patches) hold on
+// to it and must still reach the layer after a resize.
+export function resizeSheetCanvas(sheet, width, height) {
+  if (!validImportDimension(width) || !validImportDimension(height))
+    throw new Error(`sheet size must be 1..${MAX_DIM}`);
+  if (width === sheet.width && height === sheet.height) return;
+  const keepW = Math.min(width, sheet.width), keepH = Math.min(height, sheet.height);
+  for (const layer of sheetLayers(sheet)) {
+    const next = createBitmap(width, height);
+    const src = layer.bitmap.data;
+    for (let y = 0; y < keepH; y++)
+      next.data.set(src.subarray(y * sheet.width * 4, (y * sheet.width + keepW) * 4), y * width * 4);
+    Object.assign(layer.bitmap, { width, height, data: next.data });
+  }
+  sheet.width = width;
+  sheet.height = height;
+}
 
 export function findNode(root, id) {
   if (root.id === id) return root;
@@ -300,10 +322,6 @@ export function moveNode(sheet, nodeId, toParentId, toIndex) {
   }
   if (node.type === GROUP && contains(node, dstParent.id)) return;
 
-  // Only layer nodes may be moved into animation-owned groups; keep
-  // animation layer scopes isolated from arbitrary group nesting.
-  if (dstParent.animationId && node.type !== LAYER) return;
-
   // Adjust target index when reordering within the same parent.
   let adjustedToIndex = toIndex;
   if (srcLoc.parent === dstParent && srcLoc.index < toIndex) {
@@ -368,63 +386,7 @@ function withOverrides(layers, overrideLayers) {
 }
 
 export function flattenSheet(sheet, floating = null, overrideLayers = null) {
-  const acceptedStrips = (sheet.animations ?? [])
-    .filter(a => a.strip && a.layerGroupId)
-    .map(a => ({ anim: a, group: findGroup(sheet.layerTree, a.layerGroupId) }))
-    .filter(s => s.group);
-
-  const stripLayerIds = new Set();
-  for (const { group } of acceptedStrips) for (const l of flattenLayers(group)) stripLayerIds.add(l.id);
-
-  // Everything except an accepted strip's own layers composites normally.
-  const baseLayers = withOverrides(sheetLayers(sheet).filter(l => !stripLayerIds.has(l.id)), overrideLayers);
-  const out = flattenSheetLayers(baseLayers, sheet.width, sheet.height, floating, sheet.id);
-
-  // Each accepted strip then exclusively (hard-replace, not alpha-blend)
-  // owns its own frame rects: opaque to whatever's on `out` underneath,
-  // genuinely transparent (not a peek-through) wherever the strip itself
-  // has none of its own content.
-  for (const { anim, group } of acceptedStrips) {
-    const stripComposite = flattenSheetLayers(withOverrides(flattenLayers(group), overrideLayers), sheet.width, sheet.height, floating, sheet.id);
-    for (const entry of anim.frames) {
-      const frame = sheet.frames.find(f => f.id === entry.frameId);
-      if (!frame) continue;
-      const region = copyRegion(stripComposite, frame.x, frame.y, frame.w, frame.h);
-      blitRegion(out, region, frame.x, frame.y);
-    }
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------- animation layer groups
-
-export function animationGroup(sheet, animId) {
-  const anim = sheet.animations.find(a => a.id === animId);
-  if (!anim?.layerGroupId) return null;
-  return findGroup(sheet.layerTree, anim.layerGroupId) ?? null;
-}
-
-export function contextLayers(sheet, animId = null) {
-  if (!animId) return sheetLayers(sheet);
-  const group = animationGroup(sheet, animId);
-  return group ? flattenLayers(group) : sheetLayers(sheet);
-}
-
-// Given a layer, resolves the animation that owns it -- i.e. the layer is
-// nested directly under an animation-owned group (group.animationId set).
-// Returns null for a root layer, a layer under a plain (non-animation)
-// group, or a null layer. A layer can only be nested under an animation-
-// owned group after that animation has been accepted (see acceptAnimation)
-// -- a floating animation has no group/layer at all, so this never needs to
-// special-case "floating". Works for both strip and plain animations;
-// callers that care about strip-ness check ctx.anim.strip themselves.
-export function layerAnimationContext(sheet, layer) {
-  if (!layer) return null;
-  const loc = findParent(sheet.layerTree, layer.id);
-  const group = loc?.parent;
-  if (!group?.animationId) return null;
-  const anim = sheet.animations.find(a => a.id === group.animationId);
-  return anim ? { anim, group } : null;
+  return flattenSheetLayers(withOverrides(sheetLayers(sheet), overrideLayers), sheet.width, sheet.height, floating, sheet.id);
 }
 
 // ---------------------------------------------------------------- frames / animations
@@ -437,31 +399,16 @@ export function addFrame(sheet, { name, x, y, w, h, pivotX = 0, pivotY = 0 }) {
 
 export function removeFrame(sheet, frameId) {
   sheet.frames = sheet.frames.filter(f => f.id !== frameId);
-  for (const a of sheet.animations) {
-    let i;
-    while ((i = a.frames.findIndex(af => af.frameId === frameId)) !== -1) {
-      const r = removeEntry(a.frames, a.breaks, i);
-      a.frames = r.entries;
-      a.breaks = r.breaks;
-    }
-  }
+  for (const a of sheet.animations) a.frames = a.frames.filter(e => e.frameId !== frameId);
 }
 
-// A new animation starts FLOATING: no group, no layer, layerGroupId null.
-// It previews whatever's already on the sheet under its own frames (see
-// contextLayers()'s null-group fallback and flattenSheet()'s exclusive-
-// compositing skip for floating strips below) until acceptAnimation() is
-// called -- explicitly (Enter key, frames.js) or automatically (first
-// paint stroke, tools.js). This lets a strip be freely repositioned/resized
-// to align with existing imported artwork before committing to a layer.
-// `defaults` seeds the new animation's base-duration fields from the
-// project's own default (project.settings, see the Animation-panel design
-// doc) instead of a hardcoded value -- callers that create a user-visible
-// animation should pass `state.project?.settings`; omitting it (e.g. direct
-// unit-test calls) falls back to ms-100/unset, same as before this field existed.
-export function addAnimation(sheet, name, strip = false, defaults = {}) {
+// A new animation is manual with no frames. `defaults` seeds the base-
+// duration fields from the project's own default (project.settings, see the
+// Animation-panel design doc); omitting it (e.g. direct unit-test calls)
+// falls back to ms-100/unset.
+export function addAnimation(sheet, name, defaults = {}) {
   const anim = {
-    id: newId('an'), name, loop: true, strip, breaks: [], frames: [], layerGroupId: null,
+    id: newId('an'), name, loop: true, frames: [], layout: 'manual', cell: null,
     baseDuration: defaults.durationMs ?? 100,
     baseFps: defaults.baseFps,
     baseStep: defaults.baseStep,
@@ -470,36 +417,47 @@ export function addAnimation(sheet, name, strip = false, defaults = {}) {
   return anim;
 }
 
-// Promotes a floating animation into a committed one: freezes whatever's
-// currently visible under each of its own frames (i.e. flattenSheet(sheet)
-// cropped to that frame's rect -- for an accepted strip elsewhere this
-// already respects that strip's own exclusive ownership, so overlapping an
-// already-accepted strip freezes ITS content, not something hidden below
-// it) into one brand-new layer, then wires the group in. Caller's
-// responsibility to only call this once, while anim.layerGroupId is still
-// null -- see the Sprite mode's commitAcceptAnimation idempotency guard.
-export function acceptAnimation(sheet, anim) {
-  const group = createGroupNode(anim.name, { animationId: anim.id });
-  const layer = createLayerNode('Layer 1', sheet.width, sheet.height);
-  const flat = flattenSheet(sheet);
-  for (const entry of anim.frames) {
-    const frame = sheet.frames.find(f => f.id === entry.frameId);
-    if (!frame) continue;
-    const region = copyRegion(flat, frame.x, frame.y, frame.w, frame.h);
-    blitRegion(layer.bitmap, region, frame.x, frame.y);
+// The v4 animation shape: strips, breaks and animation-owned layer groups
+// are gone (js/core/legacy-animations.js converts older files). Used for
+// both save and load so neither direction can leak a legacy field.
+export function normalizeAnimation(a) {
+  const { strip: _strip, breaks: _breaks, layerGroupId: _layerGroupId, ...rest } = a;
+  const auto = a.layout === 'auto' && a.cell?.w >= 1 && a.cell?.h >= 1;
+  return {
+    ...rest,
+    frames: (a.frames ?? []).map(e => ({ ...e })),
+    layout: auto ? 'auto' : 'manual',
+    cell: auto ? { w: a.cell.w, h: a.cell.h } : null,
+  };
+}
+
+// The auto-layout invariants a loaded file must meet: every frame exists,
+// has the cell's size and the animation's one pivot, and belongs to no
+// earlier auto animation. A hand-edited file that breaks them would let the
+// planner move rects it sized wrongly, so such an animation loads manual.
+function demoteBrokenAutoAnimations(sheet) {
+  const frames = new Map(sheet.frames.map(f => [f.id, f]));
+  const claimed = new Set();
+  for (const anim of sheet.animations) {
+    if (anim.layout !== 'auto') continue;
+    const list = [...new Set(anim.frames.map(e => e.frameId))].map(id => frames.get(id));
+    const [first] = list;
+    const ok = list.every(f => f && !claimed.has(f.id) && f.w === anim.cell.w && f.h === anim.cell.h &&
+      f.pivotX === first.pivotX && f.pivotY === first.pivotY);
+    if (!ok) { anim.layout = 'manual'; anim.cell = null; continue; }
+    for (const f of list) claimed.add(f.id);
   }
-  group.children.push(layer);
-  sheet.layerTree.children.push(group);
-  anim.layerGroupId = group.id;
-  return group;
+}
+
+function clearGroupOwnership(group) {
+  delete group.animationId;
+  for (const c of group.children ?? []) if (c.type === GROUP) clearGroupOwnership(c);
 }
 
 export function renameAnimation(sheet, animId, name) {
   const anim = sheet.animations.find(a => a.id === animId);
   if (!anim) return false;
   anim.name = name;
-  const group = animationGroup(sheet, animId);
-  if (group) group.name = name;
   return true;
 }
 
@@ -530,13 +488,12 @@ export function scrubTileReferences(sheet, removedTileId) {
 
 function serializeGroup(group, sheetId, images) {
   return {
-    id: group.id, type: group.type, name: group.name,
-    animationId: group.animationId ?? null, open: group.open ?? true,
+    id: group.id, type: group.type, name: group.name, open: group.open ?? true,
     children: group.children.map(c => {
       if (c.type === LAYER) {
         const path = `images/${sheetId}/${c.id}.png`;
         images.push({ path, bitmap: cloneBitmap(c.bitmap) });
-        return { id: c.id, type: LAYER, name: c.name, visible: c.visible, opacity: c.opacity, image: path };
+        return { id: c.id, type: LAYER, name: c.name, visible: c.visible, opacity: c.opacity, locked: !!c.locked, image: path };
       }
       return serializeGroup(c, sheetId, images);
     }),
@@ -563,7 +520,7 @@ function deserializeGroup(json, sheet, imagesByPath) {
   for (const c of json.children ?? []) {
     if (c.type === LAYER) {
       const bitmap = deserializeLayerBitmap(c.image, sheet, imagesByPath);
-      group.children.push({ id: c.id, type: LAYER, name: c.name, visible: c.visible, opacity: c.opacity, bitmap });
+      group.children.push({ id: c.id, type: LAYER, name: c.name, visible: c.visible, opacity: c.opacity, locked: !!c.locked, bitmap });
     } else {
       group.children.push(deserializeGroup(c, sheet, imagesByPath));
     }
@@ -574,10 +531,10 @@ function deserializeGroup(json, sheet, imagesByPath) {
 // Backward-compat helper: turn a legacy flat `layers[]` into a root group.
 function migrateLegacyLayers(sheetJson, imagesByPath) {
   return {
-    id: newId('gp'), type: GROUP, name: sheetJson.name ?? 'root', animationId: null, open: true,
+    id: newId('gp'), type: GROUP, name: sheetJson.name ?? 'root', open: true,
     children: (sheetJson.layers ?? []).map(l => {
       const bitmap = deserializeLayerBitmap(l.image, sheetJson, imagesByPath);
-      return { id: l.id, type: LAYER, name: l.name, visible: l.visible, opacity: l.opacity, bitmap };
+      return { id: l.id, type: LAYER, name: l.name, visible: l.visible, opacity: l.opacity, locked: false, bitmap };
     }),
   };
 }
@@ -630,7 +587,7 @@ export function serializeProject(project) {
   const images = [];
   const json = {
     version: PROJECT_VERSION, name: project.name,
-    settings: { ...project.settings },
+    settings: { ...project.settings, sheetMaxWidth: project.settings.sheetMaxWidth ?? project.settings.spriteSheetW },
     activePaletteId: project.activePaletteId,
     // Embedded brushes go through the same toPlain a standalone .brush.json
     // uses. bundle.js JSON.stringifies this whole body (bundle.js:7), and a
@@ -667,7 +624,7 @@ export function serializeProject(project) {
       // Keep the existing project-file key; only the runtime name changed.
       layers: s.tileLayerNames ? s.tileLayerNames.slice() : null,
       frames: s.frames.map(f => ({ ...f })),
-      animations: s.animations.map(a => ({ ...a, frames: a.frames.map(x => ({ ...x })), breaks: (a.breaks ?? []).slice(), layerGroupId: a.layerGroupId ?? null })),
+      animations: s.animations.map(normalizeAnimation),
       layerTree: serializeGroup(s.layerTree, s.id, images),
     })),
   };
@@ -692,6 +649,7 @@ export function deserializeProject(json, imagesByPath) {
       // listing each one, so a future addition doesn't need a matching
       // edit here too.
       ...Object.fromEntries(Object.entries(DEFAULT_SETTINGS).filter(([k]) => k.startsWith('pixelSnapper'))),
+      sheetMaxWidth: json.settings.spriteSheetW,
       ...json.settings,
     },
     activePaletteId: json.activePaletteId ?? null,
@@ -711,7 +669,7 @@ export function deserializeProject(json, imagesByPath) {
       const layerTree = s.layerTree
         ? deserializeGroup(s.layerTree, s, imagesByPath)
         : migrateLegacyLayers(s, imagesByPath);
-      return {
+      const sheet = {
         id: s.id, name: s.name, width: s.width, height: s.height, kind: s.kind,
         ...(() => {
           if (s.kind !== 'tile') return { tileGrids: null, tiles: null, terrainSets: null, terrainLayoutPresets: null, tileLayerNames: null };
@@ -724,9 +682,14 @@ export function deserializeProject(json, imagesByPath) {
           };
         })(),
         frames: s.frames ?? [],
-        animations: (s.animations ?? []).map(a => ({ ...a, strip: a.strip ?? false, breaks: a.breaks ?? [], layerGroupId: a.layerGroupId ?? null })),
+        animations: (s.animations ?? []).map(a => ({ ...a, frames: (a.frames ?? []).map(e => ({ ...e })) })),
         layerTree,
       };
+      if (json.version < 4) convertLegacySheet(sheet);
+      sheet.animations = sheet.animations.map(normalizeAnimation);
+      demoteBrokenAutoAnimations(sheet);
+      clearGroupOwnership(sheet.layerTree);
+      return sheet;
     }),
   };
 }
@@ -744,7 +707,7 @@ function validPositiveInteger(value) {
 
 export function validateProjectJson(json) {
   if (!json || typeof json !== 'object') return { ok: false, error: 'not an object' };
-  if (json.version !== PROJECT_VERSION && json.version !== 2)
+  if (![2, 3, PROJECT_VERSION].includes(json.version))
     return { ok: false, error: `unsupported version ${json.version} (expected ${PROJECT_VERSION})` };
   if (!json.settings || typeof json.settings !== 'object')
     return { ok: false, error: 'missing settings' };
@@ -757,6 +720,8 @@ export function validateProjectJson(json) {
       return { ok: false, error: `settings.${k} must be a positive safe integer` };
   if (!Number.isFinite(json.settings.durationMs) || json.settings.durationMs <= 0)
     return { ok: false, error: 'settings.durationMs must be finite and positive' };
+  if ((json.version >= 4 || json.settings.sheetMaxWidth !== undefined) && !validImportDimension(json.settings.sheetMaxWidth))
+    return { ok: false, error: `settings.sheetMaxWidth must be an integer in 1..${MAX_DIM}` };
   if (!Array.isArray(json.sheets)) return { ok: false, error: 'missing sheets' };
   for (const s of json.sheets) {
     if (!validImportDimension(s?.width) || !validImportDimension(s?.height))

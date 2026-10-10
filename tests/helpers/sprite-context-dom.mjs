@@ -23,6 +23,8 @@ export function installSpriteContextDom() {
       };
     }
     set innerHTML(value) { this.children = []; }
+    focus() { globalThis.document.activeElement = this; }
+    contains(node) { return node === this || this.children.some(child => child.contains?.(node)); }
     append(...items) { this.children.push(...items); }
     appendChild(item) { this.children.push(item); return item; }
     addEventListener(type, callback) {
@@ -55,6 +57,8 @@ export function installSpriteContextDom() {
       return this.context;
     }
     setAttribute() {}
+    setPointerCapture() {}
+    releasePointerCapture() {}
   }
   globalThis.document = {
     createElement: tag => new Element(tag),

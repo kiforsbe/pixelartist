@@ -1,16 +1,13 @@
 // js/modes/sprites/presentation/frames-panel.js
 import { getEditorHost } from '../../../host/runtime.js';
 import { activeSheet } from '../../../host/document-helpers.js';
-import { segmentsOf } from '../../../core/strips.js';
-import { stripForFrame } from '../../../domain/sprites/strips.js';
-import { frameBounds } from '../../../domain/sprites/frames.js';
-import { stripMembers } from '../application/frame-geometry.js';
+import { autoAnimationOf, PINNED_HINT } from '../../../domain/sprites/auto-layout.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
+import { dispatchLayout } from '../../../components/layout-dispatch.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
-// than importing it directly — this panel lives under presentation/, and
-// tests/architecture.test.mjs bans presentation-layer code from importing
-// anything under application/commands/.
+// than importing it directly -- tests/architecture.test.mjs bans
+// presentation-layer code from importing anything under application/commands/.
 function dispatch(id, args) {
   const host = getEditorHost();
   return host.registries.commands.execute(id, { modeId: host.store.getState().session.activeModeId }, args);
@@ -20,7 +17,7 @@ function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
 }
 
-function numericField(labelText, value, { step, onCommit }) {
+function numericField(labelText, value, { step, disabled = false, onCommit }) {
   const label = document.createElement('label');
   label.className = 'frame-field';
   label.appendChild(document.createTextNode(labelText));
@@ -28,10 +25,21 @@ function numericField(labelText, value, { step, onCommit }) {
   input.type = 'number';
   if (step != null) input.step = String(step);
   input.value = String(value);
+  input.disabled = disabled;
   input.addEventListener('click', event => event.stopPropagation());
   input.addEventListener('change', () => onCommit(Number(input.value)));
   label.appendChild(input);
   return label;
+}
+
+function iconButton(text, title, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn-icon-md';
+  button.textContent = text;
+  button.title = title;
+  button.addEventListener('click', onClick);
+  return button;
 }
 
 export function mountFramesPanel(element) {
@@ -46,56 +54,42 @@ export function mountFramesPanel(element) {
   list.className = 'frame-list';
   panel.appendChild(list);
 
-  const breakApartButton = document.createElement('button');
-  breakApartButton.type = 'button';
-  breakApartButton.className = 'btn-icon-md';
-  breakApartButton.textContent = '✂';
-  breakApartButton.title = 'Break apart';
-  breakApartButton.addEventListener('click', () => {
-    const sheet = activeSheet('sprite');
-    if (!sheet) return;
-    const frameId = getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null;
-    if (!frameId) return;
-    const strip = stripForFrame(sheet, frameId);
-    if (strip) dispatch('sprites.breakApartStrip', { sheetId: sheet.id, animationId: strip.id });
-  });
-
-  function actionsRow(sheet, frame, inStrip) {
+  function actionsRow(sheet, frame, auto) {
     const actions = document.createElement('div');
     actions.className = 'row';
-
-    const editButton = document.createElement('button');
-    editButton.type = 'button';
-    editButton.className = 'btn-icon-md';
-    editButton.textContent = '✎';
-    editButton.title = 'Edit';
-    editButton.addEventListener('click', () => {
-      const host = getEditorHost();
-      host.selections.patch({ editingFrameId: frame.id }, sheetDocument(sheet));
-      host.store.updateSession({ activeViewId: 'sprites.frame' }, 'view');
-    });
-
-    const deleteButton = document.createElement('button');
-    deleteButton.type = 'button';
-    deleteButton.className = 'btn-icon-md';
-    deleteButton.textContent = '🗑';
-    deleteButton.title = inStrip ? 'Delete frame' : 'Delete';
-    deleteButton.addEventListener('click', () => {
-      const strip = stripForFrame(sheet, frame.id);
-      if (strip) dispatch('sprites.removeStripMember', { sheetId: sheet.id, animationId: strip.id, frameId: frame.id });
-      else dispatch('sprites.deleteFrame', { sheetId: sheet.id, frameId: frame.id });
-    });
-
-    actions.append(editButton, deleteButton);
-    if (inStrip) actions.appendChild(breakApartButton);
+    actions.append(
+      iconButton('✎', 'Edit', () => {
+        const host = getEditorHost();
+        host.selections.patch({ editingFrameId: frame.id }, sheetDocument(sheet));
+        host.store.updateSession({ activeViewId: 'sprites.frame' }, 'view');
+      }),
+      // contributions.js routes a pinned frame's delete through the layout.
+      iconButton('🗑', 'Delete', () => dispatchLayout('sprites.deleteFrame', { sheetId: sheet.id, frameId: frame.id })),
+    );
+    if (auto) {
+      const makeManual = document.createElement('button');
+      makeManual.type = 'button';
+      makeManual.textContent = 'Make manual';
+      makeManual.title = `Stop auto-laying-out "${auto.name}"; its frames stay where they are`;
+      makeManual.addEventListener('click', () => dispatch('animations.makeManual', { sheetId: sheet.id, animationId: auto.id }));
+      actions.appendChild(makeManual);
+    }
     return actions;
   }
 
   function renderFrameDetail(sheet, frame) {
+    const auto = autoAnimationOf(sheet, frame.id);
     const row = document.createElement('div');
     row.className = 'frame-row active';
 
     const setField = (key, value) => dispatch('sprites.setFrameField', { sheetId: sheet.id, frameId: frame.id, key, value });
+    // A pinned frame's pivot is its animation's shared pivot.
+    const setPivot = (key, value) => (auto
+      ? dispatch('animations.setPivot', {
+        sheetId: sheet.id, animationId: auto.id,
+        pivotX: key === 'pivotX' ? value : frame.pivotX, pivotY: key === 'pivotY' ? value : frame.pivotY,
+      })
+      : setField(key, value));
 
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
@@ -107,46 +101,26 @@ export function mountFramesPanel(element) {
       else nameInput.value = frame.name;
     });
 
+    const pinned = !!auto;
     const fields = document.createElement('div');
     fields.className = 'frame-fields';
     fields.append(
-      numericField('X', frame.x, { onCommit: value => setField('x', Math.round(value)) }),
-      numericField('Y', frame.y, { onCommit: value => setField('y', Math.round(value)) }),
-      numericField('W', frame.w, { onCommit: value => setField('w', Math.max(1, Math.round(value))) }),
-      numericField('H', frame.h, { onCommit: value => setField('h', Math.max(1, Math.round(value))) }),
-      numericField('PivotX', frame.pivotX, { step: 0.5, onCommit: value => setField('pivotX', value) }),
-      numericField('PivotY', frame.pivotY, { step: 0.5, onCommit: value => setField('pivotY', value) }),
+      numericField('X', frame.x, { disabled: pinned, onCommit: value => setField('x', Math.round(value)) }),
+      numericField('Y', frame.y, { disabled: pinned, onCommit: value => setField('y', Math.round(value)) }),
+      numericField('W', frame.w, { disabled: pinned, onCommit: value => setField('w', Math.max(1, Math.round(value))) }),
+      numericField('H', frame.h, { disabled: pinned, onCommit: value => setField('h', Math.max(1, Math.round(value))) }),
+      numericField('PivotX', frame.pivotX, { step: 0.5, onCommit: value => setPivot('pivotX', value) }),
+      numericField('PivotY', frame.pivotY, { step: 0.5, onCommit: value => setPivot('pivotY', value) }),
     );
 
-    row.append(nameInput, fields, actionsRow(sheet, frame, false));
-    list.appendChild(row);
-  }
-
-  function renderStripDetail(sheet, animation, selectedFrame) {
-    const members = stripMembers(sheet, animation);
-    if (!members.length) return;
-    const bounds = frameBounds(members);
-    const segmentCount = segmentsOf(animation).length;
-    const row = document.createElement('div');
-    row.className = 'frame-row active';
-
-    const title = document.createElement('div');
-    title.className = 'frame-field';
-    title.textContent = `Strip · ${members.length} frames${segmentCount > 1 ? ` · ${segmentCount} sub-strips` : ''}`;
-
-    const args = extra => ({ sheetId: sheet.id, animationId: animation.id, ...extra });
-    const fields = document.createElement('div');
-    fields.className = 'frame-fields';
-    fields.append(
-      numericField('X', bounds.x, { onCommit: value => dispatch('sprites.moveStripTo', args({ x: value, y: bounds.y })) }),
-      numericField('Y', bounds.y, { onCommit: value => dispatch('sprites.moveStripTo', args({ x: bounds.x, y: value })) }),
-      numericField('W', members[0].w, { onCommit: value => dispatch('sprites.setStripFrameSize', args({ key: 'w', value })) }),
-      numericField('H', members[0].h, { onCommit: value => dispatch('sprites.setStripFrameSize', args({ key: 'h', value })) }),
-      numericField('PivotX', members[0].pivotX, { step: 0.5, onCommit: value => dispatch('sprites.setStripPivot', args({ key: 'pivotX', value })) }),
-      numericField('PivotY', members[0].pivotY, { step: 0.5, onCommit: value => dispatch('sprites.setStripPivot', args({ key: 'pivotY', value })) }),
-    );
-
-    row.append(title, fields, actionsRow(sheet, selectedFrame, true));
+    row.append(nameInput, fields);
+    if (pinned) {
+      const hint = document.createElement('div');
+      hint.className = 'frame-field';
+      hint.textContent = PINNED_HINT;
+      row.appendChild(hint);
+    }
+    row.appendChild(actionsRow(sheet, frame, auto));
     list.appendChild(row);
   }
 
@@ -158,9 +132,9 @@ export function mountFramesPanel(element) {
     panel.hidden = false;
     list.innerHTML = '';
     const sheet = activeSheet('sprite');
-    const selectedFrameId = sheet ? (getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null) : null;
-    const frame = sheet?.frames.find(candidate => candidate.id === selectedFrameId) ?? null;
     if (!sheet) return;
+    const selectedFrameId = getEditorHost().selections.get(sheetDocument(sheet))?.frameId ?? null;
+    const frame = sheet.frames.find(candidate => candidate.id === selectedFrameId) ?? null;
     if (!frame) {
       const hint = document.createElement('div');
       hint.className = 'frame-field';
@@ -168,9 +142,7 @@ export function mountFramesPanel(element) {
       list.appendChild(hint);
       return;
     }
-    const strip = stripForFrame(sheet, frame.id);
-    if (strip) renderStripDetail(sheet, strip, frame);
-    else renderFrameDetail(sheet, frame);
+    renderFrameDetail(sheet, frame);
   }
 
   const host = getEditorHost();

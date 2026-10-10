@@ -1,7 +1,7 @@
 // tests/timeline-playback.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { advancePlayback } from '../js/modes/sprites/application/timeline-playback.js';
+import { advancePlayback } from '../js/domain/sprites/playback.js';
 
 function makeAnim(overrides = {}) {
   return {

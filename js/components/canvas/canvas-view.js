@@ -219,6 +219,10 @@ export class CanvasView {
     this.onStatus({ x: inBounds ? img.x : null, y: inBounds ? img.y : null, zoom: this.zoom });
   }
 
+  // Wheel zoom at the cursor, for an element layered over the canvas (e.g.
+  // the Animations pivot overlay) that would otherwise swallow the wheel.
+  wheel(e) { this._onWheel(e); }
+
   _onWheel(e) {
     e.preventDefault();
     const { sx, sy } = this._localPos(e);

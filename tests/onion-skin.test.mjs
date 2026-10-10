@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeOnionGhosts, hexToRgb, resolveStepColor, traceOutline } from '../js/modes/sprites/application/onion-skin.js';
+import { computeOnionGhosts, hexToRgb, resolveStepColor, traceOutline } from '../js/domain/sprites/onion-skin.js';
 
 function baseOnion(overrides = {}) {
   return {

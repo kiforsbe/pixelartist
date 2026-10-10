@@ -4,6 +4,7 @@ import { EditorHost } from '../js/host/editor-host.js';
 import { spriteMode } from '../js/modes/sprites/index.js';
 import { tileMode } from '../js/modes/tiles/index.js';
 import { mapMode } from '../js/modes/maps/index.js';
+import { animationsMode } from '../js/modes/animations/index.js';
 
 test('built-in modes provide documents, tools, panels, and views through registries', () => {
   const host = new EditorHost();
@@ -49,16 +50,44 @@ test('sprites mode registers exactly the expected sprites.* command ids', () => 
   assert.deepEqual(
     host.registries.commands.list().map(command => command.id).filter(id => id.startsWith('sprites.')),
     [
-      'sprites.acceptAnimation', 'sprites.addAnimationFrame', 'sprites.addGroup', 'sprites.addLayer',
-      'sprites.breakApartStrip', 'sprites.createFrame', 'sprites.deleteAnimation', 'sprites.deleteFrame',
-      'sprites.deleteNode', 'sprites.dragMoveNode', 'sprites.insertStripFrame',
-      'sprites.mergeDown', 'sprites.mergeStripSegments', 'sprites.moveFrames', 'sprites.moveNode',
-      'sprites.moveStripTo', 'sprites.newAnimation', 'sprites.newStripFromFrame',
-      'sprites.removeAnimationFrame', 'sprites.removeStripMember', 'sprites.renameAnimation', 'sprites.renameNode',
-      'sprites.reorderAnimationFrame', 'sprites.resizeFrame', 'sprites.resizeStripSegment', 'sprites.setAnimationBaseDuration',
-      'sprites.setAnimationFrameDuration', 'sprites.setAnimationFrameStep', 'sprites.setFrameField', 'sprites.setLayerOpacity',
-      'sprites.setStripFrameSize', 'sprites.setStripPivot', 'sprites.sliceGrid', 'sprites.splitStrip',
-      'sprites.toggleAnimationLoop', 'sprites.toggleLayerVisible',
+      'sprites.addAnimationFrame', 'sprites.addGroup', 'sprites.addLayer', 'sprites.createFrame',
+      'sprites.deleteAnimation', 'sprites.deleteFrame', 'sprites.deleteNode', 'sprites.dragMoveNode',
+      'sprites.mergeDown', 'sprites.moveFrames', 'sprites.moveNode', 'sprites.newAnimation',
+      'sprites.removeAnimationFrame', 'sprites.renameAnimation', 'sprites.renameNode',
+      'sprites.reorderAnimationFrame', 'sprites.resizeFrame', 'sprites.setAnimationBaseDuration',
+      'sprites.setAnimationFrameDuration', 'sprites.setAnimationFrameStep', 'sprites.setFrameField', 'sprites.setFramePivot',
+      'sprites.setLayerOpacity', 'sprites.sliceGrid', 'sprites.toggleAnimationLoop', 'sprites.toggleLayerLocked', 'sprites.toggleLayerVisible',
     ],
   );
+});
+
+test('sprites mode registers the animations.* layout commands for both workbenches', () => {
+  const host = new EditorHost();
+  host.registerMode(spriteMode);
+  assert.deepEqual(
+    host.registries.commands.list().map(command => command.id).filter(id => id.startsWith('animations.')),
+    [
+      'animations.addFrame', 'animations.autoLayout', 'animations.delete', 'animations.deleteFrame',
+      'animations.duplicate', 'animations.linkFrame', 'animations.makeManual', 'animations.moveFrame',
+      'animations.new', 'animations.reorderAnimations', 'animations.resizeCanvas', 'animations.setPivot',
+    ],
+  );
+  const when = host.registries.commands.get('animations.new').when;
+  assert.deepEqual([when({ modeId: 'sprites' }), when({ modeId: 'animations' }), when({ modeId: 'tiles' })], [true, true, false]);
+});
+
+test('sprites commands run in the animations workbench too', () => {
+  const host = new EditorHost();
+  host.registerMode(spriteMode); host.registerMode(animationsMode);
+  const ids = host.registries.commands.list({ modeId: 'animations' }).map(c => c.id);
+  for (const id of ['sprites.renameAnimation', 'sprites.toggleLayerLocked', 'animations.addFrame']) assert.ok(ids.includes(id), id);
+  assert.deepEqual(host.registries.modes.list().map(m => m.id), ['sprites', 'animations']);
+});
+
+test('the animations mode contributes its canvas, panels and preview', () => {
+  const host = new EditorHost();
+  host.registerMode(spriteMode); host.registerMode(animationsMode);
+  assert.deepEqual(host.registries.panels.list({ modeId: 'animations' }).map(panel => panel.id), ['animations.timeline', 'animations.list']);
+  assert.deepEqual(host.registries.previews.list({ modeId: 'animations' }).map(preview => preview.id), ['animations.preview']);
+  assert.deepEqual(host.registries.views.list().map(view => view.id).filter(id => id.startsWith('animations.')), ['animations.canvas']);
 });

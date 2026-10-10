@@ -96,19 +96,13 @@ export function addGroup(services, sheetId, targetGroupId) {
   return newGroupId;
 }
 
-// Ports doDelete's layer AND (non-animation) group branches -- both reduce,
-// once selection bookkeeping is stripped, to the identical
-// filter-on-do/snapshot-restore-on-undo shape below; only the label differs.
-// Animation-owned groups are explicitly out of scope (see brief Step 1):
-// those go through commitDeleteAnimation -> the already-migrated
-// sprites.deleteAnimation command, which also cleans up sheet.animations --
-// this function no-ops on them so a caller that dispatches here by mistake
-// doesn't silently corrupt sheet.animations.
+// Ports doDelete's layer AND group branches -- both reduce, once selection
+// bookkeeping is stripped, to the identical filter-on-do/snapshot-restore-
+// on-undo shape below; only the label differs.
 export function deleteNode(services, sheetId, nodeId) {
   const sheet = findSheet(services.projects.project, sheetId);
   const node = findNode(sheet.layerTree, nodeId);
   if (!node) return;
-  if (node.type === 'group' && node.animationId) return;
   const loc = findParent(sheet.layerTree, nodeId);
   if (!loc) return;
   const parent = loc.parent;
@@ -132,7 +126,7 @@ export function mergeLayerDownCmd(services, sheetId, layerId) {
   const loc = findParent(sheet.layerTree, layerId);
   if (!loc || loc.index <= 0) return null;
   const dest = loc.parent.children[loc.index - 1];
-  if (dest.type !== 'layer') return null;
+  if (dest.type !== 'layer' || dest.locked) return null;
   const parent = loc.parent;
   const parentId = parent.id;
   const beforeChildren = parent.children.slice();
@@ -207,21 +201,9 @@ export function renameNode(services, sheetId, nodeId, name) {
   const node = findNode(sheet.layerTree, nodeId);
   if (!node || node.name === name) return;
   const before = node.name;
-  const anim = node.type === 'group' && node.animationId ? sheet.animations.find(a => a.id === node.animationId) : null;
-  const oldAnimName = anim?.name;
   runCommand(services, sheetId, node.type === 'group' ? 'rename group' : 'rename layer',
-    sheet => {
-      const n = findNode(sheet.layerTree, nodeId);
-      n.name = name;
-      const a = anim ? sheet.animations.find(x => x.id === anim.id) : null;
-      if (a) a.name = name;
-    },
-    sheet => {
-      const n = findNode(sheet.layerTree, nodeId);
-      n.name = before;
-      const a = anim ? sheet.animations.find(x => x.id === anim.id) : null;
-      if (a) a.name = oldAnimName;
-    });
+    sheet => { findNode(sheet.layerTree, nodeId).name = name; },
+    sheet => { findNode(sheet.layerTree, nodeId).name = before; });
 }
 
 export function setLayerOpacity(services, sheetId, layerId, opacity) {
@@ -232,4 +214,17 @@ export function setLayerOpacity(services, sheetId, layerId, opacity) {
   runCommand(services, sheetId, 'layer opacity',
     sheet => { findNode(sheet.layerTree, layerId).opacity = opacity; },
     sheet => { findNode(sheet.layerTree, layerId).opacity = before; });
+}
+
+// A locked layer still renders and can be selected, but no edit writes to
+// it (see activeEditableLayer in host/document-helpers.js) and auto layout
+// refuses to move its pixels (core/sheet-layout.js).
+export function toggleLayerLocked(services, sheetId, layerId) {
+  const sheet = findSheet(services.projects.project, sheetId);
+  const layer = sheet ? findNode(sheet.layerTree, layerId) : null;
+  if (!layer || layer.type !== 'layer') return;
+  const before = !!layer.locked;
+  runCommand(services, sheetId, before ? 'unlock layer' : 'lock layer',
+    s => { findNode(s.layerTree, layerId).locked = !before; },
+    s => { findNode(s.layerTree, layerId).locked = before; });
 }

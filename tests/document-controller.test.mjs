@@ -158,3 +158,24 @@ test('mode activation falls back when its remembered document was removed', () =
   host.activateMode('sprites');
   assert.equal(host.store.getState().session.activeDocument.id, project.sheets[0].id);
 });
+
+test('the Animations tab keeps the active sprite sheet and opens the canvas view', () => {
+  const project = reset();
+  const second = project.sheets.filter(s => s.kind === 'sprite')[1];
+  host.documents.setActive({ kind: 'sprite-sheet', id: second.id });
+  elements.get('tab-animations').emit('click');
+  const session = host.store.getState().session;
+  assert.equal(session.activeModeId, 'animations');
+  assert.equal(session.activeViewId, 'animations.canvas');
+  assert.equal(session.activeDocument.id, second.id);
+});
+
+test('New Sheet in Animations creates a sprite sheet', () => {
+  const project = reset();
+  host.activateMode('animations');
+  runAction('document.newSheet');
+  elements.get('ns-name').value = 'Walk'; elements.get('ns-w').value = '8'; elements.get('ns-h').value = '8';
+  elements.get('ns-create').emit('click');
+  assert.equal(project.sheets.at(-1).kind, 'sprite');
+  assert.equal(host.store.getState().session.activeDocument.kind, 'sprite-sheet');
+});

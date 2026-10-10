@@ -17,6 +17,10 @@ export function mountDocumentController({ editorHost, workbench }) {
   function sheetDocument(sheet) {
     return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
   }
+  // Both sprite workbenches (Sprite Sheets, Animations) work on sprite sheets.
+  function sheetKindForMode(mode) {
+    return mode === 'sprites' || mode === 'animations' ? 'sprite' : 'tile';
+  }
   function seedSheetSelection(sheet, layerId) {
     if (!sheet) return;
     editorHost.selections.set(sheet.kind === 'sprite' ? { layerId, frameId: null, animationId: null } : { layerId }, sheetDocument(sheet));
@@ -24,6 +28,7 @@ export function mountDocumentController({ editorHost, workbench }) {
 
   // ---- element refs ----
   const tabSprites = document.getElementById('tab-sprites');
+  const tabAnimations = document.getElementById('tab-animations');
   const tabTiles = document.getElementById('tab-tiles');
   const tabMaps = document.getElementById('tab-maps');
   
@@ -55,6 +60,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     const previousMode = fromHost ? previousModeArg : editorHost.store.getState().session.activeModeId;
     if (previousMode === mode) return;
     tabSprites.classList.toggle('active', mode === 'sprites');
+    tabAnimations.classList.toggle('active', mode === 'animations');
     tabTiles.classList.toggle('active', mode === 'tiles');
     tabMaps.classList.toggle('active', mode === 'maps');
     if (mode === 'maps') {
@@ -68,7 +74,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     }
     // DocumentService also seeds missing per-document selections. Re-seeding
     // here would discard a remembered frame/tile/layer selection on return.
-    editorHost.store.updateSession({ activeViewId: `${mode}.sheet` }, 'view');
+    editorHost.store.updateSession({ activeViewId: editorHost.registries.modes.get(mode)?.defaultViewId ?? `${mode}.sheet` }, 'view');
     // frame/tile tools are mode-exclusive (their palette buttons hide via
     // isAvailable()); fall back to pencil so leaving their mode doesn't strand
     // pointer routing on a tool with nothing to dispatch to.
@@ -84,6 +90,7 @@ export function mountDocumentController({ editorHost, workbench }) {
   }
   editorHost?.onDidChangeMode(({ modeId, previousModeId }) => switchMode(modeId, { fromHost: true, previousMode: previousModeId }));
   tabSprites.addEventListener('click', () => switchMode('sprites'));
+  tabAnimations.addEventListener('click', () => switchMode('animations'));
   tabTiles.addEventListener('click', () => switchMode('tiles'));
   tabMaps.addEventListener('click', () => switchMode('maps'));
   
@@ -98,7 +105,7 @@ export function mountDocumentController({ editorHost, workbench }) {
       sheetSelect.value = activeDoc?.kind === 'map' ? activeDoc.id : '';
       return;
     }
-    const kind = mode === 'sprites' ? 'sprite' : 'tile';
+    const kind = sheetKindForMode(mode);
     const sheets = editorHost.projects.project?.sheets.filter(s => s.kind === kind) ?? [];
     sheetSelect.innerHTML = '';
     for (const s of sheets) {
@@ -209,7 +216,7 @@ export function mountDocumentController({ editorHost, workbench }) {
         commitAddMap(map);
         return;
       }
-      const kind = mode === 'sprites' ? 'sprite' : 'tile';
+      const kind = sheetKindForMode(mode);
       const settings = project.settings;
       const n = project.sheets.filter(s => s.kind === kind).length + 1;
       nsName.value = `sheet_${n}`;
@@ -225,7 +232,7 @@ export function mountDocumentController({ editorHost, workbench }) {
     const project = editorHost.projects.project;
     if (!project) return;
     const mode = editorHost.store.getState().session.activeModeId;
-    const kind = mode === 'sprites' ? 'sprite' : 'tile';
+    const kind = sheetKindForMode(mode);
     const sheetDim = (el) => {
       const v = parseInt(el.value, 10);
       return (Number.isNaN(v) || v < 1) ? null : Math.min(4096, v);
@@ -271,7 +278,7 @@ export function mountDocumentController({ editorHost, workbench }) {
       }
       const project = editorHost.projects.project;
       bitmap = snapProjectPixels(project, bitmap);
-      const kind = mode === 'sprites' ? 'sprite' : 'tile';
+      const kind = sheetKindForMode(mode);
       const name = file.name.replace(/\.[^.]+$/, '') || 'imported';
       const sheet = createSheet(project, {
         name, width: bitmap.width, height: bitmap.height, kind,

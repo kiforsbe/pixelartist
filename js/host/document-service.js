@@ -44,8 +44,11 @@ export class DocumentService {
 
   activateMode(mode) {
     const state = this.#store.getState();
-    const remembered = state.session.activeDocumentByMode[mode.id];
-    let reference = this.resolve(remembered);
+    // A workbench that edits the same kind of document as the one just left
+    // (Sprite Sheets <-> Animations) keeps working on it.
+    const active = state.session.activeDocument;
+    let reference = active && mode.documentKinds.includes(active.kind) ? this.resolve(active) : null;
+    reference ??= this.resolve(state.session.activeDocumentByMode[mode.id]);
     if (!reference) {
       const first = this.list(mode.documentKinds)[0];
       reference = first ? { kind: first.kind, id: first.document.id } : null;

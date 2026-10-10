@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  snapValue, snapPoint, rectBetween, snapRect, frameAt, stripMembers,
-  clampMoveDelta, stripResizeCount, resizeGhostRect,
+  snapValue, snapPoint, rectBetween, snapRect, frameAt, clampMoveDelta,
 } from '../js/modes/sprites/application/frame-geometry.js';
 
 test('snapValue passes values through when snapping is off and rounds when on', () => {
@@ -43,13 +42,6 @@ test('frameAt returns the topmost frame containing a point, else null', () => {
   assert.equal(frameAt(sheet, 100, 100), null);
 });
 
-test('stripMembers resolves an animation entry list to frame objects, skipping dangling ids', () => {
-  const f0 = { id: 'f0' }, f1 = { id: 'f1' };
-  const sheet = { frames: [f0, f1] };
-  const animation = { frames: [{ frameId: 'f0' }, { frameId: 'gone' }, { frameId: 'f1' }] };
-  assert.deepEqual(stripMembers(sheet, animation), [f0, f1]);
-});
-
 test('clampMoveDelta keeps the whole bounding box on-sheet', () => {
   const sheet = { width: 64, height: 64 };
   const bbox = { x: 8, y: 8, w: 16, h: 16 };
@@ -58,21 +50,3 @@ test('clampMoveDelta keeps the whole bounding box on-sheet', () => {
   assert.deepEqual(clampMoveDelta(sheet, bbox, { dx: 100, dy: 100 }), { dx: 40, dy: 40 });
 });
 
-test('stripResizeCount converts pointer travel into a member count, floored at 1 and capped by the sheet', () => {
-  const sheet = { width: 64, height: 64 };
-  const drag = { side: 'right', fw: 16, bbox: { x: 0, y: 0, w: 32, h: 16 }, count0: 2 };
-  assert.equal(stripResizeCount(sheet, drag, 32), 2);
-  assert.equal(stripResizeCount(sheet, drag, 48), 3);
-  assert.equal(stripResizeCount(sheet, drag, 0), 1);
-  // capped: only 4 frames of width 16 fit from x=0 in a 64px sheet
-  assert.equal(stripResizeCount(sheet, drag, 1000), 4);
-  const left = { side: 'left', fw: 16, bbox: { x: 32, y: 0, w: 32, h: 16 }, count0: 2 };
-  assert.equal(stripResizeCount(sheet, left, 16), 3);
-  assert.equal(stripResizeCount(sheet, left, -1000), 4);
-});
-
-test('resizeGhostRect grows from the dragged end and keeps the opposite edge fixed', () => {
-  const bbox = { x: 32, y: 8, w: 32, h: 16 };
-  assert.deepEqual(resizeGhostRect({ side: 'right', fw: 16, count: 4, bbox }), { x: 32, y: 8, w: 64, h: 16 });
-  assert.deepEqual(resizeGhostRect({ side: 'left', fw: 16, count: 4, bbox }), { x: 0, y: 8, w: 64, h: 16 });
-});

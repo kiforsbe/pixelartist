@@ -1,5 +1,5 @@
 // js/modes/sprites/application/commands/animation-lifecycle-commands.js
-import { addAnimation, renameAnimation as renameAnimationOnSheet, findParent } from '../../../../core/model.js';
+import { addAnimation, renameAnimation as renameAnimationOnSheet } from '../../../../core/model.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 
 function sheetDocument(sheet) {
@@ -11,12 +11,10 @@ function isActiveSheet(services, sheet) {
   return doc?.id === sheet.id && (doc.kind === 'sprite-sheet' || doc.kind === 'tile-sheet');
 }
 
-// A new animation starts FLOATING (see addAnimation/acceptAnimation in
-// core/model.js) -- no layer group until accepted, and it has zero frames at
-// creation. Mirrors strip-commands.js's newStripFromFrame: "only touch
-// selection while this command's own sheet is the one on screen" (state.commands
-// is a single global stack shared by every sheet), and the idx-remembered-at-
-// undo-time bookkeeping so a later redo reinserts at the same spot.
+// A new animation is manual with zero frames. Only touch selection while
+// this command's own sheet is on screen (history is one global stack shared
+// by every sheet); remember the index at undo time so a redo reinserts at
+// the same spot.
 export function newAnimation(services, sheetId) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   if (!sheet) return;
@@ -26,7 +24,7 @@ export function newAnimation(services, sheetId) {
   let idx = -1;
   runSheetCommand(services, sheetId, 'new animation',
     target => {
-      if (!anim) { anim = addAnimation(target, name, false, services.projects.project?.settings); idx = target.animations.indexOf(anim); }
+      if (!anim) { anim = addAnimation(target, name, services.projects.project?.settings); idx = target.animations.indexOf(anim); }
       else if (!target.animations.includes(anim)) target.animations.splice(Math.min(idx, target.animations.length), 0, anim);
       if (isActiveSheet(services, target)) services.selections.set({ ...services.selections.get(doc), animationId: anim.id }, doc);
     },
@@ -37,9 +35,9 @@ export function newAnimation(services, sheetId) {
     });
 }
 
-// Deleting an animation also tears down its layer group (if it was accepted)
-// -- captured once outside the command so undo can restore both the
-// animation and the group at their original positions.
+// Deleting a manual animation keeps its frames: they are viewports onto the
+// sheet that other animations or maps may still use. (Auto animations go
+// through animation-layout-commands.js's deleteAutoAnimation instead.)
 export function deleteAnimation(services, sheetId, animationId) {
   const sheet = findSpriteSheet(services.projects.project, sheetId);
   const anim = sheet?.animations.find(a => a.id === animationId);
@@ -47,22 +45,13 @@ export function deleteAnimation(services, sheetId, animationId) {
   const doc = sheetDocument(sheet);
   const idx = sheet.animations.indexOf(anim);
   const wasSelected = services.selections.get(doc)?.animationId === animationId;
-  const layerGroupId = anim.layerGroupId;
-  const groupLoc = anim.layerGroupId ? findParent(sheet.layerTree, anim.layerGroupId) : null;
-  const group = groupLoc ? groupLoc.parent.children[groupLoc.index] : null;
-  const groupParent = groupLoc ? groupLoc.parent : null;
-  const groupIdx = groupLoc ? groupLoc.index : -1;
   runSheetCommand(services, sheetId, 'delete animation',
     target => {
       target.animations = target.animations.filter(a => a.id !== animationId);
-      if (groupParent) groupParent.children = groupParent.children.filter(c => c.id !== anim.layerGroupId);
-      anim.layerGroupId = null;
       if (services.selections.get(doc)?.animationId === animationId) services.selections.set({ ...services.selections.get(doc), animationId: null }, doc);
     },
     target => {
       target.animations.splice(Math.min(idx, target.animations.length), 0, anim);
-      if (groupParent) groupParent.children.splice(Math.min(groupIdx, groupParent.children.length), 0, group);
-      anim.layerGroupId = layerGroupId;
       if (wasSelected) services.selections.set({ ...services.selections.get(doc), animationId }, doc);
     });
 }

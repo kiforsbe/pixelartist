@@ -6,6 +6,7 @@
 import { getEditorHost } from '../../host/runtime.js';
 import { activeSheet } from '../../host/document-helpers.js';
 import { classifySlots } from '../../core/blob47.js';
+import { isPinnedFrame } from '../../domain/sprites/auto-layout.js';
 
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
@@ -13,7 +14,7 @@ function sheetDocument(sheet) {
 
 const FRAME_STROKE = '#4f8cff';
 const FRAME_FILL = 'rgba(79,140,255,.15)';
-const FLOATING_STROKE = '#e0a030';
+const PINNED_STROKE = '#9d7cff';
 const CHIP_BG = 'rgba(20,20,24,.85)';
 const CHIP_FG = '#fff';
 const CHIP_FONT = '11px sans-serif';
@@ -56,14 +57,6 @@ function drawChip(ctx, view, text, x, y, bg = CHIP_BG) {
   return { x: cx, y: cy, w, h };
 }
 
-// A frame belongs to a floating (not-yet-accepted) animation when some
-// animation references it but hasn't been frozen into its own layer yet --
-// see acceptAnimation in core/model.js.
-function isFloatingFrame(sheet, frame) {
-  const anim = sheet.animations.find(a => a.frames.some(af => af.frameId === frame.id));
-  return !!anim && !anim.layerGroupId;
-}
-
 function drawSpriteOverlays(view, ctx, sheet) {
   const frames = sheet.frames;
   if (!frames.length) return;
@@ -73,7 +66,7 @@ function drawSpriteOverlays(view, ctx, sheet) {
     ctx.save();
     frames.forEach((f) => {
       const selected = f.id === selectedFrameId;
-      const floating = isFloatingFrame(sheet, f);
+      const pinned = isPinnedFrame(sheet, f.id);
       const p0 = view.imageToScreen(f.x, f.y);
       const p1 = view.imageToScreen(f.x + f.w, f.y + f.h);
       const w = p1.x - p0.x, h = p1.y - p0.y;
@@ -82,8 +75,8 @@ function drawSpriteOverlays(view, ctx, sheet) {
         ctx.fillRect(p0.x, p0.y, w, h);
       }
       ctx.lineWidth = selected ? 2 : 1;
-      ctx.strokeStyle = floating ? FLOATING_STROKE : FRAME_STROKE;
-      ctx.setLineDash(floating ? [4, 4] : []);
+      ctx.strokeStyle = pinned ? PINNED_STROKE : FRAME_STROKE;
+      ctx.setLineDash([]);
       ctx.strokeRect(p0.x, p0.y, w, h);
     });
     ctx.restore();

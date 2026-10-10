@@ -4,7 +4,7 @@ import { installSpriteContextDom } from './helpers/sprite-context-dom.mjs';
 import { EditorHost } from '../js/host/editor-host.js';
 import { setEditorHost } from '../js/host/runtime.js';
 import { spriteMode } from '../js/modes/sprites/index.js';
-import { createProject, createSheet, addFrame, addAnimation, acceptAnimation, animationGroup } from '../js/core/model.js';
+import { createProject, createSheet, addFrame, addAnimation, createLayerNode, sheetLayers } from '../js/core/model.js';
 import { setPixel, getPixel } from '../js/core/pixels.js';
 import { mountFrameEditor } from '../js/modes/sprites/presentation/frame-editor-presenter.js';
 import { mountTimeline } from '../js/modes/sprites/presentation/timeline-presenter.js';
@@ -24,14 +24,11 @@ async function reset() {
   const a = addFrame(sheet, { name: 'A', x: 0, y: 0, w: 4, h: 4 });
   const b = addFrame(sheet, { name: 'B', x: 8, y: 0, w: 8, h: 8 });
   const first = addAnimation(sheet, 'First'), second = addAnimation(sheet, 'Second');
-  for (const anim of [first, second]) {
-    anim.frames = [{ frameId: a.id, duration: 100 }, { frameId: b.id, duration: 100 }];
-    acceptAnimation(sheet, anim);
-  }
-  const layer = animationGroup(sheet, first.id).children[0];
-  const other = animationGroup(sheet, second.id).children[0];
+  for (const anim of [first, second]) anim.frames = [{ frameId: a.id, duration: 100 }, { frameId: b.id, duration: 100 }];
+  const layer = sheetLayers(sheet)[0];
+  const other = createLayerNode('Other', sheet.width, sheet.height);
+  sheet.layerTree.children.push(other);
   setPixel(layer.bitmap, 0, 0, red); setPixel(layer.bitmap, 8, 0, blue);
-  setPixel(other.bitmap, 0, 0, blue);
   host.setProject(project);
   host.selections.patch({ animationId: first.id, layerId: layer.id, frameId: a.id, editingFrameId: a.id });
   host.store.updateSession({ activeViewId: 'sprites.frame', activeToolId: 'move' });
@@ -67,6 +64,7 @@ test('same-frame animation/layer change invalidates raster context without reset
   }
   assert.deepEqual(paintedPixel(), red);
   editor.view.panX = 23;
+  setPixel(other.bitmap, 0, 0, blue); // a silent edit only a fresh raster shows
   host.selections.patch({ animationId: second.id, layerId: other.id });
   assert.deepEqual(paintedPixel(), blue);
   assert.equal(editor.view.panX, 23);
@@ -78,5 +76,5 @@ test('same-frame animation/layer change settles the old layer float before furth
   host.selections.patch({ animationId: second.id, layerId: other.id });
   assert.equal(activeFloating(), null);
   assert.deepEqual(getPixel(layer.bitmap, 1, 0), red);
-  assert.deepEqual(getPixel(other.bitmap, 0, 0), blue);
+  assert.deepEqual(getPixel(other.bitmap, 0, 0), [0, 0, 0, 0]);
 });

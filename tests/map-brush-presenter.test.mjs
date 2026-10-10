@@ -50,7 +50,7 @@ function fixture(kind) {
   tiles.terrainSets.push({ id: 'terrain1', tileW: 8, tileH: 12, slots: { 0: 'terrainTile' }, symmetry: { flip: false, rotate: false } });
   const sprites = createSheet(project, { name: 'Sprites', kind: 'sprite', width: 64, height: 64 });
   sprites.frames.push({ id: 'frame1', x: 0, y: 0, w: 7, h: 9 }, { id: 'animationFrame', x: 16, y: 0, w: 11, h: 5 });
-  sprites.animations.push({ id: 'animation1', layerGroupId: null, frames: [{ frameId: 'animationFrame' }, { frameId: 'frame1' }] });
+  sprites.animations.push({ id: 'animation1', frames: [{ frameId: 'animationFrame' }, { frameId: 'frame1' }] });
   const map = createMap(project, { gridW: 16, gridH: 16 });
   map.snap.mode = 'asset';
   const layer = kind === 'frame' || kind === 'animation' ? createMapLayer(map, { type: 'sprite' }) : map.layers[0];

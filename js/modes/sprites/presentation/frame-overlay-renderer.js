@@ -1,17 +1,12 @@
 // js/modes/sprites/presentation/frame-overlay-renderer.js
 // All Canvas drawing for the frame tool: create/move/resize ghosts, CAD
-// dimension labels, corner handles, in-strip call-outs/grips, break
-// separators, and the live Slice-grid preview. Every piece of state it needs
-// (active drag, hovered chrome part, current tool, selected frame, slice
-// preview options) arrives as a parameter -- this module owns no state.
+// dimension labels, corner handles, the pinned-frame hint, and the live
+// Slice-grid preview. Every piece of state it needs arrives as a parameter
+// -- this module owns no state.
 import { sliceGrid } from '../../../core/slicing.js';
-import { segmentsOf, segmentOfFrame, segmentMembers } from '../../../core/strips.js';
 import { HANDLES_CORNER } from '../../../core/resizeAnchor.js';
-import { frameBounds } from '../../../domain/sprites/frames.js';
-import { stripForFrame } from '../../../domain/sprites/strips.js';
+import { isPinnedFrame, PINNED_HINT } from '../../../domain/sprites/auto-layout.js';
 import { drawRectDims, drawChainDims } from '../../../components/canvas/dim-labels.js';
-import { resizeGhostRect } from '../application/frame-geometry.js';
-import { chromeGeometry, standaloneGripGeometry, selectedSegment, CALLOUT_R } from '../application/frame-chrome-geometry.js';
 
 const FRAME_HANDLE = '#4f8cff';
 
@@ -31,21 +26,21 @@ function drawHandles(ctx, view, f) {
   }
 }
 
-// Strip dimensions: level-0 width chain (one dimension per member, in x
-// order) below the bbox, level-1 overall width, single level-0 height
-// (members share it), origin marker on the bbox. dx/dy shift everything to
-// the drag-ghost position; opts carries quiet/dx/dy for drawRectDims.
-function drawStripDims(ctx, view, members, dx, dy, opts = {}) {
-  const bbox = frameBounds(members);
-  const r = { x: bbox.x + dx, y: bbox.y + dy, w: bbox.w, h: bbox.h };
-  const alpha = opts.quiet ? 0.7 : 1;
-  const sorted = members.slice().sort((m, n) => m.x - n.x);
-  drawChainDims(ctx, view, {
-    axis: 'h', edge: r.y + r.h,
-    spans: sorted.map(m => ({ from: m.x + dx, to: m.x + m.w + dx, text: `${m.w}` })),
-    alpha,
-  });
-  drawRectDims(ctx, view, r, { ...opts, wLevel: 1, hLevel: 0 });
+// Above a selected pinned frame: why it has no handles, and where to go.
+function drawPinnedHint(ctx, view, frame) {
+  const p = view.imageToScreen(frame.x, frame.y);
+  ctx.save();
+  ctx.font = '11px sans-serif';
+  const w = Math.ceil(ctx.measureText(PINNED_HINT).width) + 8;
+  const h = 16;
+  const x = Math.max(0, Math.min(view.cssWidth - w, p.x));
+  const y = Math.max(0, p.y - h - 4);
+  ctx.fillStyle = 'rgba(20,20,24,.85)';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#d8ccff';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(PINNED_HINT, x + 4, y + h / 2);
+  ctx.restore();
 }
 
 // Ghost grid + CAD chains for the open Slice-grid dialog: cell outlines in
@@ -90,89 +85,9 @@ function drawSlicePreview(ctx, view, sheet, o) {
   });
 }
 
-function drawCallout(ctx, c, glyph, active) {
-  ctx.beginPath();
-  ctx.arc(c.cx, c.cy, CALLOUT_R, 0, Math.PI * 2);
-  ctx.fillStyle = active ? '#4f8cff' : 'rgba(20,20,24,.85)';
-  ctx.fill();
-  ctx.strokeStyle = '#4f8cff';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.fillStyle = active ? '#fff' : '#a9c7ff';
-  ctx.font = '11px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(glyph, c.cx, c.cy + 0.5);
-}
-
-function drawGrips(ctx, grips, hover) {
-  for (const gr of grips) {
-    const active = hover?.type === 'grip' && hover.side === gr.side;
-    ctx.globalAlpha = active ? 1 : 0.7;
-    ctx.fillStyle = '#4f8cff';
-    ctx.fillRect(gr.x, gr.y, gr.w, gr.h);
-    ctx.globalAlpha = 1;
-  }
-}
-
-function drawChrome(ctx, view, sheet, drag, hover, selectedFrameId) {
-  if (drag) return;
-  const sel = selectedSegment(sheet, selectedFrameId);
-  if (!sel) return;
-  const g = chromeGeometry((x, y) => view.imageToScreen(x, y), sheet, sel.anim, sel.run);
-  if (!g) return;
-  ctx.save();
-  for (const c of g.inserts)
-    drawCallout(ctx, c, '+', hover?.type === 'insert' && hover.k === c.k);
-  for (const c of g.splits)
-    drawCallout(ctx, c, '✂', hover?.type === 'split' && hover.k === c.k);
-  drawGrips(ctx, g.grips, hover);
-  ctx.restore();
-}
-
-// "Drag out as a new strip" chrome for a selected standalone frame: reuses
-// an intact strip's own edge-grip look and geometry so grabbing an edge and
-// dragging away reads as exactly the same gesture as growing an existing
-// strip -- because that's literally what the presenter does with it.
-function drawStandaloneStripGrips(ctx, view, frame, drag, hover) {
-  if (drag) return;
-  const g = standaloneGripGeometry((x, y) => view.imageToScreen(x, y), frame);
-  ctx.save();
-  drawGrips(ctx, g.grips, hover);
-  ctx.restore();
-}
-
-// A split whose halves haven't moved yet is invisible geometry — mark it.
-function drawBreakSeparators(ctx, view, sheet) {
-  ctx.save();
-  ctx.strokeStyle = '#ffb454';
-  ctx.setLineDash([3, 3]);
-  ctx.lineWidth = 1;
-  for (const a of sheet.animations) {
-    if (!a.strip) continue;
-    const runs = segmentsOf(a);
-    for (let i = 1; i < runs.length; i++) {
-      const prev = segmentMembers(sheet, a, runs[i - 1]);
-      const next = segmentMembers(sheet, a, runs[i]);
-      if (!prev.length || !next.length) continue;
-      const pl = prev[prev.length - 1], nf = next[0];
-      if (nf.x !== pl.x + pl.w || nf.y !== pl.y) continue;
-      const p0 = view.imageToScreen(nf.x, nf.y);
-      const p1 = view.imageToScreen(nf.x, nf.y + nf.h);
-      ctx.beginPath();
-      ctx.moveTo(p0.x + 0.5, p0.y);
-      ctx.lineTo(p1.x + 0.5, p1.y);
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-
-export function paintFrameToolGhost(ctx, view, sheet, { tool, drag, slicePreview }) {
+export function paintFrameToolGhost(ctx, view, sheet, { drag, slicePreview }) {
   if (!sheet) return;
-
   if (slicePreview) drawSlicePreview(ctx, view, sheet, slicePreview);
-  if (tool === 'frametool') drawBreakSeparators(ctx, view, sheet);
   if (!drag) return;
 
   ctx.save();
@@ -180,82 +95,31 @@ export function paintFrameToolGhost(ctx, view, sheet, { tool, drag, slicePreview
   ctx.setLineDash([4, 4]);
   ctx.lineWidth = 1;
   if (drag.kind === 'create' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
-  else if (drag.kind === 'move' && drag.bbox) {
-    const dx = drag.snap ? drag.snap.dx : drag.delta.dx;
-    const dy = drag.snap ? drag.snap.dy : drag.delta.dy;
-    if (drag.snap) ctx.strokeStyle = '#6adf7a';
-    // Single frame or strip: the bbox already covers just the grabbed
-    // frame in the non-strip case, so this one branch handles both.
-    strokeGhostRect(ctx, view, { x: drag.bbox.x + dx, y: drag.bbox.y + dy, w: drag.bbox.w, h: drag.bbox.h });
-  }
+  else if (drag.kind === 'move') strokeGhostRect(ctx, view, { ...drag.bbox, x: drag.bbox.x + drag.delta.dx, y: drag.bbox.y + drag.delta.dy });
   else if (drag.kind === 'resize' && drag.rect) strokeGhostRect(ctx, view, drag.rect);
-  else if (drag.kind === 'stripresize') strokeGhostRect(ctx, view, resizeGhostRect(drag));
   ctx.restore();
 
   if (drag.kind === 'create' && drag.rect) {
     drawRectDims(ctx, view, drag.rect);
-  } else if (drag.kind === 'move' && drag.bbox) {
-    const dx = drag.snap ? drag.snap.dx : drag.delta.dx;
-    const dy = drag.snap ? drag.snap.dy : drag.delta.dy;
-    if (drag.members.length > 1) {
-      drawStripDims(ctx, view, drag.members, dx, dy, { dx, dy });
-    } else {
-      const r = { x: drag.bbox.x + dx, y: drag.bbox.y + dy, w: drag.bbox.w, h: drag.bbox.h };
-      drawRectDims(ctx, view, r, { dx, dy });
-    }
+  } else if (drag.kind === 'move') {
+    const { dx, dy } = drag.delta;
+    drawRectDims(ctx, view, { ...drag.bbox, x: drag.bbox.x + dx, y: drag.bbox.y + dy }, { dx, dy });
   } else if (drag.kind === 'resize' && drag.rect) {
-    drawRectDims(ctx, view, drag.rect, {
-      dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h,
-    });
-  } else if (drag.kind === 'stripresize') {
-    const r = resizeGhostRect(drag);
-    drawChainDims(ctx, view, {
-      axis: 'h', edge: r.y + r.h,
-      spans: Array.from({ length: drag.count }, (_, i) =>
-        ({ from: r.x + i * drag.fw, to: r.x + (i + 1) * drag.fw, text: `${drag.fw}` })),
-    });
-    const df = drag.count - drag.count0;
-    drawRectDims(ctx, view, r, {
-      wLevel: 1, hLevel: 0,
-      wOverride: `${r.w}${df ? ` (${df > 0 ? '+' : ''}${df}f)` : ''}`,
-    });
-  }
-
-  if (drag.kind === 'move' && drag.snap) {
-    const jx = drag.snap.side === 'before'
-      ? drag.bbox.x + drag.snap.dx + drag.bbox.w   // dragged right edge
-      : drag.bbox.x + drag.snap.dx;                 // dragged left edge
-    const jy = drag.bbox.y + drag.snap.dy;
-    const p0 = view.imageToScreen(jx, jy);
-    const p1 = view.imageToScreen(jx, jy + drag.bbox.h);
-    ctx.save();
-    ctx.strokeStyle = '#6adf7a'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
-    ctx.restore();
+    drawRectDims(ctx, view, drag.rect, { dw: drag.rect.w - drag.before.w, dh: drag.rect.h - drag.before.h });
   }
 }
 
-// Selection chrome — the idle dims, resize handles, and the strip call-outs/
-// grips — must render above EVERYTHING on the sheet overlay (including the
-// frame/tile label overlays chained after the frame tool), so contributions.js
-// chains this as the final overlay layer instead of drawing it inside
+// Selection chrome -- idle dims, resize handles or the pinned hint -- must
+// render above EVERYTHING on the sheet overlay (including the frame/tile
+// label overlays chained after the frame tool), so contributions.js chains
+// this as the final overlay layer instead of drawing it inside
 // paintFrameToolGhost.
-export function paintStripChrome(ctx, view, sheet, { tool, drag, hover, selectedFrameId }) {
+export function paintFrameChrome(ctx, view, sheet, { tool, drag, selectedFrameId }) {
   if (tool !== 'frametool' || !sheet) return;
   const selected = sheet.frames.find(f => f.id === selectedFrameId);
-  const strip = selected ? stripForFrame(sheet, selected.id) : null;
-  if (selected && !drag) {
-    const run = strip ? segmentOfFrame(strip, selected.id) : null;
-    const members = run ? segmentMembers(sheet, strip, run) : null;
-    // A 1-member strip degenerates to the plain single-frame case (no
-    // chain, no level-1 row) — matching the drag path's members.length gate.
-    if (members && members.length > 1) drawStripDims(ctx, view, members, 0, 0, { quiet: true });
-    else drawRectDims(ctx, view, selected, { quiet: true });
-  }
-  // No resize handles on intact-strip members.
-  if (selected && !strip) {
-    drawHandles(ctx, view, selected);
-    drawStandaloneStripGrips(ctx, view, selected, drag, hover);
-  }
-  drawChrome(ctx, view, sheet, drag, hover, selectedFrameId);
+  if (!selected) return;
+  const pinned = isPinnedFrame(sheet, selected.id);
+  if (!drag) drawRectDims(ctx, view, selected, { quiet: true });
+  if (pinned) { if (!drag) drawPinnedHint(ctx, view, selected); }
+  else drawHandles(ctx, view, selected);
 }

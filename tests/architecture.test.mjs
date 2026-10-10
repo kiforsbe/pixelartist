@@ -72,10 +72,10 @@ test('domain modules do not depend on application, browser, host, UI, or modes',
 });
 
 test('modes never import sibling modes', async () => {
-  for (const mode of ['sprites', 'tiles', 'maps']) {
+  for (const mode of ['sprites', 'animations', 'tiles', 'maps']) {
     for (const file of await jsFiles(join(root, `js/modes/${mode}`))) {
       const source = await readFile(file, 'utf8');
-      for (const sibling of ['sprites', 'tiles', 'maps'].filter(value => value !== mode)) {
+      for (const sibling of ['sprites', 'animations', 'tiles', 'maps'].filter(value => value !== mode)) {
         assert.doesNotMatch(source, new RegExp(`modes[\\\\/]${sibling}|[.][.][\\\\/]${sibling}[\\\\/]`), file);
       }
     }
@@ -177,9 +177,8 @@ test('map command modules do not access browser UI globals', async () => {
 test('sprite command modules do not access browser UI globals', async () => {
   for (const file of [
     join(root, 'js/modes/sprites/application/commands/frame-commands.js'),
-    join(root, 'js/modes/sprites/application/commands/strip-commands.js'),
+    join(root, 'js/modes/sprites/application/commands/animation-layout-commands.js'),
     join(root, 'js/modes/sprites/application/commands/frame-metadata-commands.js'),
-    join(root, 'js/modes/sprites/application/commands/animation-commands.js'),
     join(root, 'js/modes/sprites/application/commands/animation-lifecycle-commands.js'),
     join(root, 'js/modes/sprites/application/commands/animation-frame-commands.js'),
   ]) {

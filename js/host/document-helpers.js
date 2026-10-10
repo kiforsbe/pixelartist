@@ -1,5 +1,5 @@
 import { getEditorHost } from './runtime.js';
-import { findLayer, layerAnimationContext, flattenLayers, sheetLayers, contextLayers as modelContextLayers } from '../core/model.js';
+import { findLayer, sheetLayers } from '../core/model.js';
 
 function sheetDocument(sheet) {
   return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
@@ -27,16 +27,23 @@ export function activeLayer() {
   return findLayer(sheet.layerTree, layerId);
 }
 
-export function currentContextLayers() {
-  const sheet = activeSheet();
-  if (!sheet) return [];
-  const animationId = getEditorHost().selections.get(sheetDocument(sheet))?.animationId ?? null;
-  return modelContextLayers(sheet, animationId);
+// The layer an edit may write into: the active layer unless it is locked.
+// Every pixel-writing path (paint, fill, select-delete, floats, paste,
+// filters) resolves its target through this, never through activeLayer().
+export function activeEditableLayer() {
+  const layer = activeLayer();
+  return layer && !layer.locked ? layer : null;
 }
 
+// Every layer of the active sheet, bottom first: what the sheet renders.
+// (Animations used to scope this to their own layer group.)
+export function currentContextLayers() {
+  const sheet = activeSheet();
+  return sheet ? sheetLayers(sheet) : [];
+}
+
+// The layers an "all layers" edit touches: every unlocked layer.
 export function activeLayerScope() {
   const sheet = activeSheet();
-  if (!sheet) return [];
-  const ctx = layerAnimationContext(sheet, activeLayer());
-  return ctx ? flattenLayers(ctx.group) : sheetLayers(sheet);
+  return sheet ? sheetLayers(sheet).filter(l => !l.locked) : [];
 }

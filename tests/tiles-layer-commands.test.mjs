@@ -21,7 +21,7 @@ function makeLayer(overrides = {}) {
 }
 
 function makeGroup(overrides = {}) {
-  return { id: 'root', type: 'group', name: 'root', animationId: null, open: true, children: [], ...overrides };
+  return { id: 'root', type: 'group', name: 'root', open: true, children: [], ...overrides };
 }
 
 function makeSheet(overrides = {}) {
@@ -124,16 +124,6 @@ test('deleteNode refuses to delete the last layer in a group', () => {
   assert.equal(services.history.canUndo(), false);
 });
 
-test('deleteNode refuses to delete an animation-owned group (out of scope; handled by sprites.deleteAnimation elsewhere)', () => {
-  const animGroup = makeGroup({ id: 'anim-g', animationId: 'anim1', children: [makeLayer({ id: 'af1' })] });
-  const sheet = makeSheet({ layerTree: makeGroup({ children: [makeLayer({ id: 'a' }), animGroup] }) });
-  const services = makeServices(makeProject(sheet));
-
-  deleteNode(services, 'sheet1', 'anim-g');
-  assert.deepEqual(sheet.layerTree.children.map(c => c.id), ['a', 'anim-g']);
-  assert.equal(services.history.canUndo(), false);
-});
-
 test('mergeLayerDownCmd composites into the layer below and undo restores its bitmap byte-for-byte', () => {
   const bottom = makeLayer({ id: 'bottom' });
   const top = makeLayer({ id: 'top' });
@@ -221,23 +211,6 @@ test('renameNode renames a plain layer and undoes', () => {
 
   services.history.undo();
   assert.equal(sheet.layerTree.children[0].name, 'Layer 1');
-});
-
-test('renameNode syncs the matching animations entry name for an animation-owned group, and undoes', () => {
-  const animGroup = makeGroup({ id: 'anim-g', name: 'Walk', animationId: 'anim1', children: [] });
-  const sheet = makeSheet({
-    layerTree: makeGroup({ children: [makeLayer(), animGroup] }),
-    animations: [{ id: 'anim1', name: 'Walk' }],
-  });
-  const services = makeServices(makeProject(sheet));
-
-  renameNode(services, 'sheet1', 'anim-g', 'Run');
-  assert.equal(animGroup.name, 'Run');
-  assert.equal(sheet.animations[0].name, 'Run');
-
-  services.history.undo();
-  assert.equal(animGroup.name, 'Walk');
-  assert.equal(sheet.animations[0].name, 'Walk');
 });
 
 test('renameNode is a no-op when the name is unchanged', () => {

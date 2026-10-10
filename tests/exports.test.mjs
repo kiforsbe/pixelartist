@@ -52,7 +52,7 @@ test('buildFramesJson: fps-primary animation exports computed ms, honoring a per
   const sheet = createSheet(project, { name: 'Hero', width: 32, height: 16, kind: 'sprite' });
   const f0 = addFrame(sheet, { name: 'run_0', x: 0, y: 0, w: 16, h: 16 });
   const f1 = addFrame(sheet, { name: 'run_1', x: 16, y: 0, w: 16, h: 16 });
-  const anim = addAnimation(sheet, 'run', false, { durationMs: 42, baseFps: 24, baseStep: 1 });
+  const anim = addAnimation(sheet, 'run', { durationMs: 42, baseFps: 24, baseStep: 1 });
   anim.frames.push({ frameId: f0.id, duration: null, step: null }); // inherits baseStep 1 -> 42ms
   anim.frames.push({ frameId: f1.id, duration: null, step: 3 });    // overrides to 3 ticks -> 125ms
 

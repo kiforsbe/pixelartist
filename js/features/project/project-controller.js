@@ -83,6 +83,7 @@ export function mountProjectController() {
   const psName = document.getElementById('ps-name');
   const psSpriteW = document.getElementById('ps-sprite-w');
   const psSpriteH = document.getElementById('ps-sprite-h');
+  const psSheetMaxW = document.getElementById('ps-sheet-max-w');
   const psTileSheetW = document.getElementById('ps-tile-sheet-w');
   const psTileSheetH = document.getElementById('ps-tile-sheet-h');
   const psTileW = document.getElementById('ps-tile-w');
@@ -318,6 +319,7 @@ export function mountProjectController() {
     psName.value = project.name;
     psSpriteW.value = String(settings.spriteSheetW);
     psSpriteH.value = String(settings.spriteSheetH);
+    psSheetMaxW.value = String(settings.sheetMaxWidth ?? settings.spriteSheetW);
     psTileSheetW.value = String(settings.tileSheetW);
     psTileSheetH.value = String(settings.tileSheetH);
     psTileW.value = String(settings.tileW);
@@ -384,6 +386,7 @@ export function mountProjectController() {
     }
     const dims = {
       spriteSheetW: sheetDimField(psSpriteW), spriteSheetH: sheetDimField(psSpriteH),
+      sheetMaxWidth: sheetDimField(psSheetMaxW),
       tileSheetW: sheetDimField(psTileSheetW), tileSheetH: sheetDimField(psTileSheetH),
       tileW: positiveIntField(psTileW), tileH: positiveIntField(psTileH),
       frameW: positiveIntField(psFrameW), frameH: positiveIntField(psFrameH),

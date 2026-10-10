@@ -2,7 +2,7 @@
 // rectangular block of tiles (sheet.tiles entries with matching gridId);
 // tile identity within a grid is (gridCol, gridRow), which is what lets a
 // resize preserve an existing tile's name/neighbors instead of recreating
-// it. Mirrors js/core/strips.js's role for animation strips: pure,
+// it. Like domain/sprites/auto-layout.js for animations: pure,
 // DOM-free, mutates the sheet directly (the "eager mutate" half of this
 // codebase's do()-then-snapshot command idiom — UI callers wrap these with
 // state.commands.push()).

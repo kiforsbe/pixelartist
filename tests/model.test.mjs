@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PROJECT_VERSION, DEFAULT_SETTINGS, defaultOnionSettings, createProject, newDefaultProject, createSheet, createMap, createMapLayer, mapContentBounds, refreshMapBounds, addLayer, removeLayer,
-  moveLayer, mergeDown, addFrame, removeFrame, addAnimation, acceptAnimation, flattenSheet, flattenSheetLayers,
+  moveLayer, mergeDown, addFrame, removeFrame, addAnimation, flattenSheet, flattenSheetLayers,
   serializeProject, deserializeProject, validateProjectJson, GROUP, LAYER,
-  sheetLayers, findGroup, contextLayers, addGroup, flattenLayers, moveNode,
-  scrubTileReferences, layerAnimationContext, removeSheet, activePaletteColors, resolvePixelSnapperPalette,
+  sheetLayers, findGroup, addGroup, flattenLayers, moveNode,
+  scrubTileReferences, removeSheet, activePaletteColors, resolvePixelSnapperPalette,
   effectiveDuration, fpsStepToMs, msToFps,
 } from '../js/core/model.js';
 import { createPalette, setEntry, addSwatch, setEmptyColor } from '../js/core/palettes.js';
@@ -143,17 +143,6 @@ test('moveNode prevents invalid moves', () => {
   // cannot move g1 into its own descendant
   moveNode(s, g1.id, g1.id, 0);
   assert.ok(s.layerTree.children.some(c => c.id === g1.id));
-  // only layer nodes may be moved into an animation-owned group
-  const a = addAnimation(s, 'walk');
-  acceptAnimation(s, a);
-  const ag = findGroup(s.layerTree, a.layerGroupId);
-  const freeLayer = addLayer(s, 'free');
-  moveNode(s, freeLayer.id, ag.id, 0);
-  assert.ok(ag.children.some(c => c.id === freeLayer.id));
-  // groups cannot be moved into an animation-owned group
-  const g3 = addGroup(s, 'g3');
-  moveNode(s, g3.id, ag.id, 0);
-  assert.equal(ag.children.findIndex(c => c.id === g3.id), -1);
 });
 
 test('frames and animations; removeFrame cleans references', () => {
@@ -167,82 +156,12 @@ test('frames and animations; removeFrame cleans references', () => {
   assert.deepEqual(a.frames.map(x => x.frameId), [f2.id]);
 });
 
-test('addAnimation creates a floating animation with no layer group yet', () => {
+test('addAnimation creates a manual animation with no frames and no legacy fields', () => {
   const p = createProject('t');
   const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
   const a = addAnimation(s, 'walk');
-  assert.equal(a.layerGroupId, null);
-  assert.equal(a.name, 'walk');
-  assert.deepEqual(a.frames, []);
-  assert.deepEqual(a.breaks, []);
-  assert.equal(contextLayers(s, a.id).length, sheetLayers(s).length, 'falls back to whole sheet while floating');
-});
-
-test('acceptAnimation freezes the current composite under the animation\'s own frames into a new layer', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
-  setPixel(sheetLayers(s)[0].bitmap, 1, 1, [1, 2, 3, 255]);
-  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
-  const a = addAnimation(s, 'walk', true);
-  a.frames = [{ frameId: f1.id, duration: 100 }];
-  assert.equal(a.layerGroupId, null, 'floating until accepted');
-
-  acceptAnimation(s, a);
-  assert.ok(a.layerGroupId, 'animation has layerGroupId after accept');
-  const g = findGroup(s.layerTree, a.layerGroupId);
-  assert.equal(g.animationId, a.id);
-  assert.equal(flattenLayers(g).length, 1);
-  assert.deepEqual(getPixel(flattenLayers(g)[0].bitmap, 1, 1), [1, 2, 3, 255]);
-  // mutation on the strip's own layer does not bleed back to the root layer
-  setPixel(flattenLayers(g)[0].bitmap, 1, 1, [9, 9, 9, 255]);
-  assert.deepEqual(getPixel(sheetLayers(s)[0].bitmap, 1, 1), [1, 2, 3, 255]);
-});
-
-test('acceptAnimation with zero frames yields a blank layer', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [1, 2, 3, 255]);
-  const a = addAnimation(s, 'walk'); // plain animation, no frames yet
-  acceptAnimation(s, a);
-  const g = findGroup(s.layerTree, a.layerGroupId);
-  assert.deepEqual(getPixel(flattenLayers(g)[0].bitmap, 0, 0), [0, 0, 0, 0]);
-});
-
-test('acceptAnimation only freezes pixels under its own frames, not another animation\'s private layer', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
-  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
-  const a1 = addAnimation(s, 'walk', true);
-  a1.frames = [{ frameId: f1.id, duration: 100 }];
-  acceptAnimation(s, a1);
-  setPixel(flattenLayers(findGroup(s.layerTree, a1.layerGroupId))[0].bitmap, 0, 0, [255, 0, 0, 255]);
-
-  const f2 = addFrame(s, { name: 'f1', x: 4, y: 0, w: 4, h: 4 }); // adjacent, non-overlapping rect
-  const a2 = addAnimation(s, 'run', true);
-  a2.frames = [{ frameId: f2.id, duration: 100 }];
-  acceptAnimation(s, a2);
-  const g2 = findGroup(s.layerTree, a2.layerGroupId);
-  // a2's own frame rect (x:4..8) never touched a1's red pixel at (0,0)
-  assert.deepEqual(getPixel(flattenLayers(g2)[0].bitmap, 0, 0), [0, 0, 0, 0]);
-});
-
-test('acceptAnimation flattens multiple visible layers (with opacity) under its own frames', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]); // opaque red
-  const top = addLayer(s, 'top');
-  top.opacity = 0.5;
-  setPixel(top.bitmap, 0, 0, [0, 0, 255, 255]); // blue @ 50% over red
-  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
-  const a = addAnimation(s, 'walk', true);
-  a.frames = [{ frameId: f1.id, duration: 100 }];
-  acceptAnimation(s, a);
-  const g = findGroup(s.layerTree, a.layerGroupId);
-  const groupLayers = flattenLayers(g);
-  assert.equal(groupLayers.length, 1);
-  assert.equal(groupLayers[0].visible, true);
-  assert.equal(groupLayers[0].opacity, 1);
-  assert.deepEqual(getPixel(groupLayers[0].bitmap, 0, 0), [128, 0, 128, 255]);
+  assert.deepEqual([a.name, a.frames, a.layout, a.cell], ['walk', [], 'manual', null]);
+  assert.equal(['strip', 'breaks', 'layerGroupId'].some(k => k in a), false);
 });
 
 test('flattenSheet composites visible layers only', () => {
@@ -254,83 +173,6 @@ test('flattenSheet composites visible layers only', () => {
   assert.deepEqual(getPixel(flattenSheet(s), 1, 1), [255, 0, 0, 255]);
   top.visible = true;
   assert.deepEqual(getPixel(flattenSheet(s), 1, 1), [0, 255, 0, 255]);
-});
-
-test('flattenSheet gives an accepted strip exclusive, opaque ownership of its own frame rects', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
-  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]); // root pixel under the strip's frame
-  setPixel(sheetLayers(s)[0].bitmap, 8, 0, [0, 255, 0, 255]); // root pixel OUTSIDE the strip's frame
-
-  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
-  const a = addAnimation(s, 'walk', true);
-  a.frames = [{ frameId: f1.id, duration: 100 }];
-  acceptAnimation(s, a); // freezes root's (0,0) red pixel into the strip's own layer
-
-  // erase the strip's own copy of that pixel so it's transparent on the strip's layer
-  const g = findGroup(s.layerTree, a.layerGroupId);
-  setPixel(flattenLayers(g)[0].bitmap, 0, 0, [0, 0, 0, 0]);
-
-  const flat = flattenSheet(s);
-  // inside the strip's own frame rect: transparent strip pixel wins -- root's red does NOT show through
-  assert.deepEqual(getPixel(flat, 0, 0), [0, 0, 0, 0]);
-  // outside the strip's frame rect: root layer composites normally
-  assert.deepEqual(getPixel(flat, 8, 0), [0, 255, 0, 255]);
-});
-
-test('flattenSheet leaves a floating (not-yet-accepted) strip transparent to whatever is underneath', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 16, height: 8, kind: 'sprite' });
-  setPixel(sheetLayers(s)[0].bitmap, 0, 0, [255, 0, 0, 255]);
-  const f1 = addFrame(s, { name: 'f0', x: 0, y: 0, w: 4, h: 4 });
-  const a = addAnimation(s, 'walk', true);
-  a.frames = [{ frameId: f1.id, duration: 100 }];
-  // not accepted -- a.layerGroupId is still null
-  assert.deepEqual(getPixel(flattenSheet(s), 0, 0), [255, 0, 0, 255]);
-});
-
-test('layerAnimationContext returns null for a root layer', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  assert.equal(layerAnimationContext(s, sheetLayers(s)[0]), null);
-});
-
-test('layerAnimationContext returns null for a layer under a plain (non-animation) group', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  const g = addGroup(s, 'g1');
-  const layer = addLayer(s, 'inside', g.id);
-  assert.equal(layerAnimationContext(s, layer), null);
-});
-
-test('layerAnimationContext returns null for a null layer', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  assert.equal(layerAnimationContext(s, null), null);
-});
-
-test('layerAnimationContext resolves the owning animation for an accepted strip\'s own layer', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  const a = addAnimation(s, 'walk', true);
-  acceptAnimation(s, a);
-  const group = findGroup(s.layerTree, a.layerGroupId);
-  const layer = flattenLayers(group)[0];
-  const ctx = layerAnimationContext(s, layer);
-  assert.equal(ctx.anim, a);
-  assert.equal(ctx.group, group);
-});
-
-test('layerAnimationContext also resolves a plain (non-strip) animation\'s own layer', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  const a = addAnimation(s, 'anim_0'); // strip: false
-  acceptAnimation(s, a);
-  const group = findGroup(s.layerTree, a.layerGroupId);
-  const layer = flattenLayers(group)[0];
-  const ctx = layerAnimationContext(s, layer);
-  assert.equal(ctx.anim, a);
-  assert.equal(ctx.anim.strip, false);
 });
 
 test('createSheet tile kind starts with empty grids/tiles', () => {
@@ -367,7 +209,7 @@ test('serializeProject/deserializeProject keeps the layers wire key for tileLaye
   sheet.tiles.push({ id: 'ti1', x: 0, y: 0, w: 16, h: 16, name: 'grass', gridId: null, gridCol: undefined, gridRow: undefined, neighbors: undefined, terrainSetId: 'ts1', blobIndex: 0, layer: 'Ground', tags: ['nature', 'walkable'] });
 
   const { json, images } = serializeProject(p);
-  assert.equal(json.version, 3);
+  assert.equal(json.version, 4);
   assert.deepEqual(json.sheets[0].layers, ['Ground', 'Props']);
   assert.equal(Object.hasOwn(json.sheets[0], 'tileLayerNames'), false);
   const imagesByPath = new Map(images.map(i => [i.path, i.bitmap]));
@@ -536,9 +378,9 @@ test('validateProjectJson rejects bad input', () => {
   assert.equal(validateProjectJson(serializeProject(p).json).ok, true);
 });
 
-test('project carries required settings; version 3', () => {
+test('project carries required settings; version 4', () => {
   const p = createProject('s');
-  assert.equal(p.version, 3);
+  assert.equal(p.version, 4);
   assert.deepEqual(p.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
   const p2 = createProject('s2', { ...DEFAULT_SETTINGS, tileW: 8 });
   assert.equal(p2.settings.tileW, 8);
@@ -635,81 +477,23 @@ test('resolvePixelSnapperPalette: a specific palette id picks that palette, inde
   assert.deepEqual(resolvePixelSnapperPalette(p), [[7, 7, 7]]);
 });
 
-
-test('animations carry strip flag; serialize round-trips settings and strip', () => {
+test('animations save as manual; serialize round-trips settings', () => {
   const p = createProject('a');
   const s = createSheet(p, { name: 'sh', width: 32, height: 32, kind: 'sprite' });
-  const an = addAnimation(s, 'walk', true);
-  assert.equal(an.strip, true);
+  addAnimation(s, 'walk');
   const { json, images } = serializeProject(p);
-  assert.equal(json.version, 3);
+  assert.equal(json.version, 4);
   assert.deepEqual(json.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
   const map = new Map(images.map(i => [i.path, i.bitmap]));
   const p2 = deserializeProject(structuredClone(json), map);
   assert.deepEqual(p2.settings, { ...DEFAULT_SETTINGS, onion: defaultOnionSettings() });
-  assert.equal(p2.sheets[0].animations[0].strip, true);
+  assert.deepEqual([p2.sheets[0].animations[0].layout, p2.sheets[0].animations[0].cell, 'strip' in p2.sheets[0].animations[0]], ['manual', null, false]);
 });
 
 test('validateProjectJson rejects version 1 and missing/invalid settings', () => {
   assert.equal(validateProjectJson({ version: 1, sheets: [], settings: DEFAULT_SETTINGS }).ok, false);
   assert.equal(validateProjectJson({ version: 2, sheets: [] }).ok, false);
   assert.equal(validateProjectJson({ version: 2, sheets: [], settings: { tileW: 16 } }).ok, false);
-});
-
-test('addAnimation initializes breaks; serialize/deserialize round-trips them', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 32, height: 32, kind: 'sprite' });
-  const a = addAnimation(s, 'walk', true);
-  assert.deepEqual(a.breaks, []);
-  const f1 = addFrame(s, { name: 'f1', x: 0, y: 0, w: 8, h: 8 });
-  const f2 = addFrame(s, { name: 'f2', x: 8, y: 0, w: 8, h: 8 });
-  a.frames = [{ frameId: f1.id, duration: 100 }, { frameId: f2.id, duration: 100 }];
-  a.breaks = [1];
-  const { json, images } = serializeProject(p);
-  assert.deepEqual(json.sheets[0].animations[0].breaks, [1]);
-  const imagesByPath = new Map(images.map(i => [i.path, i.bitmap]));
-  const p2 = deserializeProject(json, imagesByPath);
-  assert.deepEqual(p2.sheets[0].animations[0].breaks, [1]);
-});
-
-test('deserializeProject defaults missing breaks to []', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 32, height: 32, kind: 'sprite' });
-  addAnimation(s, 'walk', true);
-  const { json, images } = serializeProject(p);
-  delete json.sheets[0].animations[0].breaks; // legacy file
-  const p2 = deserializeProject(json, new Map(images.map(i => [i.path, i.bitmap])));
-  assert.deepEqual(p2.sheets[0].animations[0].breaks, []);
-});
-
-test('removeFrame adjusts breaks (shift down, drop degenerate)', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 64, height: 32, kind: 'sprite' });
-  const fs = [0, 1, 2, 3].map(i => addFrame(s, { name: `f${i}`, x: i * 8, y: 0, w: 8, h: 8 }));
-  const a = addAnimation(s, 'walk', true);
-  a.frames = fs.map(f => ({ frameId: f.id, duration: 100 }));
-  a.breaks = [2];
-  removeFrame(s, fs[0].id);          // segments [0,1][2,3] → remove f0 → [1][2,3]
-  assert.deepEqual(a.breaks, [1]);
-  removeFrame(s, fs[1].id);          // [1][2,3] → remove f1 → break shifts to 0, normalize drops it
-  assert.deepEqual(a.frames.map(e => e.frameId), [fs[2].id, fs[3].id]);
-  assert.deepEqual(a.breaks, []);    // one segment [2,3]
-});
-
-test('contextLayers scopes to animation group or returns all layers', () => {
-  const p = createProject('t');
-  const s = createSheet(p, { name: 'S', width: 8, height: 8, kind: 'sprite' });
-  addLayer(s, 'global');
-  const beforeAnim = sheetLayers(s).map(l => l.id);
-  const a = addAnimation(s, 'walk');
-  acceptAnimation(s, a);
-  // 2 root layers + the single (blank, since the animation has no frames yet) layer created for the new anim group
-  assert.equal(contextLayers(s).length, 3);
-  // scoped to the animation, only its own (single) layer is returned
-  assert.equal(contextLayers(s, a.id).length, 1);
-  const animLayerIds = new Set(contextLayers(s, a.id).map(l => l.id));
-  // animation layers are independent copies with new ids, not the originals
-  for (const id of animLayerIds) assert.ok(!beforeAnim.includes(id));
 });
 
 test('flattenSheetLayers respects context and visibility', () => {
@@ -758,10 +542,10 @@ test('addAnimation seeds base duration from an optional defaults argument, falli
   assert.equal(a1.baseFps, undefined);
   assert.equal(a1.baseStep, undefined);
 
-  const a2 = addAnimation(s, 'run', false, { durationMs: 80 });
+  const a2 = addAnimation(s, 'run', { durationMs: 80 });
   assert.equal(a2.baseDuration, 80);
 
-  const a3 = addAnimation(s, 'jump', false, { durationMs: 83, baseFps: 24, baseStep: 2 });
+  const a3 = addAnimation(s, 'jump', { durationMs: 83, baseFps: 24, baseStep: 2 });
   assert.equal(a3.baseDuration, 83);
   assert.equal(a3.baseFps, 24);
   assert.equal(a3.baseStep, 2);
@@ -770,7 +554,7 @@ test('addAnimation seeds base duration from an optional defaults argument, falli
 test('serializeProject/deserializeProject round-trip anim base-duration fields and settings.baseFps/baseStep via the existing spreads -- no explicit per-field code needed', () => {
   const p = createProject('t');
   const s = createSheet(p, { name: 'S', width: 16, height: 16, kind: 'sprite' });
-  addAnimation(s, 'walk', false, { durationMs: 83, baseFps: 24, baseStep: 2 });
+  addAnimation(s, 'walk', { durationMs: 83, baseFps: 24, baseStep: 2 });
   p.settings.baseFps = 12;
   p.settings.baseStep = 3;
   const { json, images } = serializeProject(p);
@@ -782,7 +566,6 @@ test('serializeProject/deserializeProject round-trip anim base-duration fields a
   assert.equal(p2.sheets[0].animations[0].baseStep, 2);
   assert.equal(p2.settings.baseFps, 12);
 });
-
 
 test('a locked palette with empty slots and a custom unset color survives save and reload', () => {
   const p = createProject('pal-roundtrip');
@@ -847,7 +630,6 @@ test('an empty palette slot is an ordinary color to brush snapping -- empty is e
   assert.deepEqual(resolvePixelSnapperPalette(p), [[10, 20, 30], [0, 0, 0], [0, 0, 0]]);
   assert.equal(activePaletteColors(p).length, 3);
 });
-
 
 // --- embedded brushes -------------------------------------------------------
 

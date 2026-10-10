@@ -2,7 +2,7 @@ import { MAX_PALETTE_COLORS } from '../../core/pixelSnapper.js';
 import { copyRegion, cloneBitmap, blitRegion } from '../../core/pixels.js';
 import { commitFloatIfAny, currentEditRegion } from '../../components/canvas/float-session.js';
 import { getEditorHost } from '../../host/runtime.js';
-import { activeSheet, activeLayer, activeLayerScope, currentContextLayers } from '../../host/document-helpers.js';
+import { activeSheet, activeEditableLayer, activeLayerScope, currentContextLayers } from '../../host/document-helpers.js';
 import { medianCutPalette, resolveAlphaForQuantize, findMinimalColorCount } from '../../core/quantize.js';
 import { quantizeBitmapToPalette } from '../../core/palettes.js';
 import { chromaKeyBitmap, distanceHistogram, percentToRadius } from '../../core/chromakey.js';
@@ -92,7 +92,7 @@ export function mountFilterController(workbench) {
     const rr = currentEditRegion();
     if (!rr) return null;
     const { region } = rr;
-    const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+    const layers = allLayers ? activeLayerScope() : (activeEditableLayer() ? [activeEditableLayer()] : []);
     if (!layers.length) return null;
     const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
     const quantizeSource = (mode === 'count' && preferOpaque) ? resolveAlphaForQuantize(befores, param) : befores;
@@ -121,7 +121,7 @@ export function mountFilterController(workbench) {
     const rr = currentEditRegion();
     if (!rr) return ceiling;
     const { region } = rr;
-    const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+    const layers = allLayers ? activeLayerScope() : (activeEditableLayer() ? [activeEditableLayer()] : []);
     if (!layers.length) return ceiling;
     const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
     const quantizeSource = preferOpaque ? resolveAlphaForQuantize(befores, ceiling) : befores;
@@ -311,7 +311,7 @@ export function mountFilterController(workbench) {
       dlgQuantize.show();
       if (!dlgQuantize.style.left) centerDialog(dlgQuantize);
     },
-    isEnabled: () => !!activeLayer(),
+    isEnabled: () => !!activeEditableLayer(),
   });
   function cancelQuantizeDialog() { refreshPreviewPanel(); workbench.clearCanvasPreview(); dlgQuantize.close(); }
   qzCancel.addEventListener('click', cancelQuantizeDialog);
@@ -345,7 +345,7 @@ export function mountFilterController(workbench) {
     const rr = currentEditRegion();
     if (!rr) return null;
     const { region } = rr;
-    const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+    const layers = allLayers ? activeLayerScope() : (activeEditableLayer() ? [activeEditableLayer()] : []);
     if (!layers.length) return null;
     const befores = layers.map(l => copyRegion(l.bitmap, region.x, region.y, region.w, region.h));
     const patches = layers.map((l, i) => ({ layer: l, before: befores[i], after: chromaKeyBitmap(befores[i], params) }))
@@ -583,7 +583,7 @@ export function mountFilterController(workbench) {
       dlgChromaKey.show();
       if (!dlgChromaKey.style.left) centerDialog(dlgChromaKey);
     },
-    isEnabled: () => !!activeLayer(),
+    isEnabled: () => !!activeEditableLayer(),
   });
   function cancelChromaKeyDialog() { refreshPreviewPanel(); workbench.clearCanvasPreview(); dlgChromaKey.close(); }
   ckCancel.addEventListener('click', cancelChromaKeyDialog);
@@ -607,7 +607,7 @@ export function mountFilterController(workbench) {
     if (!sheet) return null;
     const rr = currentEditRegion();
     if (!rr) return null;
-    const layers = allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []);
+    const layers = allLayers ? activeLayerScope() : (activeEditableLayer() ? [activeEditableLayer()] : []);
     if (!layers.length) return null;
     return { region: rr.region, layers };
   }
@@ -998,7 +998,7 @@ export function mountFilterController(workbench) {
       // real guess instead of the flat [255]/[192] fallback above.
       cbAutodetect.click();
     },
-    isEnabled: () => !!activeLayer(),
+    isEnabled: () => !!activeEditableLayer(),
   });
   function cancelCheckerboardDialog() { cancelColorSample(); refreshPreviewPanel(); workbench.clearCanvasPreview(); dlgCheckerboard.close(); }
   cbCancel.addEventListener('click', cancelCheckerboardDialog);

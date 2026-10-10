@@ -1,5 +1,4 @@
-import { flattenSheet, layerAnimationContext } from '../../core/model.js';
-import { segmentsOf, segmentOfFrame, segmentOfPoint, segmentBounds } from '../../core/strips.js';
+import { flattenSheet } from '../../core/model.js';
 import { copyRegion } from '../../core/pixels.js';
 import { MAX_MASK_SIZE } from '../../core/brushes.js';
 import { colorFrequency } from '../../core/quantize.js';
@@ -14,15 +13,12 @@ import { mountPreviewPanel } from '../../components/panels/preview-panel.js';
 import { activeFloating, initFloatSession } from '../../components/canvas/float-session.js';
 import { defineAction } from '../shell/actions.js';
 import { getEditorHost } from '../../host/runtime.js';
-import { activeLayer, activeSheet } from '../../host/document-helpers.js';
+import { activeSheet } from '../../host/document-helpers.js';
 import { documentKey } from '../../host/editor-store.js';
 import { PanelManager } from '../../host/workbench/panel-manager.js';
 import { findWorkbenchRegions } from '../../host/workbench/layout.js';
 import { isTypingTarget } from '../../components/dom-utils.js';
-
-function sheetDocument(sheet) {
-  return { kind: sheet.kind === 'sprite' ? 'sprite-sheet' : 'tile-sheet', id: sheet.id };
-}
+import { applyViewControllers } from './view-switching.js';
 
 export function mountEditorWorkbench() {
   const editorHost = getEditorHost();
@@ -81,7 +77,7 @@ export function mountEditorWorkbench() {
     const activeDoc = editorHost.store.getState().session.activeDocument;
     const selection = activeDoc ? editorHost.selections.get(activeDoc) : null;
     const rect = platformId === 'none' || !sheet ? null
-      : view === 'sprites.frame' ? sheet.frames?.find(f => f.id === selection?.frameId)
+      : view === 'sprites.frame' || view === 'animations.canvas' ? sheet.frames?.find(f => f.id === selection?.frameId)
       : view === 'tiles.tile' ? sheet.tiles?.find(t => t.id === selection?.tileId)
       : null;
     if (!rect) { statusPlatform.textContent = ''; statusPlatform.title = ''; return; }
@@ -215,28 +211,11 @@ export function mountEditorWorkbench() {
     () => { canvasView.requestRender(); mapCanvasView.requestRender(); },
   );
   
-  // The sheet view's paint/float/paste target: normally the whole sheet, but
-  // narrowed to the current SEGMENT of an accepted strip's own frames when the
-  // active layer belongs to one (see docs/superpowers/specs/2026-07-18-strip-
-  // area-constraint-design.md) -- painting/copy/paste/move on a strip's own
-  // layer must never touch pixels outside the area its own frames occupy.
-  // `x, y` is the point of interest (a stroke's down-point, a marquee/frame-
-  // float's anchor corner, or a paste's original source position) -- when
-  // omitted (pasting from the OS clipboard, with no natural anchor), falls
-  // back to the segment of the currently selected frame, else the strip's
-  // first segment.
-  function sheetTargetRect(x, y) {
+  // The sheet view's paint/float/paste target: the whole sheet. (Accepted
+  // strips used to narrow it to their own frames; v4 has no layer ownership.)
+  function sheetTargetRect() {
     const sheet = activeSheet();
-    if (!sheet) return { x: 0, y: 0, w: 0, h: 0 };
-    const whole = { x: 0, y: 0, w: sheet.width, h: sheet.height };
-    const ctx = layerAnimationContext(sheet, activeLayer());
-    if (!ctx?.anim.strip) return whole;
-    const { anim } = ctx;
-    const selectedFrameId = editorHost.selections.get(sheetDocument(sheet))?.frameId ?? null;
-    let run = (x != null && y != null) ? segmentOfPoint(sheet, anim, x, y)
-      : selectedFrameId ? segmentOfFrame(anim, selectedFrameId) : null;
-    if (!run && x == null && y == null) run = segmentsOf(anim)[0] ?? null;
-    return run ? segmentBounds(sheet, anim, run) : { x: 0, y: 0, w: 0, h: 0 };
+    return sheet ? { x: 0, y: 0, w: sheet.width, h: sheet.height } : { x: 0, y: 0, w: 0, h: 0 };
   }
   
   // ---- registry-driven tools, panels, and views ----
@@ -270,40 +249,24 @@ export function mountEditorWorkbench() {
   for (const definition of editorHost.registries.views.list()) {
     viewControllers.set(definition.id, definition.create(canvasHost, contributionContext) ?? {});
   }
-  const frameEditor = viewControllers.get('sprites.frame');
-  const tileEditor = viewControllers.get('tiles.tile');
   const mapEditor = viewControllers.get('maps.canvas');
 
   // ---- view: zoom ----
   function activeCanvasView() {
     const s = editorHost.store.getState().session;
-    return s.activeModeId === 'maps' ? mapEditor.view : s.activeViewId === 'sprites.frame' ? frameEditor.view : s.activeViewId === 'tiles.tile' ? tileEditor.view : canvasView;
+    return s.activeModeId === 'maps' ? mapEditor.view : (viewControllers.get(s.activeViewId)?.view ?? canvasView);
   }
   defineAction('view.zoomIn', { label: 'Zoom In', run: () => activeCanvasView().zoomIn() });
   defineAction('view.zoomOut', { label: 'Zoom Out', run: () => activeCanvasView().zoomOut() });
   defineAction('view.actualSize', { label: 'Actual Size (100%)', run: () => activeCanvasView().actualSize() });
   defineAction('view.zoomToFit', { label: 'Zoom to Fit', run: () => activeCanvasView().fitToView() });
 
-  // ---- view switching: sheet canvas vs frame editor vs tile editor.
-  // Only one is visible at a time; each owns its own CanvasView. The sheet
-  // view's <canvas> is hidden directly (its host, #canvas-host, is shared with
-  // the frame/tile editors' own child containers) rather than tearing anything down.
+  // ---- view switching (see view-switching.js): one view is visible at a
+  // time; the Frame Editor, Tile Editor and Animations canvas each own a
+  // CanvasView in their own child of #canvas-host, while the sheet views share
+  // the sheet canvas.
   function applyView() {
-    const view = editorHost.store.getState().session.activeViewId;
-    if (view === 'sprites.sheet' || view === 'tiles.sheet' || view === 'maps.canvas') {
-      canvasView.canvas.style.display = '';
-      frameEditor.hide();
-      tileEditor.hide();
-    } else if (view === 'sprites.frame') {
-      canvasView.canvas.style.display = 'none';
-      frameEditor.show();
-      tileEditor.hide();
-    } else {
-      // 'tiles.tile'
-      canvasView.canvas.style.display = 'none';
-      frameEditor.hide();
-      tileEditor.show();
-    }
+    applyViewControllers(editorHost.store.getState().session.activeViewId, viewControllers, canvasView.canvas);
   }
   editorHost.store.subscribe(s => s.session.activeViewId, applyView, { fireImmediately: true });
   return Object.freeze({

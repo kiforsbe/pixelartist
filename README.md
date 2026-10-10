@@ -1,7 +1,8 @@
 # PixelArtist
 
 Browser-based pixel-art editor for packed sprite sheets and tile sheets.
-Frames + animations (timeline, onion skin, export loop), tiles with live
+Frames + animations (an Animations workbench with timeline, pivots, onion
+skin and export loop), tiles with live
 neighbor preview (3×3/5×5, or 1×1 to turn it off) and drag-to-grow grids,
 layers, indexed/system palettes, pixel-snapping PNG import, and
 platform-targeted export (GBA, NES, SNES, Game Boy, Game Boy Color,
@@ -74,7 +75,7 @@ the focused field or dialog retains its own keyboard behavior.
 | `O` | Ellipse |
 | `I` | Eyedropper |
 | `M` | Select (marquee) — selection only: drag inside moves the rectangle, drag a corner/edge handle resizes it (8 handles); CAD-style dimension lines (arrowed, with value pills) show W×H, origin, and Δ while dragging |
-| `V` | Move (✋) — cuts the selection (or whole layer if none) into a floating selection with move/scale/rotate handles; hold `Alt` at drag start to float all layers. On the sheet with no marquee, grabbing a frame or strip segment starts a translate-only frame-float instead (frame chrome, no handles/rotation; all layers): committing moves the frame rects together with the pixels. Nothing is rendered to the image until committed |
+| `V` | Move (✋) — cuts the selection (or whole layer if none) into a floating selection with move/scale/rotate handles; hold `Alt` at drag start to float all layers. On the sheet with no marquee, grabbing a frame starts a translate-only frame-float instead (frame chrome, no handles/rotation; all layers): committing moves the frame rect together with the pixels. Frames pinned by an auto animation don't float. Nothing is rendered to the image until committed |
 | `F` | Frame tool (sprite mode only) |
 | `T` | Tile tool (tile mode only) |
 | `A` | Autotile paint (while a terrain set is being painted) |
@@ -207,7 +208,7 @@ changes first if the current project is dirty). It collects the values
 stored as the new project's `settings` (see below): sprite sheet
 width/height, tile sheet width/height, tile width/height, frame
 width/height, and default animation frame duration. These become the
-defaults offered by "New Sheet…" and "New strip…" afterward; each field
+defaults offered by "New Sheet…" and new frames afterward; each field
 must be a positive integer or the dialog rejects the input with an alert
 instead of silently coercing it.
 
@@ -242,6 +243,49 @@ or tile currently being edited (or the timeline's live playhead frame
 while an animation is selected), with its own zoom bar, mouse-wheel zoom,
 and drag-to-pan.
 
+## Animations workbench
+
+The **Animations** tab edits the same sprite sheets as Sprite Sheets, but
+one animation frame at a time instead of the packed sheet. Switching
+between the two tabs keeps the sheet and the selected animation and frame;
+**Show on sheet** (above the canvas) and **Edit in Animations** (in the
+Sprite Sheets timeline) jump between them.
+
+- **Canvas** — paints the selected frame with every pixel tool, with the
+  same onion-skin controls as the Frame Editor. The pivot is drawn as a
+  crosshair; turn on **Pivot** and drag on the canvas to move it (snapped
+  to half pixels). An auto animation moves the pivot of all its frames
+  together.
+- **Animations panel** — **New…** (name and frame size, defaulting to the
+  project's frame size), **Duplicate** (auto animations) and **Delete**;
+  the list shows each animation's thumbnail and an auto/manual badge, and
+  rows reorder by dragging. Below it: name, Loop, base duration, and
+  **Auto-layout** / **Make manual** / **Canvas size…** (new frame size plus
+  a 3×3 anchor for where the existing pixels sit).
+- **Timeline** — every animation's frames in sheet order under a lane of
+  name tags, with a row per layer (and folder) below. Each cel shows a dot,
+  filled when that layer has pixels in that frame; clicking a cel selects
+  its frame and layer, and clicking a frame number selects its column.
+  The layer rows replace the Layers panel, which is hidden in this tab:
+  they show, rename, lock, add, delete and drag-nest layers and folders
+  like the panel does. The column-width slider in the
+  header widens the columns; past 40 px each cel shows the layer's pixels
+  and a composite row of whole frames appears. A 🔗 marks a frame used
+  again in the same animation.
+  - **Editing columns** — hover between two frame numbers for a **+** that
+    inserts a blank frame there (**Alt**+click: a copy of the frame to its
+    left); the **+** after an animation's last number appends. Drag a frame
+    number to reorder it within its animation, or **Ctrl**+drag to insert
+    a linked use of the frame. A manually laid-out animation is offered an
+    auto-layout first; declining still allows reordering.
+  - **Header** — First/Previous/Play/Next/Last, a playback-only Loop
+    toggle, **+ Frame**, **Duplicate** and **✕** for the selected column,
+    and its duration (or held frames, for an fps-based animation).
+  - **Keys** — with the timeline focused, **Left**/**Right** step through
+    columns and **Delete** removes the selected one.
+
+  Playback shows in the Preview panel.
+
 ## File format
 
 Projects save in one of two layouts, both built from the same
@@ -257,12 +301,13 @@ Projects save in one of two layouts, both built from the same
   `images/<sheetId>/<layerId>.png` entries as the unpacked folder.
 
 `project.json`'s `version` field is checked on load. The current save
-format is **version 3**; the loader accepts both versions **2 and 3** and
-migrates version 2 projects to the current in-memory format. Unsupported
-or corrupt files produce a clear error (e.g. `invalid project: unsupported
-version 99 (expected 3)`) rather than failing silently. Both accepted
-versions require a `settings` object with 9 numeric keys (validated on
-load — any missing or non-numeric key is rejected):
+format is **version 4**; the loader accepts versions **2, 3 and 4** and
+converts older projects to the current in-memory format (see "Older
+projects" below). Unsupported or corrupt files produce a clear error (e.g.
+`invalid project: unsupported version 99 (expected 4)`) rather than failing
+silently. Every accepted version requires a `settings` object with 9
+numeric keys (validated on load — any missing or non-numeric key is
+rejected):
 
 - `spriteSheetW`, `spriteSheetH` — default sprite sheet dimensions
 - `tileSheetW`, `tileSheetH` — default tile sheet dimensions
@@ -270,43 +315,45 @@ load — any missing or non-numeric key is rejected):
 - `frameW`, `frameH` — default frame size
 - `durationMs` — default animation frame duration
 
-An animation object may carry a project-internal `strip: true` flag
-marking it as an intact strip created via "New strip…" (enables the
-"Break apart" action). This flag round-trips through the project.json
-save/load cycle (`deserializeProject` restores it via `strip: a.strip ?? false`),
-but it is not part of either exported JSON shape below — the Frames JSON
-`animations[]` shape omits it and is unchanged.
+Version 4 also requires `sheetMaxWidth` (an integer in 1..4096, set as
+"Max layout width" in Project Settings): the width auto-laid-out
+animations wrap at. Older files take it from `spriteSheetW`.
 
-An intact strip may also carry a project-internal, optional `breaks` array —
-sorted indices into the animation's `frames` marking where a spatial
-SEGMENT boundary falls. Segments are purely a canvas/editing concept (each
-one can be moved, resized, or merged with another segment independently of
-the others); playback always uses the full `frames` order regardless of
-segmentation, so `breaks` has no effect on exported JSON or on how the
-animation plays. Like `strip`, it round-trips through project.json but is
-absent from both exported JSON shapes.
+### Animations, pinned frames and locked layers
 
-With the frame tool, the segment that contains the currently selected frame
-shows its editing chrome directly on the canvas whenever it is selected:
-"+" call-outs to insert a blank frame at any boundary, "✂" call-outs to
-split the segment into two (adding a `breaks` entry) at any interior
-boundary, and grips on both ends to grow/shrink the segment by whole
-frames. Only one segment's chrome is shown at a time — the one containing
-the selection — so overlapping or closely-spaced strips never have their
-chrome fight for the same screen space; click a different strip's member
-first to bring up its chrome instead. Dragging a segment moves every member
-together, metadata-only: like dragging a selection marquee, it never moves
-or clears pixels — frames are viewports onto the sheet. To move a frame or
-strip WITH its content, use the move tool (`V`): grabbing it starts a
-translate-only frame-float (live preview, frame-style chrome, no
-scale/rotation) and committing lands pixels and frame rects together.
-Dragging a segment end-to-end against another matching-size segment
-snaps and merges the two (across animations if needed, deleting the source
-animation if it becomes empty). Double-clicking any frame (strip
-member or not) opens the frame editor on it and selects its animation in
-the timeline. Once a strip is intact, its timeline cells can't be
-individually removed, reordered, or padded out with an arbitrary frame
-(that's what "Break apart" is for) — but durations remain editable per cell.
+Every animation is either **auto** or **manual** (`layout: 'auto' |
+'manual'`; an auto animation also carries its `cell` size):
+
+- An **auto** animation is laid out by the packer. Each auto animation gets
+  one band of rows, in `sheet.animations` order; a band is at most
+  `settings.sheetMaxWidth` wide, and the sheet grows downward when it runs
+  out of room. Adding, removing or reordering an auto animation's frames
+  moves their pixels with them, as one undo step.
+- A **manual** animation's frames are free rects you place yourself; it
+  references frames without owning their position.
+
+**Auto frames are pinned in Sprite Sheets.** They select and open in the
+frame editor, but don't move or resize on the sheet, and their X/Y/W/H
+fields in the Frames panel are disabled. **Make manual** (in the timeline)
+releases an auto animation's frames without moving a pixel.
+
+**Layers can be locked** (🔒 in the Layers panel, sprite sheets only). A
+locked layer still renders but takes no edits: paint tools, fills, floats,
+paste and filters skip it. Auto layout refuses to move pixels out of a
+locked layer and names the layer in its message. A layer's `locked` flag
+round-trips through project.json.
+
+`layout`, `cell` and `locked` are project-internal: neither exported JSON
+shape below carries them, and the Frames JSON `animations[]` shape is
+unchanged.
+
+### Older projects (versions 2 and 3)
+
+Version 2 and 3 projects convert on load. Accepted strips that are
+contiguous, equal-size and equal-pivot become auto animations; every other
+animation becomes manual. Animation-owned layer groups become plain groups.
+Pixels a strip used to hide go into a hidden `Covered by strips
+(converted)` folder, so the sheet looks exactly as it did before.
 
 ## Export
 

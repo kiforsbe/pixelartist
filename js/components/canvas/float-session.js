@@ -13,7 +13,7 @@ import { decodePng } from '../../core/pngcodec.js';
 import { exportPngBlob } from '../../platform/browser/project-io.js';
 import { isTypingTarget } from '../dom-utils.js';
 import { getEditorHost } from '../../host/runtime.js';
-import { activeSheet, activeLayer, activeLayerScope } from '../../host/document-helpers.js';
+import { activeSheet, activeLayer, activeEditableLayer, activeLayerScope, currentContextLayers } from '../../host/document-helpers.js';
 
 export { isTypingTarget };
 
@@ -59,11 +59,10 @@ function rectIntersect(a, b) {
 
 // region + frozen target for float/cut/copy: the view's selection clamped to
 // its target rect, or the whole target rect when there is no selection.
-// `anchor` is the point passed to getTargetRect() to resolve which segment
-// of an accepted strip applies (see docs/superpowers/specs/2026-07-18-
-// strip-area-constraint-design.md) -- callers with a more specific point
-// than the current selection (e.g. createFloat's frame-segment region) pass
-// it explicitly; otherwise this falls back to the selection's own corner.
+// `anchor` is the point passed to getTargetRect() to resolve which editable
+// rect applies -- callers with a more specific point than the current
+// selection (e.g. createFloat's frame region) pass it explicitly; otherwise
+// this falls back to the selection's own corner.
 function resolveRegion(viewApi, requireSelection = false, anchor = null) {
   const sel = viewApi.getSelection();
   const point = anchor ?? (sel ? { x: sel.x, y: sel.y } : null);
@@ -74,8 +73,11 @@ function resolveRegion(viewApi, requireSelection = false, anchor = null) {
   return region ? { region, target } : null;
 }
 
-function captureLayers(sheet, region, allLayers, explicitLayers = null) {
-  const layers = explicitLayers ?? (allLayers ? activeLayerScope() : (activeLayer() ? [activeLayer()] : []));
+// A read-only capture (copy) includes locked layers; one that clears its
+// source (cut, float) takes only the layers an edit may write.
+function captureLayers(sheet, region, allLayers, explicitLayers = null, readOnly = false) {
+  const single = readOnly ? activeLayer() : activeEditableLayer();
+  const layers = explicitLayers ?? (allLayers ? (readOnly ? currentContextLayers() : activeLayerScope()) : (single ? [single] : []));
   return layers.map(l => ({
     layerId: l.id,
     buffer: copyRegion(l.bitmap, region.x, region.y, region.w, region.h),
@@ -93,7 +95,7 @@ function flattenCaptured(captured, w, h) {
 }
 
 // region/frameIds: the move tool passes these when the drag starts on a frame
-// or strip segment (frame-float): the float cuts exactly that rect, and on
+// (frame-float): the float cuts exactly that rect, and on
 // commit the named frames' rects move with the pixels. Only honored when no
 // marquee selection exists — an explicit selection always wins.
 export function createFloat({ allLayers = false, region = null, frameIds = null, layers: explicitLayers = null, x = null, y = null } = {}) {
@@ -306,7 +308,7 @@ function clipboardCapture(allLayers, clearSource) {
   const rr = resolveRegion(viewApi, true); // cut/copy require a marquee
   if (!rr) return;
   const { region } = rr;
-  const captured = captureLayers(sheet, region, allLayers);
+  const captured = captureLayers(sheet, region, allLayers, null, !clearSource);
   if (!captured.length) return;
   clipboard = { srcRect: { ...region }, layers: captured, allLayers };
   writeSystemClipboardImage(captured, region.w, region.h);
@@ -380,7 +382,7 @@ export function pasteClipboard() {
   if (!viewApi || !sheet) return;
   const { srcRect } = clipboard;
   // Anchor the confinement lookup at the ORIGINAL copy position -- pasting
-  // back into the same strip segment it was copied from is the common case,
+  // back into the same frame it was copied from is the common case,
   // and more precise than falling back to the currently selected frame.
   const target = viewApi.getTargetRect(srcRect.x, srcRect.y);
   if (target.w <= 0 || target.h <= 0) return;
@@ -393,12 +395,13 @@ export function pasteClipboard() {
   if (clipboard.allLayers) {
     // Multi-layer copy: each buffer reattaches to its own original layer
     // when that layer still exists (preserves which pixels belonged to
-    // which layer); otherwise flatten the whole capture onto the active layer.
+    // which layer); otherwise flatten the whole capture onto the active
+    // layer. A layer locked since the copy takes no pixels.
     layers = clipboard.layers
-      .filter(e => layerIn(sheet, e.layerId))
+      .filter(e => { const l = layerIn(sheet, e.layerId); return l && !l.locked; })
       .map(e => ({ layerId: e.layerId, buffer: cloneBitmap(e.buffer) }));
     if (!layers.length) {
-      const al = activeLayer();
+      const al = activeEditableLayer();
       if (!al) return;
       layers = [{ layerId: al.id, buffer: flattenCaptured(clipboard.layers, srcRect.w, srcRect.h) }];
     }
@@ -407,7 +410,7 @@ export function pasteClipboard() {
     // NOW, not the one it was copied from -- reattaching to the original
     // layer regardless of the current selection meant copying from layer A,
     // selecting layer B, and pasting still landed back on A.
-    const al = activeLayer();
+    const al = activeEditableLayer();
     if (!al) return;
     layers = [{ layerId: al.id, buffer: cloneBitmap(clipboard.layers[0].buffer) }];
   }
@@ -448,7 +451,7 @@ async function pasteSystemImage() {
   commitFloatIfAny();
   const viewApi = activeView();
   const sheet = activeSheet();
-  const al = activeLayer();
+  const al = activeEditableLayer();
   if (!viewApi || !sheet || !al) return;
   const target = viewApi.getTargetRect();
   if (target.w <= 0 || target.h <= 0) return;
@@ -498,6 +501,7 @@ export function initFloatSession() {
       const selection = doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null;
       return [doc?.kind, doc?.id, view,
         view === 'sprites.frame' ? selection?.editingFrameId : null,
+        view === 'animations.canvas' ? selection?.frameId : null,
         view === 'tiles.tile' ? selection?.editingTileId : null,
         selection?.animationId, selection?.layerId];
     },

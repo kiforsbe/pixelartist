@@ -4,6 +4,7 @@ import { createProject, createSheet, createMap } from '../../js/core/model.js';
 import { spriteMode } from '../../js/modes/sprites/index.js';
 import { tileMode } from '../../js/modes/tiles/index.js';
 import { mapMode } from '../../js/modes/maps/index.js';
+import { animationsMode } from '../../js/modes/animations/index.js';
 import { runAction } from '../../js/features/shell/actions.js';
 
 export class Element {
@@ -41,7 +42,7 @@ export async function mountDocumentFixture() {
   globalThis.alert = message => { throw new Error(message); };
   const host = new EditorHost();
   setEditorHost(host);
-  for (const mode of [spriteMode, tileMode, mapMode]) host.registerMode(mode);
+  for (const mode of [spriteMode, animationsMode, tileMode, mapMode]) host.registerMode(mode);
   host.start('sprites');
   const workbench = { focusMap() {}, fitSheet() {} };
   const { mountDocumentController } = await import('../../js/features/project/document-controller.js');
