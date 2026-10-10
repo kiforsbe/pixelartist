@@ -60,3 +60,15 @@ export function directionGlyph(direction) {
 export function columnInRange(column, range) {
   return !!range && column.animationId === range.animationId && column.index >= range.from && column.index <= range.to;
 }
+
+// What dragging a tag's `edge` ('start' | 'end') by `delta` columns (right
+// positive) does to an animation of `length` entries: outward adds `count`
+// frames at entry `at`, inward cuts entries [from..to] -- never the last one.
+// -> { op: 'add', at, count } | { op: 'cut', from, to } | null.
+export function edgeDragPlan(length, edge, delta) {
+  const grow = edge === 'end' ? delta : -delta;
+  if (grow > 0) return { op: 'add', at: edge === 'end' ? length : 0, count: grow };
+  const cut = Math.min(-grow, length - 1);
+  if (cut <= 0) return null;
+  return edge === 'end' ? { op: 'cut', from: length - cut, to: length - 1 } : { op: 'cut', from: 0, to: cut - 1 };
+}

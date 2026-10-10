@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { timelineColumns, tagSpans, selectedColumn, celFilled, entryDurationLabel, directionGlyph, columnInRange } from '../js/modes/animations/application/timeline-model.js';
+import { timelineColumns, tagSpans, selectedColumn, celFilled, entryDurationLabel, directionGlyph, columnInRange, edgeDragPlan } from '../js/modes/animations/application/timeline-model.js';
 
 const sheet = {
   animations: [
@@ -71,4 +71,14 @@ test('columnInRange matches the range animation and its inclusive entries', () =
   assert.equal(columnInRange({ animationId: 'run', index: 0 }, range), false);
   assert.equal(columnInRange({ animationId: 'idle', index: 1 }, range), false);
   assert.equal(columnInRange({ animationId: 'run', index: 1 }, null), false);
+});
+test('dragging a tag end out adds frames there; in, cuts them, never below one frame', () => {
+  assert.deepEqual(edgeDragPlan(4, 'end', 2), { op: 'add', at: 4, count: 2 });
+  assert.deepEqual(edgeDragPlan(4, 'end', -2), { op: 'cut', from: 2, to: 3 });
+  assert.deepEqual(edgeDragPlan(4, 'end', -9), { op: 'cut', from: 1, to: 3 });
+  assert.deepEqual(edgeDragPlan(4, 'start', -3), { op: 'add', at: 0, count: 3 });
+  assert.deepEqual(edgeDragPlan(4, 'start', 1), { op: 'cut', from: 0, to: 0 });
+  assert.deepEqual(edgeDragPlan(4, 'start', 9), { op: 'cut', from: 0, to: 2 });
+  assert.equal(edgeDragPlan(4, 'end', 0), null);
+  assert.equal(edgeDragPlan(1, 'end', -1), null, 'a single frame cannot be cut');
 });

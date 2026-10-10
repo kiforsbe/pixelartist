@@ -95,7 +95,7 @@ function registerAnimationLayoutCommands(api) {
   const when = keys => keys.modeId === 'sprites' || keys.modeId === 'animations';
   const command = (id, execute) => api.commands.register({ id, when, execute });
   command('animations.new', (_c, { sheetId, name, w, h }) => newAutoAnimation(services(), sheetId, { name, w, h }));
-  command('animations.addFrame', (_c, { sheetId, animationId, at, copyOf }) => addAutoFrame(services(), sheetId, animationId, at, { copyOf }));
+  command('animations.addFrame', (_c, { sheetId, animationId, at, copyOf, count }) => addAutoFrame(services(), sheetId, animationId, at, { copyOf, count }));
   command('animations.linkFrame', (_c, { sheetId, animationId, at, frameId }) => linkAutoFrame(services(), sheetId, animationId, at, frameId));
   command('animations.deleteFrame', (_c, { sheetId, animationId, index }) => deleteAutoFrame(services(), sheetId, animationId, index));
   command('animations.moveFrame', (_c, { sheetId, animationId, from, to }) => moveAutoFrame(services(), sheetId, animationId, from, to));

@@ -838,3 +838,96 @@ test('Play settles a float first, so it is not drawn over the playing frames', a
   assert.equal(activeFloating(), null);
   byTitle('Stop').fire('click');
 });
+
+// ---- tag edges: drag an animation's start or end to cut or add frames ----
+
+const tagEdge = (i, edge) => dock.querySelectorAll('.anim-tag')[i].querySelectorAll('.anim-tag-edge').find(h => h.classList.contains(edge));
+// Presses tag `i`'s `edge` handle at x = 100 and moves it by `dx` (columns
+// are 24px wide); `release` drops it there.
+function dragEdge(i, edge, dx, { release = true, ...mods } = {}) {
+  tagEdge(i, edge).dispatch('pointerdown', { pointerId: 1, button: 0, clientX: 100, clientY: 5, ...mods });
+  window.dispatchEvent(pointerEvent('pointermove', { clientX: 100 + dx, clientY: 5, ...mods }));
+  if (release) window.dispatchEvent(pointerEvent('pointerup', { clientX: 100 + dx, clientY: 5, ...mods }));
+}
+
+test('dragging an animation\'s end inward cuts frames off the end as one undo step', async () => {
+  const { sheet, run, a, b } = await reset();
+  dragEdge(0, 'end', -24);
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id]);
+  assert.equal(sheet.frames.some(f => f.id === b.id), false, 'the cut auto frame is gone');
+  assert.equal(host.selections.get().frameId, a.id);
+  host.history.undo();
+  assert.deepEqual(run.frames.map(e => e.frameId), [a.id, b.id]);
+});
+
+test('dragging an animation\'s end outward adds blank frames, selected as a range', async () => {
+  const { run, a, b } = await reset();
+  dragEdge(0, 'end', 50); // two columns (rounded)
+  assert.equal(run.frames.length, 4);
+  assert.deepEqual(run.frames.slice(0, 2).map(e => e.frameId), [a.id, b.id]);
+  assert.equal(host.selections.get().entryIndex, 2);
+  await tick();
+  assert.deepEqual(nums().map(n => n.classList.contains('in-range')), [false, false, true, true, false]);
+  host.history.undo();
+  assert.equal(run.frames.length, 2, 'one undo step');
+});
+
+test('Alt when releasing an end adds copies of the edge frame', async () => {
+  const { sheet, run } = await reset();
+  const layer = sheetLayers(sheet)[0];
+  dragEdge(0, 'start', -24, { altKey: true }); // one copy of A before it
+  assert.equal(run.frames.length, 3);
+  const copy = sheet.frames.find(f => f.id === run.frames[0].frameId);
+  assert.deepEqual(getPixel(layer.bitmap, copy.x + 1, copy.y + 1), [255, 0, 0, 255], 'A\'s red pixel copied');
+});
+
+test('dragging an animation\'s start inward cuts frames off the start', async () => {
+  const { run, b } = await reset();
+  dragEdge(0, 'start', 24);
+  assert.deepEqual(run.frames.map(e => e.frameId), [b.id]);
+});
+
+test('an end drag never cuts the last frame', async () => {
+  const { jump } = await reset();
+  dragEdge(1, 'end', -72);
+  assert.equal(jump.frames.length, 1);
+  assert.equal(host.history.canUndo(), false);
+});
+
+test('a manual animation is cut without an offer; growing it offers the auto layout first', async () => {
+  const { sheet, run, a, b } = await reset();
+  run.layout = 'manual'; run.cell = null; host.history.execute({ do() {}, undo() {} }); host.history.clear();
+  await tick();
+  confirmAnswer = false;
+  try {
+    dragEdge(0, 'end', 24);
+    assert.equal(run.frames.length, 2, 'declining the offer adds nothing');
+    await tick();
+    dragEdge(0, 'end', -24);
+    assert.deepEqual(run.frames.map(e => e.frameId), [a.id]);
+    assert.equal(sheet.frames.some(f => f.id === b.id), true, 'a manual cut keeps the frame on the sheet');
+  } finally { confirmAnswer = true; }
+});
+
+test('while dragging, the tag previews its new length and marks the cut columns; Escape cancels', async () => {
+  const { run } = await reset();
+  dragEdge(0, 'end', -24, { release: false });
+  const tag = dock.querySelectorAll('.anim-tag')[0];
+  assert.equal(tag.style.width, '24px');
+  assert.deepEqual(nums().map(n => n.classList.contains('edge-cut')), [false, true, false]);
+  assert.equal(tag.querySelector('.anim-tag-delta').textContent, '−1');
+  window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape' }));
+  window.dispatchEvent(pointerEvent('pointerup', { clientX: 76, clientY: 5 }));
+  assert.equal(run.frames.length, 2, 'cancelled');
+  await tick();
+  assert.equal(dock.querySelectorAll('.anim-tag')[0].style.width, '48px');
+});
+
+test('a press on a tag edge does not select or rename the animation', async () => {
+  const { run } = await reset();
+  host.selections.patch({ animationId: null });
+  tagEdge(0, 'end').fire('click', {});
+  tagEdge(0, 'end').fire('dblclick', {});
+  assert.equal(dock.querySelectorAll('.anim-tag')[0].querySelector('input'), null);
+  assert.notEqual(host.selections.get().animationId, run.id);
+});

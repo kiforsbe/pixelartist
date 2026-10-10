@@ -193,3 +193,28 @@ test('growth is undone and redone byte-exactly', () => {
   assert.equal(ctx.sheet.height, 32);
   assert.deepEqual(ctx.bitmap().data, after);
 });
+
+test('addFrame with count inserts that many frames as one undo step; with copyOf each is a copy', () => {
+  const ctx = setup();
+  const anim = runWith(ctx, 1);
+  const first = entryFrame(ctx, anim, 0);
+  setPixel(ctx.bitmap(), 2, 2, RED);
+  const r = addAutoFrame(ctx.services, ctx.sheet.id, anim.id, 1, { count: 3, copyOf: first.id });
+  assert.equal(r.ok, true);
+  assert.equal(anim.frames.length, 4);
+  assert.deepEqual(r.frameIds, anim.frames.slice(1).map(e => e.frameId));
+  for (const id of r.frameIds) {
+    const f = ctx.sheet.frames.find(fr => fr.id === id);
+    assert.deepEqual(getPixel(ctx.bitmap(), f.x + 2, f.y + 2), RED);
+  }
+  assert.equal(ctx.selection().frameId, r.frameIds[0]);
+  ctx.services.history.undo();
+  assert.deepEqual([anim.frames.length, ctx.sheet.frames.length], [1, 1]);
+});
+
+test('addFrame refuses a count that is not a positive whole number', () => {
+  const ctx = setup();
+  const anim = runWith(ctx, 1);
+  for (const count of [0, -1, 1.5, 'x']) assert.equal(addAutoFrame(ctx.services, ctx.sheet.id, anim.id, 1, { count }).ok, false);
+  assert.equal(anim.frames.length, 1);
+});

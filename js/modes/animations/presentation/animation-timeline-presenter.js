@@ -38,7 +38,7 @@ import {
   nameClickPending, scheduleNameSelect, cancelNameClick,
 } from '../../../components/panels/layer-tree.js';
 import {
-  timelineColumns, tagSpans, selectedColumn, celFilled, entryDurationLabel, directionGlyph, columnInRange,
+  timelineColumns, tagSpans, selectedColumn, celFilled, entryDurationLabel, directionGlyph, columnInRange, edgeDragPlan,
 } from '../application/timeline-model.js';
 
 // Column width, px: the header's size control, remembered per browser.
@@ -691,7 +691,89 @@ export function mountAnimationTimeline(el) {
       const a = findAnim(span.animationId);
       if (a && !renaming) startTagRename(tag, a);
     });
+    for (const edge of ['start', 'end']) {
+      const handle = document.createElement('span');
+      handle.className = `anim-tag-edge ${edge}`;
+      handle.title = edge === 'end'
+        ? 'Drag to add frames at the end (Alt: copies of the last) or cut them off'
+        : 'Drag to add frames at the start (Alt: copies of the first) or cut them off';
+      handle.addEventListener('pointerdown', e => startEdgeDrag(e, tag, span.animationId, edge));
+      for (const type of ['click', 'dblclick']) handle.addEventListener(type, e => e.stopPropagation());
+      tag.appendChild(handle);
+    }
     return tag;
+  }
+
+  // ---- tag edges: dragging a tag's start or end cuts or adds frames ----
+  // The tag previews its new length (and the columns to cut) while the
+  // pointer moves; the release runs one command -- animations.deleteFrames
+  // inward, animations.addFrame with a count outward (blank, or with Alt
+  // copies of the edge frame; a manual animation is offered the auto layout
+  // first). Escape cancels. Renders wait while it runs.
+  let edgeDrag = null; // { animationId, edge, startX, length, tag, badge, end }
+  function startEdgeDrag(e, tag, animationId, edge) {
+    const anim = findAnim(animationId);
+    if (e.button !== 0 || renaming || edgeDrag || !anim) return;
+    e.preventDefault();
+    e.stopPropagation();
+    stopPlaying();
+    const badge = document.createElement('span');
+    badge.className = 'anim-tag-delta';
+    tag.appendChild(badge);
+    tag.classList.add('edge-dragging');
+    const onMove = ev => previewEdge(ev.clientX, ev.altKey);
+    const onUp = (ev) => { const d = edgeDrag; end(); commitEdge(d, ev.clientX, ev.altKey); };
+    const onCancel = () => { end(); panel.scheduleRender(); };
+    const onKey = (ev) => {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault(); ev.stopPropagation();
+      onCancel();
+    };
+    function end() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      edgeDrag = null;
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey, true);
+    edgeDrag = { animationId, edge, startX: e.clientX, length: anim.frames.length, tag, badge, end };
+  }
+  const edgePlanAt = (d, clientX) => edgeDragPlan(d.length, d.edge, Math.round((clientX - d.startX) / colW));
+  function previewEdge(clientX, alt) {
+    const d = edgeDrag;
+    if (!d) return;
+    const plan = edgePlanAt(d, clientX);
+    const cut = plan?.op === 'cut' ? plan.to - plan.from + 1 : 0;
+    const length = d.length + (plan?.op === 'add' ? plan.count : 0) - cut;
+    d.tag.style.width = `${length * colW}px`;
+    d.tag.style.marginLeft = d.edge === 'start' && length !== d.length ? `${(d.length - length) * colW}px` : '';
+    d.badge.textContent = !plan ? '' : plan.op === 'cut' ? `−${cut}` : `+${plan.count}${alt ? ' copies' : ''}`;
+    for (const num of numsRow.children) {
+      const column = hits.get(num)?.column;
+      num.classList.toggle('edge-cut', !!column && plan?.op === 'cut'
+        && columnInRange(column, { animationId: d.animationId, from: plan.from, to: plan.to }));
+    }
+  }
+  function commitEdge(d, clientX, alt) {
+    const s = sheet(), anim = d && findAnim(d.animationId);
+    const plan = anim && anim.frames.length === d.length ? edgePlanAt(d, clientX) : null;
+    if (!s || !plan) { panel.scheduleRender(); return; }
+    if (plan.op === 'cut') {
+      const result = dispatchLayout('animations.deleteFrames', { sheetId: s.id, animationId: anim.id, from: plan.from, to: plan.to });
+      const a = findAnim(anim.id);
+      if (result?.ok && a) { range = null; pickEntry(a, d.edge === 'end' ? a.frames.length - 1 : 0); }
+    } else {
+      const result = withAuto(anim, (sh, a) => dispatchLayout('animations.addFrame', {
+        sheetId: sh.id, animationId: a.id, at: plan.at, count: plan.count,
+        copyOf: alt ? a.frames[d.edge === 'end' ? a.frames.length - 1 : 0].frameId : null,
+      }));
+      if (result) setRange(findAnim(anim.id), plan.at, plan.at + plan.count - 1);
+    }
+    panel.scheduleRender();
   }
 
   // Inline rename of a tag (sprites.renameAnimation, one undo step). Renders
@@ -979,7 +1061,7 @@ export function mountAnimationTimeline(el) {
   // window ends would lose a following double-click (rename). The window's
   // end renders.
   function renderUnlessNameClickPending() {
-    if (!nameClickPending() && !renaming) render();
+    if (!nameClickPending() && !renaming && !edgeDrag) render();
   }
 
   const panel = mountStorePanel(host.store, [

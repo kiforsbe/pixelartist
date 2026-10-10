@@ -162,20 +162,29 @@ export function newAutoAnimation(services, sheetId, { name, w, h }) {
   return r.ok ? { ...r, ...ids } : r;
 }
 
-export function addAutoFrame(services, sheetId, animationId, at, { copyOf = null } = {}) {
-  let frameId = null;
+// Inserts `count` (default 1) frames at entry `at` -- blank, or copies of
+// copyOf -- as one step. -> { ok, frameId, frameIds }: the first new frame
+// (selected) and all of them in order.
+export function addAutoFrame(services, sheetId, animationId, at, { copyOf = null, count = 1 } = {}) {
+  if (!Number.isInteger(count) || count < 1) return { ok: false, reason: 'A frame count must be a positive whole number' };
+  let frameIds = [];
   const r = runLayoutCommand(services, sheetId, copyOf ? 'duplicate frame' : 'add frame', sheet => {
     const anim = autoIn(sheet, animationId);
     if (!anim) return { ok: false, reason: NOT_AUTO };
     const source = copyOf ? sheet.frames.find(f => f.id === copyOf) : null;
     if (copyOf && (!source || !anim.frames.some(e => e.frameId === copyOf)))
       return { ok: false, reason: 'Can only copy a frame of this animation' };
-    const frame = addFrame(sheet, { name: uniqueFrameName(sheet, anim.name), x: 0, y: 0, w: anim.cell.w, h: anim.cell.h, ...sharedPivot(sheet, anim) });
-    anim.frames.splice(Math.max(0, Math.min(anim.frames.length, at)), 0, { frameId: frame.id, duration: null, step: null });
-    frameId = frame.id;
-    return { content: new Map([[frame.id, source ? frameContent(sheet, source) : null]]), selection: { frameId: frame.id } };
+    const content = new Map();
+    frameIds = [];
+    for (let i = 0; i < count; i++) {
+      const frame = addFrame(sheet, { name: uniqueFrameName(sheet, anim.name), x: 0, y: 0, w: anim.cell.w, h: anim.cell.h, ...sharedPivot(sheet, anim) });
+      content.set(frame.id, source ? frameContent(sheet, source) : null);
+      frameIds.push(frame.id);
+    }
+    anim.frames.splice(Math.max(0, Math.min(anim.frames.length, at)), 0, ...frameIds.map(frameId => ({ frameId, duration: null, step: null })));
+    return { content, selection: { frameId: frameIds[0] } };
   });
-  return r.ok ? { ...r, frameId } : r;
+  return r.ok ? { ...r, frameId: frameIds[0], frameIds } : r;
 }
 
 export function linkAutoFrame(services, sheetId, animationId, at, frameId) {

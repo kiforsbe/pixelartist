@@ -295,6 +295,10 @@ Sprite Sheets timeline) jump between them.
     left); the **+** after an animation's last number appends. Drag a frame
     number (or the selected range) to move it within its animation;
     **Alt**+drag copies, **Ctrl**+drag inserts a linked use of the frame.
+    Drag either end of a tag to resize the animation: inward cuts frames
+    off that end, outward adds blank frames there (**Alt** on release: copies
+    of the edge frame), as one undo step; Escape cancels. An animation keeps
+    at least one frame.
     Double-click a frame number to edit its duration. A manually laid-out
     animation is offered an auto-layout before anything that creates
     frames; declining still allows reordering.

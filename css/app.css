@@ -427,8 +427,19 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .anim-tl-tags { top: 0; height: 24px; box-sizing: border-box; padding-top: 4px; }
 .anim-tl-nums { top: 24px; }
 .anim-tag { flex: none; box-sizing: border-box; padding: 1px 6px; margin-bottom: 2px; font-size: 11px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; background: var(--bg3); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
+  text-overflow: ellipsis; white-space: nowrap; background: var(--bg3); border: 1px solid var(--border); border-radius: 3px; cursor: pointer;
+  position: relative; }
 .anim-tag:hover { border-color: var(--accent); }
+/* Grab handles on a tag's ends: drag to cut or add frames. */
+.anim-tag-edge { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; z-index: 1; }
+.anim-tag-edge.start { left: 0; }
+.anim-tag-edge.end { right: 0; }
+.anim-tag-edge:hover, .anim-tag.edge-dragging .anim-tag-edge { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.anim-tag.edge-dragging { overflow: visible; z-index: 2; border-color: var(--accent); }
+.anim-tag-delta:empty { display: none; }
+.anim-tag-delta { position: absolute; left: 100%; top: -1px; margin-left: 4px; padding: 0 4px; font-size: 11px; color: var(--fg);
+  background: var(--bg3); border: 1px solid var(--accent); border-radius: 3px; pointer-events: none; }
+.anim-tl-num.edge-cut { opacity: 0.35; text-decoration: line-through; }
 .anim-tag-add { flex: none; box-sizing: border-box; height: 18px; min-width: 18px; margin: 0 0 2px 4px; padding: 0 4px; font-size: 12px;
   line-height: 1; color: var(--fg); background: var(--bg3); border: 1px dashed var(--border); border-radius: 3px; cursor: pointer; }
 .anim-tag-add:hover { border-color: var(--accent); border-style: solid; }

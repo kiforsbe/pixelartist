@@ -290,3 +290,10 @@ Decided while building (see `docs/superpowers/plans/2026-10-10-timeline-dock-dra
     the playing frame; the Animations canvas shows it (no onion ghosts) and
     keeps its zoom across same-size frames. Play settles a float first; a
     press on the canvas stops on the shown frame and selects it.
+12. **Follow-up: tag edges.** Each tag has a grab handle on both ends.
+    Dragging one inward cuts entries off that end (`animations.deleteFrames`,
+    never the last entry); outward adds blank frames there
+    (`animations.addFrame`, which now takes a `count`), or copies of the
+    edge frame with Alt on release. A manual animation is cut as an entry
+    edit, and is offered the auto-layout before growing. The plan is the
+    pure `edgeDragPlan` in `timeline-model.js`.
