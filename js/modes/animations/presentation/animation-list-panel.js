@@ -1,8 +1,9 @@
 // js/modes/animations/presentation/animation-list-panel.js
 // The Animations workbench's Animations panel: the active sheet's
 // animations (thumbnail bordered in the tag colour, name, layout badge; click
-// to select, drag to reorder), then New… / Duplicate / Delete / Sprite size…
-// (every frame on a sprite sheet is one size; its form adds a 3×3 anchor).
+// to select, drag to reorder), then one row of icon command buttons -- New,
+// Duplicate, Delete, Sprite size (every frame on a sprite sheet is one size;
+// its form adds a 3×3 anchor).
 // The selected animation's details are the separate
 // Animation panel (animation-inspector-panel.js). Layout changes go through
 // dispatchLayout (settles a float, explains a refusal).
@@ -17,7 +18,7 @@ import { drawFit } from '../../../components/canvas/draw-fit.js';
 import { dispatchLayout } from '../../../components/layout-dispatch.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
 import { attachDragReorder, slotToFinalIndex } from '../../../components/drag-reorder.js';
-import { sheetDocument, textButton, numberInput, labelled } from './panel-controls.js';
+import { sheetDocument, textButton, iconButton, numberInput, labelled } from './panel-controls.js';
 
 const THUMB = 32;
 const ANCHORS = ['nw', 'n', 'ne', 'w', 'c', 'e', 'sw', 's', 'se'];
@@ -91,7 +92,7 @@ export function mountAnimationListPanel(el) {
 
   // ---- toolbar + New form ----
   const toolbar = document.createElement('div');
-  toolbar.className = 'row anim-toolbar';
+  toolbar.className = 'row layer-actions anim-toolbar';
   const newForm = document.createElement('div');
   newForm.className = 'anim-form anim-new-form';
   newForm.hidden = true;
@@ -108,21 +109,21 @@ export function mountAnimationListPanel(el) {
     }
   }), textButton('Cancel', '', () => { newForm.hidden = true; }));
 
-  const btnNew = textButton('New…', 'New animation, one blank frame of the sprite size', () => {
+  const btnNew = iconButton('➕', 'New animation (one blank frame of the sprite size)', () => {
     newName.value = '';
     newForm.hidden = false;
   });
-  const btnDuplicate = textButton('Duplicate', 'Duplicate the selected animation and its frames', () => {
+  const btnDuplicate = iconButton('⧉', 'Duplicate the selected animation and its frames', () => {
     const s = sheet(), anim = selectedAnim();
     if (s && anim) dispatchLayout('animations.duplicate', { sheetId: s.id, animationId: anim.id });
   });
-  const btnDelete = textButton('Delete', 'Delete the selected animation', () => {
+  const btnDelete = iconButton('🗑', 'Delete the selected animation', () => {
     const s = sheet(), anim = selectedAnim();
     if (!s || !anim) return;
     const message = anim.layout === 'auto' ? `Delete animation "${anim.name}" and its frames?` : `Delete animation "${anim.name}"?`;
     if (confirmOrAuto(message)) dispatchLayout('animations.delete', { sheetId: s.id, animationId: anim.id });
   });
-  const btnSpriteSize = textButton('Sprite size…', 'Resize every frame on this sheet', () => {
+  const btnSpriteSize = iconButton('📐', 'Sprite size: resize every frame on this sheet', () => {
     const size = sheet()?.spriteSize;
     if (size) openSizeForm(size);
   });
@@ -179,14 +180,14 @@ export function mountAnimationListPanel(el) {
     list.innerHTML = '';
     s?.animations.forEach(a => list.appendChild(buildRow(s, a, a === anim)));
     hint.hidden = !!s?.animations.length;
-    hint.textContent = s ? 'No animations yet — click New….' : 'No sprite sheet.';
+    hint.textContent = s ? 'No animations yet — click ➕ below.' : 'No sprite sheet.';
     btnDuplicate.disabled = anim?.layout !== 'auto';
     btnDuplicate.title = anim && anim.layout !== 'auto' ? 'Auto-layout this animation first' : 'Duplicate the selected animation and its frames';
     btnDelete.disabled = !anim;
     btnNew.disabled = !s;
     if (!s) newForm.hidden = true;
     btnSpriteSize.disabled = !s?.spriteSize;
-    btnSpriteSize.title = s?.spriteSize ? `Every frame on this sheet is ${s.spriteSize.w}×${s.spriteSize.h} — resize them all` : 'Resize every frame on this sheet';
+    btnSpriteSize.title = s?.spriteSize ? `Sprite size ${s.spriteSize.w}×${s.spriteSize.h}: resize every frame on this sheet` : 'Sprite size: resize every frame on this sheet';
   }
 
   const panel = mountStorePanel(host.store, [

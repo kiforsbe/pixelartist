@@ -64,7 +64,7 @@ test('clicking a row selects the animation and its first frame', async () => {
 
 test('New asks only for a name and makes an animation of the sprite size', async () => {
   const { sheet } = await reset();
-  button('New…').fire('click');
+  button('➕').fire('click');
   const form = panel.querySelector('.anim-new-form');
   assert.equal(form.hidden, false);
   const inputs = form.querySelectorAll('input');
@@ -90,7 +90,7 @@ test('Auto-layout of frames whose pivots differ offers to align them instead of 
 
 test('Sprite size… re-frames the whole sheet with the chosen anchor, without a selected animation', async () => {
   const { sheet, run, idle } = await reset();
-  button('Sprite size…').fire('click'); await tick();
+  button('📐').fire('click'); await tick();
   const form = panel.querySelector('.anim-size-form');
   assert.equal(form.hidden, false);
   const [w, h] = form.querySelectorAll('input');
@@ -114,14 +114,14 @@ test('Make manual turns an auto animation manual', async () => {
 test('Delete removes the selected animation', async () => {
   const { run, sheet } = await reset();
   host.selections.patch({ animationId: run.id }); await tick();
-  button('Delete').fire('click');
+  button('🗑').fire('click');
   assert.equal(sheet.animations.some(a => a.id === run.id), false);
 });
 
 test('Duplicate copies the selected auto animation', async () => {
   const { run, sheet } = await reset();
   host.selections.patch({ animationId: run.id }); await tick();
-  button('Duplicate').fire('click');
+  button('⧉').fire('click');
   assert.equal(sheet.animations.length, 3);
 });
 
@@ -224,14 +224,14 @@ test('a coloured animation borders its row thumbnail in that colour', async () =
 test('New… is disabled without a sprite sheet', async () => {
   await reset();
   host.setProject(createProject('Empty')); await tick();
-  assert.equal(button('New…').disabled, true);
+  assert.equal(button('➕').disabled, true);
   await reset();
-  assert.equal(button('New…').disabled, false);
+  assert.equal(button('➕').disabled, false);
 });
 
 test('a fractional size is refused, not truncated', async () => {
   const { sheet } = await reset();
-  button('Sprite size…').fire('click');
+  button('📐').fire('click');
   const [w, h] = panel.querySelector('.anim-size-form').querySelectorAll('input');
   w.value = '12.9'; h.value = '10';
   button('Apply').fire('click');
@@ -239,13 +239,13 @@ test('a fractional size is refused, not truncated', async () => {
   assert.equal(alerts.length, 1, 'the refusal says why');
 });
 
-test('the toolbar, with Sprite size…, sits below the list', async () => {
+test('one row of icon command buttons sits below the list', async () => {
   await reset();
   const kids = panel.children.map(c => c.className);
   const at = cls => kids.findIndex(k => k.split(' ').includes(cls));
   assert.ok(at('anim-list') < at('anim-toolbar'));
-  assert.deepEqual(panel.querySelector('.anim-toolbar').querySelectorAll('button').map(b => b.textContent), ['New…', 'Duplicate', 'Delete', 'Sprite size…']);
-  assert.match(button('Sprite size…').title, /8×8/);
+  assert.deepEqual(panel.querySelector('.anim-toolbar').querySelectorAll('button').map(b => [b.textContent, b.className]), [['➕', 'btn-icon-md'], ['⧉', 'btn-icon-md'], ['🗑', 'btn-icon-md'], ['📐', 'btn-icon-md']]);
+  assert.match(button('📐').title, /8×8/);
   assert.equal(panel.querySelector('.anim-details'), null, 'the details are the separate Animation panel');
 });
 

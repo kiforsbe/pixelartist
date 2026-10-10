@@ -19,6 +19,14 @@ export function textButton(text, title, onClick) {
   return button;
 }
 
+// A panel command button: a pictogram with its name as the tooltip, like the
+// Layers panel's (css .btn-icon-md, in a `row layer-actions` row).
+export function iconButton(icon, title, onClick) {
+  const button = textButton(icon, title, onClick);
+  button.className = 'btn-icon-md';
+  return button;
+}
+
 export function numberInput(title) {
   const input = document.createElement('input');
   input.type = 'number'; input.min = '1'; input.title = title;
