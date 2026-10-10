@@ -529,3 +529,9 @@ test('clicking a frame number selects its column', async () => {
   assert.equal(host.selections.get().frameId, b.id);
   assert.equal(host.selections.get().entryIndex, 1);
 });
+
+test('the Animations timeline dock keeps the shared dock resizer first across re-renders', async () => {
+  await reset(); await expand();
+  assert.equal(dock.children[0].classList.contains('dock-resizer'), true);
+  assert.equal(dock.querySelectorAll('.dock-resizer').length, 1);
+});

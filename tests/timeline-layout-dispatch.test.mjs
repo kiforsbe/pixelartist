@@ -88,3 +88,12 @@ test('Edit in Animations keeps a selected frame that the animation uses', async 
   const sel = host.selections.get();
   assert.equal(sel.frameId, b.id); assert.equal(sel.entryIndex, 1);
 });
+
+test('the Sprites timeline dock gets the shared dock resizer as its first child', async () => {
+  await reset();
+  const handle = timeline.children[0];
+  assert.equal(handle.classList.contains('dock-resizer'), true);
+  assert.equal(timeline.querySelectorAll('.timeline-resize-handle').length, 0, 'the old inline handle is gone');
+  handle.fire('keydown', { key: 'ArrowUp', preventDefault() {} });
+  assert.match(timeline.style.height, /^\d+px$/);
+});

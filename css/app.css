@@ -393,10 +393,13 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 #timeline-dock, #anim-timeline-dock { grid-column: 2; grid-row: 2; height: 140px; background: var(--bg2); border-top: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden; }
 #timeline-dock[hidden], #anim-timeline-dock[hidden] { display: none; }
-.timeline-resize-handle { flex: none; height: 5px; margin-top: -1px; cursor: ns-resize;
+/* Shared bottom-dock resize handle (js/components/dock-resizer.js). */
+.dock-resizer { flex: none; height: 5px; margin-top: -1px; cursor: ns-resize;
   touch-action: none; background: transparent; }
-.timeline-resize-handle:hover, .timeline-resize-handle.dragging { background: var(--accent); }
-.timeline-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.dock-resizer:hover, .dock-resizer.dragging, .dock-resizer:focus-visible { background: var(--accent); outline: none; }
+/* min-height: 0 lets the strip / grid inside shrink and scroll instead of
+   overflowing the dock and clipping the lower layer rows. */
+.timeline-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .timeline-header { display: flex; align-items: center; gap: 6px; padding: 4px 8px;
   border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }
 .timeline-header select { width: auto; }
@@ -417,8 +420,16 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .timeline-remove { font-size: 10px; padding: 1px 4px; flex: none; }
 
 /* animations timeline: tags, frame numbers, cells -- one 40px column each */
-.anim-tl-grid { flex: 1; overflow: auto; padding: 4px 8px; }
+.anim-tl-grid { flex: 1; min-height: 0; overflow: auto; padding: 0 8px 4px; }
 .anim-tl-row { display: flex; }
+/* The tag and frame-number rows stay put while the layer rows scroll under
+   them: opaque, above the cels and the sticky layer heads (z-index 1) and
+   the cells-row corner (z-index 3); their own sticky corners stack inside
+   them. The tag row has a fixed height (the grid's top padding moved into
+   it, so nothing peeks above it) for the numbers row to stick below. */
+.anim-tl-tags, .anim-tl-nums { position: sticky; z-index: 4; background: var(--bg2); }
+.anim-tl-tags { top: 0; height: 24px; box-sizing: border-box; padding-top: 4px; }
+.anim-tl-nums { top: 24px; }
 .anim-tag { flex: none; box-sizing: border-box; padding: 1px 6px; margin-bottom: 2px; font-size: 11px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; background: var(--bg3); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; }
 .anim-tag:hover { border-color: var(--accent); }

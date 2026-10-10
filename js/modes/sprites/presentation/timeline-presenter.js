@@ -27,6 +27,7 @@ import { createRasterCache } from '../../../components/canvas/raster-cache.js';
 import { drawFit } from '../../../components/canvas/draw-fit.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
 import { buildFrameDurationInput } from '../../../components/panels/frame-duration-input.js';
+import { createDockResizer, workspaceDockMax, migratePreference } from '../../../components/dock-resizer.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly -- this file lives under presentation/, and
@@ -52,8 +53,9 @@ const THUMB_MIN = 32, THUMB_MAX = 200;
 // Approximate (not measured live) since the controls row's own height
 // depends on THUMB_SIZE only through the cell's width, not its height.
 const THUMB_CHROME = 44;
-const DOCK_MIN = 100, DOCK_MAX = 400;
-const DOCK_HEIGHT_KEY = 'pixelartist.timelineDockHeight';
+const DOCK_MIN = 100;
+const DOCK_HEIGHT_KEY = 'dock.sprites.timeline.height';
+const LEGACY_DOCK_HEIGHT_KEY = 'timelineDockHeight'; // the old inline handle's key
 const SPEEDS = [0.25, 0.5, 1, 2];
 
 // ------------------------------------------------------------- public API
@@ -103,42 +105,23 @@ export function mountTimeline(el) {
   main.append(header, strip);
 
   // ---- dock resize (height only -- width already spans the fixed gap
-  // between the tool palette and side panels) ----
-  const resizeHandle = document.createElement('div');
-  resizeHandle.className = 'timeline-resize-handle';
-  resizeHandle.title = 'Drag to resize the timeline panel';
-
-  const savedHeight = parseInt(localStorage.getItem(DOCK_HEIGHT_KEY), 10);
-  if (Number.isFinite(savedHeight)) {
-    el.style.height = Math.max(DOCK_MIN, Math.min(DOCK_MAX, savedHeight)) + 'px';
-  }
-
-  let dragStartY = 0, dragStartH = 0, dragging = false, resizeRaf = null;
-  resizeHandle.addEventListener('pointerdown', (e) => {
-    dragging = true;
-    dragStartY = e.clientY;
-    dragStartH = el.getBoundingClientRect().height;
-    resizeHandle.classList.add('dragging');
-    resizeHandle.setPointerCapture(e.pointerId);
-    e.preventDefault();
+  // between the tool palette and side panels). The size from the old inline
+  // handle is carried over once as this dock's starting size. A fit sizes
+  // the strip for the largest thumbnails. ----
+  const prefs = getEditorHost().preferences;
+  migratePreference(prefs, LEGACY_DOCK_HEIGHT_KEY, DOCK_HEIGHT_KEY);
+  let resizeRaf = null;
+  const resizer = createDockResizer({
+    target: el, edge: 'top', min: DOCK_MIN, max: () => workspaceDockMax(el),
+    measureContent: () => (resizer.element.offsetHeight || 0) + (header.offsetHeight || 0) + THUMB_MAX + THUMB_CHROME,
+    prefs, prefKey: DOCK_HEIGHT_KEY, label: 'Resize the timeline panel',
+    onResize: () => {
+      if (resizeRaf != null) return;
+      resizeRaf = requestAnimationFrame(() => { resizeRaf = null; render(); });
+    },
   });
-  resizeHandle.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const next = Math.max(DOCK_MIN, Math.min(DOCK_MAX, dragStartH + (dragStartY - e.clientY)));
-    el.style.height = next + 'px';
-    if (resizeRaf != null) return;
-    resizeRaf = requestAnimationFrame(() => { resizeRaf = null; render(); });
-  });
-  function endResizeDrag() {
-    if (!dragging) return;
-    dragging = false;
-    resizeHandle.classList.remove('dragging');
-    localStorage.setItem(DOCK_HEIGHT_KEY, el.getBoundingClientRect().height.toFixed(0));
-  }
-  resizeHandle.addEventListener('pointerup', endResizeDrag);
-  resizeHandle.addEventListener('pointercancel', endResizeDrag);
 
-  el.append(resizeHandle, main);
+  el.append(resizer.element, main);
 
   // Derives THUMB_SIZE from however much vertical room the strip actually
   // has right now -- called at the top of every render() so both the
@@ -459,5 +442,5 @@ export function mountTimeline(el) {
     s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
   ], render, { onDispose: stopPlaying });
   const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
-  return { ...panel, dispose() { disposeHistory(); panel.dispose(); } };
+  return { ...panel, dispose() { disposeHistory(); resizer.dispose(); panel.dispose(); } };
 }

@@ -25,6 +25,7 @@ import { dispatchLayout } from '../../../components/layout-dispatch.js';
 import { setPreviewBitmap } from '../../../components/panels/preview-panel.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
 import { buildFrameDurationInput } from '../../../components/panels/frame-duration-input.js';
+import { createDockResizer, workspaceDockMax } from '../../../components/dock-resizer.js';
 import { layerTreeRows, buildLayerRow, attachLayerTreeDrop, selectTreeNode, addSheetLayer, addSheetGroup, deleteSheetNode, nameClickPending } from '../../../components/panels/layer-tree.js';
 import { timelineColumns, tagSpans, selectedColumn, celFilled } from '../application/timeline-model.js';
 
@@ -124,7 +125,20 @@ export function mountAnimationTimeline(el) {
   const main = document.createElement('div');
   main.className = 'timeline-main';
   main.append(header, grid);
-  el.append(main);
+
+  // ---- dock resize: mounted once beside .timeline-main, which render()
+  // never clears. A fit shows every row: the grid's rows (not its
+  // scrollHeight, which never drops below a tall dock's grid) plus its
+  // bottom padding (4px, css/app.css) and horizontal scrollbar. ----
+  const gridChrome = () => 4 + Math.max(0, (grid.offsetHeight || 0) - (grid.clientHeight || 0));
+  const resizer = createDockResizer({
+    target: el, edge: 'top', min: 100, max: () => workspaceDockMax(el),
+    measureContent: () => (resizer.element.offsetHeight || 0) + (header.offsetHeight || 0)
+      + Array.from(grid.children).reduce((sum, row) => sum + (row.hidden ? 0 : row.offsetHeight || 0), 0)
+      + gridChrome() + Math.max(0, (el.offsetHeight || 0) - (el.clientHeight || 0)),
+    prefs: host.preferences, prefKey: 'dock.animations.timeline.height', label: 'Resize the timeline panel',
+  });
+  el.append(resizer.element, main);
 
   // ---- state ----
   const sheet = () => activeSheet('sprite');
@@ -579,5 +593,5 @@ export function mountAnimationTimeline(el) {
   ], renderUnlessNameClickPending, { onDispose: stopPlaying });
   const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
   const disposePixels = host.store.subscribe(s => s.workspace.pixelRevision, refreshPixels);
-  return { ...panel, dispose() { disposeHistory(); disposePixels(); panel.dispose(); } };
+  return { ...panel, dispose() { disposeHistory(); disposePixels(); resizer.dispose(); panel.dispose(); } };
 }
