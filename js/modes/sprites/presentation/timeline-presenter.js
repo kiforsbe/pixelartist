@@ -199,6 +199,7 @@ export function mountTimeline(el) {
     if (!anim || !anim.frames.length) return;
     position = Math.max(0, Math.min(anim.frames.length - 1, index));
     acc = 0;
+    cursor = null;
     renderPreview();
     updatePlayheadHighlight();
   }
@@ -228,6 +229,8 @@ export function mountTimeline(el) {
     btnPlay.textContent = '⏸';
     lastTs = null;
     acc = 0;
+    // A finished one-shot pass leaves the cursor at the end of the play order.
+    cursor = null;
     rafId = requestAnimationFrame(tick);
   }
 
@@ -238,7 +241,7 @@ export function mountTimeline(el) {
   // ---- header controls ----
   animSelect.addEventListener('change', () => {
     stopPlaying();
-    position = 0; acc = 0;
+    position = 0; acc = 0; cursor = null;
     setSelection({ animationId: animSelect.value || null });
     render();
   });

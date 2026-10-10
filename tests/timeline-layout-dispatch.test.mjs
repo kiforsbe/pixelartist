@@ -11,7 +11,7 @@ import { mountFrameEditor } from '../js/modes/sprites/presentation/frame-editor-
 import { mountTimeline } from '../js/modes/sprites/presentation/timeline-presenter.js';
 import { initFloatSession, createFloat, activeFloating } from '../js/components/canvas/float-session.js';
 
-const { Element } = installSpriteContextDom();
+const { Element, stepAnimationFrames } = installSpriteContextDom();
 const alerts = [];
 globalThis.alert = message => alerts.push(message);
 const host = new EditorHost();
@@ -71,6 +71,25 @@ test('removing an auto entry stops playback first', async () => {
   assert.notEqual(play.textContent, '▶', 'playing');
   removeButtons()[0].fire('click');
   assert.equal(play.textContent, '▶');
+});
+
+test('a finished one-shot ping-pong plays again from the start when Play is pressed again', async () => {
+  const { anim } = await reset();
+  anim.direction = 'pingpong';
+  const loop = timeline.querySelectorAll('input').find(i => i.type === 'checkbox');
+  loop.checked = false; loop.fire('change');
+  const play = timeline.querySelectorAll('button').find(b => b.textContent === '▶');
+  const playhead = () => timeline.querySelectorAll('.timeline-cell').findIndex(c => c.classList.contains('playhead'));
+  play.fire('click');
+  for (let t = 0; t <= 400 && play.textContent !== '▶'; t += 50) stepAnimationFrames(t);
+  assert.equal(play.textContent, '▶', 'the one-shot pass ended');
+  assert.equal(playhead(), 0, 'back on the first frame');
+  play.fire('click');
+  stepAnimationFrames(1000);
+  stepAnimationFrames(1150);
+  assert.notEqual(play.textContent, '▶', 'still playing after replay');
+  assert.equal(playhead(), 1, 'the replay advanced to the second frame');
+  play.fire('click');
 });
 
 test('Edit in Animations opens the Animations workbench on the selected animation', async () => {
