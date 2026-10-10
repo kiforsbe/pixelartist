@@ -16,7 +16,7 @@ import {
 } from './application/commands/animation-layout-commands.js';
 import {
   moveFrames as moveAnimationFrames, copyFrames, duplicateFrames, deleteFrames, reverseFrames, setFrameDurations,
-  unlinkFrame, clearCel,
+  unlinkFrame, clearCel, splitFrames,
 } from './application/commands/animation-range-commands.js';
 import { isPinnedFrame } from '../../domain/sprites/auto-layout.js';
 import { setFrameField, setFramePivot } from './application/commands/frame-metadata-commands.js';
@@ -121,6 +121,7 @@ function registerAnimationLayoutCommands(api) {
   command('animations.reverseFrames', (_c, { sheetId, animationId, from, to }) => reverseFrames(services(), sheetId, animationId, from, to));
   command('animations.setFrameDurations', (_c, { sheetId, animationId, from, to, duration, step }) => setFrameDurations(services(), sheetId, animationId, from, to, { duration, step }));
   command('animations.unlinkFrame', (_c, { sheetId, animationId, index }) => unlinkFrame(services(), sheetId, animationId, index));
+  command('animations.splitFrames', (_c, { sheetId, animationId, from, to, name }) => splitFrames(services(), sheetId, animationId, from, to, { name }));
   command('animations.clearCel', (_c, { sheetId, frameId, layerId }) => clearCel(services(), sheetId, frameId, layerId));
 }
 

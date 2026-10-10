@@ -431,7 +431,7 @@ const menuLabels = root => menuItems(root).map(labelOf);
 const menuItem = (label, root) => menuItems(root).find(b => labelOf(b) === label);
 const rightClick = el => el.dispatch('contextmenu', { clientX: 10, clientY: 10 });
 const layerCels = () => dock.querySelectorAll('.anim-tl-layer')[0].querySelectorAll('.anim-tl-cel');
-const FRAME_ITEMS = ['Frame Duration…', 'Insert Blank Frame', 'Duplicate Frames', 'Insert Linked Frame', 'Unlink Frame', 'Reverse Frames', 'Delete Frames'];
+const FRAME_ITEMS = ['Frame Duration…', 'Insert Blank Frame', 'Duplicate Frames', 'Insert Linked Frame', 'Unlink Frame', 'Reverse Frames', 'Delete Frames', 'New Animation from Frames', 'New Animation'];
 
 test('right-clicking a frame number selects that column and opens the frame menu', async () => {
   const { b } = await reset();
@@ -476,7 +476,7 @@ test('right-clicking a tag selects its animation and opens the tag menu', async 
   const { jump } = await reset();
   rightClick(dock.querySelectorAll('.anim-tag')[1]);
   assert.equal(host.selections.get().animationId, jump.id);
-  assert.deepEqual(menuLabels(), ['Rename Animation…', 'Direction', 'Colour…', 'No Colour', 'Loop', 'Duplicate Animation', 'Make Manual', 'Delete Animation']);
+  assert.deepEqual(menuLabels(), ['Rename Animation…', 'Direction', 'Colour…', 'No Colour', 'Loop', 'New Animation', 'Duplicate Animation', 'Make Manual', 'Delete Animation']);
   assert.equal(menuItem('No Colour').disabled, true);
 });
 
@@ -503,4 +503,73 @@ test('a right-click on the grid outside numbers, cels and tags keeps the native 
   const e = rightClick(grid());
   assert.equal(e.defaultPrevented, false);
   assert.equal(menu(), null);
+});
+
+// ---- New Animation / New Animation from Frames ----
+
+const tagInput = () => dock.querySelectorAll('.anim-tag').map(t => t.querySelector('input')).find(Boolean) ?? null;
+
+test('New Animation from Frames moves the range into a new animation after it and opens its rename', async () => {
+  const { sheet, run, jump, a, b, d } = await reset();
+  await selectRange(1, 2);
+  rightClick(nums()[1]);
+  menuItem('New Animation from Frames').fire('click');
+  assert.deepEqual(sheet.animations.map(x => x.name), ['Run', 'Run_2', 'Jump']);
+  const made = sheet.animations[1];
+  assert.deepEqual([run.frames.map(e => e.frameId), made.frames.map(e => e.frameId)], [[a.id], [b.id, d.id]]);
+  assert.equal(host.selections.get().animationId, made.id);
+  await tick();
+  const input = tagInput();
+  assert.ok(input, 'the new tag is open for renaming');
+  assert.equal(document.activeElement, input);
+  assert.equal(input.closest('.anim-tag').dataset.animationId, made.id);
+  input.value = 'Land'; input.fire('keydown', { key: 'Enter' });
+  assert.equal(made.name, 'Land');
+  host.history.undo(); host.history.undo();
+  assert.deepEqual([sheet.animations.map(x => x.id), run.frames.length], [[run.id, jump.id], 3]);
+});
+
+test('New Animation from Frames is disabled when the range is the whole animation', async () => {
+  await reset();
+  await selectRange(0, 2);
+  assert.equal(enabled(T('newFromFrames')), false);
+  await selectRange(0, 1);
+  assert.equal(enabled(T('newFromFrames')), true);
+});
+
+test('the frame and tag menus offer New Animation', async () => {
+  await reset();
+  rightClick(nums()[0]);
+  assert.ok(menuItem('New Animation'));
+  closeContextMenu();
+  rightClick(dock.querySelectorAll('.anim-tag')[0]);
+  assert.ok(menuItem('New Animation'));
+});
+
+test('New Animation adds an auto animation of one blank frame at the selected cell size and opens its rename', async () => {
+  const { sheet } = await reset();
+  runAction(T('newAnimation'));
+  const made = sheet.animations.at(-1);
+  assert.equal(sheet.animations.length, 3);
+  assert.deepEqual([made.layout, made.cell, made.frames.length], ['auto', { w: 8, h: 8 }, 1]);
+  assert.equal(host.selections.get().animationId, made.id);
+  await tick();
+  const input = tagInput();
+  assert.equal(input?.closest('.anim-tag').dataset.animationId, made.id);
+  input.fire('keydown', { key: 'Escape' });
+  assert.equal(made.name, 'anim_2', 'Escape keeps the generated name');
+  host.history.undo();
+  assert.equal(sheet.animations.length, 2, 'one undo step');
+});
+
+test('the + at the end of the tag lane creates an animation, at the project frame size without a selection', async () => {
+  const { sheet } = await reset();
+  host.selections.patch({ animationId: null, frameId: null, entryIndex: null });
+  await tick();
+  const add = dock.querySelector('.anim-tag-add');
+  assert.ok(add, 'a + after the last tag');
+  add.fire('click', {});
+  const made = sheet.animations.at(-1);
+  assert.equal(sheet.animations.length, 3);
+  assert.deepEqual(made.cell, { w: 16, h: 16 });
 });

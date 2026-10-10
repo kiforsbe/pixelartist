@@ -282,6 +282,14 @@ Sprite Sheets timeline) jump between them.
   **Ctrl**+wheel over the grid) widens the columns; past 40 px each cel
   shows the layer's pixels and a composite row of whole frames appears. A
   🔗 marks a frame used again in the same animation.
+  - **New animations** — the **+** at the end of the tag lane (or **New
+    Animation** in a frame or tag right-click menu) adds an auto-laid-out
+    animation of one blank frame, sized like the selected animation's
+    frames (else the project frame size), and opens its name for editing.
+    **New Animation from Frames** (frame right-click menu) turns the
+    selected frame or range into a new animation placed right after the
+    original, as one undo step. Frames the original still uses elsewhere
+    are copied for an auto-laid-out animation and shared by a manual one.
   - **Editing columns** — hover between two frame numbers for a **+** that
     inserts a blank frame there (**Alt**+click: a copy of the frame to its
     left); the **+** after an animation's last number appends. Drag a frame
@@ -292,9 +300,10 @@ Sprite Sheets timeline) jump between them.
     frames; declining still allows reordering.
   - **Right-click** a frame number for Duration…, Insert blank / linked
     frame, Duplicate, Unlink (give a linked frame its own pixels),
-    Reverse and Delete; a cel adds **Clear cel** (that layer in that
-    frame); a tag offers Rename, Direction, Colour, Loop, Duplicate,
-    Auto-layout / Make manual and Delete.
+    Reverse, Delete, New Animation from Frames and New Animation; a cel
+    adds **Clear cel** (that layer in that frame); a tag offers Rename,
+    Direction, Colour, Loop, New Animation, Duplicate, Auto-layout / Make
+    manual and Delete.
   - **Header** — First/Previous/Play/Next/Last, a playback-only Loop
     toggle, **+ Frame**, **Duplicate** and **✕** for the selected columns,
     and their duration (or held frames, for an fps-based animation).

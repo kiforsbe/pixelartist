@@ -15,17 +15,19 @@
 // Results: { ok: true, ... } or { ok: false, reason } (nothing changed, no
 // history), the same shape dispatchLayout (components/layout-dispatch.js)
 // explains to the user.
-import { addFrame, findLayer, sheetLayers } from '../../../../core/model.js';
+import { addFrame, addAnimation, findLayer, sheetLayers } from '../../../../core/model.js';
 import { copyRegion, blitRegion, fillRegion } from '../../../../core/pixels.js';
 import { hasPixels } from '../../../../core/sheet-layout.js';
 import { findSpriteSheet, runSheetCommand } from './frame-commands.js';
 import {
-  runLayoutCommand, findAnimation, frameContent, uniqueFrameName, isFrameReferenced, rectOf, sheetDocument, NEEDS_AUTO,
+  runLayoutCommand, findAnimation, frameContent, uniqueFrameName, uniqueAnimationName, isFrameReferenced, rectOf, sheetDocument,
+  NEEDS_AUTO,
 } from './animation-layout-commands.js';
 
 const NO_ANIMATION = 'No such animation';
 const BAD_RANGE = 'No such frames in this animation';
 const BAD_SLOT = 'No such place in this animation';
+const WHOLE_ANIMATION = 'These are all of its frames: rename the animation instead';
 const BAD_DURATION = 'A duration must be a positive number of milliseconds, a step a positive whole number, or null for the default';
 const CLEAR = [0, 0, 0, 0];
 
@@ -235,6 +237,82 @@ export function unlinkFrame(services, sheetId, animationId, index) {
     return { content: new Map([[f.id, frameContent(sheet, src)]]), selection: { frameId: f.id, entryIndex: index } };
   });
   return r.ok ? { ok: true, frameId } : r;
+}
+
+// A new animation named `name` with `source`'s timing and layout, placed
+// right after it in the timeline.
+function animationAfter(sheet, source, name, settings) {
+  const made = addAnimation(sheet, name, settings);
+  sheet.animations.splice(sheet.animations.indexOf(made), 1);
+  sheet.animations.splice(sheet.animations.indexOf(source) + 1, 0, made);
+  Object.assign(made, {
+    loop: source.loop, baseDuration: source.baseDuration, baseFps: source.baseFps, baseStep: source.baseStep,
+    direction: source.direction ?? 'forward', layout: source.layout, cell: source.cell ? { ...source.cell } : null,
+  });
+  return made;
+}
+
+// Takes entries [from..to] out of their animation into a new one, placed
+// right after it ("New Animation from Frames"). Frames only the range uses
+// move with it; on an auto animation a frame the original still uses gets
+// a copy in the new one (an auto frame belongs to one auto animation), while
+// a manual one just shares it. The whole animation is refused -- that is a
+// rename. -> { ok, animationId }, with the new animation selected.
+export function splitFrames(services, sheetId, animationId, from, to, { name } = {}) {
+  const anim = findAnimation(services, sheetId, animationId);
+  if (!anim) return { ok: false, reason: NO_ANIMATION };
+  const range = entryRange(anim, from, to);
+  if (!range) return { ok: false, reason: BAD_RANGE };
+  const count = range.to - range.from + 1;
+  if (count === anim.frames.length) return { ok: false, reason: WHOLE_ANIMATION };
+  const sheet0 = findSpriteSheet(services.projects.project, sheetId);
+  const label = 'new animation from frames';
+  const settings = services.projects.project?.settings;
+  const newName = name ?? uniqueAnimationName(sheet0, anim.name);
+  if (anim.layout === 'auto') {
+    const kept = new Set(anim.frames.filter((_e, i) => i < range.from || i > range.to).map(e => e.frameId));
+    const shared = [...new Set(anim.frames.slice(range.from, range.to + 1).map(e => e.frameId))]
+      .filter(id => kept.has(id)).map(id => sheet0.frames.find(f => f.id === id)).filter(Boolean);
+    const locked = lockedInkIn(sheet0, shared);
+    if (locked) return locked;
+    let madeId = null;
+    const r = runLayoutCommand(services, sheetId, label, sheet => {
+      const a = sheet.animations.find(x => x.id === animationId);
+      const made = animationAfter(sheet, a, newName, settings);
+      const ids = new Map(), content = new Map();
+      for (const src of shared) {
+        const f = addFrame(sheet, { name: uniqueFrameName(sheet, made.name), x: 0, y: 0, w: src.w, h: src.h, pivotX: src.pivotX, pivotY: src.pivotY });
+        ids.set(src.id, f.id);
+        content.set(f.id, frameContent(sheet, src));
+      }
+      made.frames = a.frames.splice(range.from, count).map(e => ({ ...e, frameId: ids.get(e.frameId) ?? e.frameId }));
+      madeId = made.id;
+      return { content, selection: { animationId: made.id, frameId: made.frames[0].frameId, entryIndex: 0 } };
+    });
+    return r.ok ? { ok: true, animationId: madeId } : r;
+  }
+  const before = anim.frames.map(e => ({ ...e }));
+  const after = before.filter((_e, i) => i < range.from || i > range.to);
+  const taken = before.slice(range.from, range.to + 1);
+  const doc = sheetDocument(sheet0);
+  const selectionBefore = services.selections?.get(doc) ?? null;
+  const selection = { animationId: null, frameId: taken[0].frameId, entryIndex: 0 };
+  let made = null;
+  runSheetCommand(services, sheetId, label,
+    target => {
+      const a = target.animations.find(x => x.id === animationId);
+      if (!made) made = animationAfter(target, a, newName, settings);
+      else target.animations.splice(target.animations.indexOf(a) + 1, 0, made);
+      made.frames = taken.map(e => ({ ...e }));
+      a.frames = after.map(e => ({ ...e }));
+      services.selections?.patch({ ...selection, animationId: made.id }, doc);
+    },
+    target => {
+      target.animations = target.animations.filter(x => x !== made);
+      target.animations.find(x => x.id === animationId).frames = before.map(e => ({ ...e }));
+      services.selections?.patch(Object.fromEntries(Object.keys(selection).map(k => [k, selectionBefore?.[k] ?? null])), doc);
+    });
+  return { ok: true, animationId: made.id };
 }
 
 // Clears one layer's pixels inside one frame's rect -- any frame, either

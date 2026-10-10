@@ -72,7 +72,7 @@ test('sprites mode registers the animations.* layout commands for both workbench
       'animations.delete', 'animations.deleteFrame', 'animations.deleteFrames', 'animations.duplicate',
       'animations.duplicateFrames', 'animations.linkFrame', 'animations.makeManual', 'animations.moveFrame',
       'animations.moveFrames', 'animations.new', 'animations.reorderAnimations', 'animations.resizeCanvas',
-      'animations.reverseFrames', 'animations.setFrameDurations', 'animations.setPivot', 'animations.unlinkFrame',
+      'animations.reverseFrames', 'animations.setFrameDurations', 'animations.setPivot', 'animations.splitFrames', 'animations.unlinkFrame',
     ],
   );
   const when = host.registries.commands.get('animations.new').when;

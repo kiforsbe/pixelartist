@@ -64,6 +64,12 @@ export function uniqueFrameName(sheet, base) {
   for (let i = 0; ; i++) if (!names.has(`${base}_${i}`)) return `${base}_${i}`;
 }
 
+// The first free animation name `${base}_${i}` with i >= start.
+export function uniqueAnimationName(sheet, base, start = 2) {
+  const names = new Set(sheet.animations.map(a => a.name));
+  for (let i = start; ; i++) if (!names.has(`${base}_${i}`)) return `${base}_${i}`;
+}
+
 // True while any animation entry on the sheet, or any map sprite placement
 // of this sheet, still names the frame (maps place frames by id as assetId).
 export function isFrameReferenced(project, sheet, frameId) {
@@ -145,7 +151,7 @@ export function newAutoAnimation(services, sheetId, { name, w, h }) {
   if (!validSize(w, h)) return { ok: false, reason: BAD_SIZE };
   let ids = null;
   const r = runLayoutCommand(services, sheetId, 'new animation', sheet => {
-    const anim = addAnimation(sheet, name ?? `anim_${sheet.animations.length}`, services.projects.project?.settings);
+    const anim = addAnimation(sheet, name ?? uniqueAnimationName(sheet, 'anim', sheet.animations.length), services.projects.project?.settings);
     anim.layout = 'auto';
     anim.cell = { w, h };
     const frame = addFrame(sheet, { name: uniqueFrameName(sheet, anim.name), x: 0, y: 0, w, h });

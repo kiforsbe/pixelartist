@@ -492,6 +492,36 @@ export function mountAnimationTimeline(el) {
     if (result?.animationId) pickEntry(findAnim(result.animationId), 0);
   }
 
+  // Selects a just-made animation and opens its tag's rename once rendered.
+  function adoptNew(animationId) {
+    range = null; anchor = null;
+    pendingRename = animationId;
+    pickEntry(findAnim(animationId), 0);
+    panel.scheduleRender();
+  }
+
+  // A new auto animation of one blank frame, the selected animation's cell
+  // size (else the project frame size), named for now -- the rename opens.
+  function newAnimation() {
+    const s = sheet();
+    if (!s) return;
+    stopPlaying();
+    const anim = selectedAnim(), settings = host.projects.project?.settings;
+    const first = anim && s.frames.find(f => f.id === anim.frames[0]?.frameId);
+    const size = anim?.cell ?? first ?? { w: settings?.frameW ?? 16, h: settings?.frameH ?? 16 };
+    const result = dispatchLayout('animations.new', { sheetId: s.id, w: size.w, h: size.h });
+    if (result?.ok) adoptNew(result.animationId);
+  }
+
+  // The selected entries become a new animation right after theirs.
+  function newFromFrames() {
+    const s = sheet(), r = selectedRange();
+    if (!s || !r) return;
+    stopPlaying();
+    const result = dispatchLayout('animations.splitFrames', rangeArgs(s, r));
+    if (result?.ok) adoptNew(result.animationId);
+  }
+
   function autoLayoutSelected() {
     const s = sheet(), anim = selectedAnim();
     if (s && anim && anim.layout !== 'auto') autoLayoutWithSizePrompt(s, anim);
@@ -651,6 +681,7 @@ export function mountAnimationTimeline(el) {
   // Inline rename of a tag (sprites.renameAnimation, one undo step). Renders
   // wait while it is open so the field is not rebuilt under the caret.
   let renaming = false;
+  let pendingRename = null; // a new animation whose tag opens for renaming
   function startTagRename(tag, anim) {
     cancelNameClick();
     renaming = true;
@@ -683,6 +714,17 @@ export function mountAnimationTimeline(el) {
     const anim = selectedAnim();
     const tag = anim && Array.from(tagsRow.querySelectorAll('.anim-tag')).find(t => t.dataset.animationId === anim.id);
     if (tag) startTagRename(tag, anim);
+  }
+
+  // The tag lane's end: a new animation (the New Animation action).
+  function buildTagAdd() {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'anim-tag-add';
+    add.textContent = '+';
+    add.title = 'New animation';
+    add.addEventListener('click', (e) => { e.stopPropagation(); newAnimation(); });
+    return add;
   }
 
   function buildCell(s, column, selected, inRange) {
@@ -883,6 +925,7 @@ export function mountAnimationTimeline(el) {
       const expanded = colW >= EXPAND_AT;
       if (expanded) cellsRow.appendChild(corner('Frame'));
       for (const span of tagSpans(s)) tagsRow.appendChild(buildTag(span));
+      tagsRow.appendChild(buildTagAdd());
       cols.forEach((column, i) => {
         numsRow.appendChild(buildNum(column, i, cols[i + 1]?.animationId !== column.animationId, rangeFlags[i]));
         if (expanded) cellsRow.appendChild(buildCell(s, column, i === selectedIndex, rangeFlags[i]));
@@ -895,7 +938,7 @@ export function mountAnimationTimeline(el) {
     if (hadFocus && !grid.contains(document.activeElement)) grid.focus({ preventScroll: true });
     renderDuration(s, sel);
     empty.hidden = cols.length > 0;
-    empty.textContent = !s ? 'No sprite sheet.' : 'No animation frames yet — create an animation in the Animations panel.';
+    empty.textContent = !s ? 'No sprite sheet.' : 'No animation frames yet — press + above to add an animation.';
 
     const hasFrames = !!anim?.frames.length;
     if (playing && playbackStale(anim)) stopPlaying();
@@ -910,6 +953,10 @@ export function mountAnimationTimeline(el) {
     btnAddLayer.disabled = btnAddFolder.disabled = btnDeleteNode.disabled = !s;
     updatePlayhead();
     if (!playing) renderPreview();
+    const toRename = pendingRename && findAnim(pendingRename);
+    pendingRename = null;
+    const newTag = toRename && Array.from(tagsRow.querySelectorAll('.anim-tag')).find(t => t.dataset.animationId === toRename.id);
+    if (newTag) startTagRename(newTag, toRename);
   }
 
   // A layer-name click selects at once; rebuilding its row before the grace
@@ -935,12 +982,12 @@ export function mountAnimationTimeline(el) {
     active: () => host.store.getState().session.activeModeId === 'animations',
     state: () => {
       const range = selectedRange();
-      return { anim: selectedAnim(), range, layer: selectedLayerNode(), linked: !!range && frameUses(range.column.frameId) > 1, playing };
+      return { sheet: !!sheet(), anim: selectedAnim(), range, layer: selectedLayerNode(), linked: !!range && frameUses(range.column.frameId) > 1, playing };
     },
     togglePlay: () => (playing ? stopPlaying() : startPlaying()),
     step: stepInAnimation,
     focusDuration, insertBlank, insertLinked, deleteFrames, clearCel, setDirection, setColor, pickColor, toggleLoop,
-    duplicateAnimation, deleteAnimation,
+    duplicateAnimation, deleteAnimation, newAnimation, newFromFrames,
     duplicate: duplicateFrames, unlink: unlinkFrame, reverse: reverseFrames, renameTag: renameSelectedTag,
     autoLayout: autoLayoutSelected, makeManual: makeManualSelected,
   };

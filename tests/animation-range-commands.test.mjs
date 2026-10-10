@@ -14,7 +14,7 @@ import {
   newAutoAnimation, addAutoFrame, linkAutoFrame, NEEDS_AUTO,
 } from '../js/modes/sprites/application/commands/animation-layout-commands.js';
 import {
-  moveFrames, copyFrames, duplicateFrames, deleteFrames, reverseFrames, setFrameDurations, unlinkFrame, clearCel,
+  moveFrames, copyFrames, duplicateFrames, deleteFrames, reverseFrames, setFrameDurations, unlinkFrame, clearCel, splitFrames,
 } from '../js/modes/sprites/application/commands/animation-range-commands.js';
 
 const RED = [255, 0, 0, 255], GREEN = [0, 255, 0, 255], BLUE = [0, 0, 255, 255], WHITE = [255, 255, 255, 255];
@@ -395,4 +395,70 @@ test('clearCel refuses a locked layer, a folder, or an unknown frame; an empty c
   const revision = ctx.revision();
   assert.deepEqual(clearCel(ctx.services, ctx.sheet.id, f0, empty.id), { ok: true });
   assert.equal(ctx.revision(), revision);
+});
+
+// ---- splitFrames ----
+
+test('splitFrames moves an auto range into a new animation right after the original; pixels follow', () => {
+  const ctx = setup();
+  const anim = autoRun(ctx, 4);
+  const [f0, f1, f2, f3] = ids(anim);
+  const r = oneStep(ctx, () => splitFrames(ctx.services, ctx.sheet.id, anim.id, 2, 1));
+  const made = ctx.sheet.animations.find(a => a.id === r.animationId);
+  assert.deepEqual(ctx.sheet.animations.map(a => a.id), [anim.id, made.id]);
+  assert.deepEqual([ids(anim), ids(made)], [[f0, f3], [f1, f2]]);
+  assert.equal(made.name, 'run_2');
+  assert.deepEqual([made.layout, made.cell, made.loop], ['auto', { w: 16, h: 16 }, anim.loop]);
+  assert.equal(ctx.sheet.frames.length, 4, 'the frames moved, none copied');
+  assert.deepEqual([marker(ctx, f0), marker(ctx, f1), marker(ctx, f2), marker(ctx, f3)], [RED, GREEN, BLUE, WHITE]);
+  assert.deepEqual([ctx.selection().animationId, ctx.selection().frameId, ctx.selection().entryIndex], [made.id, f1, 0]);
+});
+
+test('splitFrames places the new animation directly after its source and takes a given name', () => {
+  const ctx = setup();
+  const first = autoRun(ctx, 3);
+  const second = manualRun(ctx, 2);
+  const r = splitFrames(ctx.services, ctx.sheet.id, first.id, 2, 2, { name: 'jump' });
+  assert.deepEqual(ctx.sheet.animations.map(a => a.id), [first.id, r.animationId, second.id]);
+  assert.equal(ctx.sheet.animations[1].name, 'jump');
+});
+
+test('splitFrames copies a linked frame the original still uses; links inside the range stay linked', () => {
+  const ctx = setup();
+  const anim = autoRun(ctx, 3);
+  const [f0, f1, f2] = ids(anim);
+  linkAutoFrame(ctx.services, ctx.sheet.id, anim.id, 3, f0); // f0 f1 f2 f0
+  linkAutoFrame(ctx.services, ctx.sheet.id, anim.id, 4, f2); // f0 f1 f2 f0 f2
+  const r = oneStep(ctx, () => splitFrames(ctx.services, ctx.sheet.id, anim.id, 2, 4));
+  const made = ctx.sheet.animations.find(a => a.id === r.animationId);
+  assert.deepEqual(ids(anim), [f0, f1]);
+  const [m0, m1, m2] = ids(made);
+  assert.equal(m0, f2, 'a frame only the range used moves');
+  assert.equal(m2, f2, 'and its links inside the range stay on it');
+  assert.notEqual(m1, f0, 'f0 is still in the original, so the new animation gets a copy');
+  assert.deepEqual([marker(ctx, m1), marker(ctx, f0)], [RED, RED]);
+});
+
+test('splitFrames on a manual animation moves the entries only', () => {
+  const ctx = setup();
+  const anim = manualRun(ctx, 3);
+  const [f0, f1, f2] = ids(anim);
+  const rects = JSON.stringify(ctx.sheet.frames);
+  const r = oneStep(ctx, () => splitFrames(ctx.services, ctx.sheet.id, anim.id, 0, 0));
+  const made = ctx.sheet.animations.find(a => a.id === r.animationId);
+  assert.deepEqual([ids(anim), ids(made)], [[f1, f2], [f0]]);
+  assert.equal(made.layout, 'manual');
+  assert.equal(JSON.stringify(ctx.sheet.frames), rects, 'no frame moved or was added');
+});
+
+test('splitFrames refuses the whole animation, a bad range, an unknown animation and locked ink it would copy', () => {
+  const ctx = setup();
+  const anim = autoRun(ctx, 2);
+  refusesUnchanged(ctx, () => splitFrames(ctx.services, ctx.sheet.id, anim.id, 0, 1), /rename/i);
+  refusesUnchanged(ctx, () => splitFrames(ctx.services, ctx.sheet.id, anim.id, 1, 5));
+  refusesUnchanged(ctx, () => splitFrames(ctx.services, ctx.sheet.id, 'nope', 0, 0));
+  const [f0] = ids(anim);
+  linkAutoFrame(ctx.services, ctx.sheet.id, anim.id, 2, f0); // f0 f1 f0
+  sheetLayers(ctx.sheet)[0].locked = true;
+  refusesUnchanged(ctx, () => splitFrames(ctx.services, ctx.sheet.id, anim.id, 2, 2), /locked/);
 });

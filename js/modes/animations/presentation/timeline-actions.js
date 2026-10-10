@@ -7,8 +7,9 @@
 // The presenter (animation-timeline-presenter.js) owns the state and the
 // gestures; it hands defineTimelineActions a controller:
 //   active()   -> the Animations workbench is the active mode
-//   state()    -> { anim, range: { anim, from, to, column } | null, layer, linked, playing }
-//                 (layer: the selected layer node, linked: the selected
+//   state()    -> { sheet, anim, range: { anim, from, to, column } | null, layer, linked, playing }
+//                 (sheet: a sprite sheet is open,
+//                 layer: the selected layer node, linked: the selected
 //                 column's frame is used more than once)
 //   and one method per operation (togglePlay, step, duplicate, ...).
 // Frame-creating operations on a manual animation stay enabled: the
@@ -88,6 +89,9 @@ export const FRAME_MENU = [
   { separator: true },
   { action: ID('reverse') },
   { action: ID('delete') },
+  { separator: true },
+  { action: ID('newFromFrames') },
+  { action: ID('newAnimation') },
 ];
 export const CEL_MENU = [{ action: ID('clearCel') }, { separator: true }, ...FRAME_MENU];
 export const TAG_MENU = [
@@ -97,6 +101,7 @@ export const TAG_MENU = [
   { action: ID('clearColor') },
   { action: ID('loop') },
   { separator: true },
+  { action: ID('newAnimation') },
   { action: ID('duplicateAnimation') },
   { action: ID('autoLayout') },
   { action: ID('makeManual') },
@@ -149,6 +154,12 @@ export function defineTimelineActions(t) {
   define('color', { label: 'Colour…', isEnabled: () => !!anim(), run: () => t.pickColor() });
   define('clearColor', { label: 'No Colour', isEnabled: () => !!anim()?.color, run: () => t.setColor(null) });
   define('loop', { label: 'Loop', isEnabled: () => !!anim(), isChecked: () => !!anim()?.loop, run: () => t.toggleLoop() });
+  define('newAnimation', { label: 'New Animation', isEnabled: () => t.state().sheet, run: () => t.newAnimation() });
+  define('newFromFrames', {
+    label: 'New Animation from Frames',
+    isEnabled: () => { const r = range(); return !!r && r.to - r.from + 1 < r.anim.frames.length; },
+    run: () => t.newFromFrames(),
+  });
   define('duplicateAnimation', { label: 'Duplicate Animation', isEnabled: () => !!anim(), run: () => t.duplicateAnimation() });
   defineAction(ID('autoLayout'), {
     label: 'Auto-layout', isAvailable: () => t.active() && anim()?.layout !== 'auto',
