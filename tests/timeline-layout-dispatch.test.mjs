@@ -18,6 +18,7 @@ const host = new EditorHost();
 setEditorHost(host); host.registerMode(spriteMode); host.registerMode(animationsMode); host.start('sprites');
 initFloatSession();
 const timeline = new Element();
+document.body.append(timeline); // strip drags cancel when their cell is not in the document
 const editor = mountFrameEditor(new Element());
 mountTimeline(timeline);
 const red = [255, 0, 0, 255], blue = [0, 0, 255, 255];
@@ -87,6 +88,53 @@ test('Edit in Animations keeps a selected frame that the animation uses', async 
   timeline.querySelectorAll('button').find(b => b.textContent === 'Edit in Animations').fire('click');
   const sel = host.selections.get();
   assert.equal(sel.frameId, b.id); assert.equal(sel.entryIndex, 1);
+});
+
+// Strip cells 64 px wide with a 6 px gap: cell i spans [70i, 70i + 64).
+function layoutCells() {
+  const cells = timeline.querySelectorAll('.timeline-cell');
+  cells.forEach((cell, i) => { cell.rect = { left: i * 70, top: 0, width: 64, height: 90 }; });
+  return cells;
+}
+const pointer = (type, props) => Object.assign(new Event(type, { cancelable: true }), { pointerId: 1, button: 0, ...props });
+const down = (el, x, y) => el.dispatch('pointerdown', { pointerId: 1, button: 0, clientX: x, clientY: y });
+const move = (x, y) => window.dispatchEvent(pointer('pointermove', { clientX: x, clientY: y }));
+const up = (x, y) => window.dispatchEvent(pointer('pointerup', { clientX: x, clientY: y }));
+
+test('dragging a strip cell after the next one moves the entry (auto layout), one undo step', async () => {
+  const { anim, a, b, layer } = await reset();
+  const cells = layoutCells();
+  assert.equal(cells[0].draggable, undefined, 'no native HTML5 drag');
+  down(cells[0].querySelector('.timeline-thumb'), 10, 20);
+  move(110, 20); // right half of cell 1 -> after it
+  up(110, 20);
+  assert.deepEqual(anim.frames.map(e => e.frameId), [b.id, a.id]);
+  assert.deepEqual(getPixel(layer.bitmap, 1, 1), blue, 'the layout moved frame B to the first cell');
+  host.history.undo();
+  assert.deepEqual(anim.frames.map(e => e.frameId), [a.id, b.id]);
+  assert.deepEqual(getPixel(layer.bitmap, 9, 1), blue);
+});
+
+test('dragging a strip cell of a manual animation reorders entries only', async () => {
+  const { anim, a, b, sheet } = await reset();
+  anim.layout = 'manual';
+  const before = sheet.frames.map(f => ({ id: f.id, x: f.x, y: f.y }));
+  const cells = layoutCells();
+  down(cells[1].querySelector('.timeline-thumb'), 80, 20);
+  move(5, 20); // left half of cell 0 -> before it
+  up(5, 20);
+  assert.deepEqual(anim.frames.map(e => e.frameId), [b.id, a.id]);
+  assert.deepEqual(sheet.frames.map(f => ({ id: f.id, x: f.x, y: f.y })), before, 'no frame moved on the sheet');
+});
+
+test('a press on a cell control never starts a strip drag', async () => {
+  const { anim, a, b } = await reset();
+  const cells = layoutCells();
+  down(cells[0].querySelector('.timeline-remove'), 10, 80);
+  move(110, 80);
+  assert.equal(document.body.querySelectorAll('.dr-line').length, 0);
+  up(110, 80);
+  assert.deepEqual(anim.frames.map(e => e.frameId), [a.id, b.id]);
 });
 
 test('the Sprites timeline dock gets the shared dock resizer as its first child', async () => {

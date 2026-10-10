@@ -1,8 +1,9 @@
 // js/modes/animations/presentation/animation-list-panel.js
 // The Animations workbench's Animations panel: the active sheet's
-// animations (thumbnail, name, layout badge; click to select, drag to
-// reorder), New / Duplicate / Delete, and the selected animation's details --
-// name, loop, base duration, Auto-layout / Make manual and Canvas size…
+// animations (thumbnail bordered in the tag colour, name, layout badge; click
+// to select, drag to reorder), New / Duplicate / Delete, and the selected
+// animation's details -- name, loop, direction, colour, base duration,
+// Auto-layout / Make manual and Canvas size…
 // (with an anchor grid). Layout changes go through dispatchLayout (settles
 // a float, explains a refusal); a needsSize refusal opens the size form.
 import { flattenSheetLayers } from '../../../core/model.js';
@@ -16,9 +17,12 @@ import { drawFit } from '../../../components/canvas/draw-fit.js';
 import { dispatchLayout } from '../../../components/layout-dispatch.js';
 import { buildBaseDurationControl } from '../../../components/panels/base-duration-control.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
+import { attachDragReorder, slotToFinalIndex } from '../../../components/drag-reorder.js';
 
 const THUMB = 32;
 const ANCHORS = ['nw', 'n', 'ne', 'w', 'c', 'e', 'sw', 's', 'se'];
+const DIRECTIONS = [['forward', 'Forward'], ['reverse', 'Reverse'], ['pingpong', 'Ping-pong'], ['pingpong-reverse', 'Ping-pong reverse']];
+const DEFAULT_TAG_COLOR = '#4f8cff'; // css/app.css --accent, the tag colour when none is set
 
 function dispatch(id, args) {
   const host = getEditorHost();
@@ -117,17 +121,15 @@ export function mountAnimationListPanel(el) {
     host.selections.patch({ animationId: anim.id, frameId: anim.frames[0]?.frameId ?? null, entryIndex: 0 }, sheetDocument(s));
   }
 
-  // Row reorder drags carry their index under a private type, so text
-  // dragged in from outside is never taken for a row.
-  const ROW_DRAG_TYPE = 'application/x-pixelartist-animation';
-
-  function buildRow(s, anim, index, active) {
+  function buildRow(s, anim, active) {
     const row = document.createElement('div');
     row.className = active ? 'anim-row active' : 'anim-row';
-    row.draggable = true;
+    row.dataset.dragKey = anim.id;
     const thumb = document.createElement('canvas');
     thumb.width = THUMB; thumb.height = THUMB;
     thumb.className = 'anim-thumb';
+    // The animation's tag colour borders its thumbnail.
+    if (anim.color) { thumb.classList.add('has-color'); thumb.style.borderColor = anim.color; }
     const first = s.frames.find(f => f.id === anim.frames[0]?.frameId);
     if (first) drawFit(thumb, copyRegion(flat(s), first.x, first.y, first.w, first.h));
     const name = document.createElement('span');
@@ -139,24 +141,23 @@ export function mountAnimationListPanel(el) {
     badge.title = anim.layout === 'auto' ? 'Frames are laid out on the sheet automatically' : 'Frames stay where they are on the sheet';
     row.append(thumb, name, badge);
     row.addEventListener('click', () => selectAnimation(s, anim));
-    row.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData(ROW_DRAG_TYPE, String(index));
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    row.addEventListener('dragover', (e) => {
-      if (!e.dataTransfer.types?.includes(ROW_DRAG_TYPE)) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-    });
-    row.addEventListener('drop', (e) => {
-      const data = e.dataTransfer.getData(ROW_DRAG_TYPE);
-      if (!data) return;
-      e.preventDefault();
-      const from = parseInt(data, 10);
-      if (Number.isFinite(from) && from !== index) dispatchLayout('animations.reorderAnimations', { sheetId: s.id, from, to: index });
-    });
     return row;
   }
+
+  // Rows reorder by pointer drag (insertion line between rows). The list
+  // element outlives its rows, so the drag is attached once; rows are keyed
+  // by animation id and the command takes the final index.
+  const disposeDrag = attachDragReorder(list, {
+    axis: 'y',
+    itemSelector: '.anim-row',
+    onDrop: ({ sourceKey, slot }) => {
+      const s = sheet();
+      const from = s?.animations.findIndex(a => a.id === sourceKey) ?? -1;
+      if (from < 0 || slot == null) return;
+      const to = slotToFinalIndex(from, slot);
+      if (to !== from) dispatchLayout('animations.reorderAnimations', { sheetId: s.id, from, to });
+    },
+  });
 
   // ---- details ----
   const details = document.createElement('div');
@@ -183,6 +184,36 @@ export function mountAnimationListPanel(el) {
   const nameRow = document.createElement('div');
   nameRow.className = 'row';
   nameRow.append(nameInput, loopLabel);
+
+  // Direction (how playback walks the frames) and tag colour (timeline tag,
+  // row thumbnail border). The colour picker cannot show "none", so a null
+  // colour shows the accent and marks the picker unset.
+  const directionSelect = document.createElement('select');
+  directionSelect.title = 'Playback direction';
+  for (const [value, text] of DIRECTIONS) {
+    const opt = document.createElement('option');
+    opt.value = value; opt.textContent = text;
+    directionSelect.appendChild(opt);
+  }
+  directionSelect.addEventListener('change', () => {
+    const s = sheet(), anim = selectedAnim();
+    if (s && anim) dispatch('sprites.setAnimationDirection', { sheetId: s.id, animationId: anim.id, direction: directionSelect.value });
+  });
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.className = 'anim-color';
+  colorInput.title = 'Tag colour';
+  colorInput.addEventListener('change', () => {
+    const s = sheet(), anim = selectedAnim();
+    if (s && anim) dispatch('sprites.setAnimationColor', { sheetId: s.id, animationId: anim.id, color: colorInput.value.toLowerCase() });
+  });
+  const btnNoColor = textButton('None', 'Use the default tag colour', () => {
+    const s = sheet(), anim = selectedAnim();
+    if (s && anim) dispatch('sprites.setAnimationColor', { sheetId: s.id, animationId: anim.id, color: null });
+  });
+  const styleRow = document.createElement('div');
+  styleRow.className = 'row';
+  styleRow.append(labelled('Direction', directionSelect), labelled('Colour', colorInput), btnNoColor);
 
   const durationControl = buildBaseDurationControl({
     getValue: () => { const a = selectedAnim(); return { durationMs: a?.baseDuration ?? 100, baseFps: a?.baseFps, baseStep: a?.baseStep }; },
@@ -254,7 +285,7 @@ export function mountAnimationListPanel(el) {
     sizeForm.hidden = false;
   }
 
-  details.append(nameRow, durationControl.el, layoutRow, sizeForm);
+  details.append(nameRow, styleRow, durationControl.el, layoutRow, sizeForm);
 
   const hint = document.createElement('div');
   hint.className = 'frame-field';
@@ -269,7 +300,7 @@ export function mountAnimationListPanel(el) {
     const anim = selectedAnim();
     if (anim?.id !== lastAnimationId) { sizeForm.hidden = true; lastAnimationId = anim?.id ?? null; }
     list.innerHTML = '';
-    s?.animations.forEach((a, index) => list.appendChild(buildRow(s, a, index, a === anim)));
+    s?.animations.forEach(a => list.appendChild(buildRow(s, a, a === anim)));
     hint.hidden = !!anim;
     hint.textContent = !s ? 'No sprite sheet.' : s.animations.length ? 'Select an animation.' : 'No animations yet — click New….';
     details.hidden = !anim;
@@ -281,6 +312,10 @@ export function mountAnimationListPanel(el) {
     if (!anim) return;
     nameInput.value = anim.name;
     loopCheckbox.checked = !!anim.loop;
+    directionSelect.value = anim.direction ?? 'forward';
+    colorInput.value = anim.color ?? DEFAULT_TAG_COLOR;
+    colorInput.classList.toggle('unset', !anim.color);
+    btnNoColor.disabled = !anim.color;
     durationControl.refresh();
     const auto = anim.layout === 'auto';
     btnAutoLayout.hidden = auto;
@@ -296,5 +331,5 @@ export function mountAnimationListPanel(el) {
     s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
   ], render);
   const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
-  return { ...panel, dispose() { disposeHistory(); panel.dispose(); } };
+  return { ...panel, dispose() { disposeHistory(); disposeDrag(); panel.dispose(); } };
 }

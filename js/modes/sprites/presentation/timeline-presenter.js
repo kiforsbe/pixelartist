@@ -28,6 +28,7 @@ import { drawFit } from '../../../components/canvas/draw-fit.js';
 import { mountStorePanel } from '../../../components/panel-mount.js';
 import { buildFrameDurationInput } from '../../../components/panels/frame-duration-input.js';
 import { createDockResizer, workspaceDockMax, migratePreference } from '../../../components/dock-resizer.js';
+import { attachDragReorder } from '../../../components/drag-reorder.js';
 
 // Dispatches a Command Handler by id (registered in contributions.js) rather
 // than importing it directly -- this file lives under presentation/, and
@@ -306,7 +307,6 @@ export function mountTimeline(el) {
   function buildCell(anim, entry, index, sheet) {
     const cell = document.createElement('div');
     cell.className = 'timeline-cell';
-    cell.draggable = true;
     cell.style.width = THUMB_SIZE + 'px';
 
     const thumbCanvas = document.createElement('canvas');
@@ -351,35 +351,23 @@ export function mountTimeline(el) {
       }
     });
 
-    cell.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', String(index));
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    cell.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const rect = cell.getBoundingClientRect();
-      const before = (e.clientX - rect.left) < rect.width / 2;
-      cell.classList.toggle('drag-before', before);
-      cell.classList.toggle('drag-after', !before);
-    });
-    cell.addEventListener('dragleave', () => cell.classList.remove('drag-before', 'drag-after'));
-    cell.addEventListener('drop', (e) => {
-      e.preventDefault();
-      const before = cell.classList.contains('drag-before');
-      cell.classList.remove('drag-before', 'drag-after');
-      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
-      if (!Number.isFinite(fromIndex)) return;
-      let toIndex = index + (before ? 0 : 1);
-      if (fromIndex < toIndex) toIndex -= 1; // removal shifts everything after it left by one
-      if (toIndex === fromIndex) return;
-      stopPlaying();
-      if (anim.layout === 'auto') dispatchLayout('animations.moveFrame', { sheetId: sheet.id, animationId: anim.id, from: fromIndex, to: toIndex });
-      else dispatch('sprites.reorderAnimationFrame', { sheetId: sheet.id, animationId: anim.id, fromIndex, toIndex });
-    });
-
     return cell;
   }
+
+  // Cells reorder by pointer drag along the strip (the duration input and
+  // remove button stay clickable). A one-entry animations.moveFrames handles
+  // both layouts: manual moves the entry, auto also lays the frames out.
+  const disposeStripDrag = attachDragReorder(strip, {
+    axis: 'x',
+    itemSelector: '.timeline-cell',
+    onDrop: ({ sourceIndex, slot }) => {
+      const sheet = activeSheet('sprite');
+      const anim = currentAnim();
+      if (!sheet || !anim || slot == null) return;
+      stopPlaying(); // a structural change; playback would index stale entries
+      dispatchLayout('animations.moveFrames', { sheetId: sheet.id, animationId: anim.id, from: sourceIndex, to: sourceIndex, at: slot });
+    },
+  });
 
   // ---- full render ----
   function renderAnimSelect(sheet) {
@@ -444,5 +432,5 @@ export function mountTimeline(el) {
     s => { const doc = s.session.activeDocument; return doc ? s.session.selectionsByDocument[`${doc.kind}:${doc.id}`] : null; },
   ], render, { onDispose: stopPlaying });
   const disposeHistory = host.history.subscribe(() => panel.scheduleRender());
-  return { ...panel, dispose() { disposeHistory(); resizer.dispose(); panel.dispose(); } };
+  return { ...panel, dispose() { disposeHistory(); disposeStripDrag(); resizer.dispose(); panel.dispose(); } };
 }

@@ -411,8 +411,6 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
   border: 1px solid transparent; border-radius: 3px; flex: none; width: 64px; cursor: grab; }
 .timeline-cell:hover { background: var(--bg3); }
 .timeline-cell.playhead { border-color: var(--accent); background: var(--bg3); }
-.timeline-cell.drag-before { box-shadow: inset 2px 0 0 #fff; }
-.timeline-cell.drag-after { box-shadow: inset -2px 0 0 #fff; }
 .timeline-thumb { image-rendering: pixelated; background: var(--bg); border: 1px solid var(--border);
   width: 64px; height: 64px; }
 .timeline-cell-controls { display: flex; gap: 2px; width: 100%; }
@@ -499,7 +497,9 @@ details .dlg-grid { margin-top: 8px; margin-bottom: 0; }
 .anim-row { display: flex; align-items: center; gap: 6px; padding: 3px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
 .anim-row:hover { background: var(--bg3); }
 .anim-row.active { background: var(--bg3); border-color: var(--accent); }
-.anim-thumb { width: 32px; height: 32px; flex: none; background: var(--bg); }
+.anim-thumb { width: 32px; height: 32px; flex: none; background: var(--bg); border: 2px solid transparent; }
+.anim-color { width: 32px; height: 20px; padding: 0; border: 1px solid var(--border); background: none; }
+.anim-color.unset { opacity: 0.5; }
 .anim-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .anim-badge { font-size: 10px; color: #9a9ca8; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .anim-form { display: flex; flex-direction: column; gap: 4px; padding: 6px; margin: 4px 0; background: var(--bg3); border-radius: 4px; }

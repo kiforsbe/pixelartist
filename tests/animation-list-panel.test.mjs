@@ -17,6 +17,7 @@ setEditorHost(host);
 for (const mode of [spriteMode, animationsMode]) host.registerMode(mode);
 host.start('animations');
 const panel = new Element();
+document.body.append(panel); // drags cancel when their row is not in the document
 mountAnimationListPanel(panel);
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const button = text => panel.querySelectorAll('button').find(b => b.textContent === text);
@@ -123,14 +124,92 @@ test('renaming in the details updates the animation', async () => {
   assert.equal(run.name, 'Sprint');
 });
 
-test('dropping a row reorders animations', async () => {
-  const { sheet, idle } = await reset();
+// Rows 36 px tall with a 2 px gap: row i spans [38i, 38i + 36).
+function layoutRows() {
   const rows = panel.querySelectorAll('.anim-row');
-  const data = new Map();
-  const dataTransfer = { setData: (k, v) => data.set(k, v), getData: k => data.get(k), effectAllowed: '', dropEffect: '' };
-  rows[1].fire('dragstart', { dataTransfer });
-  rows[0].fire('drop', { dataTransfer });
-  assert.equal(sheet.animations[0].id, idle.id);
+  rows.forEach((row, i) => { row.rect = { left: 0, top: i * 38, width: 200, height: 36 }; });
+  return rows;
+}
+const pointer = (type, props) => Object.assign(new Event(type, { cancelable: true }), { pointerId: 1, button: 0, ...props });
+const down = (el, x, y) => el.dispatch('pointerdown', { pointerId: 1, button: 0, clientX: x, clientY: y });
+const move = (x, y) => window.dispatchEvent(pointer('pointermove', { clientX: x, clientY: y }));
+const up = (x, y) => window.dispatchEvent(pointer('pointerup', { clientX: x, clientY: y }));
+const lines = () => document.body.querySelectorAll('.dr-line');
+
+test('dragging a row below the next one reorders animations, with an insertion line', async () => {
+  const { sheet, run, idle } = await reset();
+  const rows = layoutRows();
+  down(rows[0].querySelector('.anim-row-name'), 20, 10);
+  move(20, 70); // lower half of row 1 -> after it
+  assert.equal(lines().length, 1);
+  assert.equal(lines()[0].hidden, false);
+  up(20, 70);
+  assert.deepEqual(sheet.animations.map(a => a.id), [idle.id, run.id]);
+  assert.equal(lines().length, 0, 'the line is removed after the drop');
+  host.history.undo();
+  assert.deepEqual(sheet.animations.map(a => a.id), [run.id, idle.id]);
+});
+
+test('dragging a row above the first one moves it to the top', async () => {
+  const { sheet, run, idle } = await reset();
+  const rows = layoutRows();
+  down(rows[1].querySelector('.anim-row-name'), 20, 48);
+  move(20, 4);
+  up(20, 4);
+  assert.deepEqual(sheet.animations.map(a => a.id), [idle.id, run.id]);
+});
+
+test('a drop where the row already is records nothing', async () => {
+  const { sheet, run } = await reset();
+  const rows = layoutRows();
+  down(rows[0].querySelector('.anim-row-name'), 20, 10);
+  move(20, 30); // still over its own row
+  up(20, 30);
+  assert.equal(sheet.animations[0].id, run.id);
+  assert.equal(host.history.canUndo(), false);
+});
+
+test('the direction select sets the selected animation\'s direction', async () => {
+  const { run } = await reset();
+  host.selections.patch({ animationId: run.id }); await tick();
+  const select = panel.querySelector('.anim-details').querySelector('select');
+  assert.deepEqual(select.children.map(o => o.value), ['forward', 'reverse', 'pingpong', 'pingpong-reverse']);
+  assert.deepEqual(select.children.map(o => o.textContent), ['Forward', 'Reverse', 'Ping-pong', 'Ping-pong reverse']);
+  assert.equal(select.value, 'forward');
+  select.value = 'pingpong'; select.fire('change');
+  assert.equal(run.direction, 'pingpong');
+  host.history.undo(); await tick();
+  assert.equal(run.direction, 'forward');
+  assert.equal(select.value, 'forward', 'the control follows the model');
+});
+
+test('the colour control sets and clears the animation colour', async () => {
+  const { run } = await reset();
+  host.selections.patch({ animationId: run.id }); await tick();
+  const details = panel.querySelector('.anim-details');
+  const color = details.querySelectorAll('input').find(i => i.type === 'color');
+  const none = details.querySelectorAll('button').find(b => b.textContent === 'None');
+  assert.equal(none.disabled, true, 'nothing to clear yet');
+  color.value = '#ff8800'; color.fire('change');
+  assert.equal(run.color, '#ff8800');
+  await tick();
+  assert.equal(none.disabled, false);
+  none.fire('click');
+  assert.equal(run.color, null);
+  host.history.undo();
+  assert.equal(run.color, '#ff8800');
+});
+
+test('a coloured animation borders its row thumbnail in that colour', async () => {
+  const { run } = await reset();
+  host.selections.patch({ animationId: run.id }); await tick();
+  const thumbs = () => panel.querySelectorAll('.anim-thumb');
+  assert.equal(thumbs()[0].classList.contains('has-color'), false);
+  const color = panel.querySelector('.anim-details').querySelectorAll('input').find(i => i.type === 'color');
+  color.value = '#00ff00'; color.fire('change'); await tick();
+  assert.equal(thumbs()[0].classList.contains('has-color'), true);
+  assert.equal(thumbs()[0].style.borderColor, '#00ff00');
+  assert.equal(thumbs()[1].classList.contains('has-color'), false, 'Idle has no colour');
 });
 
 test('New… is disabled without a sprite sheet', async () => {
@@ -149,15 +228,4 @@ test('a fractional size is refused, not truncated', async () => {
   button('Create').fire('click');
   assert.equal(sheet.animations.length, 2, 'nothing created');
   assert.equal(alerts.length, 1, 'the refusal says why');
-});
-
-test('external text dropped on a row does not reorder', async () => {
-  const { sheet, run } = await reset();
-  const rows = panel.querySelectorAll('.anim-row');
-  const dataTransfer = { types: ['text/plain'], getData: k => (k === 'text/plain' ? '1' : ''), dropEffect: '' };
-  let accepted = false;
-  rows[0].fire('dragover', { dataTransfer, preventDefault() { accepted = true; } });
-  rows[0].fire('drop', { dataTransfer });
-  assert.equal(accepted, false, 'not a drop target for outside text');
-  assert.equal(sheet.animations[0].id, run.id);
 });
